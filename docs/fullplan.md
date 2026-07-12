@@ -30,6 +30,8 @@ This schema lives entirely in the user's browser storage:
 - **Tags/Categories:** `++id`, `tagName`
 - **ImageTags (Join):** `++id`, `imageId`, `tagId` 
 
+*Crucial Architecture Constraint (Cascading Deletes):* Dexie.js is a NoSQL store and does not auto-delete children. To prevent massive local storage bloat, we must register a `db.projects.hook('deleting')` lifecycle event on initialization that manually force-deletes all orphaned Image Blobs and TextBlocks whenever a project is removed. 
+
 ### Cloud Database (PostgreSQL)
 Only used for authentication and subscription management when the user opts for "Cloud Mode":
 - **Users Table:** `id`, `email`, `password_hash`, `subscription_status`, `jwt_token_version`
@@ -38,10 +40,10 @@ Only used for authentication and subscription management when the user opts for 
 
 ### A. How to run AI locally for Non-Tech Users (Zero Setup)
 *The Problem:* We want users to translate locally without installing Python, Docker, or external keys.
-*The Solution:* We use WebAssembly (Wasm) and WebGPU to run compressed ONNX and specialized models directly in JavaScript.
-*   **ONNX (Open Neural Network Exchange):** Models (like MarianMT and PaddleOCR) are converted to `.onnx` files, which are highly optimized binary neural networks (usually 20MB - 100MB).
-*   **Transformers.js (ONNX Runtime Web + Wasm):** Hugging Face's JS library downloads the `.onnx` files via standard `fetch` from their CDN, caches them permanently in the browser's native **Cache Storage API**, and executes them locally at near-native speed using WebAssembly (Wasm).
-*   **WebLLM (WebGPU):** For large context-aware translation LLMs (like Llama-3 or Gemma), WebLLM binds directly to the user's GPU hardware via the WebGPU API. Because these models are larger (1GB - 4GB), this is an optional feature for users with stronger PCs.
+*The Solution:* We use WebAssembly (Wasm) and WebGPU to run compressed ONNX models directly in JavaScript.
+*   **Transformers.js (ONNX Runtime Web):** Hugging Face's JS library downloads `.onnx` models, caches them permanently in the browser's **Cache Storage API**, and executes them locally.
+*   *Mentor Correction (Avoiding Heavy LLMs):* Previously, the plan suggested using WebLLM with Llama-3 for translation. This is an anti-pattern. An 8B parameter LLM requires 4GB+ of VRAM, takes minutes to download, and is slow to generate. Instead, we will use purpose-built translation models like **NLLB-200 (No Language Left Behind)** or **MarianMT**. These models are explicitly trained for translation, are extremely lightweight (~50-150MB), and run instantly in the browser. 
+
 **The User Flow (Extension Dashboard):**
 1. User opens the extension Dashboard and toggles "Local Mode".
 2. The UI displays a progress bar as Transformers.js downloads the `.onnx` files from Hugging Face.
@@ -55,29 +57,56 @@ Instead of piecing together separate complex models, we will use a pre-packaged 
 1.  **Multi-Language:** PaddleOCR supports over 80 languages out-of-the-box (English, Japanese, Korean, Chinese, etc.).
 2.  **All-in-One:** It handles both finding the bounding boxes (DB model) and reading the text (CRNN model) in a single optimized pass.
 3.  **Low Complexity:** By using an NPM wrapper around the ONNX models, we avoid writing custom WebGL/WebGPU tensor logic ourselves.
+*Handling Rotated Text (Polygons):* PaddleOCR returns `dt_polys` (4-point polygons) rather than simple rectangles. Because manga text is often tilted, we will use a small geometry utility to calculate the rotation angle from the polygon and apply it to our HTML overlays via CSS `transform: rotate(Xdeg)`. This ensures text perfectly aligns with slanted speech bubbles.
 *Result:* We get the exact relative positions AND highly accurate multi-language text, allowing us to perfectly overlay editable text boxes over the original image. It runs entirely in the user's browser, caching the model after the first download.
 
-### C. The Chrome Extension Architecture (Web Scraping)
-*The Problem:* How does the extension universally translate images on any website, and how does it share the downloaded model with the web app?
-*The Extension Logic:*
-1. **Content Script:** Injects a "Translate" button on the top-left of every `<img>` tag it finds on a webpage.
-2. **Background Worker (Service Worker):** This is where **Transformers.js** lives. When a user clicks the button, the image URL is sent to the background worker. The worker downloads the image, runs the OCR and Translation locally in the browser, and returns the bounding boxes.
-3. **Overlay Rendering:** The Content Script receives the data and injects `<div>` elements with `position: absolute` precisely over the original image's speech bubbles, containing the translated text.
-*Model Syncing (Website vs Extension):*
-Due to browser security, `your-website.com` and `chrome-extension://...` cannot share the same `IndexedDB` file. To solve this: The website will detect if the Extension is installed. If installed, the website will pass translation requests to the extension via `window.postMessage`, allowing the extension's downloaded model to do the work. If not installed, the website will prompt the user to download the model into the website's cache.
+### C. The Chrome Extension Architecture (Web Scraping & Capture)
+*The Goal:* Provide frictionless translation with two distinct modes (Auto vs Manual) controlled via a setting, while gracefully handling DRM and long WebToon strips.
+
+*1. Auto Translate Mode (The Queue System):*
+When enabled, the extension automatically finds all normal `<img>` tags on the page and begins translating them without user interaction.
+- **Concurrency Control:** To prevent crashing the browser on pages with many images, we implement a Promise-based concurrency queue. It processes a maximum of `N` images at a time (default `peak = 3`, adjustable in settings). As one image finishes, the next starts.
+- **The Canvas Limitation:** Auto Mode *does not* run on protected `<canvas>` elements (like WebToons). Automatically firing `captureVisibleTab()` every time a user scrolls a pixel would rate-limit the browser and cause severe stuttering. For `<canvas>`, the extension gracefully degrades to Manual Mode.
+
+*2. Extraction Methods (MVP vs Future):*
+To keep the foundation clean (YAGNI), we will build the extraction UI in stages:
+- **Method 1: Sticky Image Button (MVP FOCUS):** 
+  - First option: A fast loop scrapes normal `<img>` tags and injects a "Translate" button absolutely positioned at the top-left of the image. Clicking it sends the `srcUrl` to the Background Worker. This is the sole focus for Phase 1/2.   
+  - Second option: we use the native Chrome Context Menu API (`chrome.contextMenus`). The user right-clicks any standard `<img>` and selects "Translate Image". The Background Worker natively receives the `srcUrl` and processes it 
+- **Advanced Extraction (Viewport Slicing for Canvas) - deferred:** Because WebToon `<canvas>` elements can be 20,000px tall, injecting a button at the top is useless. Instead, the user right-clicks anywhere on the canvas and selects "Translate Viewport". This triggers `chrome.tabs.captureVisibleTab()` to capture and translate *only* the slice of the canvas currently visible on their screen. The translated text overlay is locked to those exact absolute scroll coordinates.
+- **Method 3: The Magic Lens Crop (Future):** A draggable, resizable dashed rectangle placed anywhere on the screen. Clicking "Translate" on the box captures that specific screen slice, translates it, and overlays the result directly inside the box (with an "X" to close). Future iteration: An auto-mode that seamlessly re-translates the box contents every 5 seconds.
+
+*The Orchestrator Pattern (Fixing Memory Limits & DB Write Constraints):*
+Content Scripts run on the host website and **cannot** write to the extension's local `IndexedDB`. Data flow must strictly be: Content Script -> Service Worker -> Offscreen Document -> DB. 
+Crucially, the Background Service Worker acts *only* as a lightweight traffic cop. It handles the volatile lifecycle of the Offscreen Document (which Chrome kills when idle), queuing messages until the document boots. It fetches the image buffer and passes it directly to the **Offscreen Document**, which has full DOM access and high memory limits, to execute the heavy ONNX translation and save the results to the database. This guarantees Chrome will not kill the Service Worker.
+
+*Model Syncing (Website vs Extension & The Communication Bottleneck):*
+Due to browser security, `your-website.com` and `chrome-extension://...` cannot share the same `IndexedDB` file. To solve this without hitting the **Web-to-Extension Communication Bottleneck** (passing heavy Base64 image blobs via `postMessage` crashes memory and breaks on navigation): 
+1. The website will pass only the **Image URL** or use **Transferable Objects (`ArrayBuffer`)** via `window.postMessage` to the extension. Transferable objects are zero-copy and do not duplicate memory.
+2. The Extension handles the heavy processing in the Offscreen Document independently of the webpage's lifecycle, returning only lightweight JSON back to the website.
 
 ### D. Editable Export (Photoshop/PSD)
 *The Solution:* To allow users to download their edits, we will export a `.json` "Project File" containing the base image URL and an array of text objects (X, Y, Text). We can also include a script using `ag-psd` to compile this into a `.psd` file for Photoshop users.
 
 ### E. The "Out of Bounds" Translation Problem (Auto-Scaling Font Size)
 *The Problem:* As you noted by looking at the PP-OCRv6 JSON, the OCR only gives us the bounding box coordinates (`rec_boxes` / `dt_polys`) of the *original* Japanese text. English translations are usually much longer and will overflow the original box. The OCR does not tell us what font size to use for the new text.
-*The Solution (The Manga-Translator Logic):* We will implement a **Text Auto-Scaling & Wrapping Algorithm** in JavaScript (using our React-Konva canvas). 
-1. **Word Wrapping:** We take the translated English string and the original bounding box `width`. We use canvas measurement tools to break the string into multiple lines so it doesn't overflow horizontally.
-2. **Binary Search for Font Size:** We start with a large `font-size`. We measure the total height of the wrapped text. If the total height exceeds the original bounding box `height`, we recursively shrink the font size (using a binary search algorithm) until the text fits perfectly inside the box without overflowing.
+*The Solution (The Manga-Translator Logic & Resolving the DOM/Canvas Contradiction):* 
+Because our architecture uses both HTML DOM Overlays (for on-page translation) and a React-Konva Canvas (for the dashboard editor), we must use two different scaling mathematical approaches to prevent text overflow mismatches:
+1. **For the Canvas Dashboard (React-Konva):** We use Canvas `context.measureText()` to wrap words and perform a binary search, shrinking the `font-size` until the total wrapped height fits perfectly inside the bounding box.
+2. **For the Content Script (HTML Overlays):** We cannot use Canvas `measureText()` because it lacks CSS engine nuance (line-height, browser-specific font rendering). Instead, we create an invisible, off-screen `<div>` with the exact width constraints of the bounding box. We inject the text, check `div.scrollHeight`, and recursively shrink the font size using a binary search until it matches the target height. This guarantees 1:1 CSS rendering accuracy.
 3. **Centering:** We center the text horizontally and vertically within the bounding box.
 *Result:* Exactly like the Python `manga-image-translator`, the text will automatically shrink and wrap to fit perfectly inside the speech bubble. Because it is a React component, the user can also manually tweak the font size via a UI slider if they don't like the automatic calculation.
 
-### F. Two-Part Frontend UX (Tampermonkey Style)
+### F. Removing the Original Text Cleanly (Inpainting)
+*The Problem:* Before we can overlay the translated English text, we must cleanly erase the original text from the image so it doesn't bleed through. We need a solution that works for *any* image (manga, photos, diagrams) and runs fast locally.
+
+*The Solution (Advanced AI Inpainting):* 
+We will use **Fast-LaMa (F-LaMa)** converted to an ONNX model, running via Transformers.js (WebAssembly/WebGPU). 
+* **Why LaMa?** LaMa (Resolution-robust Large Mask Inpainting) is the absolute industry standard for fast, high-quality inpainting (used by web tools like cleanup.pictures). It uses Fast Fourier Convolutions, which gives it a global understanding of the image. This means it doesn't just blur the edges; it can accurately hallucinate missing manga screentones, photo backgrounds, and complex textures in real-time.
+* **Performance:** By using a quantized ONNX version of F-LaMa, the model size is kept very small (~30-50MB). It executes inference in milliseconds, providing a seamless, native feel without needing a remote server.
+* **Fallback:** For ultra-low-end devices, we will keep a simple **Solid Color Fill** (sampling the edge colors of the bounding box) as an instant, zero-compute fallback.
+
+### G. Two-Part Frontend UX (Tampermonkey Style)
 *The Problem:* How do we provide quick access to settings while also giving the user a robust, full-screen canvas editor?
 *The Solution (Local-First Design):* We structure the frontend into two distinct React interfaces, mirroring extensions like Tampermonkey:
 1. **The Popup Window (Quick Actions):** A small window that opens when clicking the extension icon in the toolbar. It contains quick toggles (Enable/Disable translation, Local/Cloud mode) and a primary button to "Open Dashboard" or "Manual Upload".
@@ -90,3 +119,17 @@ Due to browser security, `your-website.com` and `chrome-extension://...` cannot 
 - **Phase 2 (Canvas Editor):** React-Konva Canvas Dashboard implementation (draggable text boxes, editable text, rendering from IndexedDB).
 - **Phase 3 (Local AI Engine):** Offscreen document running PaddleOCR ONNX / MarianMT with Hugging Face CDN download progress bars.
 - **Phase 4 (Cloud Premium Compute):** Server-Hosted Compute API with JWT authentication middleware + Web App Stripe checkout, communicating Auth tokens back to the extension.
+## 3. Important References & Tool Links
+
+The following tools and libraries are critical references for the development of this project:
+
+### AI Core & Models
+*   **[Transformers.js](https://huggingface.co/docs/transformers.js)**: Library for running Hugging Face models natively in the browser via ONNX Runtime Web.
+*   **[PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR)**: State-of-the-art multi-lingual OCR toolkit used for single-pass local detection and recognition.
+
+### Spatial Rendering & Translation References
+*   **[manga-image-translator](https://github.com/zyddnys/manga-image-translator)**: The reference Python repository for high-quality manga translation pipelines, containing text inpainting and text typesetting logic (Pillow `textbbox` implementation).
+*   **[Manga Translator Chrome Extension](https://chromewebstore.google.com/detail/manga-translator%F0%9F%8D%93/lepcfgkehgeiblekejomdmdklmjdmflp)**: The primary UX reference for on-page scraper overlays and image translation.
+
+### Extension & Web APIs
+*   **[Chrome Offscreen Documents API](https://developer.chrome.com/docs/extensions/reference/api/offscreen)**: Documentation on managing invisible documents for image/tensor processing in Manifest V3 background scripts.
