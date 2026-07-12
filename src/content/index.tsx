@@ -1,7 +1,17 @@
 import { createRoot } from 'react-dom/client';
+import { useEffect, useState } from 'react';
 import '../index.css'; 
 
-function TranslateOverlay({ srcUrl }: { srcUrl: string }) {
+// Decoupled UI Component: Avoid hardcoding the button style in the core logic.
+// In the future, this can easily be swapped for a Spinner, a Magic Lens UI, or a custom Icon.
+interface TranslateButtonProps {
+  srcUrl: string;
+  top: number;
+  left: number;
+  onHide: () => void;
+}
+
+function TranslateButton({ srcUrl, top, left, onHide }: TranslateButtonProps) {
   const handleTranslate = () => {
     if (!srcUrl) {
       console.error('[Content Script] Cannot translate: No image URL provided.');
@@ -24,68 +34,93 @@ function TranslateOverlay({ srcUrl }: { srcUrl: string }) {
         e.stopPropagation();
         handleTranslate();
       }}
-      className="absolute top-2 left-2 z-[999999] bg-blue-600 hover:bg-blue-700 text-white font-bold py-1 px-3 rounded shadow-lg text-sm cursor-pointer border-none"
-      style={{ pointerEvents: 'auto' }}
+      onMouseLeave={onHide}
+      className="absolute z-[999999] bg-blue-600 hover:bg-blue-700 text-white font-bold py-1 px-3 rounded shadow-lg text-sm cursor-pointer border-none"
+      style={{ 
+        top: `${top}px`, 
+        left: `${left}px`,
+        pointerEvents: 'auto' 
+      }}
     >
       Translate
     </button>
   );
 }
 
-function injectOverlays() {
-  try {
-    const images = document.querySelectorAll('img');
-    let injectedCount = 0;
-    
-    images.forEach(img => {
-      // Defensive checks: Skip invalid sources or tiny icons
-      if (!img.src || img.width < 100 || img.height < 100) return;
-      
-      // Avoid double injection
-      if (img.parentElement?.dataset.kitesInjected) return;
-      
-      const wrapper = document.createElement('div');
-      wrapper.style.position = 'relative';
-      wrapper.style.display = 'inline-block';
-      wrapper.dataset.kitesInjected = 'true';
-      
-      if (!img.parentNode) return;
-      
-      img.parentNode.insertBefore(wrapper, img);
-      wrapper.appendChild(img);
-      
-      const uiContainer = document.createElement('div');
-      uiContainer.style.position = 'absolute';
-      uiContainer.style.top = '0';
-      uiContainer.style.left = '0';
-      uiContainer.style.width = '100%';
-      uiContainer.style.height = '100%';
-      uiContainer.style.pointerEvents = 'none'; // Let clicks pass through to image except on button
-      
-      wrapper.appendChild(uiContainer);
-      
-      const root = createRoot(uiContainer);
-      root.render(<TranslateOverlay srcUrl={img.src} />);
-      injectedCount++;
-    });
-    
-    if (injectedCount > 0) {
-      console.log(`[Content Script] Injected Kites overlay into ${injectedCount} images.`);
-    }
-  } catch (error) {
-    console.error('[Content Script] Error injecting overlays:', error);
-  }
+// Global Orchestrator: We use a single floating overlay attached to the body.
+// We DO NOT mutate the DOM by wrapping <img> tags, because that breaks React/Vue virtual DOMs
+// on sites like Reddit and nHentai, causing them to delete the images or break grid CSS layouts.
+function GlobalOverlay() {
+  const [activeImg, setActiveImg] = useState<{ srcUrl: string, top: number, left: number } | null>(null);
+
+  useEffect(() => {
+    const handleMouseOver = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (target && target.tagName === 'IMG') {
+        const img = target as HTMLImageElement;
+        
+        // Defensive checks: skip invalid or tiny icons
+        if (!img.src || img.width < 100 || img.height < 100) return;
+
+        // Calculate absolute position on the document
+        const rect = img.getBoundingClientRect();
+        
+        // If image is out of bounds or hidden, ignore
+        if (rect.width === 0 || rect.height === 0) return;
+
+        setActiveImg({
+          srcUrl: img.src,
+          top: rect.top + window.scrollY + 8, // 8px padding from top
+          left: rect.left + window.scrollX + 8, // 8px padding from left
+        });
+      }
+    };
+
+    const handleScroll = () => {
+      // Hide on scroll to prevent the button from floating detached if the DOM shifts
+      setActiveImg(null);
+    };
+
+    document.addEventListener('mouseover', handleMouseOver);
+    window.addEventListener('scroll', handleScroll, { passive: true });
+
+    return () => {
+      document.removeEventListener('mouseover', handleMouseOver);
+      window.addEventListener('scroll', handleScroll);
+    };
+  }, []);
+
+  if (!activeImg) return null;
+
+  return (
+    <TranslateButton 
+      srcUrl={activeImg.srcUrl} 
+      top={activeImg.top} 
+      left={activeImg.left} 
+      onHide={() => setActiveImg(null)}
+    />
+  );
 }
 
 // Run on load
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', injectOverlays);
-} else {
-  injectOverlays();
+try {
+  // Create a 0x0 container so it doesn't interfere with the page layout
+  const overlayRoot = document.createElement('div');
+  overlayRoot.id = 'kites-global-overlay';
+  overlayRoot.style.position = 'absolute'; 
+  overlayRoot.style.top = '0';
+  overlayRoot.style.left = '0';
+  overlayRoot.style.width = '0';
+  overlayRoot.style.height = '0';
+  overlayRoot.style.overflow = 'visible';
+  overlayRoot.style.zIndex = '999999';
+  
+  document.body.appendChild(overlayRoot);
+  
+  const root = createRoot(overlayRoot);
+  root.render(<GlobalOverlay />);
+  
+  console.log('[Content Script] Initialized Kites Global Hover Overlay.');
+} catch (error) {
+  console.error('[Content Script] Failed to initialize overlay:', error);
 }
-
-// Observe dynamic additions
-const observer = new MutationObserver(() => {
-  injectOverlays();
-});
-observer.observe(document.body, { childList: true, subtree: true });
