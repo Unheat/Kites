@@ -44,13 +44,20 @@ db.version(1).stores({
 db.projects.hook('deleting', function(projectId) {
   // Use a transaction to ensure atomic deletion
   return db.transaction('rw', db.images, db.textBlocks, async () => {
-    const images = await db.images.where({ projectId }).toArray();
-    for (const img of images) {
-      if (img.id) {
-        await db.textBlocks.where({ imageId: img.id }).delete();
+    try {
+      console.log(`[Database] Triggering cascading delete for Project ID: ${projectId}`);
+      const images = await db.images.where({ projectId }).toArray();
+      for (const img of images) {
+        if (img.id) {
+          await db.textBlocks.where({ imageId: img.id }).delete();
+        }
       }
+      await db.images.where({ projectId }).delete();
+      console.log(`[Database] Cascading delete complete for Project ID: ${projectId}`);
+    } catch (error) {
+      console.error(`[Database] Failed cascading delete for Project ID: ${projectId}`, error);
+      throw error;
     }
-    await db.images.where({ projectId }).delete();
   });
 });
 

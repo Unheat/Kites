@@ -3,7 +3,18 @@ import '../index.css';
 
 function TranslateOverlay({ srcUrl }: { srcUrl: string }) {
   const handleTranslate = () => {
-    chrome.runtime.sendMessage({ type: 'TRANSLATE_IMAGE', url: srcUrl });
+    if (!srcUrl) {
+      console.error('[Content Script] Cannot translate: No image URL provided.');
+      return;
+    }
+    console.log('[Content Script] Sending TRANSLATE_IMAGE to background:', srcUrl);
+    chrome.runtime.sendMessage({ type: 'TRANSLATE_IMAGE', url: srcUrl }, (response) => {
+      if (chrome.runtime.lastError) {
+        console.error('[Content Script] Message failed:', chrome.runtime.lastError.message);
+      } else {
+        console.log('[Content Script] Response from background:', response);
+      }
+    });
   };
 
   return (
@@ -22,37 +33,48 @@ function TranslateOverlay({ srcUrl }: { srcUrl: string }) {
 }
 
 function injectOverlays() {
-  const images = document.querySelectorAll('img');
-  
-  images.forEach(img => {
-    // Skip tiny icons
-    if (img.width < 100 || img.height < 100) return;
+  try {
+    const images = document.querySelectorAll('img');
+    let injectedCount = 0;
     
-    // Avoid double injection
-    if (img.parentElement?.dataset.kitesInjected) return;
+    images.forEach(img => {
+      // Defensive checks: Skip invalid sources or tiny icons
+      if (!img.src || img.width < 100 || img.height < 100) return;
+      
+      // Avoid double injection
+      if (img.parentElement?.dataset.kitesInjected) return;
+      
+      const wrapper = document.createElement('div');
+      wrapper.style.position = 'relative';
+      wrapper.style.display = 'inline-block';
+      wrapper.dataset.kitesInjected = 'true';
+      
+      if (!img.parentNode) return;
+      
+      img.parentNode.insertBefore(wrapper, img);
+      wrapper.appendChild(img);
+      
+      const uiContainer = document.createElement('div');
+      uiContainer.style.position = 'absolute';
+      uiContainer.style.top = '0';
+      uiContainer.style.left = '0';
+      uiContainer.style.width = '100%';
+      uiContainer.style.height = '100%';
+      uiContainer.style.pointerEvents = 'none'; // Let clicks pass through to image except on button
+      
+      wrapper.appendChild(uiContainer);
+      
+      const root = createRoot(uiContainer);
+      root.render(<TranslateOverlay srcUrl={img.src} />);
+      injectedCount++;
+    });
     
-    // Wrap the image to establish relative positioning context
-    const wrapper = document.createElement('div');
-    wrapper.style.position = 'relative';
-    wrapper.style.display = 'inline-block';
-    wrapper.dataset.kitesInjected = 'true';
-    
-    img.parentNode?.insertBefore(wrapper, img);
-    wrapper.appendChild(img);
-    
-    const uiContainer = document.createElement('div');
-    uiContainer.style.position = 'absolute';
-    uiContainer.style.top = '0';
-    uiContainer.style.left = '0';
-    uiContainer.style.width = '100%';
-    uiContainer.style.height = '100%';
-    uiContainer.style.pointerEvents = 'none'; // Let clicks pass through to image except on button
-    
-    wrapper.appendChild(uiContainer);
-    
-    const root = createRoot(uiContainer);
-    root.render(<TranslateOverlay srcUrl={img.src} />);
-  });
+    if (injectedCount > 0) {
+      console.log(`[Content Script] Injected Kites overlay into ${injectedCount} images.`);
+    }
+  } catch (error) {
+    console.error('[Content Script] Error injecting overlays:', error);
+  }
 }
 
 // Run on load

@@ -19,3 +19,17 @@ The developer of this project is a beginner learning full-stack, web extension, 
 *   **Proactive Commits**: Do not wait for the end of the project to commit everything in one massive shot. Actively manage the Git history.
 *   **Logical Milestones**: After completing a major feature, scaffolding a phase, or reaching a stable checkpoint (like passing a build), automatically stage and commit the code.
 *   **Solo Branching Strategy**: Use branches if experimenting with risky changes. Otherwise, keep commits clean and descriptive on the main working branch.
+*   you should know youself when to create a commit/ split new branch, merge,... in a way of solo projects not full team ( different way of using github)
+
+---
+
+## 3. Architecture & Code Quality
+
+*   **Clean & Expandable Foundation**: Write modular code that leaves room for future expansion (e.g., adding full web text translation alongside image translation). Do not over-engineer or build these features now (maintain YAGNI), but ensure the core abstractions (like message passing, scraping logic, or data models) are clean enough to support them later without a full rewrite.
+
+---
+
+## 4. Defensive Coding & Debugging
+
+*   **Fail Gracefully**: Always write defensive code. Assume network requests can fail, DOM elements might not exist, and databases can be locked or corrupted. Use `try/catch` blocks, null-checks, and optional chaining.
+*   **Targeted Logging**: Include `console.log` (for state transitions) and `console.error` (for failures) at critical junctions (e.g., message passing, database writes, and API calls) to aid debugging. Avoid messy or spammy logs in fast loops (like DOM observers).
