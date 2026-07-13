@@ -2,6 +2,12 @@ import { createRoot } from 'react-dom/client';
 import { useEffect, useState, useRef } from 'react';
 import '../index.css'; 
 
+// Minimum image size to avoid detect small icons
+const MIN_WIDTH_IMAGE_PX = 150;
+const MIN_HEIGHT_IMAGE_PX = 150;
+
+const TIMEOUT_MS = 300; // Debounce timeout in ms
+
 /**
  * Renders the floating translation button using modern CSS Anchor Positioning.
  * 
@@ -105,7 +111,7 @@ function GlobalOverlay() {
       let timeoutId: number | null = null;
       const debouncedUpdate = () => {
         if (timeoutId) window.clearTimeout(timeoutId);
-        timeoutId = window.setTimeout(updateImages, 300);
+        timeoutId = window.setTimeout(updateImages, TIMEOUT_MS);
       };
 
       // Use a MutationObserver (Industry Standard) instead of setInterval to instantly catch dynamic images
@@ -149,7 +155,7 @@ function GlobalOverlay() {
           
           // Use getBoundingClientRect for accurate rendered size
           const rect = img.getBoundingClientRect();
-          if (!img.src || rect.width < 100 || rect.height < 100) return; // skip small icons
+          if (!img.src || rect.width < MIN_WIDTH_IMAGE_PX || rect.height < MIN_HEIGHT_IMAGE_PX) return; // skip small icons
 
           let anchorName = img.style.getPropertyValue('anchor-name');
           if (!anchorName) {

@@ -5,6 +5,8 @@ export interface Project {
   title: string;
   timestamp: number;
   isFavorite: boolean;
+  status?: string;
+  mockTranslatedBlocks?: any[];
 }
 
 export interface ImageRecord {
