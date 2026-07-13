@@ -26,6 +26,8 @@ The developer of this project is a beginner learning full-stack, web extension, 
 ## 3. Architecture & Code Quality
 
 *   **Clean & Expandable Foundation (Open/Closed Principle)**: Write modular code that leaves room for future expansion. Do NOT hardcode UI elements (e.g. assume a basic button will always be used; design it to be swappable with a spinner/icon) or backend services (e.g. do not hardcode a specific AI model; use OOP/interfaces so we can swap Local, OpenAI, or Cloud models easily). Maintain YAGNI (don't over-engineer now), but ensure the core abstractions are clean enough to support swaps without a full rewrite.
+*   **Performance vs UX Trade-offs**: Always implement the most efficient, modern approach (e.g., `MutationObserver` over polling, CSS Anchors over JS math) if there is no trade-off. However, if an efficient approach prevents a user feature or lowers the user experience, you MUST stop and ask the user to decide if the performance gain is worth the feature loss.
+*   **Mandatory Docstrings**: Each function must include a docstring detailing its general description/purpose, input parameters, and return value/outputs.
 
 ---
 
@@ -33,3 +35,6 @@ The developer of this project is a beginner learning full-stack, web extension, 
 
 *   **Fail Gracefully**: Always write defensive code. Assume network requests can fail, DOM elements might not exist, and databases can be locked or corrupted. Use `try/catch` blocks, null-checks, and optional chaining.
 *   **Targeted Logging**: Include `console.log` (for state transitions) and `console.error` (for failures) at critical junctions (e.g., message passing, database writes, and API calls) to aid debugging. Avoid messy or spammy logs in fast loops (like DOM observers).
+
+## 5. Documents write
+* for documents like fullplan.md you should not summarize/shorten writing or when modifying existing descriptions. You should only change to reflect the accurate information of the plan.
