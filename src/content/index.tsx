@@ -61,7 +61,7 @@ function TranslateButton({ srcUrl, anchorName }: { srcUrl: string, anchorName: s
 }
 
 // Toggle this flag to test Consistent Mode vs Hover Mode
-const TEST_CONSISTENT_MODE = false;
+const TEST_CONSISTENT_MODE = true;
 
 /**
  * Manages the global state of the translation overlays.
@@ -112,7 +112,7 @@ function GlobalOverlay() {
       const observer = new MutationObserver((mutations) => {
         let shouldUpdate = false;
         for (const mutation of mutations) {
-          if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+          if (mutation.type === 'childList' && (mutation.addedNodes.length > 0 || mutation.removedNodes.length > 0)) {
             shouldUpdate = true;
             break;
           }
