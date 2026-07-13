@@ -35,4 +35,5 @@ The developer of this project is a beginner learning full-stack, web extension, 
 *   **Fail Gracefully**: Always write defensive code. Assume network requests can fail, DOM elements might not exist, and databases can be locked or corrupted. Use `try/catch` blocks, null-checks, and optional chaining.
 *   **Targeted Logging**: Include `console.log` (for state transitions) and `console.error` (for failures) at critical junctions (e.g., message passing, database writes, and API calls) to aid debugging. Avoid messy or spammy logs in fast loops (like DOM observers).
 
-## 
+## 5. Documents write
+* for documents like fullplan.md you should not summarize/shorten writing or when modifying existing descriptions. You should only change to reflect the accurate information of the plan.

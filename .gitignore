@@ -23,6 +23,6 @@ dist-ssr
 *.sln
 *.sw?
 
-docs/
-
+.agents
+docs
 .env

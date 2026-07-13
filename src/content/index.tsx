@@ -78,7 +78,7 @@ function GlobalOverlay() {
   activeImgRef.current = activeImg;
 
   useEffect(() => {
-    if (TEST_CONSISTENT_MODE) {
+    if (TEST_CONSISTENT_MODE) { // Consistent Mode
       const updateImages = () => {
         const imgs = Array.from(document.querySelectorAll('img'));
         const validImgs = imgs.filter(img => {
@@ -100,8 +100,47 @@ function GlobalOverlay() {
       };
 
       updateImages();
-      const intervalId = setInterval(updateImages, 2000);
-      return () => clearInterval(intervalId);
+      
+      // Debounce the update call to prevent CPU spikes during heavy DOM mutations
+      let timeoutId: number | null = null;
+      const debouncedUpdate = () => {
+        if (timeoutId) window.clearTimeout(timeoutId);
+        timeoutId = window.setTimeout(updateImages, 300);
+      };
+
+      // Use a MutationObserver (Industry Standard) instead of setInterval to instantly catch dynamic images
+      const observer = new MutationObserver((mutations) => {
+        let shouldUpdate = false;
+        for (const mutation of mutations) {
+          if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+            shouldUpdate = true;
+            break;
+          }
+          if (mutation.type === 'attributes' && mutation.attributeName === 'src' && mutation.target.nodeName === 'IMG') {
+            shouldUpdate = true;
+            break;
+          }
+        }
+        if (shouldUpdate) {
+          debouncedUpdate();
+        }
+      });
+
+      observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['src']
+      });
+
+      // Also update on window resize in case images change dimensions
+      window.addEventListener('resize', debouncedUpdate, { passive: true });
+
+      return () => {
+        observer.disconnect();
+        window.removeEventListener('resize', debouncedUpdate);
+        if (timeoutId) window.clearTimeout(timeoutId);
+      };
     } else {
       const handleMouseOver = (e: MouseEvent) => {
         const target = e.target as HTMLElement;
@@ -110,7 +149,7 @@ function GlobalOverlay() {
           
           // Use getBoundingClientRect for accurate rendered size
           const rect = img.getBoundingClientRect();
-          if (!img.src || rect.width < 100 || rect.height < 100) return;
+          if (!img.src || rect.width < 100 || rect.height < 100) return; // skip small icons
 
           let anchorName = img.style.getPropertyValue('anchor-name');
           if (!anchorName) {
