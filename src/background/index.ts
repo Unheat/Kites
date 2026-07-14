@@ -1,5 +1,5 @@
 import { db } from '../db';
-import type { TranslateImageMessage, ProcessProjectMessage } from '../shared/types';
+import type { TranslateImageMessage, ProcessJobMessage } from '../shared/types';
 
 // Magic Number: Limit concurrency to avoid network/CPU throttling
 const MAX_CONCURRENT_TRANSLATIONS = 3;
@@ -69,10 +69,8 @@ async function setupOffscreenDocument(path: string) {
  */
 async function queueTranslation(srcUrl: string) {
   console.log('[Background] Queuing image URL:', srcUrl);
-  await db.projects.add({
-    title: `Translation - ${new Date().toLocaleTimeString()}`,
+  await db.translationJobs.add({
     timestamp: Date.now(),
-    isFavorite: false,
     status: 'queued',
     srcUrl: srcUrl
   });
@@ -92,8 +90,8 @@ async function processQueue() {
   
   try {
     // Check how many are currently active
-    const downloadingCount = await db.projects.where('status').equals('downloading').count();
-    const processingCount = await db.projects.where('status').equals('processing').count();
+    const downloadingCount = await db.translationJobs.where('status').equals('downloading').count();
+    const processingCount = await db.translationJobs.where('status').equals('processing').count();
     const activeCount = downloadingCount + processingCount;
     
     if (activeCount >= MAX_CONCURRENT_TRANSLATIONS) {
@@ -105,17 +103,17 @@ async function processQueue() {
     console.log(`[Background] Queue slots available: ${slotsAvailable}. Pulling next jobs...`);
     
     // Dexie implicitly orders by primary key ('id') so this fetches chronologically oldest
-    const queuedProjects = await db.projects.where('status').equals('queued').limit(slotsAvailable).toArray();
+    const queuedJobs = await db.translationJobs.where('status').equals('queued').limit(slotsAvailable).toArray();
     
-    for (const project of queuedProjects) {
-      if (!project.id || !project.srcUrl) continue;
+    for (const job of queuedJobs) {
+      if (!job.id || !job.srcUrl) continue;
       
       // Update status to prevent other queue loops from grabbing it
-      await db.projects.update(project.id, { status: 'downloading' });
+      await db.translationJobs.update(job.id, { status: 'downloading' });
       
       // Fire it off asynchronously so we process all available slots in parallel
-      processImageTranslation(project.id, project.srcUrl).catch(e => {
-        console.error(`[Background] Unhandled error processing project ${project.id}:`, e);
+      processImageTranslation(job.id, job.srcUrl).catch(e => {
+        console.error(`[Background] Unhandled error processing job ${job.id}:`, e);
       });
     }
     
@@ -129,53 +127,53 @@ async function processQueue() {
 /**
  * Fetches the image, saves it to Dexie (Zero-Copy Bus), and routes the task to the Offscreen Document.
  * 
- * @param {number} projectId - The ID of the queued project.
+ * @param {number} jobId - The ID of the queued translation job.
  * @param {string} srcUrl - The URL of the image to fetch and process.
  * @returns {Promise<void>} Resolves when the image is successfully saved to the database and the processing task is queued.
  * @throws {Error} Throws an error if the image fetch fails or database write fails.
  */
-async function processImageTranslation(projectId: number, srcUrl: string) {
+async function processImageTranslation(jobId: number, srcUrl: string) {
   try {
-    console.log(`[Background] Fetching image for project ${projectId} from URL: ${srcUrl}`);
+    console.log(`[Background] Fetching image for job ${jobId} from URL: ${srcUrl}`);
     const response = await fetch(srcUrl);
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
     const blob = await response.blob();
     
-    console.log(`[Background] Saving blob for project ${projectId} to IndexedDB...`);
+    console.log(`[Background] Saving blob for job ${jobId} to IndexedDB...`);
     await db.images.add({
-      projectId: projectId,
+      jobId: jobId,
       rawImageBlob: blob
     });
     
-    await db.projects.update(projectId, { status: 'processing' });
+    await db.translationJobs.update(jobId, { status: 'processing' });
     
     // 1. Boot up the offscreen document if it's sleeping
     await setupOffscreenDocument('src/offscreen/offscreen.html');
     
-    // 2. Route the Project ID to the Offscreen Document to begin processing
-    const message: ProcessProjectMessage = {
-      type: 'PROCESS_PROJECT',
-      payload: { projectId: projectId }
+    // 2. Route the Job ID to the Offscreen Document to begin processing
+    const message: ProcessJobMessage = {
+      type: 'PROCESS_JOB',
+      payload: { jobId: jobId }
     };
     
-    console.log(`[Background] Routing task ${projectId} to Offscreen Document...`);
+    console.log(`[Background] Routing task ${jobId} to Offscreen Document...`);
     chrome.runtime.sendMessage(message, (response) => {
       if (chrome.runtime.lastError) {
-        console.error(`[Background] Error from offscreen for project ${projectId}:`, chrome.runtime.lastError);
-        db.projects.update(projectId, { status: 'error' }).then(() => processQueue());
+        console.error(`[Background] Error from offscreen for job ${jobId}:`, chrome.runtime.lastError);
+        db.translationJobs.update(jobId, { status: 'error' }).then(() => processQueue());
         return;
       }
       
-      console.log(`[Background] Offscreen completed project ${projectId} with status:`, response?.status);
+      console.log(`[Background] Offscreen completed job ${jobId} with status:`, response?.status);
       // Trigger the queue to pull the next available image!
       processQueue();
     });
     
   } catch (error) {
-    console.error(`[Background] Failed to process image for project ${projectId}:`, error);
-    await db.projects.update(projectId, { status: 'error' });
+    console.error(`[Background] Failed to process image for job ${jobId}:`, error);
+    await db.translationJobs.update(jobId, { status: 'error' });
     // Trigger queue again in case a slot opened up due to this error
     processQueue();
     throw error;

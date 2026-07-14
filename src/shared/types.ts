@@ -12,9 +12,9 @@ export interface TranslateImageMessage {
   url: string;
 }
 
-export interface ProcessProjectMessage {
-  type: 'PROCESS_PROJECT';
-  payload: { 
-    projectId: number; 
+export interface ProcessJobMessage {
+  type: 'PROCESS_JOB';
+  payload: {
+    jobId: number;
   };
 }
