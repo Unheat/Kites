@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { Download, Check, Upload, ChevronDown } from 'lucide-react';
+import { Download, Check, Upload, ChevronDown, Plus } from 'lucide-react';
 import type { PopupState } from '../index';
+import AddApiForm from './AddApiForm';
 
 interface EngineDropdownProps {
   state: PopupState;
@@ -23,6 +24,7 @@ export const AVAILABLE_ENGINES: Engine[] = [
 
 export default function EngineDropdown({ state, updateState }: EngineDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const [showAddApi, setShowAddApi] = useState(false);
 
   const allEngines: Engine[] = [
     ...AVAILABLE_ENGINES,
@@ -107,37 +109,59 @@ export default function EngineDropdown({ state, updateState }: EngineDropdownPro
           </button>
 
           {isOpen && (
-            <div className="mt-1 bg-[var(--color-paper)] border border-[var(--color-dust)] rounded-md shadow-sm overflow-hidden flex flex-col max-h-[250px]">
-              <div className="overflow-y-auto flex-1 p-1">
-                {allEngines.map((engine) => (
-                  <button
-                    key={engine.id}
-                    onClick={() => {
-                      updateState({ activeEngineId: engine.id });
+            <div className="mt-1 bg-[var(--color-paper)] border border-[var(--color-dust)] rounded-md shadow-sm overflow-hidden flex flex-col max-h-[350px] overflow-y-auto">
+              {!showAddApi ? (
+                <>
+                  <div className="flex-1 p-1">
+                    {allEngines.map((engine) => (
+                      <button
+                        key={engine.id}
+                        onClick={() => {
+                          updateState({ activeEngineId: engine.id });
+                          setIsOpen(false);
+                        }}
+                        className={`w-full flex items-center justify-between p-2 text-left rounded-sm cursor-pointer ${
+                          state.activeEngineId === engine.id ? 'bg-[var(--color-vellum)] text-[var(--color-editorial)] font-semibold' : 'hover:bg-[var(--color-vellum)]'
+                        }`}
+                      >
+                        <span className="truncate pr-2 text-sm">{engine.name}</span>
+                        <div className="flex-shrink-0">
+                          {state.activeEngineId === engine.id ? (
+                            <Check size={14} className="text-[var(--color-editorial)]" />
+                          ) : engine.type === 'local' && !engine.isDownloaded ? (
+                            <Download size={14} className="text-[var(--color-dust)] hover:text-[var(--color-ink)]" />
+                          ) : null}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                  
+                  <div className="border-t border-[var(--color-dust)] p-1 bg-[var(--color-vellum)]">
+                    <button 
+                      onClick={() => setShowAddApi(true)}
+                      className="w-full flex items-center gap-2 p-2 text-sm text-left hover:bg-[var(--color-paper)] rounded-sm cursor-pointer transition-colors"
+                    >
+                      <Plus size={14} className="text-[var(--color-editorial)]" />
+                      <span className="text-[var(--color-editorial)] font-medium">Add Custom API Key</span>
+                    </button>
+                    <button className="w-full flex items-center gap-2 p-2 text-sm text-left hover:bg-[var(--color-paper)] rounded-sm cursor-pointer transition-colors">
+                      <Upload size={14} className="text-[var(--color-dust)]" />
+                      <span>Import Local .onnx Model</span>
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className="p-2">
+                  <AddApiForm 
+                    onSave={(api) => {
+                      updateState({ customApis: [...state.customApis, api] });
+                      setShowAddApi(false);
                       setIsOpen(false);
                     }}
-                    className={`w-full flex items-center justify-between p-2 text-left rounded-sm cursor-pointer ${
-                      state.activeEngineId === engine.id ? 'bg-[var(--color-vellum)] text-[var(--color-editorial)] font-semibold' : 'hover:bg-[var(--color-vellum)]'
-                    }`}
-                  >
-                    <span className="truncate pr-2 text-sm">{engine.name}</span>
-                    <div className="flex-shrink-0">
-                      {state.activeEngineId === engine.id ? (
-                        <Check size={14} className="text-[var(--color-editorial)]" />
-                      ) : engine.type === 'local' && !engine.isDownloaded ? (
-                        <Download size={14} className="text-[var(--color-dust)] hover:text-[var(--color-ink)]" />
-                      ) : null}
-                    </div>
-                  </button>
-                ))}
-              </div>
-              
-              <div className="border-t border-[var(--color-dust)] p-1 bg-[var(--color-vellum)]">
-                <button className="w-full flex items-center gap-2 p-2 text-sm text-left hover:bg-[var(--color-paper)] rounded-sm cursor-pointer transition-colors">
-                  <Upload size={14} className="text-[var(--color-dust)]" />
-                  <span>Import Local .onnx Model</span>
-                </button>
-              </div>
+                    onCancel={() => setShowAddApi(false)}
+                  />
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -54,7 +54,7 @@ export default function FallbackConfigPanel({ state, updateState, onClose }: Fal
         If the primary engine fails (e.g. rate limit, WebGPU crash), Kites will automatically try the engines below in order.
       </p>
 
-      <div className="flex flex-col gap-2 relative">
+      <div className="flex flex-col relative">
         {/* Visual Root Node: The Primary Engine from Home */}
         <div className="relative flex flex-col items-center">
           <div className="w-full flex items-center gap-2 p-3 bg-[var(--color-vellum)] border border-dashed border-[var(--color-dust)] rounded-md opacity-60">
@@ -70,7 +70,7 @@ export default function FallbackConfigPanel({ state, updateState, onClose }: Fal
             <div key={`${index}-${engineId}`} className="relative flex flex-col items-center">
               
               {/* Arrow pointing down from the item above */}
-              <div className="w-px h-4 bg-[var(--color-dust)] my-1 relative">
+              <div className="w-px h-4 bg-[var(--color-dust)] relative">
                 <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 border-l-4 border-r-4 border-t-4 border-l-transparent border-r-transparent border-t-[var(--color-dust)]" />
               </div>
 
