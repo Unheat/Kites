@@ -100,7 +100,7 @@ export default function EngineDropdown({ state, updateState }: EngineDropdownPro
           </button>
 
           {isOpen && (
-            <div className="absolute top-full left-0 right-0 mt-1 bg-[var(--color-paper)] border border-[var(--color-dust)] rounded-md shadow-lg z-10 overflow-hidden flex flex-col max-h-[250px]">
+            <div className="mt-1 bg-[var(--color-paper)] border border-[var(--color-dust)] rounded-md shadow-sm overflow-hidden flex flex-col max-h-[250px]">
               <div className="overflow-y-auto flex-1 p-1">
                 {AVAILABLE_ENGINES.map((engine) => (
                   <button

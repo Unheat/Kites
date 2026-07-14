@@ -14,6 +14,7 @@ export interface PopupState {
   isDark: boolean;
   activeEngineId: string;
   apiConfig: {
+    provider: string;
     model: string;
     apiKey: string;
   };
@@ -28,7 +29,7 @@ function PopupApp() {
     concurrency: 3,
     isDark: true,
     activeEngineId: 'nllb-200',
-    apiConfig: { model: '', apiKey: '' }
+    apiConfig: { provider: 'custom', model: '', apiKey: '' }
   });
 
   useEffect(() => {

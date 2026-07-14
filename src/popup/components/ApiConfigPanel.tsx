@@ -13,6 +13,16 @@ export default function ApiConfigPanel({ state, updateState, onClose }: ApiConfi
         <h3 className="text-sm font-semibold">Configure API</h3>
         <button onClick={onClose} className="text-xs text-[var(--color-dust)] hover:text-[var(--color-ink)] cursor-pointer">Cancel</button>
       </div>
+      <select 
+        value={state.apiConfig?.provider || 'custom'}
+        onChange={(e) => updateState({ apiConfig: { ...state.apiConfig, provider: e.target.value } })}
+        className="w-full mb-3 p-2 text-sm bg-[var(--color-paper)] border border-[var(--color-dust)] rounded focus:outline-none focus:border-[var(--color-ink)] transition-colors text-[var(--color-ink)]"
+      >
+        <option value="openai">OpenAI</option>
+        <option value="anthropic">Anthropic (Claude)</option>
+        <option value="openrouter">OpenRouter</option>
+        <option value="custom">OpenAI-Compatible Endpoint</option>
+      </select>
       <input 
         type="text" 
         placeholder="Model Name (e.g. gpt-4o)" 
