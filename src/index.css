@@ -24,7 +24,7 @@
   --color-dust: #4A4A4A;
 }
 
-html, body {
+html.kites-extension-page, body.kites-extension-page {
   font-family: var(--font-body);
   background-color: var(--color-paper);
   color: var(--color-ink);
@@ -34,16 +34,16 @@ html, body {
 }
 
 /* Custom Scrollbar */
-::-webkit-scrollbar {
+.kites-extension-page::-webkit-scrollbar {
   width: 6px;
 }
-::-webkit-scrollbar-track {
+.kites-extension-page::-webkit-scrollbar-track {
   background: transparent;
 }
-::-webkit-scrollbar-thumb {
+.kites-extension-page::-webkit-scrollbar-thumb {
   background: var(--color-dust);
   border-radius: 10px;
 }
-::-webkit-scrollbar-thumb:hover {
+.kites-extension-page::-webkit-scrollbar-thumb:hover {
   background: var(--color-editorial);
 }
