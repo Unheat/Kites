@@ -24,13 +24,13 @@ A Chrome Extension-first web application that allows users to translate text wit
 
 ### Local Database (IndexedDB / Dexie.js)
 This schema lives entirely in the user's browser storage:
-- **Workspaces/Projects:** `++id`, `title`, `timestamp`, `isFavorite`
-- **Images:** `++id`, `projectId`, `rawImageBlob`, `translatedImageBlob` (We store raw blobs instead of Cloudinary URLs)
-- **TextBlocks:** `++id`, `imageId`, `originalText`, `translatedText`, `posX`, `posY`, `width`, `height`, `fontSize`, `fontFamily`, `color`
+- **ProjectFolders:** `++id`, `title`, `timestamp`, `isFavorite` (Formerly Workspaces/Projects)
+- **TranslationJobs:** `++id`, `folderId`, `rawImageBlob`, `translatedImageBlob`, `createdAt`, `updatedAt` (Formerly Images)
+- **TextBlocks:** `++id`, `jobId`, `originalText`, `translatedText`, `posX`, `posY`, `width`, `height`, `fontSize`, `fontFamily`, `color`
 - **Tags/Categories:** `++id`, `tagName`
-- **ImageTags (Join):** `++id`, `imageId`, `tagId` 
+- **ImageTags (Join):** `++id`, `jobId`, `tagId` 
 
-*Crucial Architecture Constraint (Cascading Deletes):* Dexie.js is a NoSQL store and does not auto-delete children. To prevent massive local storage bloat, we must register a `db.projects.hook('deleting')` lifecycle event on initialization that manually force-deletes all orphaned Image Blobs and TextBlocks whenever a project is removed. 
+*Crucial Architecture Constraint (Cascading Deletes):* Dexie.js is a NoSQL store and does not auto-delete children. To prevent massive local storage bloat, we must register a `db.folders.hook('deleting')` lifecycle event on initialization that manually force-deletes all orphaned TranslationJobs and TextBlocks whenever a folder is removed. 
 
 ### Cloud Database (PostgreSQL)
 Only used for authentication and subscription management when the user opts for "Cloud Mode":
@@ -40,14 +40,20 @@ Only used for authentication and subscription management when the user opts for 
 
 ### A. How to run AI locally for Non-Tech Users (Zero Setup)
 *The Problem:* We want users to translate locally without installing Python, Docker, or external keys.
-*The Solution:* We use WebAssembly (Wasm) and WebGPU to run compressed ONNX models directly in JavaScript.
-*   **Transformers.js (ONNX Runtime Web):** Hugging Face's JS library downloads `.onnx` models, caches them permanently in the browser's **Cache Storage API**, and executes them locally.
-*   *Mentor Correction (Avoiding Heavy LLMs):* Previously, the plan suggested using WebLLM with Llama-3 for translation. This is an anti-pattern. An 8B parameter LLM requires 4GB+ of VRAM, takes minutes to download, and is slow to generate. Instead, we will use purpose-built translation models like **NLLB-200 (No Language Left Behind)** or **MarianMT**. These models are explicitly trained for translation, are extremely lightweight (~50-150MB), and run instantly in the browser. 
+*The Solution:* We use WebAssembly (Wasm) and WebGPU to run compressed models directly in JavaScript. We use a **Dual-Local Compute Strategy**:
+1.  **Transformers.js (ONNX Runtime Web):** Hugging Face's JS library runs purpose-built translation models like **NLLB-200** or **MarianMT**. These models are extremely lightweight (~50-600MB) and run instantly in the browser on CPU or WebGL, perfect for any standard laptop.
+2.  **WebLLM (WebGPU):** For users with capable GPUs, we provide WebLLM to run full Large Language Models (like Llama-3.2-1B or Qwen-1.5B). LLMs provide superior contextual translation quality but require more resources.
+
+**Unified Model Search Registry:**
+Instead of hardcoding or manually maintaining a massive list of downloadable models in our UI, we will implement a dynamic model search bar by combining two native registries:
+*   **WebLLM:** We read the `webllm.prebuiltAppConfig.model_list` which contains all officially verified WebLLM models.
+*   **ONNX / Transformers.js:** We query the Hugging Face API (e.g., filtering by `author=Xenova` and `library=transformers.js`) to dynamically fetch compatible ONNX models.
+*   The UI will merge both lists, displaying a `[WebGPU]` badge for WebLLM models and a `[CPU/Fast]` badge for ONNX models.
 
 **The User Flow (Extension Dashboard):**
-1. User opens the extension Dashboard and toggles "Local Mode".
-2. The UI displays a progress bar as Transformers.js downloads the `.onnx` files from Hugging Face.
-3. The weights are cached permanently in Chrome's local cache. On all future translations, the model loads in 0.1 seconds from disk.
+1. User opens the extension Dashboard and toggles "Auto-Translate" or manually selects a translation engine.
+2. The UI displays a progress bar as the engine caches the model weights.
+3. The weights are cached permanently in Chrome's local cache. On all future translations, the model loads in milliseconds from disk.
 4. When translating, the Offscreen Document processes the image locally. Zero API keys, zero server costs.
 
 ### B. The OCR & Detection Breakthrough (PaddleOCR ONNX)
@@ -110,9 +116,9 @@ We will use **Fast-LaMa (F-LaMa)** converted to an ONNX model, running via Trans
 ### G. Two-Part Frontend UX (Tampermonkey Style)
 *The Problem:* How do we provide quick access to settings while also giving the user a robust, full-screen canvas editor?
 *The Solution (Local-First Design):* We structure the frontend into two distinct React interfaces, mirroring extensions like Tampermonkey:
-1. **The Popup Window (Quick Actions):** A small window that opens when clicking the extension icon in the toolbar. It contains quick toggles (Enable/Disable translation, Local/Cloud mode) and a primary button to "Open Dashboard" or "Manual Upload".
+1. **The Popup Window (Quick Actions):** A small window that opens when clicking the extension icon. It handles quick operational toggles (`Auto-Translate` vs `Manual Selection Method (Hover/Persistent)`), Translation Engine selection (Local/API/Custom), and Max Concurrent Translations.
 2. **The Standalone Dashboard (Full UI):** A full-screen React app hosted on an extension tab (`chrome-extension://.../index.html`). This is the "Main Brain" UI where the user accesses the interactive Canvas Editor, Recent History, Favorites, and can manually upload screenshots taken with their OS snipping tool for protected sites. All images and history are saved into the extension's local `IndexedDB`.
-3. **Swappable Engine Router:** We implement a Strategy Pattern for compute. When a user translates an image, the UI calls a generic `translationService.translate()`. If set to Local, it runs Wasm via an Offscreen Document. If set to Cloud, it sends the image to our Remote API with a JWT Auth Token.
+3. **Swappable Engine Router:** We implement a Strategy Pattern for compute. When a user translates an image, the UI calls a generic `translationService.translate()`. Depending on the popup's selected engine, it runs Wasm via an Offscreen Document, uses WebGPU for WebLLM, or sends the request to a Custom API Endpoint.
 *Result:* This provides the absolute best UX. The user gets a completely private, full-featured app via the extension, with quick access via the popup and deep editing via the dashboard tab.
 
 ## 5. Implementation Phases
