@@ -69,6 +69,11 @@ function TranslateButton({ srcUrl, anchorName }: { srcUrl: string, anchorName: s
 // Toggle this flag to test Consistent Mode vs Hover Mode
 const TEST_CONSISTENT_MODE = true;
 
+// Toggle this flag to automatically translate images found on the page without clicking
+const AUTO_TRANSLATE_ENABLED = true;
+// Keep track of which URLs we have already sent to the background to avoid spamming
+const processedUrls = new Set<string>();
+
 /**
  * Manages the global state of the translation overlays.
  * In Hover Mode, tracks the mouse to anchor a single button.
@@ -90,7 +95,7 @@ function GlobalOverlay() {
         const validImgs = imgs.filter(img => {
           // Use getBoundingClientRect for accurate rendered size, bypassing lazy-load 0 width attributes
           const rect = img.getBoundingClientRect();
-          return img.src && rect.width >= 100 && rect.height >= 100;
+          return img.src && rect.width >= MIN_WIDTH_IMAGE_PX && rect.height >= MIN_HEIGHT_IMAGE_PX;
         });
 
         const newConsistentImages = validImgs.map(img => {
@@ -99,6 +104,17 @@ function GlobalOverlay() {
             anchorName = `--kites-img-${Math.random().toString(36).substr(2, 9)}`;
             img.style.setProperty('anchor-name', anchorName);
           }
+          
+          if (AUTO_TRANSLATE_ENABLED && !processedUrls.has(img.src)) {
+            processedUrls.add(img.src);
+            console.log('[Content Script] Auto-Translating image:', img.src);
+            chrome.runtime.sendMessage({ type: 'TRANSLATE_IMAGE', url: img.src }, () => {
+              if (chrome.runtime.lastError) {
+                console.error('[Content Script] Auto-Translate message failed:', chrome.runtime.lastError.message);
+              }
+            });
+          }
+          
           return { srcUrl: img.src, anchorName };
         });
 

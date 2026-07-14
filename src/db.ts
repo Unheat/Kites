@@ -5,7 +5,8 @@ export interface Project {
   title: string;
   timestamp: number;
   isFavorite: boolean;
-  status?: string;
+  status?: 'queued' | 'downloading' | 'processing' | 'completed' | 'error';
+  srcUrl?: string;
   mockTranslatedBlocks?: any[];
 }
 
@@ -36,8 +37,11 @@ const db = new Dexie('KitesDatabase') as Dexie & {
   textBlocks: EntityTable<TextBlock, 'id'>;
 };
 
-db.version(1).stores({
-  projects: '++id, title, timestamp, isFavorite',
+// Increment version or keep 1 since we are just adding an index and this is local MVP,
+// Dexie allows adding indices by simply changing the string if version is updated.
+// Let's increment version to 2 to safely apply the schema change.
+db.version(2).stores({
+  projects: '++id, title, timestamp, isFavorite, status',
   images: '++id, projectId',
   textBlocks: '++id, imageId'
 });
