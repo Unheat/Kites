@@ -7,6 +7,14 @@ import SettingsView from './components/SettingsView';
 
 import { Settings, Home, Power } from 'lucide-react';
 
+export interface CustomApiConfig {
+  id: string;
+  provider: 'openai' | 'openai-compatible' | 'gemini' | 'claude';
+  modelName: string;
+  apiKey: string;
+  baseUrl?: string; // Optional for openAI-compatible
+}
+
 export interface PopupState {
   isExtensionEnabled: boolean;
   isAuto: boolean;
@@ -14,11 +22,8 @@ export interface PopupState {
   concurrency: number;
   isDark: boolean;
   activeEngineId: string;
-  apiConfig: {
-    provider: string;
-    model: string;
-    apiKey: string;
-  };
+  fallbackChain: string[];
+  customApis: CustomApiConfig[];
 }
 
 function PopupApp() {
@@ -31,7 +36,8 @@ function PopupApp() {
     concurrency: 3,
     isDark: true,
     activeEngineId: 'nllb-200',
-    apiConfig: { provider: 'custom', model: '', apiKey: '' }
+    fallbackChain: [],
+    customApis: []
   });
 
   useEffect(() => {

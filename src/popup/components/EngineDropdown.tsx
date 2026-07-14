@@ -1,21 +1,20 @@
 import { useState } from 'react';
-import { Download, Check, Upload, KeyRound, ChevronDown } from 'lucide-react';
+import { Download, Check, Upload, ChevronDown } from 'lucide-react';
 import type { PopupState } from '../index';
-import ApiConfigPanel from './ApiConfigPanel';
 
 interface EngineDropdownProps {
   state: PopupState;
   updateState: (updates: Partial<PopupState>) => void;
 }
 
-interface Engine {
+export interface Engine {
   id: string;
   name: string;
   type: 'local' | 'api' | 'custom';
   isDownloaded?: boolean;
 }
 
-const AVAILABLE_ENGINES: Engine[] = [
+export const AVAILABLE_ENGINES: Engine[] = [
   { id: 'nllb-200', name: 'NLLB-200 Distilled (~600MB)', type: 'local', isDownloaded: false },
   { id: 'marian-mt', name: 'Marian-MT (Dynamic Pairs)', type: 'local', isDownloaded: true },
   { id: 'llama-1b', name: 'Llama-3.2-1B (WebLLM)', type: 'local', isDownloaded: false },
@@ -24,10 +23,18 @@ const AVAILABLE_ENGINES: Engine[] = [
 
 export default function EngineDropdown({ state, updateState }: EngineDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const [activeEngineId, setActiveEngineId] = useState('nllb-200');
-  const [showApiConfig, setShowApiConfig] = useState(false);
 
-  const activeEngine = AVAILABLE_ENGINES.find(e => e.id === activeEngineId) || AVAILABLE_ENGINES[0];
+  const allEngines: Engine[] = [
+    ...AVAILABLE_ENGINES,
+    ...(state.customApis || []).map(api => ({
+      id: api.id,
+      name: `${api.provider}/${api.modelName}`,
+      type: 'custom' as const,
+      isDownloaded: true
+    }))
+  ];
+
+  const activeEngine = allEngines.find(e => e.id === state.activeEngineId) || allEngines[0];
 
   return (
     <div className="flex flex-col gap-5">
@@ -102,20 +109,20 @@ export default function EngineDropdown({ state, updateState }: EngineDropdownPro
           {isOpen && (
             <div className="mt-1 bg-[var(--color-paper)] border border-[var(--color-dust)] rounded-md shadow-sm overflow-hidden flex flex-col max-h-[250px]">
               <div className="overflow-y-auto flex-1 p-1">
-                {AVAILABLE_ENGINES.map((engine) => (
+                {allEngines.map((engine) => (
                   <button
                     key={engine.id}
                     onClick={() => {
-                      setActiveEngineId(engine.id);
+                      updateState({ activeEngineId: engine.id });
                       setIsOpen(false);
                     }}
                     className={`w-full flex items-center justify-between p-2 text-left rounded-sm cursor-pointer ${
-                      activeEngineId === engine.id ? 'bg-[var(--color-vellum)] text-[var(--color-editorial)] font-semibold' : 'hover:bg-[var(--color-vellum)]'
+                      state.activeEngineId === engine.id ? 'bg-[var(--color-vellum)] text-[var(--color-editorial)] font-semibold' : 'hover:bg-[var(--color-vellum)]'
                     }`}
                   >
                     <span className="truncate pr-2 text-sm">{engine.name}</span>
                     <div className="flex-shrink-0">
-                      {activeEngineId === engine.id ? (
+                      {state.activeEngineId === engine.id ? (
                         <Check size={14} className="text-[var(--color-editorial)]" />
                       ) : engine.type === 'local' && !engine.isDownloaded ? (
                         <Download size={14} className="text-[var(--color-dust)] hover:text-[var(--color-ink)]" />
@@ -130,24 +137,10 @@ export default function EngineDropdown({ state, updateState }: EngineDropdownPro
                   <Upload size={14} className="text-[var(--color-dust)]" />
                   <span>Import Local .onnx Model</span>
                 </button>
-                <button 
-                  onClick={() => {
-                    setIsOpen(false);
-                    setShowApiConfig(true);
-                  }}
-                  className="w-full flex items-center gap-2 p-2 text-sm text-left hover:bg-[var(--color-paper)] rounded-sm cursor-pointer transition-colors"
-                >
-                  <KeyRound size={14} className="text-[var(--color-editorial)]" />
-                  <span className="text-[var(--color-editorial)] font-medium">Add Custom API Key</span>
-                </button>
               </div>
             </div>
           )}
         </div>
-
-        {showApiConfig && (
-          <ApiConfigPanel state={state} updateState={updateState} onClose={() => setShowApiConfig(false)} />
-        )}
       </div>
     </div>
   );

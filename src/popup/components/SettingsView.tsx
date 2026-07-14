@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import type { PopupState } from '../index';
-import { Moon, Sun, KeyRound } from 'lucide-react';
-import ApiConfigPanel from './ApiConfigPanel';
+import { Moon, Sun, KeyRound, Network } from 'lucide-react';
+import ApiManagerPanel from './ApiManagerPanel';
+import FallbackConfigPanel from './FallbackConfigPanel';
 
 interface SettingsViewProps {
   state: PopupState;
@@ -9,7 +10,9 @@ interface SettingsViewProps {
 }
 
 export default function SettingsView({ state, updateState }: SettingsViewProps) {
-  const [showApiConfig, setShowApiConfig] = useState(false);
+  const [showApiManager, setShowApiManager] = useState(false);
+  const [showFallbackConfig, setShowFallbackConfig] = useState(false);
+
   return (
     <div className="flex flex-col gap-6">
       
@@ -76,27 +79,43 @@ export default function SettingsView({ state, updateState }: SettingsViewProps) 
         </p>
       </div>
 
-      {/* API Configuration */}
+      {/* Advanced Configurations */}
       <div>
         <div className="flex justify-between items-center mb-2">
-          <span className="font-medium text-sm">Custom API Provider</span>
+          <span className="font-medium text-sm">Advanced Configuration</span>
         </div>
-        {!showApiConfig ? (
-          <button 
-            onClick={() => setShowApiConfig(true)}
-            className="w-full flex items-center justify-between p-3 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md hover:border-[var(--color-ink)] transition-colors cursor-pointer"
-          >
-            <div className="flex items-center gap-2">
-              <KeyRound size={16} className="text-[var(--color-dust)]" />
-              <span className="font-medium text-sm">
-                {state.apiConfig?.apiKey ? 'Configure API (Key Saved)' : 'Add Custom API Key'}
-              </span>
-            </div>
-            <span className="text-xs text-[var(--color-editorial)] font-medium">Edit</span>
-          </button>
-        ) : (
-          <ApiConfigPanel state={state} updateState={updateState} onClose={() => setShowApiConfig(false)} />
-        )}
+        
+        <div className="flex flex-col gap-2">
+          {!showApiManager ? (
+            <button 
+              onClick={() => setShowApiManager(true)}
+              className="w-full flex items-center justify-between p-3 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md hover:border-[var(--color-ink)] transition-colors cursor-pointer"
+            >
+              <div className="flex items-center gap-2">
+                <KeyRound size={16} className="text-[var(--color-dust)]" />
+                <span className="font-medium text-sm">Manage Custom APIs</span>
+              </div>
+              <span className="text-xs text-[var(--color-editorial)] font-medium">Edit</span>
+            </button>
+          ) : (
+            <ApiManagerPanel state={state} updateState={updateState} onClose={() => setShowApiManager(false)} />
+          )}
+
+          {!showFallbackConfig ? (
+            <button 
+              onClick={() => setShowFallbackConfig(true)}
+              className="w-full flex items-center justify-between p-3 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md hover:border-[var(--color-ink)] transition-colors cursor-pointer"
+            >
+              <div className="flex items-center gap-2">
+                <Network size={16} className="text-[var(--color-dust)]" />
+                <span className="font-medium text-sm">Configure Fallback Chain</span>
+              </div>
+              <span className="text-xs text-[var(--color-editorial)] font-medium">Edit</span>
+            </button>
+          ) : (
+            <FallbackConfigPanel state={state} updateState={updateState} onClose={() => setShowFallbackConfig(false)} />
+          )}
+        </div>
       </div>
 
       {/* Concurrency Slider */}
