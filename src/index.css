@@ -14,8 +14,36 @@
   --font-mono: 'JetBrains Mono', monospace;
 }
 
-body {
+/* Dark Theme overrides */
+.dark {
+  --color-paper: #121212;
+  --color-glass: #1A1A1A;
+  --color-ink: #E0E0E0;
+  --color-vellum: #1E1E1E;
+  --color-editorial: #FF2A6D;
+  --color-dust: #4A4A4A;
+}
+
+html, body {
   font-family: var(--font-body);
   background-color: var(--color-paper);
   color: var(--color-ink);
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-dust);
+  border-radius: 10px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-editorial);
 }
