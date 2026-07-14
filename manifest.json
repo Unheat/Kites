@@ -4,7 +4,8 @@
   "version": "1.0.0",
   "description": "Translate manga and images with spatial awareness.",
   "action": {
-    "default_title": "Kites"
+    "default_title": "Kites",
+    "default_popup": "popup.html"
   },
   "permissions": [
     "activeTab",

@@ -1,1 +1,21 @@
 @import "tailwindcss";
+
+@theme {
+  /* Kites Design Tokens - Editor's Light Table */
+  --color-paper: #E4E0D9;
+  --color-glass: #0B0C10;
+  --color-ink: #111111;
+  --color-vellum: #EFECE6;
+  --color-editorial: #D9381E;
+  --color-dust: #A19F9A;
+
+  --font-display: 'Cabinet Grotesk', 'Space Grotesk', 'Clash Display', sans-serif;
+  --font-body: 'Satoshi', 'Inter', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+body {
+  font-family: var(--font-body);
+  background-color: var(--color-paper);
+  color: var(--color-ink);
+}
