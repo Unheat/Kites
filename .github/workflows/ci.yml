@@ -1,0 +1,49 @@
+name: Kites CI/CD
+
+# Trigger the workflow on pushes to main and on pull requests
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  test-and-build:
+    name: Test and Build Extension
+    runs-on: ubuntu-latest
+
+    steps:
+      # Check out your code from the repository
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # Setup Node.js environment
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20' # Use LTS version
+          cache: 'npm'       # Speeds up subsequent runs by caching dependencies
+
+      # Install dependencies (npm ci is preferred in CI environments over npm install)
+      - name: Install Dependencies
+        run: npm ci
+
+      # Run the Oxlint linter
+      - name: Run Linter
+        run: npm run lint
+
+      # Run your Vitest automated unit tests (like TranslationManager.test.ts)
+      - name: Run Unit Tests
+        run: npm run test
+
+      # Attempt to build the Chrome Extension (TypeScript checks + Vite build)
+      - name: Build Extension
+        run: npm run build
+
+      # Upload the built extension as an artifact so you can download it
+      - name: Upload Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kites-extension-build
+          path: dist/ # Vite output directory
+          retention-days: 7
