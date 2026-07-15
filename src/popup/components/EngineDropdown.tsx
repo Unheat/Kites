@@ -1,7 +1,9 @@
-import { useState } from 'react';
-import { Download, Check, Upload, ChevronDown, Plus } from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
+import { Download, Check, Upload, ChevronDown, Plus, Search } from 'lucide-react';
 import type { PopupState } from '../index';
 import AddApiForm from './AddApiForm';
+import MiniSearch from 'minisearch';
+import { ModelRegistry } from '../services/ModelRegistry';
 
 interface EngineDropdownProps {
   state: PopupState;
@@ -13,30 +15,50 @@ export interface Engine {
   name: string;
   type: 'local' | 'api' | 'custom';
   isDownloaded?: boolean;
+  hardware?: 'CPU' | 'WebGPU';
 }
-
-export const AVAILABLE_ENGINES: Engine[] = [
-  { id: 'nllb-200', name: 'NLLB-200 Distilled (~600MB)', type: 'local', isDownloaded: false },
-  { id: 'marian-mt', name: 'Marian-MT (Dynamic Pairs)', type: 'local', isDownloaded: true },
-  { id: 'llama-1b', name: 'Llama-3.2-1B (WebLLM)', type: 'local', isDownloaded: false },
-  { id: 'qwen-1.5b', name: 'Qwen2.5-1.5B (WebLLM)', type: 'local', isDownloaded: false },
-];
 
 export default function EngineDropdown({ state, updateState }: EngineDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [showAddApi, setShowAddApi] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  
+  const [baseEngines, setBaseEngines] = useState<Engine[]>([]);
+  
+  useEffect(() => {
+    ModelRegistry.getAvailableEngines().then(setBaseEngines);
+  }, []);
 
-  const allEngines: Engine[] = [
-    ...AVAILABLE_ENGINES,
-    ...(state.customApis || []).map(api => ({
+  const allEngines = useMemo(() => {
+    const custom: Engine[] = (state.customApis || []).map(api => ({
       id: api.id,
       name: `${api.provider}/${api.modelName}`,
       type: 'custom' as const,
       isDownloaded: true
-    }))
-  ];
+    }));
+    return [...baseEngines, ...custom];
+  }, [baseEngines, state.customApis]);
 
-  const activeEngine = allEngines.find(e => e.id === state.activeEngineId) || allEngines[0];
+  const miniSearch = useMemo(() => {
+    if (allEngines.length === 0) return null;
+    const ms = new MiniSearch({
+      fields: ['name', 'id', 'hardware', 'type'],
+      storeFields: ['id', 'name', 'type', 'isDownloaded', 'hardware'],
+      searchOptions: { fuzzy: 0.2, prefix: true }
+    });
+    ms.addAll(allEngines);
+    return ms;
+  }, [allEngines]);
+
+  const displayedEngines = useMemo(() => {
+    if (!searchQuery.trim() || !miniSearch) {
+      return allEngines.slice(0, 50);
+    }
+    const results = miniSearch.search(searchQuery);
+    return results.slice(0, 50) as unknown as Engine[];
+  }, [searchQuery, miniSearch, allEngines]);
+
+  const activeEngine = allEngines.find(e => e.id === state.activeEngineId) || allEngines[0] || { name: 'Loading...', id: '' };
 
   return (
     <div className="flex flex-col gap-5">
@@ -109,23 +131,44 @@ export default function EngineDropdown({ state, updateState }: EngineDropdownPro
           </button>
 
           {isOpen && (
-            <div className="mt-1 bg-[var(--color-paper)] border border-[var(--color-dust)] rounded-md shadow-sm overflow-hidden flex flex-col max-h-[350px] overflow-y-auto">
+            <div className="mt-1 bg-[var(--color-paper)] border border-[var(--color-dust)] rounded-md shadow-sm overflow-hidden flex flex-col max-h-[350px]">
               {!showAddApi ? (
                 <>
-                  <div className="flex-1 p-1">
-                    {allEngines.map((engine) => (
+                  <div className="p-2 border-b border-[var(--color-dust)]">
+                    <div className="relative">
+                      <Search size={14} className="absolute left-2 top-1/2 -translate-y-1/2 text-[var(--color-dust)]" />
+                      <input 
+                        type="text" 
+                        placeholder="Search models..." 
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="w-full pl-8 pr-2 py-1.5 text-sm bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded focus:outline-none focus:border-[var(--color-ink)] transition-colors"
+                        autoFocus
+                      />
+                    </div>
+                  </div>
+                  <div className="overflow-y-auto flex-1 p-1">
+                    {displayedEngines.length > 0 ? displayedEngines.map((engine) => (
                       <button
                         key={engine.id}
                         onClick={() => {
                           updateState({ activeEngineId: engine.id });
                           setIsOpen(false);
+                          setSearchQuery('');
                         }}
                         className={`w-full flex items-center justify-between p-2 text-left rounded-sm cursor-pointer ${
                           state.activeEngineId === engine.id ? 'bg-[var(--color-vellum)] text-[var(--color-editorial)] font-semibold' : 'hover:bg-[var(--color-vellum)]'
                         }`}
                       >
-                        <span className="truncate pr-2 text-sm">{engine.name}</span>
-                        <div className="flex-shrink-0">
+                        <div className="flex flex-col overflow-hidden">
+                          <span className="truncate pr-2 text-sm">{engine.name}</span>
+                          {engine.hardware && (
+                            <span className="text-[10px] font-bold text-[var(--color-dust)] uppercase tracking-wider">
+                              [{engine.hardware}] {engine.type === 'local' ? 'Local' : ''}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex-shrink-0 ml-2">
                           {state.activeEngineId === engine.id ? (
                             <Check size={14} className="text-[var(--color-editorial)]" />
                           ) : engine.type === 'local' && !engine.isDownloaded ? (
@@ -133,7 +176,11 @@ export default function EngineDropdown({ state, updateState }: EngineDropdownPro
                           ) : null}
                         </div>
                       </button>
-                    ))}
+                    )) : (
+                      <div className="p-4 text-center text-sm text-[var(--color-dust)]">
+                        No models found
+                      </div>
+                    )}
                   </div>
                   
                   <div className="border-t border-[var(--color-dust)] p-1 bg-[var(--color-vellum)]">

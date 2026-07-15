@@ -1,7 +1,8 @@
+import { useState, useEffect } from 'react';
 import { X, ChevronDown, Plus } from 'lucide-react';
 import type { PopupState } from '../index';
-import { AVAILABLE_ENGINES } from './EngineDropdown';
 import type { Engine } from './EngineDropdown';
+import { ModelRegistry } from '../services/ModelRegistry';
 
 interface FallbackConfigPanelProps {
   state: PopupState;
@@ -10,9 +11,14 @@ interface FallbackConfigPanelProps {
 }
 
 export default function FallbackConfigPanel({ state, updateState, onClose }: FallbackConfigPanelProps) {
+  const [baseEngines, setBaseEngines] = useState<Engine[]>([]);
+  
+  useEffect(() => {
+    ModelRegistry.getAvailableEngines().then(setBaseEngines);
+  }, []);
   
   const allEngines: Engine[] = [
-    ...AVAILABLE_ENGINES,
+    ...baseEngines,
     ...(state.customApis || []).map(api => ({
       id: api.id,
       name: `${api.provider}/${api.modelName}`,
@@ -20,6 +26,7 @@ export default function FallbackConfigPanel({ state, updateState, onClose }: Fal
       isDownloaded: true
     }))
   ];
+
 
   const handleUpdateChain = (index: number, newId: string) => {
     const newChain = [...state.fallbackChain];
