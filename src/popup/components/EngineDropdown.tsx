@@ -147,7 +147,7 @@ export default function EngineDropdown({ state, updateState }: EngineDropdownPro
                       />
                     </div>
                   </div>
-                  <div className="overflow-y-auto flex-1 p-1">
+                  <div className="overflow-y-auto flex-1 p-1 custom-scrollbar">
                     {displayedEngines.length > 0 ? displayedEngines.map((engine) => (
                       <button
                         key={engine.id}

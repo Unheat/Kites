@@ -34,16 +34,20 @@ html.kites-extension-page, body.kites-extension-page {
 }
 
 /* Custom Scrollbar */
-.kites-extension-page::-webkit-scrollbar {
+.kites-extension-page::-webkit-scrollbar,
+.custom-scrollbar::-webkit-scrollbar {
   width: 6px;
 }
-.kites-extension-page::-webkit-scrollbar-track {
+.kites-extension-page::-webkit-scrollbar-track,
+.custom-scrollbar::-webkit-scrollbar-track {
   background: transparent;
 }
-.kites-extension-page::-webkit-scrollbar-thumb {
+.kites-extension-page::-webkit-scrollbar-thumb,
+.custom-scrollbar::-webkit-scrollbar-thumb {
   background: var(--color-dust);
   border-radius: 10px;
 }
-.kites-extension-page::-webkit-scrollbar-thumb:hover {
+.kites-extension-page::-webkit-scrollbar-thumb:hover,
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background: var(--color-editorial);
 }
