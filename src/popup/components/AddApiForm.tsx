@@ -45,6 +45,7 @@ export default function AddApiForm({ onSave, onCancel }: AddApiFormProps) {
       <div>
         <label className="text-xs font-semibold text-[var(--color-dust)] uppercase mb-1 block">Model Name</label>
         <input 
+          autoFocus
           type="text" 
           placeholder="e.g. gpt-4o or claude-3-5-sonnet" 
           value={newModelName}

@@ -69,7 +69,7 @@ function PopupApp() {
   if (!isLoaded) return null;
 
   return (
-    <div className="flex flex-col bg-[var(--color-paper)] text-[var(--color-ink)] font-body relative" style={{ width: '320px', minHeight: '400px' }}>
+    <div className="flex flex-col bg-[var(--color-paper)] text-[var(--color-ink)] font-body relative" style={{ width: '320px', minHeight: '350px' }}>
       
       {/* Header */}
       <div className="flex justify-between items-center mb-4 p-4 pb-0">
