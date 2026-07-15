@@ -1,6 +1,7 @@
 import { createRoot } from 'react-dom/client';
 import { useEffect, useState, useRef } from 'react';
 import '../index.css'; 
+import { Languages } from 'lucide-react';
 
 // Minimum image size to avoid detect small icons
 const MIN_WIDTH_IMAGE_PX = 150;
@@ -18,6 +19,7 @@ const TIMEOUT_MS = 300; // Debounce timeout in ms
  */
 function TranslateButton({ srcUrl, anchorName }: { srcUrl: string, anchorName: string }) {
   const buttonRef = useRef<HTMLButtonElement>(null);
+  const [isTranslating, setIsTranslating] = useState(false);
 
   useEffect(() => {
     if (buttonRef.current) {
@@ -33,8 +35,10 @@ function TranslateButton({ srcUrl, anchorName }: { srcUrl: string, anchorName: s
       console.error('[Content Script] Cannot translate: No image URL provided.');
       return;
     }
+    setIsTranslating(true);
     console.log('[Content Script] Sending TRANSLATE_IMAGE to background:', srcUrl);
     chrome.runtime.sendMessage({ type: 'TRANSLATE_IMAGE', url: srcUrl }, (response) => {
+      setIsTranslating(false);
       if (chrome.runtime.lastError) {
         console.error('[Content Script] Message failed:', chrome.runtime.lastError.message);
       } else {
@@ -54,14 +58,15 @@ function TranslateButton({ srcUrl, anchorName }: { srcUrl: string, anchorName: s
       }}
       // We use 'fixed' instead of 'absolute' so the viewport is the containing block.
       // This is required for CSS Anchors to target elements outside the React root.
-      className="fixed z-[999999] bg-blue-600 hover:bg-blue-700 text-white font-bold py-1 px-3 rounded shadow-lg text-sm cursor-pointer border-none"
+      className={`fixed z-[999999] w-8 h-8 flex items-center justify-center rounded-full bg-transparent hover:bg-black/5 transition-all cursor-pointer border-none text-black ${isTranslating ? 'animate-spin' : ''}`}
       style={{ 
         marginTop: '8px',
         marginLeft: '8px',
         pointerEvents: 'auto' 
       }}
+      title="Translate Image"
     >
-      Translate
+      <Languages size={18} className="opacity-80 hover:opacity-100 transition-opacity" />
     </button>
   );
 }
