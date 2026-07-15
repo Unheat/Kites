@@ -75,7 +75,7 @@ describe('WebLLMEngine Delimiter Batching', () => {
       ]
     });
 
-    await expect(engine.translate(inputs)).rejects.toThrow('Delimiter parsing failed. Expected 2 lines, got 1. Model hallucinated.');
+    await expect(engine.translate(inputs)).rejects.toThrow('Delimiter parsing failed for chunk. Expected 2 lines, got 1. Model hallucinated.');
   });
 
   it('should return an array of empty strings immediately if all inputs are empty', async () => {

@@ -49,8 +49,6 @@ export class WebLLMEngine implements ITranslationEngine {
 
     if (!texts || texts.length === 0) return [];
 
-    console.log(`[WebLLMEngine] Translating ${texts.length} text blocks via Delimiter Batching...`);
-
     // 1. Filter out empty strings to save tokens, keep track of original indices
     const nonEmptyInputs: { originalIndex: number; text: string }[] = [];
     texts.forEach((text, i) => {
@@ -61,57 +59,57 @@ export class WebLLMEngine implements ITranslationEngine {
       return texts.map(() => ''); // All were empty
     }
 
-    // 2. Construct Delimiter prompt
+    const CHUNK_SIZE = 10;
+    const results: string[] = new Array(texts.length).fill('');
     const DELIMITER = '[|||]';
-    let combinedText = '';
-    nonEmptyInputs.forEach((item, index) => {
-      combinedText += `Line ${index}${DELIMITER}${item.text}\n`;
-    });
 
-    const prompt = `You are a highly accurate translator. Translate the following lines from ${sourceLang} to ${targetLang}. 
+    console.log(`[WebLLMEngine] Translating ${nonEmptyInputs.length} blocks in chunks of ${CHUNK_SIZE}...`);
+
+    // 2. Process in chunks
+    for (let i = 0; i < nonEmptyInputs.length; i += CHUNK_SIZE) {
+      const chunk = nonEmptyInputs.slice(i, i + CHUNK_SIZE);
+      let combinedText = '';
+      
+      chunk.forEach((item, index) => {
+        combinedText += `Line ${index}${DELIMITER}${item.text}\n`;
+      });
+
+      const prompt = `You are a highly accurate translator. Translate the following lines from ${sourceLang} to ${targetLang}. 
 Keep the exact line number and ${DELIMITER} separator for every line. Do not add any conversational filler. Only output the translated lines.
 
 ${combinedText}`;
 
-    try {
-      const reply = await this.engine.chat.completions.create({
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.1, // low temp for strict formatting
-        max_tokens: 2048,
-      });
-      
-      const rawOutput = reply.choices[0].message.content || '';
-      console.log('[WebLLMEngine] Raw output length:', rawOutput.length);
-
-      // 3. Parse output
-      const lines = rawOutput.split('\n').map(l => l.trim()).filter(l => l.includes(DELIMITER));
-      
-      if (lines.length !== nonEmptyInputs.length) {
-        throw new Error(`Delimiter parsing failed. Expected ${nonEmptyInputs.length} lines, got ${lines.length}. Model hallucinated.`);
-      }
-
-      // 4. Map back to original array
-      const results: string[] = new Array(texts.length).fill('');
-      
-      for (let i = 0; i < lines.length; i++) {
-        // split by first occurrence of delimiter
-        const parts = lines[i].split(DELIMITER);
-        if (parts.length < 2) {
-          throw new Error(`Missing delimiter on line: ${lines[i]}`);
-        }
-        // Extract translated text (everything after delimiter)
-        const translatedText = parts.slice(1).join(DELIMITER).trim(); 
+      try {
+        const reply = await this.engine.chat.completions.create({
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.1,
+          max_tokens: 2048,
+        });
         
-        const originalIndex = nonEmptyInputs[i].originalIndex;
-        results[originalIndex] = translatedText;
+        const rawOutput = reply.choices[0].message.content || '';
+        const lines = rawOutput.split('\n').map(l => l.trim()).filter(l => l.includes(DELIMITER));
+        
+        if (lines.length !== chunk.length) {
+          throw new Error(`Delimiter parsing failed for chunk. Expected ${chunk.length} lines, got ${lines.length}. Model hallucinated.`);
+        }
+
+        // 3. Map chunk back to original array
+        for (let j = 0; j < lines.length; j++) {
+          const parts = lines[j].split(DELIMITER);
+          if (parts.length < 2) {
+            throw new Error(`Missing delimiter on line: ${lines[j]}`);
+          }
+          const translatedText = parts.slice(1).join(DELIMITER).trim(); 
+          const originalIndex = chunk[j].originalIndex;
+          results[originalIndex] = translatedText;
+        }
+      } catch (e) {
+        console.error(`[WebLLMEngine] Chunk translation error (items ${i} to ${i + CHUNK_SIZE}):`, e);
+        throw e; // Throw so TranslationManager Waterfall catches it
       }
-
-      return results;
-
-    } catch (e) {
-      console.error('[WebLLMEngine] Delimiter Batching translation error:', e);
-      throw e; // Throw so TranslationManager Waterfall catches it
     }
+
+    return results;
   }
 
   async destroy(): Promise<void> {
