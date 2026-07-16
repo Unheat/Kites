@@ -40,8 +40,9 @@ export class PaddleOcrEngine implements IOcrEngine {
 
       // In Node.js, ppu-paddle-ocr natively uses CPU (wasm/cpu providers)
       this.service = new PaddleOcrService({
+        model: MODEL_PRESETS['v6-small'],
         detection: {
-          maxSideLength: 2000,
+          maxSideLength: 960,
         },
         session: {
           executionProviders: isNode ? undefined : executionProviders,

@@ -78,14 +78,31 @@ export function extractPolygons(
   const resizeRatioY = originalHeight / height;
   const polygons: Point2D[][] = [];
 
+  const dist = (a: Point, b: Point) =>
+    Math.sqrt((a.X - b.X) ** 2 + (a.Y - b.Y) ** 2);
+
   for (const blob of blobs) {
+    // 1. Box Score Thresholding (det_db_box_thresh = 0.6)
+    // Filter out weak detections (e.g. background drawings, bushes, grass)
+    let scoreSum = 0;
+    for (const p of blob) {
+      scoreSum += probMap[p.Y * width + p.X];
+    }
+    const avgScore = scoreSum / blob.length;
+    if (avgScore < 0.6) continue;
+
     // 2. Convex Hull
     const hull = getConvexHull(blob);
     if (hull.length < 3) continue;
 
     // 3. Initial Min Area Rect (find minAreaRect first)
     const initialMinRect = minAreaRect(hull);
-    if (initialMinRect.length < 3) continue;
+    if (initialMinRect.length < 4) continue;
+
+    // Filter by initial box side size (sside >= 3)
+    const w0 = dist(initialMinRect[0], initialMinRect[1]);
+    const h0 = dist(initialMinRect[0], initialMinRect[3]);
+    if (Math.min(w0, h0) < 3) continue;
 
     // 4. Unclip (Expand) the 4-point rectangle instead of the hull
     const expandedPoly = unclip(initialMinRect, unclipRatio);
@@ -93,6 +110,12 @@ export function extractPolygons(
 
     // 5. Final Min Area Rect (find minAreaRect again on expanded polygon)
     const finalMinRect = minAreaRect(expandedPoly);
+    if (finalMinRect.length < 4) continue;
+
+    // Filter by expanded box side size (sside >= 5)
+    const w1 = dist(finalMinRect[0], finalMinRect[1]);
+    const h1 = dist(finalMinRect[0], finalMinRect[3]);
+    if (Math.min(w1, h1) < 5) continue;
     
     // Scale back to original
     const scaledRect = finalMinRect.map(p => ({
