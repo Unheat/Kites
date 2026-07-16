@@ -232,5 +232,26 @@ function minAreaRect(hull: Point[]): Point[] {
     }
   }
 
+  if (bestRect.length === 4) {
+    // Deterministic sorting identical to Baidu's get_mini_boxes in predict_system.py
+    // 1. Sort points by X coordinate to separate left and right sides
+    const sortedByX = [...bestRect].sort((a, b) => a.X - b.X);
+    
+    const leftPts = [sortedByX[0], sortedByX[1]];
+    const rightPts = [sortedByX[2], sortedByX[3]];
+    
+    // 2. Sort left points by Y to distinguish Top-Left and Bottom-Left
+    leftPts.sort((a, b) => a.Y - b.Y);
+    const topLeft = leftPts[0];
+    const bottomLeft = leftPts[1];
+    
+    // 3. Sort right points by Y to distinguish Top-Right and Bottom-Right
+    rightPts.sort((a, b) => a.Y - b.Y);
+    const topRight = rightPts[0];
+    const bottomRight = rightPts[1];
+
+    return [topLeft, topRight, bottomRight, bottomLeft];
+  }
+
   return bestRect;
 }

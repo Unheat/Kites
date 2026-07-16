@@ -73,8 +73,49 @@ export class PaddleOcrEngine implements IOcrEngine {
       // 1. Get perfect rotated bounding boxes via pure JS detector
       const polygons = await this.customDetector.detectPolygons(imageBuffer);
       
-      // Convert polygons to the axis-aligned boxes that ppu-paddle-ocr expects for cropping
-      const uprightBoxes = polygons.map(poly => {
+      console.log(`[PaddleOcrEngine] Extracted ${polygons.length} text polygons. Running custom rotated recognition...`);
+
+      // 2. Prepare source image canvas
+      const sourceCanvas = await this.service.platform.canvas.prepareCanvas(imageBuffer);
+      
+      const recognitor = this.service.recognitor;
+      const ctx = recognitor.buildContext();
+      const dictionary = this.service.options.recognition?.charactersDictionary;
+
+      const texts: string[] = [];
+      const boxes: OcrBox[] = [];
+      const scores: number[] = [];
+
+      // 3. Crop, warp, and recognize each text polygon in its native alignment
+      for (let i = 0; i < polygons.length; i++) {
+        const poly = polygons[i];
+        
+        // Perspective crop/rotate to straighten text and handle vertical manga layout
+        const finalCropCanvas = cropAndWarp(this.service.platform, sourceCanvas, poly);
+        
+        // Save crops to disk in Node environment for developer visual debugging
+        if (typeof window === 'undefined') {
+          try {
+            const fs = await import('fs');
+            const path = await import('path');
+            const cropDir = path.join(process.cwd(), 'src/test/result/crops');
+            if (!fs.existsSync(cropDir)) {
+              fs.mkdirSync(cropDir, { recursive: true });
+            }
+            const cropBuffer = finalCropCanvas.toBuffer('image/png');
+            fs.writeFileSync(path.join(cropDir, `crop_${i}.png`), cropBuffer);
+          } catch (err) {
+            console.error('[PaddleOcrEngine] Failed to save debug crop:', err);
+          }
+        }
+        
+        // Execute CRNN text recognition on the straightened crop
+        const { text, confidence } = await recognitor.recognizeTextViaContext(finalCropCanvas, ctx, dictionary);
+        
+        texts.push(text);
+        scores.push(confidence);
+
+        // Generate standard axis-aligned OcrBox for legacy rendering support
         let minX = Infinity, minY = Infinity;
         let maxX = -Infinity, maxY = -Infinity;
         for (const p of poly) {
@@ -83,80 +124,18 @@ export class PaddleOcrEngine implements IOcrEngine {
           if (p.y < minY) minY = p.y;
           if (p.y > maxY) maxY = p.y;
         }
-        return {
+        boxes.push({
           x: Math.max(0, Math.round(minX)),
           y: Math.max(0, Math.round(minY)),
-          width: Math.max(1, Math.round(maxX - minX)),
-          height: Math.max(1, Math.round(maxY - minY))
-        };
-      });
-
-      console.log(`[PaddleOcrEngine] Extracted ${uprightBoxes.length} text bounding boxes. Running recognition...`);
-
-      // 2. Pass the boxes directly to the recognizer
-      // We must manually prepare the canvas since we are bypassing service.recognize()
-      const canvas = await this.service.platform.canvas.prepareCanvas(imageBuffer);
-      
-      // The recognizer requires a parsed dictionary
-      const dictionary = this.service.options.recognition?.charactersDictionary;
-      const strategy = this.service.options.recognition?.strategy ?? 'per-line';
-      
-      let rawResult = await this.service.recognitor.run(canvas, uprightBoxes, dictionary, strategy);
-
-       const texts: string[] = [];
-      const boxes: OcrBox[] = [];
-      const scores: number[] = [];
-      const sortedPolygons: {x: number, y: number}[][] = [];
-
-      // map the results back
-      if (rawResult && Array.isArray(rawResult)) {
-        for (let i = 0; i < rawResult.length; i++) {
-          const region = rawResult[i];
-          texts.push(region.text);
-          scores.push(region.confidence);
-          
-          let matchedPoly = polygons[i]; // Fallback
-          
-          if (region.box) {
-            boxes.push({
-              x: region.box.x,
-              y: region.box.y,
-              w: region.box.width,
-              h: region.box.height
-            });
-            
-            // Find the original polygon that matches this recognized box's coordinates
-            const matchIndex = uprightBoxes.findIndex(ub => 
-              Math.abs(ub.x - region.box.x) < 2 &&
-              Math.abs(ub.y - region.box.y) < 2 &&
-              Math.abs(ub.width - region.box.width) < 2 &&
-              Math.abs(ub.height - region.box.height) < 2
-            );
-            
-            console.log(`[PaddleOcrEngine] Mapping Box ${i}:`, {
-              text: region.text,
-              regionBox: region.box,
-              matchIndex,
-              matchedUpright: matchIndex !== -1 ? uprightBoxes[matchIndex] : null
-            });
-            
-            if (matchIndex !== -1) {
-              matchedPoly = polygons[matchIndex];
-            }
-          } else {
-            // Use our original upright box if it got lost
-            const b = uprightBoxes[i];
-            boxes.push({ x: b.x, y: b.y, w: b.width, h: b.height });
-          }
-          
-          sortedPolygons.push(matchedPoly);
-        }
+          w: Math.max(1, Math.round(maxX - minX)),
+          h: Math.max(1, Math.round(maxY - minY))
+        });
       }
 
       console.log(`[PaddleOcrEngine] Recognition complete. Found ${texts.length} text blocks.`);
       
-      // Return texts, upright boxes, scores, and our perfect polys (in matching reading order)!
-      return { texts, boxes, scores, polygons: sortedPolygons };
+      // Return texts, boxes, scores, and polygons (perfectly aligned by index)
+      return { texts, boxes, scores, polygons };
     } catch (e) {
       console.error('[PaddleOcrEngine] Recognition failed:', e);
       throw e;
@@ -171,4 +150,62 @@ export class PaddleOcrEngine implements IOcrEngine {
     this.isInitialized = false;
     console.log('[PaddleOcrEngine] Destroyed and memory freed.');
   }
+}
+
+/**
+ * Custom canvas crop helper that deskews rotated quadrilateral text regions
+ * and automatically rotates vertical text lines by 90 degrees counter-clockwise
+ * to lay them flat horizontally before character recognition.
+ */
+function cropAndWarp(
+  platform: any,
+  sourceCanvas: any,
+  polygon: { x: number; y: number }[]
+): any {
+  const p0 = polygon[0];
+  const p1 = polygon[1];
+  const p2 = polygon[2];
+  const p3 = polygon[3];
+
+  const dist = (a: { x: number; y: number }, b: { x: number; y: number }) =>
+    Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2);
+
+  const width = Math.max(dist(p0, p1), dist(p2, p3));
+  const height = Math.max(dist(p0, p3), dist(p1, p2));
+
+  const cropW = Math.max(1, Math.round(width));
+  const cropH = Math.max(1, Math.round(height));
+
+  // Create intermediate canvas to hold the straightened crop
+  const destCanvas = platform.createCanvas(cropW, cropH);
+  const destCtx = destCanvas.getContext('2d');
+  if (!destCtx) return destCanvas;
+
+  // Calculate the angle of rotation of the text block
+  const theta = Math.atan2(p1.y - p0.y, p1.x - p0.x);
+
+  // Apply the transformation to draw the tilted region flat
+  destCtx.save();
+  destCtx.translate(0, 0);
+  destCtx.rotate(-theta);
+  destCtx.translate(-p0.x, -p0.y);
+  destCtx.drawImage(sourceCanvas, 0, 0);
+  destCtx.restore();
+
+  // If the text line is vertical (typical vertical speech bubble in manga),
+  // rotate it 90 degrees counter-clockwise so that the CRNN recognizer can read it horizontally.
+  if (cropH / cropW >= 1.5) {
+    const rotatedCanvas = platform.createCanvas(cropH, cropW);
+    const rCtx = rotatedCanvas.getContext('2d');
+    if (rCtx) {
+      rCtx.save();
+      rCtx.translate(0, cropW);
+      rCtx.rotate(-Math.PI / 2); // 90 degrees counter-clockwise
+      rCtx.drawImage(destCanvas, 0, 0);
+      rCtx.restore();
+      return rotatedCanvas;
+    }
+  }
+
+  return destCanvas;
 }

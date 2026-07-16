@@ -18,18 +18,28 @@ async function runVisualTest() {
   }
 
   // Get all images from test-img folder
+  const testImages = [
+    'Messy-Fonts-35024994-1.jpg',
+    'all_tilt_text.jpg',
+    'animal-crossing-japanese-460_x2.jpg',
+    'image1.jpg',
+    't3qWG.png'
+  ];
+
   const files = fs.readdirSync(testImgDir).filter(file => 
     file.endsWith('.jpg') || file.endsWith('.png')
   );
 
-  if (files.length === 0) {
-    console.error('No images found in src/test/test-img/');
+  const filesToProcess = files.filter(file => testImages.includes(file));
+
+  if (filesToProcess.length === 0) {
+    console.error('No matching images found in src/test/test-img/');
     return;
   }
 
   const manager = new OcrManager();
 
-  for (const file of files) {
+  for (const file of filesToProcess) {
     console.log(`\nProcessing: ${file}`);
     const imagePath = path.join(testImgDir, file);
     
@@ -43,6 +53,7 @@ async function runVisualTest() {
     const result = await manager.processImage(arrayBuffer);
     
     console.log(`OCR took ${Date.now() - startTime}ms. Found ${result.boxes.length} text regions.`);
+    console.log('Recognized texts:', result.texts);
 
     // Load image into Canvas to draw boxes
     const image = await loadImage(buffer);
