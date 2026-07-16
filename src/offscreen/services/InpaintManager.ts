@@ -4,7 +4,8 @@ import { TeleaInpaintEngine } from '../engines/inpaint/TeleaInpaintEngine';
 import { AotInpaintEngine } from '../engines/inpaint/AotInpaintEngine';
 import { LamaInpaintEngine } from '../engines/inpaint/LamaInpaintEngine';
 
-export type InpaintTier = 'simple' | 'telea' | 'aot' | 'lama';
+export type ActiveInpaintTier = 'simple' | 'telea' | 'aot' | 'lama';
+export type InpaintTier = ActiveInpaintTier | 'none' | 'original';
 
 /**
  * Orchestrator and single entry-point for the image inpainting / background erasing pipeline.
@@ -12,7 +13,7 @@ export type InpaintTier = 'simple' | 'telea' | 'aot' | 'lama';
  */
 export class InpaintManager {
   private platform: any = null;
-  private engines: Map<InpaintTier, IInpaintEngine> = new Map();
+  private engines: Map<ActiveInpaintTier, IInpaintEngine> = new Map();
   private isInitialized = false;
 
   /**
@@ -39,9 +40,9 @@ export class InpaintManager {
   /**
    * Returns an initialized instance of the requested inpaint engine.
    * 
-   * @param tier - The inpaint tier ('simple', 'telea', 'aot', 'lama').
+   * @param tier - The active inpaint tier ('simple', 'telea', 'aot', 'lama').
    */
-  async getEngine(tier: InpaintTier): Promise<IInpaintEngine> {
+  async getEngine(tier: ActiveInpaintTier): Promise<IInpaintEngine> {
     await this.init();
 
     if (this.engines.has(tier)) {
@@ -84,6 +85,11 @@ export class InpaintManager {
     maskPolygons: Point2D[][],
     tier: InpaintTier = 'telea'
   ): Promise<ArrayBuffer> {
+    if (tier === 'none' || tier === 'original') {
+      console.log(`[InpaintManager] Bypass mode active: ${tier}. Returning image buffer unmodified.`);
+      return imageBuffer;
+    }
+
     if (!maskPolygons || maskPolygons.length === 0) {
       return imageBuffer;
     }

@@ -44,11 +44,11 @@ Only used for authentication and subscription management when the user opts for 
 1.  **Transformers.js (ONNX Runtime Web):** Hugging Face's JS library runs purpose-built translation models like **NLLB-200** or **MarianMT**. These models are extremely lightweight (~50-600MB) and run instantly in the browser on CPU or WebGL, perfect for any standard laptop.
 2.  **WebLLM (WebGPU):** For users with capable GPUs, we provide WebLLM to run full Large Language Models (like Llama-3.2-1B or Qwen-1.5B). LLMs provide superior contextual translation quality but require more resources.
 
-**Unified Model Search Registry:**
-Instead of hardcoding or manually maintaining a massive list of downloadable models in our UI, we will implement a dynamic model search bar by combining two native registries:
-*   **WebLLM:** We read the `webllm.prebuiltAppConfig.model_list` which contains all officially verified WebLLM models.
-*   **ONNX / Transformers.js:** We query the Hugging Face API (e.g., filtering by `author=Xenova` and `library=transformers.js`) to dynamically fetch compatible ONNX models.
-*   The UI will merge both lists, displaying a `[WebGPU]` badge for WebLLM models and a `[CPU/Fast]` badge for ONNX models.
+**Unified Model Search Registry & Optimizations:**
+Instead of hardcoding a massive list of downloadable models in our UI, we have implemented a high-performance dynamic model search bar combining two registries:
+*   **WebLLM:** We read the `webllm.prebuiltAppConfig.model_list` directly from the NPM package, guaranteeing the compiled WebAssembly binaries match the engine version perfectly.
+*   **ONNX / Transformers.js (Static Registry):** Instead of querying the Hugging Face API directly (which hits rate limits for 10,000+ users), we fetch a static JSON file from a GitHub CDN (`raw.githubusercontent.com`). A GitHub Action cron job updates this file daily.
+*   **MiniSearch & DOM Capping:** The UI merges both lists and displays badges (`[WebGPU]` / `[CPU]`). To ensure the popup never lags while rendering 150+ models, we use `MiniSearch` for lightning-fast fuzzy autocomplete, and hard-cap the DOM to only render the top 50 results at a time.
 
 **The User Flow (Extension Dashboard):**
 1. User opens the extension Dashboard and toggles "Auto-Translate" or manually selects a translation engine.
@@ -105,13 +105,56 @@ Because our architecture uses both HTML DOM Overlays (for on-page translation) a
 *Result:* Exactly like the Python `manga-image-translator`, the text will automatically shrink and wrap to fit perfectly inside the speech bubble. Because it is a React component, the user can also manually tweak the font size via a UI slider if they don't like the automatic calculation.
 
 ### F. Removing the Original Text Cleanly (Inpainting)
-*The Problem:* Before we can overlay the translated English text, we must cleanly erase the original text from the image so it doesn't bleed through. We need a solution that works for *any* image (manga, photos, diagrams) and runs fast locally.
 
-*The Solution (Advanced AI Inpainting):* 
-We will use **Fast-LaMa (F-LaMa)** converted to an ONNX model, running via Transformers.js (WebAssembly/WebGPU). 
-* **Why LaMa?** LaMa (Resolution-robust Large Mask Inpainting) is the absolute industry standard for fast, high-quality inpainting (used by web tools like cleanup.pictures). It uses Fast Fourier Convolutions, which gives it a global understanding of the image. This means it doesn't just blur the edges; it can accurately hallucinate missing manga screentones, photo backgrounds, and complex textures in real-time.
-* **Performance:** By using a quantized ONNX version of F-LaMa, the model size is kept very small (~30-50MB). It executes inference in milliseconds, providing a seamless, native feel without needing a remote server.
-* **Fallback:** For ultra-low-end devices, we will keep a simple **Solid Color Fill** (sampling the edge colors of the bounding box) as an instant, zero-compute fallback.
+*The Problem:* Before we can overlay the translated English text, we must cleanly erase the original text from the image so it doesn't bleed through. We need a solution that works for any image (manga, photos, diagrams) and runs fast locally. We must also prevent erasing speech bubble outlines, panel borders, and background line drawings.
+
+*The Solution (4-Tier Extensible Architecture & Stroke Masking):*
+To solve this, we implement a **4-Tier Hybrid Inpainting Pipeline** wrapped in a Strategy Pattern (`IInpaintEngine`), which selects the active eraser mode based on settings:
+
+```mermaid
+graph TD
+    ImageBuffer[Raw Image Buffer] --> InpaintManager
+    Polygons[Text Polygons] --> InpaintManager
+    InpaintManager --> Binarizer[Binarizer: Extract Text Stroke Mask]
+    Binarizer --> StrokeMask[Stroke-Level Mask Canvas]
+    
+    InpaintManager --> EngineRouter{Engine Selector}
+    
+    EngineRouter -- Tier 1: Simple Fill --> SimpleEngine[SimpleInpaintEngine: Sample Edge & Fill Bbox]
+    EngineRouter -- Tier 2: Telea Math --> TeleaEngine[TeleaInpaintEngine: FMM Diffusion]
+    EngineRouter -- Tier 3: AOT-GAN --> AotEngine[AotInpaintEngine: Quantized ONNX Model]
+    EngineRouter -- Tier 4: LaMa AI --> LamaEngine[LamaInpaintEngine: Fourier CNN ONNX Model]
+    
+    ImageBuffer --> SimpleEngine
+    
+    ImageBuffer --> TeleaEngine
+    StrokeMask --> TeleaEngine
+    
+    ImageBuffer --> AotEngine
+    StrokeMask --> AotEngine
+    
+    ImageBuffer --> LamaEngine
+    StrokeMask --> LamaEngine
+    
+    SimpleEngine --> CleanBuffer[Clean Text-Free Image]
+    TeleaEngine --> CleanBuffer
+    AotEngine --> CleanBuffer
+    LamaEngine --> CleanBuffer
+```
+
+#### The Binarizer (Handling the Border-Erase Problem)
+Instead of masking the entire blocky bounding box, we extract a **pixel-perfect mask of the exact text strokes**.
+* **Grayscale + Otsu's Adaptive Thresholding:** Runs on each cropped text box canvas to separate high-contrast text strokes from the bubble background.
+* **Polygon Masking:** Zeroes out any threshed pixels falling outside the text bounding polygons.
+* **Usage:** **Tier 2 (Telea)**, **Tier 3 (AOT-GAN)**, and **Tier 4 (LaMa)** all consume this refined stroke-level mask. They only erase the text strokes, keeping bubble borders and background illustrations 100% untouched.
+
+#### The 4 Tiers & Bypass Modes:
+1. **none (No Eraser Bypass):** Bypasses the inpainting/background erasing phase completely. The original text remains visible on the image, and translated English text overlays are drawn directly on top.
+2. **original (Copy Image Bypass):** Bypasses both the inpainting phase and the translation overlay phase. The original source image is returned completely unmodified.
+3. **Tier 1: Simple Inpaint (Dominant Color Fill):** Samples pixel colors along the bounding box outer edges, determines the dominant color (or simple gradient), and fills the bounding rectangle. Runs in microseconds with zero downloads (`0MB`), but paints over bubble outlines if they overlap.
+4. **Tier 2: Telea Math Inpaint (FMM Diffusion):** Applies Alexandru Telea's Fast Marching Method FMM algorithm on the stroke mask, propagating surrounding background colors inward to erase characters. Extremely fast (`10–50ms`), requires zero downloads (`0MB`), and preserves outlines.
+5. **Tier 3: AOT-GAN Inpaint (Quantized ONNX):** Runs a lightweight generative adversarial network inpainting model. Learns manga textures and screentones to reconstruct backgrounds behind erased text. Fast (`~100–300ms`), requires a small download (`~10MB`), and runs via WebGPU when available.
+6. **Tier 4: LaMa Inpaint (Fourier CNN ONNX):** Runs the Large Mask Inpainting model using Fast Fourier Convolutions to hallucinate large or complex textures globally. Highly robust, requires a larger download (`~30MB`), and takes `~500ms` on CPU or `~100ms` on WebGPU.
 
 ### G. Two-Part Frontend UX (Tampermonkey Style)
 *The Problem:* How do we provide quick access to settings while also giving the user a robust, full-screen canvas editor?
@@ -137,6 +180,6 @@ The following tools and libraries are critical references for the development of
 ### Spatial Rendering & Translation References
 *   **[manga-image-translator](https://github.com/zyddnys/manga-image-translator)**: The reference Python repository for high-quality manga translation pipelines, containing text inpainting and text typesetting logic (Pillow `textbbox` implementation).
 *   **[Manga Translator Chrome Extension](https://chromewebstore.google.com/detail/manga-translator%F0%9F%8D%93/lepcfgkehgeiblekejomdmdklmjdmflp)**: The primary UX reference for on-page scraper overlays and image translation.
-
+*   **[LaMa (Large Mask Inpainting)](https://github.com/advimman/lama)**: The reference repository for high-quality image inpainting used for text removal.
 ### Extension & Web APIs
 *   **[Chrome Offscreen Documents API](https://developer.chrome.com/docs/extensions/reference/api/offscreen)**: Documentation on managing invisible documents for image/tensor processing in Manifest V3 background scripts.
