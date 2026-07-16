@@ -46,7 +46,8 @@ export class CustomPaddleDetector {
       input.originalWidth,
       input.originalHeight,
       this.service.options.detection?.probabilityThreshold ?? 0.3,
-      1.5 // unclip ratio (matches PP-OCRv6 default 1.5 for tight boxes)
+      2.0, // unclip ratio (matches Baidu's DBPostProcess default 2.0)
+      input.resizeRatio
     );
 
     console.log(`[CustomPaddleDetector] Found ${polygons.length} text polygons.`);

@@ -25,7 +25,8 @@ export function extractPolygons(
   originalWidth: number,
   originalHeight: number,
   threshold: number = 0.3,
-  unclipRatio: number = 2.0
+  unclipRatio: number = 2.0,
+  resizeRatio?: number
 ): Point2D[][] {
   const binaryMap = new Uint8Array(width * height);
   for (let i = 0; i < probMap.length; i++) {
@@ -74,8 +75,9 @@ export function extractPolygons(
     }
   }
 
-  const resizeRatioX = originalWidth / width;
-  const resizeRatioY = originalHeight / height;
+  const ratio = resizeRatio ?? (width / originalWidth);
+  const resizeRatioX = 1 / ratio;
+  const resizeRatioY = 1 / ratio;
   const polygons: Point2D[][] = [];
 
   const dist = (a: Point, b: Point) =>
