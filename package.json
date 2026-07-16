@@ -12,9 +12,15 @@
   },
   "dependencies": {
     "@mlc-ai/web-llm": "^0.2.84",
+    "@paddleocr/paddleocr-js": "^0.4.2",
+    "clipper-lib": "^6.4.2",
     "dexie": "^4.4.4",
     "lucide-react": "^1.24.0",
     "minisearch": "^7.2.0",
+    "onnxruntime-web": "^1.27.0",
+    "paddleocr": "^1.2.0",
+    "paddleocr-js": "^0.4.2",
+    "ppu-paddle-ocr": "^6.1.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"
   },
@@ -27,9 +33,12 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",
     "autoprefixer": "^10.5.2",
+    "canvas": "^3.2.3",
+    "onnxruntime-node": "^1.27.0",
     "oxlint": "^1.71.0",
     "postcss": "^8.5.17",
     "tailwindcss": "^4.3.2",
+    "tsx": "^4.23.1",
     "typescript": "~6.0.2",
     "vite": "^8.1.1",
     "vitest": "^4.1.10"
