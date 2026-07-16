@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { TranslationManager } from './TranslationManager';
+import { WebLLMEngine } from '../engines/WebLLMEngine';
+export type { WebLLMEngine };
 
 const mocks = vi.hoisted(() => ({
   engineCounter: 0,
