@@ -46,7 +46,7 @@ export class CustomPaddleDetector {
       input.originalWidth,
       input.originalHeight,
       this.service.options.detection?.probabilityThreshold ?? 0.3,
-      2.0 // unclip ratio (DBNet default is usually 1.5 - 2.0)
+      1.5 // unclip ratio (matches PP-OCRv6 default 1.5 for tight boxes)
     );
 
     console.log(`[CustomPaddleDetector] Found ${polygons.length} text polygons.`);

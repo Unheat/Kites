@@ -14,6 +14,7 @@ export class PaddleOcrEngine implements IOcrEngine {
       console.log('[PaddleOcrEngine] Initializing...');
       const isNode = typeof window === 'undefined';
       let PaddleOcrService: any;
+      let MODEL_PRESETS: any;
       let isWebGpuAvailable: () => Promise<boolean> = async () => false;
 
       if (isNode) {
@@ -21,12 +22,14 @@ export class PaddleOcrEngine implements IOcrEngine {
         console.log('[PaddleOcrEngine] Detected Node.js environment. Loading native backend...');
         const pkg = await import('ppu-paddle-ocr');
         PaddleOcrService = pkg.PaddleOcrService;
+        MODEL_PRESETS = pkg.MODEL_PRESETS;
       } else {
         // Browser environment (Chrome Extension)
         console.log('[PaddleOcrEngine] Detected Browser environment. Loading web backend...');
         const pkg = await import('ppu-paddle-ocr/web');
         PaddleOcrService = pkg.PaddleOcrService;
         isWebGpuAvailable = pkg.isWebGpuAvailable;
+        MODEL_PRESETS = pkg.MODEL_PRESETS;
       }
 
       const useWebGpu = await isWebGpuAvailable();
@@ -37,6 +40,9 @@ export class PaddleOcrEngine implements IOcrEngine {
 
       // In Node.js, ppu-paddle-ocr natively uses CPU (wasm/cpu providers)
       this.service = new PaddleOcrService({
+        detection: {
+          maxSideLength: 2000,
+        },
         session: {
           executionProviders: isNode ? undefined : executionProviders,
         },
@@ -97,9 +103,10 @@ export class PaddleOcrEngine implements IOcrEngine {
       
       let rawResult = await this.service.recognitor.run(canvas, uprightBoxes, dictionary, strategy);
 
-      const texts: string[] = [];
+       const texts: string[] = [];
       const boxes: OcrBox[] = [];
       const scores: number[] = [];
+      const sortedPolygons: {x: number, y: number}[][] = [];
 
       // map the results back
       if (rawResult && Array.isArray(rawResult)) {
@@ -108,6 +115,8 @@ export class PaddleOcrEngine implements IOcrEngine {
           texts.push(region.text);
           scores.push(region.confidence);
           
+          let matchedPoly = polygons[i]; // Fallback
+          
           if (region.box) {
             boxes.push({
               x: region.box.x,
@@ -115,18 +124,39 @@ export class PaddleOcrEngine implements IOcrEngine {
               w: region.box.width,
               h: region.box.height
             });
+            
+            // Find the original polygon that matches this recognized box's coordinates
+            const matchIndex = uprightBoxes.findIndex(ub => 
+              Math.abs(ub.x - region.box.x) < 2 &&
+              Math.abs(ub.y - region.box.y) < 2 &&
+              Math.abs(ub.width - region.box.width) < 2 &&
+              Math.abs(ub.height - region.box.height) < 2
+            );
+            
+            console.log(`[PaddleOcrEngine] Mapping Box ${i}:`, {
+              text: region.text,
+              regionBox: region.box,
+              matchIndex,
+              matchedUpright: matchIndex !== -1 ? uprightBoxes[matchIndex] : null
+            });
+            
+            if (matchIndex !== -1) {
+              matchedPoly = polygons[matchIndex];
+            }
           } else {
             // Use our original upright box if it got lost
             const b = uprightBoxes[i];
             boxes.push({ x: b.x, y: b.y, w: b.width, h: b.height });
           }
+          
+          sortedPolygons.push(matchedPoly);
         }
       }
 
       console.log(`[PaddleOcrEngine] Recognition complete. Found ${texts.length} text blocks.`);
       
-      // Return texts, upright boxes, scores, and our perfect polys!
-      return { texts, boxes, scores, polygons };
+      // Return texts, upright boxes, scores, and our perfect polys (in matching reading order)!
+      return { texts, boxes, scores, polygons: sortedPolygons };
     } catch (e) {
       console.error('[PaddleOcrEngine] Recognition failed:', e);
       throw e;

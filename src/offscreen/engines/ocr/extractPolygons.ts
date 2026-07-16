@@ -83,15 +83,19 @@ export function extractPolygons(
     const hull = getConvexHull(blob);
     if (hull.length < 3) continue;
 
-    // 3. Unclip (Expand)
-    const expandedHull = unclip(hull, unclipRatio);
-    if (expandedHull.length < 3) continue;
+    // 3. Initial Min Area Rect (find minAreaRect first)
+    const initialMinRect = minAreaRect(hull);
+    if (initialMinRect.length < 3) continue;
 
-    // 4. Min Area Rect (Rotating Calipers)
-    const minRect = minAreaRect(expandedHull);
+    // 4. Unclip (Expand) the 4-point rectangle instead of the hull
+    const expandedPoly = unclip(initialMinRect, unclipRatio);
+    if (expandedPoly.length < 3) continue;
+
+    // 5. Final Min Area Rect (find minAreaRect again on expanded polygon)
+    const finalMinRect = minAreaRect(expandedPoly);
     
     // Scale back to original
-    const scaledRect = minRect.map(p => ({
+    const scaledRect = finalMinRect.map(p => ({
       x: Math.max(0, Math.min(originalWidth, p.X * resizeRatioX)),
       y: Math.max(0, Math.min(originalHeight, p.Y * resizeRatioY))
     }));
