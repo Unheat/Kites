@@ -7,10 +7,21 @@ export class WebLLMEngine implements ITranslationEngine {
   private modelId: string;
   private isInitializing: boolean = false;
 
+  /**
+   * Constructs a new WebLLMEngine instance.
+   * 
+   * @param modelId - The specific model identifier/weights repository to load.
+   */
   constructor(modelId: string) {
     this.modelId = modelId;
   }
 
+  /**
+   * Bootstraps the WebLLM engine, downloading weights and compiling WebGPU shaders.
+   * 
+   * @param onProgress - Optional callback function to track initialization progress.
+   * @returns A promise that resolves when the engine is fully bootstrapped.
+   */
   async init(onProgress?: InitProgressCallback): Promise<void> {
     if (this.engine) return;
     if (this.isInitializing) {
@@ -42,6 +53,14 @@ export class WebLLMEngine implements ITranslationEngine {
     }
   }
 
+  /**
+   * Translates an array of text blocks by grouping them into chunks and invoking WebGPU-accelerated LLM completions.
+   * 
+   * @param texts - The array of text strings to translate.
+   * @param sourceLang - The source language name (e.g. 'Japanese'). Defaults to 'auto'.
+   * @param targetLang - The target language name (e.g. 'English'). Defaults to 'English'.
+   * @returns A promise that resolves to an array of translated strings in the original order.
+   */
   async translate(texts: string[], sourceLang: string = 'auto', targetLang: string = 'English'): Promise<string[]> {
     if (!this.engine) {
       throw new Error('WebLLMEngine is not initialized. Call init() first.');
@@ -112,6 +131,11 @@ ${combinedText}`;
     return results;
   }
 
+  /**
+   * Unloads the model and releases GPU/VRAM allocated by the WebLLM engine.
+   * 
+   * @returns A promise that resolves when cleanup is complete.
+   */
   async destroy(): Promise<void> {
     if (this.engine) {
       console.log(`[WebLLMEngine] Destroying engine and releasing WebGPU memory for: ${this.modelId}`);

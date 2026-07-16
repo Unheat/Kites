@@ -7,6 +7,12 @@ export class PaddleOcrEngine implements IOcrEngine {
   private customDetector: CustomPaddleDetector | null = null;
   private isInitialized = false;
 
+  /**
+   * Initializes the PaddleOCR Engine, loading either Node or Browser native dependencies
+   * and initializing the underlying OCR service.
+   * 
+   * @returns A promise that resolves when initialization is complete.
+   */
   async init(): Promise<void> {
     if (this.isInitialized) return;
 
@@ -40,7 +46,7 @@ export class PaddleOcrEngine implements IOcrEngine {
 
       // In Node.js, ppu-paddle-ocr natively uses CPU (wasm/cpu providers)
       this.service = new PaddleOcrService({
-        model: MODEL_PRESETS['v6-small'],
+        model: MODEL_PRESETS['v6-small'], 
         detection: {
           maxSideLength: 960,
         },
@@ -63,6 +69,13 @@ export class PaddleOcrEngine implements IOcrEngine {
     }
   }
 
+  /**
+   * Executes the full OCR pipeline: runs detection to get rotated bounding boxes,
+   * crops and warps each region, and executes CRNN character recognition.
+   * 
+   * @param imageBuffer - The raw ArrayBuffer of the image.
+   * @returns A promise that resolves to the OCR result containing texts, boxes, and polygons.
+   */
   async recognize(imageBuffer: ArrayBuffer): Promise<OcrResult> {
     if (!this.isInitialized || !this.service || !this.customDetector) {
       throw new Error('PaddleOcrEngine is not initialized.');
@@ -143,6 +156,11 @@ export class PaddleOcrEngine implements IOcrEngine {
     }
   }
 
+  /**
+   * Frees memory and resources allocated by the underlying PaddleOcrService.
+   * 
+   * @returns A promise that resolves when the engine is destroyed.
+   */
   async destroy(): Promise<void> {
     if (this.service) {
       await this.service.destroy();
@@ -157,6 +175,11 @@ export class PaddleOcrEngine implements IOcrEngine {
  * Custom canvas crop helper that deskews rotated quadrilateral text regions
  * and automatically rotates vertical text lines by 90 degrees counter-clockwise
  * to lay them flat horizontally before character recognition.
+ * 
+ * @param platform - The platform abstraction layer.
+ * @param sourceCanvas - The source canvas containing the full image.
+ * @param polygon - The coordinates of the quadrilateral bounding the text region.
+ * @returns The cropped and straightened canvas containing the text line.
  */
 function cropAndWarp(
   platform: any,

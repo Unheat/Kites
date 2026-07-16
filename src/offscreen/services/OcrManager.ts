@@ -1,4 +1,4 @@
-import { IOcrEngine, OcrResult } from '../engines/ocr/BaseOcrEngine';
+import type { IOcrEngine, OcrResult } from '../engines/ocr/BaseOcrEngine';
 import { PaddleOcrEngine } from '../engines/ocr/PaddleOcrEngine';
 
 export class OcrManager {
@@ -6,8 +6,10 @@ export class OcrManager {
   private isInitializing = false;
 
   /**
-   * Initializes the OCR engine. Currently hardcoded to PaddleOcrEngine (PP-OCRv4).
+   * Initializes the OCR engine. Currently hardcoded to PaddleOcrEngine.
    * In the future, this can accept config to route to different engines.
+   * 
+   * @returns A promise that resolves to the loaded OCR engine instance.
    */
   async getOrLoadEngine(): Promise<IOcrEngine> {
     if (this.engine) return this.engine;
@@ -32,6 +34,9 @@ export class OcrManager {
 
   /**
    * Process the image buffer to extract text and bounding boxes.
+   * 
+   * @param imageBuffer - The raw ArrayBuffer of the image.
+   * @returns A promise that resolves to the standardized OCR result.
    */
   async processImage(imageBuffer: ArrayBuffer): Promise<OcrResult> {
     const engine = await this.getOrLoadEngine();
@@ -40,6 +45,8 @@ export class OcrManager {
 
   /**
    * Unloads the engine from memory to free up VRAM/RAM.
+   * 
+   * @returns A promise that resolves when cleanup is complete.
    */
   async cleanup(): Promise<void> {
     if (this.engine) {

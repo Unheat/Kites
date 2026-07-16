@@ -68,6 +68,9 @@ export class TranslationManager {
   /**
    * Instantiates or reuses an engine based on the ID.
    * This is a simple factory method.
+   * 
+   * @param engineId - The identifier of the translation engine.
+   * @returns A promise that resolves to the instantiated translation engine.
    */
   private async getOrLoadEngine(engineId: string): Promise<ITranslationEngine> {
     // If the requested engine is already loaded, reuse it
@@ -92,6 +95,11 @@ export class TranslationManager {
     return this.activeEngine;
   }
 
+  /**
+   * Unloads the currently active translation engine to free up VRAM/RAM resources.
+   * 
+   * @returns A promise that resolves when the engine is unloaded.
+   */
   private async unloadCurrentEngine(): Promise<void> {
     if (this.activeEngine) {
       console.log(`[TranslationManager] Unloading previous engine: ${this.activeEngineId}`);

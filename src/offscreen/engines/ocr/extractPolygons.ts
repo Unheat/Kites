@@ -17,6 +17,16 @@ export interface Point2D {
  * 2. Finds the convex hull of each blob.
  * 3. Expands the hull using Vatti clipping (clipper-lib) by ratio.
  * 4. Calculates the Minimum Area Bounding Rectangle using Rotating Calipers.
+ * 
+ * @param probMap - The probability heat map output from the DB text detector model.
+ * @param width - The width of the resized image fed into the model.
+ * @param height - The height of the resized image fed into the model.
+ * @param originalWidth - The original width of the input image.
+ * @param originalHeight - The original height of the input image.
+ * @param threshold - The binary threshold to binarize the probability map. Defaults to 0.3.
+ * @param unclipRatio - The expansion factor to unclip the bounding box. Defaults to 2.0.
+ * @param resizeRatio - Optional predefined resize ratio mapping model size back to original size.
+ * @returns An array of perfectly aligned 4-point bounding polygons scaled back to original dimensions.
  */
 export function extractPolygons(
   probMap: Float32Array,
@@ -131,6 +141,12 @@ export function extractPolygons(
   return polygons;
 }
 
+/**
+ * Calculates the convex hull of a set of 2D points using the Monotone Chain algorithm.
+ * 
+ * @param points - The input array of points.
+ * @returns The array of points forming the convex hull.
+ */
 function getConvexHull(points: Point[]): Point[] {
   points.sort((a, b) => a.X === b.X ? a.Y - b.Y : a.X - b.X);
 
@@ -159,6 +175,12 @@ function getConvexHull(points: Point[]): Point[] {
   return lower.concat(upper);
 }
 
+/**
+ * Calculates the area of a polygon using the Shoelace formula.
+ * 
+ * @param poly - The array of vertices of the polygon.
+ * @returns The calculated area of the polygon.
+ */
 function polygonArea(poly: Point[]): number {
   let area = 0;
   for (let i = 0; i < poly.length; i++) {
@@ -168,6 +190,12 @@ function polygonArea(poly: Point[]): number {
   return Math.abs(area / 2);
 }
 
+/**
+ * Calculates the perimeter of a polygon.
+ * 
+ * @param poly - The array of vertices of the polygon.
+ * @returns The total perimeter of the polygon.
+ */
 function polygonPerimeter(poly: Point[]): number {
   let perim = 0;
   for (let i = 0; i < poly.length; i++) {
@@ -179,6 +207,13 @@ function polygonPerimeter(poly: Point[]): number {
   return perim;
 }
 
+/**
+ * Expands a polygon by a specified unclip ratio using ClipperLib's offset scaling.
+ * 
+ * @param hull - The vertices of the polygon to expand.
+ * @param unclipRatio - The ratio by which to expand the polygon.
+ * @returns The vertices of the expanded polygon.
+ */
 function unclip(hull: Point[], unclipRatio: number): Point[] {
   const area = polygonArea(hull);
   const length = polygonPerimeter(hull);
@@ -208,6 +243,13 @@ function unclip(hull: Point[], unclipRatio: number): Point[] {
   return solution[0].map((p: any) => ({ X: p.X / scale, Y: p.Y / scale }));
 }
 
+/**
+ * Finds the minimum area bounding box (minimum area rectangle) of a convex hull using Rotating Calipers.
+ * Sorts vertices deterministically as [TopLeft, TopRight, BottomRight, BottomLeft].
+ * 
+ * @param hull - The convex hull vertices.
+ * @returns The 4-point bounding rectangle.
+ */
 function minAreaRect(hull: Point[]): Point[] {
   // Edge-case
   if (hull.length < 3) return hull;

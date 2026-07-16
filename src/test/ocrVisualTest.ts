@@ -7,6 +7,13 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+/**
+ * Executes a visual integration test on a set of pre-selected test images,
+ * running the OCR pipeline on each, drawing cyan/red polygons, and outputting
+ * marked visual images to the result directory.
+ * 
+ * @returns A promise that resolves when the test execution is complete.
+ */
 async function runVisualTest() {
   console.log('--- Starting OCR Visual Integration Test ---');
   

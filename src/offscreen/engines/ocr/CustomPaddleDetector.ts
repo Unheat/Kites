@@ -8,12 +8,20 @@ import { extractPolygons, type Point2D } from './extractPolygons';
 export class CustomPaddleDetector {
   private service: any; // PaddleOcrService instance
 
+  /**
+   * Constructs a new CustomPaddleDetector instance.
+   * 
+   * @param service - An initialized PaddleOcrService instance.
+   */
   constructor(service: any) {
     this.service = service;
   }
 
   /**
-   * Run the ONNX detection model and return the extracted polygons.
+   * Runs the underlying ONNX detection model on the image buffer and returns extracted text polygons.
+   * 
+   * @param imageBuffer - The raw ArrayBuffer of the image.
+   * @returns A promise that resolves to an array of oriented 4-point bounding polygons.
    */
   async detectPolygons(imageBuffer: ArrayBuffer): Promise<Point2D[][]> {
     if (!this.service || !this.service.detector) {
