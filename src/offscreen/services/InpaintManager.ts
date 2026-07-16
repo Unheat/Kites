@@ -3,9 +3,11 @@ import { SimpleInpaintEngine } from '../engines/inpaint/SimpleInpaintEngine';
 import { TeleaInpaintEngine } from '../engines/inpaint/TeleaInpaintEngine';
 import { AotInpaintEngine } from '../engines/inpaint/AotInpaintEngine';
 import { LamaInpaintEngine } from '../engines/inpaint/LamaInpaintEngine';
+import { NoneInpaintEngine } from '../engines/inpaint/NoneInpaintEngine';
+import { OriginalInpaintEngine } from '../engines/inpaint/OriginalInpaintEngine';
+import { Binarizer } from '../engines/inpaint/Binarizer';
 
-export type ActiveInpaintTier = 'simple' | 'telea' | 'aot' | 'lama';
-export type InpaintTier = ActiveInpaintTier | 'none' | 'original';
+export type InpaintTier = 'simple' | 'telea' | 'aot' | 'lama' | 'none' | 'original';
 
 /**
  * Orchestrator and single entry-point for the image inpainting / background erasing pipeline.
@@ -13,8 +15,13 @@ export type InpaintTier = ActiveInpaintTier | 'none' | 'original';
  */
 export class InpaintManager {
   private platform: any = null;
-  private engines: Map<ActiveInpaintTier, IInpaintEngine> = new Map();
+  private engines: Map<InpaintTier, IInpaintEngine> = new Map();
+  private binarizer: Binarizer;
   private isInitialized = false;
+
+  constructor() {
+    this.binarizer = new Binarizer();
+  }
 
   /**
    * Initializes the platform abstraction provider dynamically.
@@ -40,9 +47,9 @@ export class InpaintManager {
   /**
    * Returns an initialized instance of the requested inpaint engine.
    * 
-   * @param tier - The active inpaint tier ('simple', 'telea', 'aot', 'lama').
+   * @param tier - The inpaint tier.
    */
-  async getEngine(tier: ActiveInpaintTier): Promise<IInpaintEngine> {
+  async getEngine(tier: InpaintTier): Promise<IInpaintEngine> {
     await this.init();
 
     if (this.engines.has(tier)) {
@@ -62,6 +69,12 @@ export class InpaintManager {
         break;
       case 'lama':
         engine = new LamaInpaintEngine(this.platform);
+        break;
+      case 'none':
+        engine = new NoneInpaintEngine();
+        break;
+      case 'original':
+        engine = new OriginalInpaintEngine();
         break;
       default:
         throw new Error(`[InpaintManager] Unknown inpainting tier: ${tier}`);
@@ -85,17 +98,19 @@ export class InpaintManager {
     maskPolygons: Point2D[][],
     tier: InpaintTier = 'telea'
   ): Promise<ArrayBuffer> {
-    if (tier === 'none' || tier === 'original') {
-      console.log(`[InpaintManager] Bypass mode active: ${tier}. Returning image buffer unmodified.`);
-      return imageBuffer;
-    }
-
     if (!maskPolygons || maskPolygons.length === 0) {
       return imageBuffer;
     }
 
     const engine = await this.getEngine(tier);
     console.log(`[InpaintManager] Executing inpainting using tier: ${tier}...`);
+    
+    // For Tiers that don't need erasing, we can skip mask generation
+    if (tier === 'none' || tier === 'original') {
+      return await engine.inpaint(imageBuffer, maskPolygons);
+    }
+
+    // Pass polygons. (TODO: integrate the Binarizer output if engine needs it)
     return await engine.inpaint(imageBuffer, maskPolygons);
   }
 
@@ -105,8 +120,11 @@ export class InpaintManager {
   async cleanup(): Promise<void> {
     for (const [tier, engine] of this.engines.entries()) {
       console.log(`[InpaintManager] Destroying inpaint engine: ${tier}...`);
-      await engine.destroy();
+      if (engine.destroy) {
+          await engine.destroy();
+      }
     }
     this.engines.clear();
   }
 }
+

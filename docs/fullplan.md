@@ -108,15 +108,13 @@ Because our architecture uses both HTML DOM Overlays (for on-page translation) a
 
 *The Problem:* Before we can overlay the translated English text, we must cleanly erase the original text from the image so it doesn't bleed through. We need a solution that works for any image (manga, photos, diagrams) and runs fast locally. We must also prevent erasing speech bubble outlines, panel borders, and background line drawings.
 
-*The Solution (4-Tier Extensible Architecture & Stroke Masking):*
-To solve this, we implement a **4-Tier Hybrid Inpainting Pipeline** wrapped in a Strategy Pattern (`IInpaintEngine`), which selects the active eraser mode based on settings:
+*The Solution (6-Tier Extensible Architecture & Stroke Masking):*
+To solve this, we implement a **6-Tier Hybrid Inpainting Pipeline** wrapped in a Strategy Pattern (`IInpaintEngine`), which selects the active eraser mode based on settings:
 
 ```mermaid
 graph TD
     ImageBuffer[Raw Image Buffer] --> InpaintManager
     Polygons[Text Polygons] --> InpaintManager
-    InpaintManager --> Binarizer[Binarizer: Extract Text Stroke Mask]
-    Binarizer --> StrokeMask[Stroke-Level Mask Canvas]
     
     InpaintManager --> EngineRouter{Engine Selector}
     
@@ -124,22 +122,32 @@ graph TD
     EngineRouter -- Tier 2: Telea Math --> TeleaEngine[TeleaInpaintEngine: FMM Diffusion]
     EngineRouter -- Tier 3: AOT-GAN --> AotEngine[AotInpaintEngine: Quantized ONNX Model]
     EngineRouter -- Tier 4: LaMa AI --> LamaEngine[LamaInpaintEngine: Fourier CNN ONNX Model]
+    EngineRouter -- Tier 5: None --> NoneEngine[NoneInpaintEngine: Bypass Erase]
+    EngineRouter -- Tier 6: Original --> OriginalEngine[OriginalInpaintEngine: Bypass All]
+    
+    InpaintManager --> Binarizer[Binarizer: Extract Text Stroke Mask]
+    Binarizer -.-> StrokeMask[Stroke-Level Mask Canvas]
     
     ImageBuffer --> SimpleEngine
     
     ImageBuffer --> TeleaEngine
-    StrokeMask --> TeleaEngine
+    StrokeMask -.-> TeleaEngine
     
     ImageBuffer --> AotEngine
-    StrokeMask --> AotEngine
+    StrokeMask -.-> AotEngine
     
     ImageBuffer --> LamaEngine
-    StrokeMask --> LamaEngine
+    StrokeMask -.-> LamaEngine
+    
+    ImageBuffer --> NoneEngine
+    ImageBuffer --> OriginalEngine
     
     SimpleEngine --> CleanBuffer[Clean Text-Free Image]
     TeleaEngine --> CleanBuffer
     AotEngine --> CleanBuffer
     LamaEngine --> CleanBuffer
+    NoneEngine --> CleanBuffer
+    OriginalEngine --> CleanBuffer
 ```
 
 #### The Binarizer (Handling the Border-Erase Problem)
@@ -148,13 +156,13 @@ Instead of masking the entire blocky bounding box, we extract a **pixel-perfect 
 * **Polygon Masking:** Zeroes out any threshed pixels falling outside the text bounding polygons.
 * **Usage:** **Tier 2 (Telea)**, **Tier 3 (AOT-GAN)**, and **Tier 4 (LaMa)** all consume this refined stroke-level mask. They only erase the text strokes, keeping bubble borders and background illustrations 100% untouched.
 
-#### The 4 Tiers & Bypass Modes:
-1. **none (No Eraser Bypass):** Bypasses the inpainting/background erasing phase completely. The original text remains visible on the image, and translated English text overlays are drawn directly on top.
-2. **original (Copy Image Bypass):** Bypasses both the inpainting phase and the translation overlay phase. The original source image is returned completely unmodified.
-3. **Tier 1: Simple Inpaint (Dominant Color Fill):** Samples pixel colors along the bounding box outer edges, determines the dominant color (or simple gradient), and fills the bounding rectangle. Runs in microseconds with zero downloads (`0MB`), but paints over bubble outlines if they overlap.
-4. **Tier 2: Telea Math Inpaint (FMM Diffusion):** Applies Alexandru Telea's Fast Marching Method FMM algorithm on the stroke mask, propagating surrounding background colors inward to erase characters. Extremely fast (`10–50ms`), requires zero downloads (`0MB`), and preserves outlines.
-5. **Tier 3: AOT-GAN Inpaint (Quantized ONNX):** Runs a lightweight generative adversarial network inpainting model. Learns manga textures and screentones to reconstruct backgrounds behind erased text. Fast (`~100–300ms`), requires a small download (`~10MB`), and runs via WebGPU when available.
-6. **Tier 4: LaMa Inpaint (Fourier CNN ONNX):** Runs the Large Mask Inpainting model using Fast Fourier Convolutions to hallucinate large or complex textures globally. Highly robust, requires a larger download (`~30MB`), and takes `~500ms` on CPU or `~100ms` on WebGPU.
+#### The 6 Inpainting Tiers:
+1. **Tier 1: Simple Inpaint (Dominant Color Fill):** Samples pixel colors along the bounding box outer edges, determines the dominant color, and fills the bounding rectangle. Runs in microseconds (`0MB`).
+2. **Tier 2: Telea Math Inpaint (FMM Diffusion):** Applies Alexandru Telea's Fast Marching Method FMM algorithm on the stroke mask, propagating surrounding background colors inward to erase characters. Extremely fast (`0MB`), preserves outlines.
+3. **Tier 3: AOT-GAN Inpaint (Quantized ONNX):** Runs a lightweight generative adversarial network inpainting model. Learns manga textures and screentones to reconstruct backgrounds behind erased text. Fast (`~10MB`), runs via WebGPU when available.
+4. **Tier 4: LaMa Inpaint (Fourier CNN ONNX):** Runs the Large Mask Inpainting model using Fast Fourier Convolutions to hallucinate large or complex textures globally. Highly robust, larger download (`~30MB`).
+5. **Tier 5: None:** Bypasses inpainting entirely. Returns the original image. The OCR and translation pipeline will still overlay translated text on top of the original text.
+6. **Tier 6: Original:** Bypasses the entire translation/inpainting pipeline and just returns a raw copy of the original image without any modifications.
 
 ### G. Two-Part Frontend UX (Tampermonkey Style)
 *The Problem:* How do we provide quick access to settings while also giving the user a robust, full-screen canvas editor?
