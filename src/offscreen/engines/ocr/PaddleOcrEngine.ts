@@ -96,14 +96,10 @@ export class PaddleOcrEngine implements IOcrEngine {
       const ctx = recognitor.buildContext();
       const dictionary = this.service.options.recognition?.charactersDictionary;
 
-      const texts: string[] = [];
-      const boxes: OcrBox[] = [];
-      const scores: number[] = [];
 
-      // 3. Crop, warp, and recognize each text polygon in its native alignment
-      for (let i = 0; i < polygons.length; i++) {
-        const poly = polygons[i];
-        
+
+      // 3. Crop, warp, and recognize each text polygon in parallel
+      const promises = polygons.map(async (poly, i) => {
         // Perspective crop/rotate to straighten text and handle vertical manga layout
         const finalCropCanvas = cropAndWarp(this.service.platform, sourceCanvas, poly);
         
@@ -125,9 +121,6 @@ export class PaddleOcrEngine implements IOcrEngine {
         
         // Execute CRNN text recognition on the straightened crop
         const { text, confidence } = await recognitor.recognizeTextViaContext(finalCropCanvas, ctx, dictionary);
-        
-        texts.push(text);
-        scores.push(confidence);
 
         // Generate standard axis-aligned OcrBox for legacy rendering support
         let minX = Infinity, minY = Infinity;
@@ -138,13 +131,21 @@ export class PaddleOcrEngine implements IOcrEngine {
           if (p.y < minY) minY = p.y;
           if (p.y > maxY) maxY = p.y;
         }
-        boxes.push({
+        const box = {
           x: Math.max(0, Math.round(minX)),
           y: Math.max(0, Math.round(minY)),
           w: Math.max(1, Math.round(maxX - minX)),
           h: Math.max(1, Math.round(maxY - minY))
-        });
-      }
+        };
+
+        return { text, confidence, box };
+      });
+
+      const results = await Promise.all(promises);
+
+      const texts = results.map(r => r.text);
+      const scores = results.map(r => r.confidence);
+      const boxes = results.map(r => r.box);
 
       console.log(`[PaddleOcrEngine] Recognition complete. Found ${texts.length} text blocks.`);
       
