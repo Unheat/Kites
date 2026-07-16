@@ -26,11 +26,11 @@ async function runVisualTest() {
     't3qWG.png'
   ];
 
-  const files = fs.readdirSync(testImgDir).filter(file => 
+  const files = fs.readdirSync(testImgDir).filter((file: string) => 
     file.endsWith('.jpg') || file.endsWith('.png')
   );
 
-  const filesToProcess = files.filter(file => testImages.includes(file));
+  const filesToProcess = files.filter((file: string) => testImages.includes(file));
 
   if (filesToProcess.length === 0) {
     console.error('No matching images found in src/test/test-img/');

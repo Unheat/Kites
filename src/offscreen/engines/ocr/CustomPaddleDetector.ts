@@ -1,4 +1,4 @@
-import { extractPolygons, Point } from './extractPolygons';
+import { extractPolygons, type Point2D } from './extractPolygons';
 
 /**
  * CustomPaddleDetector wraps the internal DetectionService from ppu-paddle-ocr
@@ -15,7 +15,7 @@ export class CustomPaddleDetector {
   /**
    * Run the ONNX detection model and return the extracted polygons.
    */
-  async detectPolygons(imageBuffer: ArrayBuffer): Promise<Point[][]> {
+  async detectPolygons(imageBuffer: ArrayBuffer): Promise<Point2D[][]> {
     if (!this.service || !this.service.detector) {
       throw new Error('CustomPaddleDetector: PaddleOcrService is not initialized.');
     }

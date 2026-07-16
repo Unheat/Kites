@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { TranslationManager } from './TranslationManager';
-import { WebLLMEngine } from '../engines/WebLLMEngine';
 
 const mocks = vi.hoisted(() => ({
   engineCounter: 0,
@@ -11,7 +10,7 @@ const mocks = vi.hoisted(() => ({
 
 // 1. Mock the Chrome API globally
 const mockChromeStorageGet = vi.fn();
-global.chrome = {
+(globalThis as any).chrome = {
   storage: {
     local: {
       get: mockChromeStorageGet,

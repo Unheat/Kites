@@ -1,4 +1,4 @@
-import { IOcrEngine, OcrResult, OcrBox } from './BaseOcrEngine';
+import type { IOcrEngine, OcrResult, OcrBox } from './BaseOcrEngine';
 
 import { CustomPaddleDetector } from './CustomPaddleDetector';
 

@@ -4,7 +4,7 @@
     "target": "es2023",
     "lib": ["ES2023", "DOM"],
     "module": "esnext",
-    "types": ["vite/client", "chrome"],
+    "types": ["vite/client", "chrome", "node"],
     "allowArbitraryExtensions": true,
     "skipLibCheck": true,
 
