@@ -141,7 +141,7 @@ export default function EngineDropdown({ state, updateState }: EngineDropdownPro
             <h2 className="text-sm font-medium">Translation Engine</h2>
             <div className="w-4 h-4 rounded-full border border-[var(--color-dust)] flex items-center justify-center text-[10px] text-[var(--color-dust)] cursor-help">?</div>
             <div className="absolute left-0 top-6 w-64 p-2 bg-[var(--color-ink)] text-[var(--color-paper)] text-xs rounded shadow-lg opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-50">
-              Your device {state.webgpuSupported === true ? 'supports' : 'does not support'} WebGPU acceleration. If unsupported, the system gracefully falls back to your CPU. Accuracy remains exactly the same, but processing will be slower.
+              <span className="font-semibold">[CPU] Local</span> models run on your processor. <span className="font-semibold">[WEBGPU] Local</span> models use your graphics card for faster speeds with the exact same accuracy.
             </div>
           </div>
 
@@ -241,8 +241,12 @@ export default function EngineDropdown({ state, updateState }: EngineDropdownPro
 
       {/* Inpainting Engine */}
       <div>
-        <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-1.5 mb-2 group relative">
           <h2 className="text-sm font-medium">Inpainting Engine</h2>
+          <div className="w-4 h-4 rounded-full border border-[var(--color-dust)] flex items-center justify-center text-[10px] text-[var(--color-dust)] cursor-help">?</div>
+          <div className="absolute left-0 top-6 w-64 p-2 bg-[var(--color-ink)] text-[var(--color-paper)] text-xs rounded shadow-lg opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-50">
+            Your device {state.webgpuSupported === true ? 'supports' : 'does not support'} WebGPU acceleration. If unsupported, the system gracefully falls back to your CPU. Accuracy remains exactly the same, but processing will be slower.
+          </div>
         </div>
 
         <div className="relative">
