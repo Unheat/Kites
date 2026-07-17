@@ -257,7 +257,7 @@ export default function EngineDropdown({ state, updateState }: EngineDropdownPro
           </button>
 
           {isOpenInpaint && (
-            <div className="mt-1 bg-[var(--color-paper)] border border-[var(--color-dust)] rounded-md shadow-sm overflow-hidden flex flex-col max-h-[350px] absolute w-full z-10">
+            <div className="mt-1 bg-[var(--color-paper)] border border-[var(--color-dust)] rounded-md shadow-sm overflow-hidden flex flex-col max-h-[350px]">
               <div className="overflow-y-auto flex-1 p-1 custom-scrollbar">
                 {inpaintingEngines.map((engine) => (
                   <button

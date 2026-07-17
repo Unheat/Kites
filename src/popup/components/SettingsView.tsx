@@ -92,9 +92,9 @@ export default function SettingsView({ state, updateState }: SettingsViewProps) 
               state.webgpuSupported === false ? 'bg-red-100 text-red-800 border border-red-200' : 
               'bg-gray-100 text-gray-800 border border-gray-200'
             }`}>
-              {state.webgpuSupported === true ? '✓ Supported' : 
-               state.webgpuSupported === false ? '✗ Unsupported' : 
-               'Checking...'}
+              {state.webgpuSupported === true ? '✓' : 
+               state.webgpuSupported === false ? '✗' : 
+               '...'}
             </span>
           </div>
           <button 
@@ -106,7 +106,7 @@ export default function SettingsView({ state, updateState }: SettingsViewProps) 
             }}
             className="px-3 py-1.5 bg-[var(--color-paper)] border border-[var(--color-dust)] hover:border-[var(--color-ink)] text-xs font-medium rounded transition-colors cursor-pointer"
           >
-            Re-check WebGPU Support
+            Re-check
           </button>
         </div>
         <p className="text-xs text-[var(--color-dust)] mt-2 leading-relaxed">
