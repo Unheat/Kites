@@ -63,10 +63,11 @@ export class TeleaInpaintEngine implements IInpaintEngine {
         if (p.y > maxY) maxY = p.y;
       }
 
-      const x = Math.max(0, Math.floor(minX));
-      const y = Math.max(0, Math.floor(minY));
-      const w = Math.min(width - x, Math.ceil(maxX - minX));
-      const h = Math.min(height - y, Math.ceil(maxY - minY));
+      const padding = 15; // padding for dilation + extra for FMM known pixels
+      const x = Math.max(0, Math.floor(minX) - padding);
+      const y = Math.max(0, Math.floor(minY) - padding);
+      const w = Math.min(width - x, Math.ceil(maxX - minX) + padding * 2);
+      const h = Math.min(height - y, Math.ceil(maxY - minY) + padding * 2);
 
       if (w <= 0 || h <= 0) continue;
 
