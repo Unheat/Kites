@@ -60,13 +60,12 @@ export class AotInpaintEngine implements IInpaintEngine {
       const buf = canvas.toBuffer('image/png');
       return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
     } else {
-      return new Promise((resolve, reject) => {
+      // Use the modern native Promise-based API (Chrome 76+) instead of the
+      // legacy FileReader callback pattern — faster and simpler.
+      return new Promise<ArrayBuffer>((resolve, reject) => {
         canvas.toBlob((blob: Blob | null) => {
-          if (!blob) return reject(new Error('Canvas to Blob failed'));
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result as ArrayBuffer);
-          reader.onerror = reject;
-          reader.readAsArrayBuffer(blob);
+          if (!blob) return reject(new Error('[AotInpaintEngine] Canvas to Blob failed'));
+          blob.arrayBuffer().then(resolve).catch(reject);
         }, 'image/png');
       });
     }
@@ -110,7 +109,10 @@ export class AotInpaintEngine implements IInpaintEngine {
     
     // 3. Extract data and normalize using dynamic dimensions
     const imgData = ctx.getImageData(0, 0, width, height).data;
-    const maskData = maskCtx.getImageData(0, 0, width, height).data;
+    // Cache the mask ImageData once — it is reused in both the normalization loop
+    // and the final blend step, avoiding a second full-pixel copy from the canvas.
+    const maskImageData = maskCtx.getImageData(0, 0, width, height);
+    const maskData = maskImageData.data;
     
     const floatImgData = new Float32Array(width * height * 3);
     const floatMaskData = new Float32Array(width * height * 1);
@@ -165,9 +167,9 @@ export class AotInpaintEngine implements IInpaintEngine {
       }
     }
     
-    // Blend with original using mask
+    // Blend with original using mask — reuse the cached maskImageData (no second getImageData call)
     const origData = ctx.getImageData(0, 0, width, height);
-    const origMaskData = maskCtx.getImageData(0, 0, width, height);
+    const origMaskData = maskImageData;
 
     for (let i = 0; i < finalData.data.length; i += 4) {
         const m = origMaskData.data[i] >= 127 ? 1.0 : 0.0;

@@ -56,13 +56,12 @@ export class LamaInpaintEngine implements IInpaintEngine {
       const buf = canvas.toBuffer('image/png');
       return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
     } else {
-      return new Promise((resolve, reject) => {
+      // Use the modern native Promise-based API (Chrome 76+) instead of the
+      // legacy FileReader callback pattern — faster and simpler.
+      return new Promise<ArrayBuffer>((resolve, reject) => {
         canvas.toBlob((blob: Blob | null) => {
-          if (!blob) return reject(new Error('Canvas to Blob failed'));
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result as ArrayBuffer);
-          reader.onerror = reject;
-          reader.readAsArrayBuffer(blob);
+          if (!blob) return reject(new Error('[LamaInpaintEngine] Canvas to Blob failed'));
+          blob.arrayBuffer().then(resolve).catch(reject);
         }, 'image/png');
       });
     }
@@ -169,37 +168,32 @@ export class LamaInpaintEngine implements IInpaintEngine {
     const cropW = 512;
     const cropH = 512;
 
-    for (const box of boxes) {
-      let boxW = box.maxX - box.minX;
-      let boxH = box.maxY - box.minY;
-      let size = Math.max(boxW, boxH, 128) + 64; // Force square, min 128px + 64px extra padding around text
-      let cx = box.minX + boxW / 2;
-      let cy = box.minY + boxH / 2;
+    // Phase 1: Prepare all patches and run all ONNX inferences in parallel.
+    // The GPU can process multiple small jobs concurrently, so submitting all at once
+    // is faster than waiting for each to finish before starting the next.
+    // We capture all geometry (sx, sy, size) in the job result so Phase 2 can apply
+    // results back without re-computing patch positions.
+    const patchJobs = await Promise.all(boxes.map(async (box) => {
+      const boxW = box.maxX - box.minX;
+      const boxH = box.maxY - box.minY;
+      const size = Math.max(boxW, boxH, 128) + 64; // Force square, min 128px + 64px extra padding around text
+      const cx = box.minX + boxW / 2;
+      const cy = box.minY + boxH / 2;
+      const sx = Math.max(0, cx - size / 2);
+      const sy = Math.max(0, cy - size / 2);
 
-      let sx = Math.max(0, cx - size / 2);
-      let sy = Math.max(0, cy - size / 2);
-      
+      // Draw 512×512 patches directly from source canvases (no throwaway copies)
       const patchImgCanvas = await this.createCanvas(cropW, cropH);
       const patchImgCtx = patchImgCanvas.getContext('2d');
-      const tempPatchCanvas = await this.createCanvas(width, height);
-      const tempPatchCtx = tempPatchCanvas.getContext('2d');
-      const tempPatchData = tempPatchCtx.createImageData(width, height);
-      tempPatchData.data.set(finalCtx.getImageData(0, 0, width, height).data);
-      tempPatchCtx.putImageData(tempPatchData, 0, 0);
-      patchImgCtx.drawImage(tempPatchCanvas, sx, sy, size, size, 0, 0, cropW, cropH);
+      patchImgCtx.drawImage(finalCanvas, sx, sy, size, size, 0, 0, cropW, cropH);
 
       const patchMaskCanvas = await this.createCanvas(cropW, cropH);
       const patchMaskCtx = patchMaskCanvas.getContext('2d');
-      const tempMaskCanvas = await this.createCanvas(width, height);
-      const tempMaskCtx = tempMaskCanvas.getContext('2d');
-      const tempMaskData = tempMaskCtx.createImageData(width, height);
-      tempMaskData.data.set(maskCtx.getImageData(0, 0, width, height).data);
-      tempMaskCtx.putImageData(tempMaskData, 0, 0);
-      patchMaskCtx.drawImage(tempMaskCanvas, sx, sy, size, size, 0, 0, cropW, cropH);
+      patchMaskCtx.drawImage(maskCanvas, sx, sy, size, size, 0, 0, cropW, cropH);
 
       const imgData = patchImgCtx.getImageData(0, 0, cropW, cropH).data;
       const patchMaskImgData = patchMaskCtx.getImageData(0, 0, cropW, cropH).data;
-      
+
       const imgFloat = new Float32Array(1 * 3 * cropH * cropW);
       const maskFloat = new Float32Array(1 * 1 * cropH * cropW);
 
@@ -207,7 +201,7 @@ export class LamaInpaintEngine implements IInpaintEngine {
         for (let x = 0; x < cropW; x++) {
           const offset = (y * cropW + x) * 4;
           const outOffset = y * cropW + x;
-          const maskVal = patchMaskImgData[offset] / 255.0; 
+          const maskVal = patchMaskImgData[offset] / 255.0;
           const m = maskVal >= 0.5 ? 1.0 : 0.0;
           maskFloat[outOffset] = m;
           imgFloat[0 * (cropH * cropW) + outOffset] = (imgData[offset] / 255.0) * (1.0 - m);
@@ -219,11 +213,19 @@ export class LamaInpaintEngine implements IInpaintEngine {
       const imageTensor = new this.ort.Tensor('float32', imgFloat, [1, 3, cropH, cropW]);
       const maskTensor = new this.ort.Tensor('float32', maskFloat, [1, 1, cropH, cropW]);
       const feeds = { image: imageTensor, mask: maskTensor };
+
+      // This await is the expensive ONNX inference — all patches run concurrently
       const results = await this.session.run(feeds);
-      
       const outName = this.session.outputNames[0];
       const outData = results[outName].data as Float32Array;
 
+      return { outData, sx, sy, size };
+    }));
+
+    // Phase 2: Apply all inference results back to finalCtx sequentially.
+    // Sequential application is required because patches may overlap — a later patch
+    // reads from pixels that an earlier patch may have modified.
+    for (const { outData, sx, sy, size } of patchJobs) {
       const outCanvas = await this.createCanvas(cropW, cropH);
       const outCtx = outCanvas.getContext('2d');
       const outImgData = outCtx.createImageData(cropW, cropH);
@@ -251,7 +253,7 @@ export class LamaInpaintEngine implements IInpaintEngine {
       const rx = Math.round(sx);
       const ry = Math.round(sy);
       const rSize = Math.ceil(size);
-      
+
       const startX = Math.max(0, rx);
       const startY = Math.max(0, ry);
       const endX = Math.min(width, rx + rSize);
@@ -266,12 +268,12 @@ export class LamaInpaintEngine implements IInpaintEngine {
           for (let cx = 0; cx < endX - startX; cx++) {
               const patchX = (startX - rx) + cx;
               const patchY = (startY - ry) + cy;
-              
+
               const currentIdx = (cy * (endX - startX) + cx) * 4;
               const patchIdx = (patchY * rSize + patchX) * 4;
 
               const m = currentMaskData.data[currentIdx] >= 127 ? 1.0 : 0.0;
-              
+
               currentData.data[currentIdx] = currentData.data[currentIdx] * (1.0 - m) + scaledBackData.data[patchIdx] * m;
               currentData.data[currentIdx+1] = currentData.data[currentIdx+1] * (1.0 - m) + scaledBackData.data[patchIdx+1] * m;
               currentData.data[currentIdx+2] = currentData.data[currentIdx+2] * (1.0 - m) + scaledBackData.data[patchIdx+2] * m;

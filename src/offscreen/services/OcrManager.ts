@@ -3,38 +3,36 @@ import { PaddleOcrEngine } from '../engines/ocr/PaddleOcrEngine';
 
 export class OcrManager {
   private engine: IOcrEngine | null = null;
-  private isInitializing = false;
+  // Stores the in-flight initialization promise so that concurrent callers
+  // all await the same work rather than spinning in a polling loop.
+  private initPromise: Promise<IOcrEngine> | null = null;
 
   /**
-   * Initializes the OCR engine. Currently hardcoded to PaddleOcrEngine.
-   * In the future, this can accept config to route to different engines.
-   * 
+   * Returns the initialized OCR engine, creating and initializing it on first call.
+   * Uses the singleton promise pattern: if initialization is already in progress,
+   * concurrent callers await the same promise instead of busy-waiting with setTimeout.
+   *
    * @returns A promise that resolves to the loaded OCR engine instance.
    */
   async getOrLoadEngine(): Promise<IOcrEngine> {
     if (this.engine) return this.engine;
-    if (this.isInitializing) {
-      // Wait for initialization to complete if it's already in progress
-      while (this.isInitializing) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
-      if (this.engine) return this.engine;
+
+    if (!this.initPromise) {
+      this.initPromise = (async () => {
+        console.log('[OcrManager] Instantiating PaddleOcrEngine...');
+        const engine = new PaddleOcrEngine();
+        await engine.init();
+        this.engine = engine;
+        return engine;
+      })();
     }
 
-    this.isInitializing = true;
-    try {
-      console.log('[OcrManager] Instantiating PaddleOcrEngine...');
-      this.engine = new PaddleOcrEngine();
-      await this.engine.init();
-      return this.engine;
-    } finally {
-      this.isInitializing = false;
-    }
+    return this.initPromise;
   }
 
   /**
    * Process the image buffer to extract text and bounding boxes.
-   * 
+   *
    * @param imageBuffer - The raw ArrayBuffer of the image.
    * @returns A promise that resolves to the standardized OCR result.
    */
@@ -45,13 +43,14 @@ export class OcrManager {
 
   /**
    * Unloads the engine from memory to free up VRAM/RAM.
-   * 
+   *
    * @returns A promise that resolves when cleanup is complete.
    */
   async cleanup(): Promise<void> {
     if (this.engine) {
       await this.engine.destroy();
       this.engine = null;
+      this.initPromise = null;
     }
   }
 }

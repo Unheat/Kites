@@ -16,6 +16,7 @@ vi.mock('../../db', () => ({
     },
     textBlocks: {
       add: vi.fn(),
+      bulkAdd: vi.fn(),
     }
   }
 }));
@@ -102,13 +103,14 @@ describe('PipelineOrchestrator', () => {
       translatedImageBlob: expect.any(Blob)
     }));
 
-    // Should save two text blocks
-    expect(db.textBlocks.add).toHaveBeenCalledTimes(2);
-    expect(db.textBlocks.add).toHaveBeenNthCalledWith(1, expect.objectContaining({
-      imageId: 1,
-      originalText: 'こんにちは',
-      translatedText: 'Hello'
-    }));
+    // Should save text blocks in a single bulk transaction
+    expect(db.textBlocks.bulkAdd).toHaveBeenCalledTimes(1);
+    expect(db.textBlocks.bulkAdd).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({ imageId: 1, originalText: 'こんにちは', translatedText: 'Hello' }),
+        expect.objectContaining({ imageId: 1, originalText: '世界', translatedText: 'World' }),
+      ])
+    );
 
     expect(db.translationJobs.update).toHaveBeenCalledWith(100, { status: 'completed' });
     
@@ -140,6 +142,7 @@ describe('PipelineOrchestrator', () => {
     }));
 
     // Should not add text blocks
+    expect(db.textBlocks.bulkAdd).not.toHaveBeenCalled();
     expect(db.textBlocks.add).not.toHaveBeenCalled();
 
     // Should complete successfully
