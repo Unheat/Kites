@@ -92,7 +92,9 @@ export class TeleaInpaintEngine implements IInpaintEngine {
   private inpaintFMM(width: number, height: number, imgBytes: Uint8ClampedArray, maskBytes: Uint8ClampedArray) {
     const totalPixels = width * height;
     const state = new Uint8Array(totalPixels); // 0 = KNOWN (background), 1 = BAND (boundary), 2 = INSIDE (masked)
-    const bandQueue: number[] = [];
+    const queue = new Uint32Array(totalPixels);
+    let qHead = 0;
+    let qTail = 0;
     const radius = 3;
 
     // 1. Initialize states
@@ -118,16 +120,15 @@ export class TeleaInpaintEngine implements IInpaintEngine {
 
           if (isBoundary) {
             state[i] = 1; // BAND
-            bandQueue.push(i);
+            queue[qTail++] = i;
           }
         }
       }
     }
 
     // 3. March boundary inward
-    let qIdx = 0;
-    while (qIdx < bandQueue.length) {
-      const i = bandQueue[qIdx++];
+    while (qHead < qTail) {
+      const i = queue[qHead++];
       const x = i % width;
       const y = Math.floor(i / width);
 
@@ -169,12 +170,16 @@ export class TeleaInpaintEngine implements IInpaintEngine {
 
       state[i] = 0; // Pixel is now KNOWN
 
-      // Check direct neighbors and add them to the queue if they are inside
+      // Check direct 8-way neighbors to approximate circular expansion (Octagonal/Chebyshev blend)
       const neighbors = [
         { nx: x - 1, ny: y },
         { nx: x + 1, ny: y },
         { nx: x, ny: y - 1 },
-        { nx: x, ny: y + 1 }
+        { nx: x, ny: y + 1 },
+        { nx: x - 1, ny: y - 1 },
+        { nx: x + 1, ny: y - 1 },
+        { nx: x - 1, ny: y + 1 },
+        { nx: x + 1, ny: y + 1 }
       ];
 
       for (const n of neighbors) {
@@ -182,7 +187,7 @@ export class TeleaInpaintEngine implements IInpaintEngine {
           const ni = n.ny * width + n.nx;
           if (state[ni] === 2) {
             state[ni] = 1; // Push to BAND boundary
-            bandQueue.push(ni);
+            queue[qTail++] = ni;
           }
         }
       }
