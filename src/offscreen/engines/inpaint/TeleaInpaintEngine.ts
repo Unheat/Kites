@@ -37,7 +37,7 @@ export class TeleaInpaintEngine implements IInpaintEngine {
 
     maskCtx.fillStyle = '#ffffff';
     maskCtx.strokeStyle = '#ffffff';
-    maskCtx.lineWidth = 12; // Dilation amount (6px outward inflation)
+    maskCtx.lineWidth = 4; // Dilation amount (2px outward inflation)
     maskCtx.lineJoin = 'round';
     
     for (const poly of maskPolygons) {
