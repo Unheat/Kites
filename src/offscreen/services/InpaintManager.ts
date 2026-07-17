@@ -34,7 +34,7 @@ export class InpaintManager {
     } else {
       // Browser environment (Chrome Extension)
       // @ts-ignore - The module exists at runtime
-      const { WebPlatformProvider } = await import('ppu-paddle-ocr/web/platform.web.js');
+      const { WebPlatformProvider } = await import(/* @vite-ignore */ 'ppu-paddle-ocr/web/platform.web.js');
       this.platform = new WebPlatformProvider();
     }
 

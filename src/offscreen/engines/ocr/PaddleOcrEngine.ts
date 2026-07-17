@@ -26,7 +26,8 @@ export class PaddleOcrEngine implements IOcrEngine {
         // Node environment (Visual Unit Tests)
         console.log('[PaddleOcrEngine] Detected Node.js environment. Loading native backend...');
         // @ts-ignore - The module exists at runtime for Node
-        const pkg = await import('ppu-paddle-ocr/node');
+        const moduleName = 'ppu-paddle-ocr' + '/node';
+        const pkg = await import(/* @vite-ignore */ moduleName);
         PaddleOcrService = pkg.PaddleOcrService;
         MODEL_PRESETS = pkg.MODEL_PRESETS;
       } else {

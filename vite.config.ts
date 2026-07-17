@@ -14,6 +14,11 @@ export default defineConfig({
   ],
   build: {
     rollupOptions: {
+      external: [
+        'ppu-paddle-ocr/node',
+        '@napi-rs/canvas',
+        '@napi-rs/canvas-darwin-arm64'
+      ],
       input: {
         offscreen: resolve(__dirname, 'src/offscreen/offscreen.html'),
         popup: resolve(__dirname, 'popup.html'),
