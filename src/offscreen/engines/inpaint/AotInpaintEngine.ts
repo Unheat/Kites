@@ -105,61 +105,35 @@ export class AotInpaintEngine implements IInpaintEngine {
         maskCtx.fill();
       }
     }
+    
+    // 3. Extract data and normalize using dynamic dimensions
+    const imgData = ctx.getImageData(0, 0, width, height).data;
+    const maskData = maskCtx.getImageData(0, 0, width, height).data;
+    
+    const floatImgData = new Float32Array(width * height * 3);
+    const floatMaskData = new Float32Array(width * height * 1);
 
-    // 3. Resize to 512x512 (required by this specific fixed-axis ONNX export)
-    const newW = 512;
-    const newH = 512;
-    
-    // We resize both image and mask to the 512x512 dimensions
-    const scaledImgCanvas = await this.createCanvas(newW, newH);
-    const scaledImgCtx = scaledImgCanvas.getContext('2d');
-    
-    // Workaround for mismatched node-canvas versions (ppu-paddle-ocr vs ours):
-    const tempImgCanvas = await this.createCanvas(width, height);
-    const tempImgCtx = tempImgCanvas.getContext('2d');
-    const tempImgData = tempImgCtx.createImageData(width, height);
-    tempImgData.data.set(ctx.getImageData(0, 0, width, height).data);
-    tempImgCtx.putImageData(tempImgData, 0, 0);
-    scaledImgCtx.drawImage(tempImgCanvas, 0, 0, width, height, 0, 0, newW, newH);
-    
-    const scaledMaskCanvas = await this.createCanvas(newW, newH);
-    const scaledMaskCtx = scaledMaskCanvas.getContext('2d');
-    
-    const tempMaskCanvas = await this.createCanvas(width, height);
-    const tempMaskCtx = tempMaskCanvas.getContext('2d');
-    const tempMaskData = tempMaskCtx.createImageData(width, height);
-    tempMaskData.data.set(maskCtx.getImageData(0, 0, width, height).data);
-    tempMaskCtx.putImageData(tempMaskData, 0, 0);
-    scaledMaskCtx.drawImage(tempMaskCanvas, 0, 0, width, height, 0, 0, newW, newH);
-
-    // 4. Extract data and normalize
-    const imgData = scaledImgCtx.getImageData(0, 0, newW, newH).data;
-    const maskData = scaledMaskCtx.getImageData(0, 0, newW, newH).data;
-    
-    const imgFloat = new Float32Array(1 * 3 * newH * newW);
-    const maskFloat = new Float32Array(1 * 1 * newH * newW);
-
-    for (let y = 0; y < newH; y++) {
-      for (let x = 0; x < newW; x++) {
-        const offset = (y * newW + x) * 4;
-        const outOffset = y * newW + x;
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const offset = (y * width + x) * 4;
+        const outOffset = y * width + x;
         
         // Mask normalization (0 or 1)
         const maskVal = maskData[offset] / 255.0; // using R channel
         const m = maskVal >= 0.5 ? 1.0 : 0.0;
-        maskFloat[outOffset] = m;
+        floatMaskData[outOffset] = m;
         
         // AOT Image Normalization: [-1.0, 1.0] -> / 127.5 - 1.0
         // Apply (1 - mask) to black out text
-        imgFloat[0 * (newH * newW) + outOffset] = ((imgData[offset] / 127.5) - 1.0) * (1.0 - m);     // R
-        imgFloat[1 * (newH * newW) + outOffset] = ((imgData[offset + 1] / 127.5) - 1.0) * (1.0 - m); // G
-        imgFloat[2 * (newH * newW) + outOffset] = ((imgData[offset + 2] / 127.5) - 1.0) * (1.0 - m); // B
+        floatImgData[0 * (height * width) + outOffset] = ((imgData[offset] / 127.5) - 1.0) * (1.0 - m);     // R
+        floatImgData[1 * (height * width) + outOffset] = ((imgData[offset + 1] / 127.5) - 1.0) * (1.0 - m); // G
+        floatImgData[2 * (height * width) + outOffset] = ((imgData[offset + 2] / 127.5) - 1.0) * (1.0 - m); // B
       }
     }
 
-    // 5. Run Inference
-    const imageTensor = new ort.Tensor('float32', imgFloat, [1, 3, newH, newW]);
-    const maskTensor = new ort.Tensor('float32', maskFloat, [1, 1, newH, newW]);
+    // 4. Run Inference with dynamic axes
+    const imageTensor = new ort.Tensor('float32', floatImgData, [1, 3, height, width]);
+    const maskTensor = new ort.Tensor('float32', floatMaskData, [1, 1, height, width]);
     
     const feeds = { image: imageTensor, mask: maskTensor };
     const results = await this.session.run(feeds);
@@ -167,36 +141,29 @@ export class AotInpaintEngine implements IInpaintEngine {
     const outName = this.session.outputNames[0];
     const outData = results[outName].data as Float32Array;
 
-    // 6. Denormalize, draw to 512x512 canvas, then scale back and blend
-    const outCanvas = await this.createCanvas(newW, newH);
-    const outCtx = outCanvas.getContext('2d');
-    const outImgData = outCtx.createImageData(newW, newH);
+    // 5. Denormalize directly back to original dimensions
+    const finalCanvas = await this.createCanvas(width, height);
+    const finalCtx = finalCanvas.getContext('2d');
+    const finalData = finalCtx.createImageData(width, height);
 
-    for (let y = 0; y < newH; y++) {
-      for (let x = 0; x < newW; x++) {
-        const outOffset = y * newW + x;
-        const i = (y * newW + x) * 4;
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const outOffset = y * width + x;
+        const i = (y * width + x) * 4;
         
         // Denormalize: (val + 1.0) * 127.5
-        let r = (outData[0 * (newH * newW) + outOffset] + 1.0) * 127.5;
-        let g = (outData[1 * (newH * newW) + outOffset] + 1.0) * 127.5;
-        let b = (outData[2 * (newH * newW) + outOffset] + 1.0) * 127.5;
+        let r = (outData[0 * (height * width) + outOffset] + 1.0) * 127.5;
+        let g = (outData[1 * (height * width) + outOffset] + 1.0) * 127.5;
+        let b = (outData[2 * (height * width) + outOffset] + 1.0) * 127.5;
         
-        outImgData.data[i] = Math.max(0, Math.min(255, r));
-        outImgData.data[i+1] = Math.max(0, Math.min(255, g));
-        outImgData.data[i+2] = Math.max(0, Math.min(255, b));
-        outImgData.data[i+3] = 255;
+        finalData.data[i] = Math.max(0, Math.min(255, r));
+        finalData.data[i+1] = Math.max(0, Math.min(255, g));
+        finalData.data[i+2] = Math.max(0, Math.min(255, b));
+        finalData.data[i+3] = 255;
       }
     }
     
-    outCtx.putImageData(outImgData, 0, 0);
-
-    // Scale back to original resolution
-    const finalCanvas = await this.createCanvas(width, height);
-    const finalCtx = finalCanvas.getContext('2d');
-    finalCtx.drawImage(outCanvas, 0, 0, newW, newH, 0, 0, width, height);
-    const finalData = finalCtx.getImageData(0, 0, width, height);
-
+    // Blend with original using mask
     const origData = ctx.getImageData(0, 0, width, height);
     const origMaskData = maskCtx.getImageData(0, 0, width, height);
 
