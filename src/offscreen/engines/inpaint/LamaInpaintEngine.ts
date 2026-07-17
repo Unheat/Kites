@@ -102,109 +102,172 @@ export class LamaInpaintEngine implements IInpaintEngine {
       }
     }
 
-    // 3. Resize to 512x512
-    const newW = 512;
-    const newH = 512;
-    
-    // We resize both image and mask to the 512x512 dimensions
-    const scaledImgCanvas = await this.createCanvas(newW, newH);
-    const scaledImgCtx = scaledImgCanvas.getContext('2d');
-    
-    // Workaround for mismatched node-canvas versions (ppu-paddle-ocr vs ours):
-    const tempImgCanvas = await this.createCanvas(width, height);
-    const tempImgCtx = tempImgCanvas.getContext('2d');
-    const tempImgData = tempImgCtx.createImageData(width, height);
-    tempImgData.data.set(ctx.getImageData(0, 0, width, height).data);
-    tempImgCtx.putImageData(tempImgData, 0, 0);
-    scaledImgCtx.drawImage(tempImgCanvas, 0, 0, width, height, 0, 0, newW, newH);
-    
-    const scaledMaskCanvas = await this.createCanvas(newW, newH);
-    const scaledMaskCtx = scaledMaskCanvas.getContext('2d');
-    
-    const tempMaskCanvas = await this.createCanvas(width, height);
-    const tempMaskCtx = tempMaskCanvas.getContext('2d');
-    const tempMaskData = tempMaskCtx.createImageData(width, height);
-    tempMaskData.data.set(maskCtx.getImageData(0, 0, width, height).data);
-    tempMaskCtx.putImageData(tempMaskData, 0, 0);
-    scaledMaskCtx.drawImage(tempMaskCanvas, 0, 0, width, height, 0, 0, newW, newH);
-
-    // 4. Extract data and normalize
-    const imgData = scaledImgCtx.getImageData(0, 0, newW, newH).data;
-    const maskData = scaledMaskCtx.getImageData(0, 0, newW, newH).data;
-    
-    const imgFloat = new Float32Array(1 * 3 * newH * newW);
-    const maskFloat = new Float32Array(1 * 1 * newH * newW);
-
-    for (let y = 0; y < newH; y++) {
-      for (let x = 0; x < newW; x++) {
-        const offset = (y * newW + x) * 4;
-        const outOffset = y * newW + x;
-        
-        // Mask normalization (0 or 1)
-        const maskVal = maskData[offset] / 255.0; 
-        const m = maskVal >= 0.5 ? 1.0 : 0.0;
-        maskFloat[outOffset] = m;
-        
-        // LaMa Image Normalization: [0.0, 1.0] -> / 255.0
-        // Apply (1 - mask) to black out text
-        imgFloat[0 * (newH * newW) + outOffset] = (imgData[offset] / 255.0) * (1.0 - m);     // R
-        imgFloat[1 * (newH * newW) + outOffset] = (imgData[offset + 1] / 255.0) * (1.0 - m); // G
-        imgFloat[2 * (newH * newW) + outOffset] = (imgData[offset + 2] / 255.0) * (1.0 - m); // B
+    // 3. Cluster bounding boxes for patch cropping
+    class BoundingBox {
+      constructor(public minX: number, public minY: number, public maxX: number, public maxY: number) {}
+      intersects(other: BoundingBox, padding: number): boolean {
+        return !(this.maxX + padding < other.minX - padding || 
+                 this.minX - padding > other.maxX + padding || 
+                 this.maxY + padding < other.minY - padding || 
+                 this.minY - padding > other.maxY + padding);
+      }
+      merge(other: BoundingBox) {
+        this.minX = Math.min(this.minX, other.minX);
+        this.minY = Math.min(this.minY, other.minY);
+        this.maxX = Math.max(this.maxX, other.maxX);
+        this.maxY = Math.max(this.maxY, other.maxY);
       }
     }
 
-    // 5. Run Inference
-    const imageTensor = new ort.Tensor('float32', imgFloat, [1, 3, newH, newW]);
-    const maskTensor = new ort.Tensor('float32', maskFloat, [1, 1, newH, newW]);
-    
-    const feeds = { image: imageTensor, mask: maskTensor };
-    const results = await this.session.run(feeds);
-    
-    const outName = this.session.outputNames[0];
-    const outData = results[outName].data as Float32Array;
+    const boxes: BoundingBox[] = [];
+    if (!strokeMaskCanvas && polygons && polygons.length > 0) {
+      for (const poly of polygons) {
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const pt of poly) {
+           minX = Math.min(minX, pt.x); minY = Math.min(minY, pt.y);
+           maxX = Math.max(maxX, pt.x); maxY = Math.max(maxY, pt.y);
+        }
+        boxes.push(new BoundingBox(minX, minY, maxX, maxY));
+      }
+    } else {
+       boxes.push(new BoundingBox(0, 0, width, height)); // fallback to whole image
+    }
 
-    // 6. Denormalize, draw to 512x512 canvas, then scale back and blend
-    const outCanvas = await this.createCanvas(newW, newH);
-    const outCtx = outCanvas.getContext('2d');
-    const outImgData = outCtx.createImageData(newW, newH);
-
-    for (let y = 0; y < newH; y++) {
-      for (let x = 0; x < newW; x++) {
-        const outOffset = y * newW + x;
-        const i = (y * newW + x) * 4;
-        
-        // Denormalize: val * 255.0
-        let r = outData[0 * (newH * newW) + outOffset] * 255.0;
-        let g = outData[1 * (newH * newW) + outOffset] * 255.0;
-        let b = outData[2 * (newH * newW) + outOffset] * 255.0;
-        
-        outImgData.data[i] = Math.max(0, Math.min(255, r));
-        outImgData.data[i+1] = Math.max(0, Math.min(255, g));
-        outImgData.data[i+2] = Math.max(0, Math.min(255, b));
-        outImgData.data[i+3] = 255;
+    let merged = true;
+    while (merged) {
+      merged = false;
+      for (let i = 0; i < boxes.length; i++) {
+        for (let j = i + 1; j < boxes.length; j++) {
+          if (boxes[i].intersects(boxes[j], 100)) { // 100px padding for clustering
+            boxes[i].merge(boxes[j]);
+            boxes.splice(j, 1);
+            merged = true;
+            break;
+          }
+        }
+        if (merged) break;
       }
     }
-    
-    outCtx.putImageData(outImgData, 0, 0);
 
-    // Scale back to original resolution
     const finalCanvas = await this.createCanvas(width, height);
     const finalCtx = finalCanvas.getContext('2d');
-    finalCtx.drawImage(outCanvas, 0, 0, newW, newH, 0, 0, width, height);
-    const finalData = finalCtx.getImageData(0, 0, width, height);
-
-    const origData = ctx.getImageData(0, 0, width, height);
-    const origMaskData = maskCtx.getImageData(0, 0, width, height);
-
-    for (let i = 0; i < finalData.data.length; i += 4) {
-        const m = origMaskData.data[i] >= 127 ? 1.0 : 0.0;
-        finalData.data[i] = finalData.data[i] * m + origData.data[i] * (1.0 - m);
-        finalData.data[i+1] = finalData.data[i+1] * m + origData.data[i+1] * (1.0 - m);
-        finalData.data[i+2] = finalData.data[i+2] * m + origData.data[i+2] * (1.0 - m);
-        finalData.data[i+3] = 255;
-    }
+    const tempFinalData = finalCtx.createImageData(width, height);
+    tempFinalData.data.set(ctx.getImageData(0, 0, width, height).data);
+    finalCtx.putImageData(tempFinalData, 0, 0);
     
-    finalCtx.putImageData(finalData, 0, 0);
+    const cropW = 512;
+    const cropH = 512;
+
+    for (const box of boxes) {
+      let boxW = box.maxX - box.minX;
+      let boxH = box.maxY - box.minY;
+      let size = Math.max(boxW, boxH, 128) + 64; // Force square, min 128px + 64px extra padding around text
+      let cx = box.minX + boxW / 2;
+      let cy = box.minY + boxH / 2;
+
+      let sx = Math.max(0, cx - size / 2);
+      let sy = Math.max(0, cy - size / 2);
+      
+      const patchImgCanvas = await this.createCanvas(cropW, cropH);
+      const patchImgCtx = patchImgCanvas.getContext('2d');
+      const tempPatchCanvas = await this.createCanvas(width, height);
+      const tempPatchCtx = tempPatchCanvas.getContext('2d');
+      const tempPatchData = tempPatchCtx.createImageData(width, height);
+      tempPatchData.data.set(finalCtx.getImageData(0, 0, width, height).data);
+      tempPatchCtx.putImageData(tempPatchData, 0, 0);
+      patchImgCtx.drawImage(tempPatchCanvas, sx, sy, size, size, 0, 0, cropW, cropH);
+
+      const patchMaskCanvas = await this.createCanvas(cropW, cropH);
+      const patchMaskCtx = patchMaskCanvas.getContext('2d');
+      const tempMaskCanvas = await this.createCanvas(width, height);
+      const tempMaskCtx = tempMaskCanvas.getContext('2d');
+      const tempMaskData = tempMaskCtx.createImageData(width, height);
+      tempMaskData.data.set(maskCtx.getImageData(0, 0, width, height).data);
+      tempMaskCtx.putImageData(tempMaskData, 0, 0);
+      patchMaskCtx.drawImage(tempMaskCanvas, sx, sy, size, size, 0, 0, cropW, cropH);
+
+      const imgData = patchImgCtx.getImageData(0, 0, cropW, cropH).data;
+      const patchMaskImgData = patchMaskCtx.getImageData(0, 0, cropW, cropH).data;
+      
+      const imgFloat = new Float32Array(1 * 3 * cropH * cropW);
+      const maskFloat = new Float32Array(1 * 1 * cropH * cropW);
+
+      for (let y = 0; y < cropH; y++) {
+        for (let x = 0; x < cropW; x++) {
+          const offset = (y * cropW + x) * 4;
+          const outOffset = y * cropW + x;
+          const maskVal = patchMaskImgData[offset] / 255.0; 
+          const m = maskVal >= 0.5 ? 1.0 : 0.0;
+          maskFloat[outOffset] = m;
+          imgFloat[0 * (cropH * cropW) + outOffset] = (imgData[offset] / 255.0) * (1.0 - m);
+          imgFloat[1 * (cropH * cropW) + outOffset] = (imgData[offset + 1] / 255.0) * (1.0 - m);
+          imgFloat[2 * (cropH * cropW) + outOffset] = (imgData[offset + 2] / 255.0) * (1.0 - m);
+        }
+      }
+
+      const imageTensor = new ort.Tensor('float32', imgFloat, [1, 3, cropH, cropW]);
+      const maskTensor = new ort.Tensor('float32', maskFloat, [1, 1, cropH, cropW]);
+      const feeds = { image: imageTensor, mask: maskTensor };
+      const results = await this.session.run(feeds);
+      
+      const outName = this.session.outputNames[0];
+      const outData = results[outName].data as Float32Array;
+
+      const outCanvas = await this.createCanvas(cropW, cropH);
+      const outCtx = outCanvas.getContext('2d');
+      const outImgData = outCtx.createImageData(cropW, cropH);
+
+      for (let y = 0; y < cropH; y++) {
+        for (let x = 0; x < cropW; x++) {
+          const outOffset = y * cropW + x;
+          const i = (y * cropW + x) * 4;
+          let r = outData[0 * (cropH * cropW) + outOffset] * 255.0;
+          let g = outData[1 * (cropH * cropW) + outOffset] * 255.0;
+          let b = outData[2 * (cropH * cropW) + outOffset] * 255.0;
+          outImgData.data[i] = Math.max(0, Math.min(255, r));
+          outImgData.data[i+1] = Math.max(0, Math.min(255, g));
+          outImgData.data[i+2] = Math.max(0, Math.min(255, b));
+          outImgData.data[i+3] = 255;
+        }
+      }
+      outCtx.putImageData(outImgData, 0, 0);
+
+      const scaledBackCanvas = await this.createCanvas(Math.ceil(size), Math.ceil(size));
+      const scaledBackCtx = scaledBackCanvas.getContext('2d');
+      scaledBackCtx.drawImage(outCanvas, 0, 0, cropW, cropH, 0, 0, Math.ceil(size), Math.ceil(size));
+      const scaledBackData = scaledBackCtx.getImageData(0, 0, Math.ceil(size), Math.ceil(size));
+
+      const rx = Math.round(sx);
+      const ry = Math.round(sy);
+      const rSize = Math.ceil(size);
+      
+      const startX = Math.max(0, rx);
+      const startY = Math.max(0, ry);
+      const endX = Math.min(width, rx + rSize);
+      const endY = Math.min(height, ry + rSize);
+
+      if (endX <= startX || endY <= startY) continue;
+
+      const currentData = finalCtx.getImageData(startX, startY, endX - startX, endY - startY);
+      const currentMaskData = maskCtx.getImageData(startX, startY, endX - startX, endY - startY);
+
+      for (let cy = 0; cy < endY - startY; cy++) {
+          for (let cx = 0; cx < endX - startX; cx++) {
+              const patchX = (startX - rx) + cx;
+              const patchY = (startY - ry) + cy;
+              
+              const currentIdx = (cy * (endX - startX) + cx) * 4;
+              const patchIdx = (patchY * rSize + patchX) * 4;
+
+              const m = currentMaskData.data[currentIdx] >= 127 ? 1.0 : 0.0;
+              
+              currentData.data[currentIdx] = currentData.data[currentIdx] * (1.0 - m) + scaledBackData.data[patchIdx] * m;
+              currentData.data[currentIdx+1] = currentData.data[currentIdx+1] * (1.0 - m) + scaledBackData.data[patchIdx+1] * m;
+              currentData.data[currentIdx+2] = currentData.data[currentIdx+2] * (1.0 - m) + scaledBackData.data[patchIdx+2] * m;
+          }
+      }
+      finalCtx.putImageData(currentData, startX, startY);
+    }
 
     return await this.canvasToArrayBuffer(finalCanvas);
   }
