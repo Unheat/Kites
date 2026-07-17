@@ -37,7 +37,7 @@ export class TeleaInpaintEngine implements IInpaintEngine {
 
     maskCtx.fillStyle = '#ffffff';
     maskCtx.strokeStyle = '#ffffff';
-    maskCtx.lineWidth = 4; // Dilation amount (2px outward inflation)
+    maskCtx.lineWidth = 12; // Dilation amount (6px outward inflation)
     maskCtx.lineJoin = 'round';
     
     for (const poly of maskPolygons) {
@@ -63,11 +63,10 @@ export class TeleaInpaintEngine implements IInpaintEngine {
         if (p.y > maxY) maxY = p.y;
       }
 
-      const padding = 15; // padding for dilation + extra for FMM known pixels
-      const x = Math.max(0, Math.floor(minX) - padding);
-      const y = Math.max(0, Math.floor(minY) - padding);
-      const w = Math.min(width - x, Math.ceil(maxX - minX) + padding * 2);
-      const h = Math.min(height - y, Math.ceil(maxY - minY) + padding * 2);
+      const x = Math.max(0, Math.floor(minX));
+      const y = Math.max(0, Math.floor(minY));
+      const w = Math.min(width - x, Math.ceil(maxX - minX));
+      const h = Math.min(height - y, Math.ceil(maxY - minY));
 
       if (w <= 0 || h <= 0) continue;
 
@@ -92,9 +91,7 @@ export class TeleaInpaintEngine implements IInpaintEngine {
   private inpaintFMM(width: number, height: number, imgBytes: Uint8ClampedArray, maskBytes: Uint8ClampedArray) {
     const totalPixels = width * height;
     const state = new Uint8Array(totalPixels); // 0 = KNOWN (background), 1 = BAND (boundary), 2 = INSIDE (masked)
-    const queue = new Uint32Array(totalPixels);
-    let qHead = 0;
-    let qTail = 0;
+    const bandQueue: number[] = [];
     const radius = 3;
 
     // 1. Initialize states
@@ -120,15 +117,16 @@ export class TeleaInpaintEngine implements IInpaintEngine {
 
           if (isBoundary) {
             state[i] = 1; // BAND
-            queue[qTail++] = i;
+            bandQueue.push(i);
           }
         }
       }
     }
 
     // 3. March boundary inward
-    while (qHead < qTail) {
-      const i = queue[qHead++];
+    let qIdx = 0;
+    while (qIdx < bandQueue.length) {
+      const i = bandQueue[qIdx++];
       const x = i % width;
       const y = Math.floor(i / width);
 
@@ -170,16 +168,12 @@ export class TeleaInpaintEngine implements IInpaintEngine {
 
       state[i] = 0; // Pixel is now KNOWN
 
-      // Check direct 8-way neighbors to approximate circular expansion (Octagonal/Chebyshev blend)
+      // Check direct neighbors and add them to the queue if they are inside
       const neighbors = [
         { nx: x - 1, ny: y },
         { nx: x + 1, ny: y },
         { nx: x, ny: y - 1 },
-        { nx: x, ny: y + 1 },
-        { nx: x - 1, ny: y - 1 },
-        { nx: x + 1, ny: y - 1 },
-        { nx: x - 1, ny: y + 1 },
-        { nx: x + 1, ny: y + 1 }
+        { nx: x, ny: y + 1 }
       ];
 
       for (const n of neighbors) {
@@ -187,7 +181,7 @@ export class TeleaInpaintEngine implements IInpaintEngine {
           const ni = n.ny * width + n.nx;
           if (state[ni] === 2) {
             state[ni] = 1; // Push to BAND boundary
-            queue[qTail++] = ni;
+            bandQueue.push(ni);
           }
         }
       }
