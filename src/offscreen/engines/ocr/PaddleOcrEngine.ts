@@ -1,5 +1,5 @@
-import type { IOcrEngine, OcrResult, OcrBox } from './BaseOcrEngine';
-
+import type { IOcrEngine, OcrResult } from './BaseOcrEngine';
+import { checkWebGPUAvailability } from '../../utils/hardware';
 import { CustomPaddleDetector } from './CustomPaddleDetector';
 
 export class PaddleOcrEngine implements IOcrEngine {
@@ -21,12 +21,12 @@ export class PaddleOcrEngine implements IOcrEngine {
       const isNode = typeof window === 'undefined';
       let PaddleOcrService: any;
       let MODEL_PRESETS: any;
-      let isWebGpuAvailable: () => Promise<boolean> = async () => false;
 
       if (isNode) {
         // Node environment (Visual Unit Tests)
         console.log('[PaddleOcrEngine] Detected Node.js environment. Loading native backend...');
-        const pkg = await import('ppu-paddle-ocr');
+        // @ts-ignore - The module exists at runtime for Node
+        const pkg = await import('ppu-paddle-ocr/node');
         PaddleOcrService = pkg.PaddleOcrService;
         MODEL_PRESETS = pkg.MODEL_PRESETS;
       } else {
@@ -34,11 +34,10 @@ export class PaddleOcrEngine implements IOcrEngine {
         console.log('[PaddleOcrEngine] Detected Browser environment. Loading web backend...');
         const pkg = await import('ppu-paddle-ocr/web');
         PaddleOcrService = pkg.PaddleOcrService;
-        isWebGpuAvailable = pkg.isWebGpuAvailable;
         MODEL_PRESETS = pkg.MODEL_PRESETS;
       }
 
-      const useWebGpu = await isWebGpuAvailable();
+      const useWebGpu = await checkWebGPUAvailability();
       console.log(`[PaddleOcrEngine] WebGPU Available: ${useWebGpu}. Initializing service...`);
 
       // Explicitly declare execution providers

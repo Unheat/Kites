@@ -20,8 +20,18 @@ export interface Engine {
 
 export default function EngineDropdown({ state, updateState }: EngineDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const [isOpenInpaint, setIsOpenInpaint] = useState(false);
   const [showAddApi, setShowAddApi] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  
+  const inpaintingEngines = useMemo(() => [
+    { id: 'none', name: 'None (Bypass)', type: 'local', isDownloaded: true },
+    { id: 'simple', name: 'Simple Fill (Fast)', type: 'local', isDownloaded: true },
+    { id: 'telea', name: 'Telea Diffusion (Smooth)', type: 'local', isDownloaded: true },
+    { id: 'aot', name: 'AOT-GAN (Fast, General)', type: 'local', isDownloaded: false },
+    { id: 'lama', name: 'LaMa (High Quality, General)', type: 'local', isDownloaded: false },
+    { id: 'lama-manga', name: 'LaMa-Manga (High Quality, Comics)', type: 'local', isDownloaded: false },
+  ], []);
   
   const [baseEngines, setBaseEngines] = useState<Engine[]>([]);
   
@@ -30,14 +40,22 @@ export default function EngineDropdown({ state, updateState }: EngineDropdownPro
   }, []);
 
   const allEngines = useMemo(() => {
-    const custom: Engine[] = (state.customApis || []).map(api => ({
+    let custom: Engine[] = (state.customApis || []).map(api => ({
       id: api.id,
       name: `${api.provider}/${api.modelName}`,
       type: 'custom' as const,
       isDownloaded: true
     }));
-    return [...baseEngines, ...custom];
-  }, [baseEngines, state.customApis]);
+    
+    let combined = [...baseEngines, ...custom];
+    
+    // WebGPU Filtering Logic
+    if (state.webgpuSupported === false) {
+      combined = combined.filter(e => e.hardware !== 'WebGPU');
+    }
+    
+    return combined;
+  }, [baseEngines, state.customApis, state.webgpuSupported]);
 
   const miniSearch = useMemo(() => {
     if (allEngines.length === 0) return null;
@@ -116,10 +134,16 @@ export default function EngineDropdown({ state, updateState }: EngineDropdownPro
       <hr className="border-[var(--color-dust)] opacity-50" />
 
       {/* Engine Selection */}
-      <div>
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="text-sm font-medium">Translation Engine</h2>
-        </div>
+      <div className="flex flex-col gap-4">
+        {/* Translation Engine */}
+        <div>
+          <div className="flex items-center gap-1.5 mb-2 group relative">
+            <h2 className="text-sm font-medium">Translation Engine</h2>
+            <div className="w-4 h-4 rounded-full border border-[var(--color-dust)] flex items-center justify-center text-[10px] text-[var(--color-dust)] cursor-help">?</div>
+            <div className="absolute left-0 top-6 w-64 p-2 bg-[var(--color-ink)] text-[var(--color-paper)] text-xs rounded shadow-lg opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-50">
+              Your device {state.webgpuSupported === true ? 'supports' : 'does not support'} WebGPU acceleration. If unsupported, the system gracefully falls back to your CPU. Accuracy remains exactly the same, but processing will be slower.
+            </div>
+          </div>
 
         <div className="relative">
           <button 
@@ -209,6 +233,56 @@ export default function EngineDropdown({ state, updateState }: EngineDropdownPro
                   />
                 </div>
               )}
+            </div>
+          )}
+        </div>
+        </div>
+      </div>
+
+      {/* Inpainting Engine */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="text-sm font-medium">Inpainting Engine</h2>
+        </div>
+
+        <div className="relative">
+          <button 
+            onClick={() => setIsOpenInpaint(!isOpenInpaint)}
+            className="w-full flex items-center justify-between p-3 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md hover:border-[var(--color-ink)] transition-colors cursor-pointer"
+          >
+            <span className="font-medium truncate pr-2">
+              {inpaintingEngines.find(e => e.id === state.activeInpaintId)?.name || 'Loading...'}
+            </span>
+            <ChevronDown size={16} className={`text-[var(--color-dust)] transition-transform ${isOpenInpaint ? 'rotate-180' : ''}`} />
+          </button>
+
+          {isOpenInpaint && (
+            <div className="mt-1 bg-[var(--color-paper)] border border-[var(--color-dust)] rounded-md shadow-sm overflow-hidden flex flex-col max-h-[350px] absolute w-full z-10">
+              <div className="overflow-y-auto flex-1 p-1 custom-scrollbar">
+                {inpaintingEngines.map((engine) => (
+                  <button
+                    key={engine.id}
+                    onClick={() => {
+                      updateState({ activeInpaintId: engine.id });
+                      setIsOpenInpaint(false);
+                    }}
+                    className={`w-full flex items-center justify-between p-2 text-left rounded-sm cursor-pointer ${
+                      state.activeInpaintId === engine.id ? 'bg-[var(--color-vellum)] text-[var(--color-editorial)] font-semibold' : 'hover:bg-[var(--color-vellum)]'
+                    }`}
+                  >
+                    <div className="flex flex-col overflow-hidden">
+                      <span className="truncate pr-2 text-sm">{engine.name}</span>
+                    </div>
+                    <div className="flex-shrink-0 ml-2">
+                      {state.activeInpaintId === engine.id ? (
+                        <Check size={14} className="text-[var(--color-editorial)]" />
+                      ) : !engine.isDownloaded ? (
+                        <Download size={14} className="text-[var(--color-dust)] hover:text-[var(--color-ink)]" />
+                      ) : null}
+                    </div>
+                  </button>
+                ))}
+              </div>
             </div>
           )}
         </div>

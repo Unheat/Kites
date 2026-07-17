@@ -20,6 +20,13 @@ vi.mock('@mlc-ai/web-llm', () => {
   };
 });
 
+// Mock hardware check so tests can pass without real WebGPU
+vi.mock('../utils/hardware', () => {
+  return {
+    checkWebGPUAvailability: vi.fn().mockResolvedValue(true)
+  };
+});
+
 describe('WebLLMEngine Delimiter Batching', () => {
   let engine: WebLLMEngine;
 

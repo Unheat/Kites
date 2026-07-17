@@ -1,6 +1,7 @@
 import { MLCEngine, CreateMLCEngine } from '@mlc-ai/web-llm';
 import type { InitProgressCallback } from '@mlc-ai/web-llm';
 import type { ITranslationEngine } from './BaseEngine';
+import { checkWebGPUAvailability } from '../utils/hardware';
 
 export class WebLLMEngine implements ITranslationEngine {
   private engine: MLCEngine | null = null;
@@ -26,6 +27,11 @@ export class WebLLMEngine implements ITranslationEngine {
     if (this.engine) return;
     if (this.isInitializing) {
       throw new Error('Engine is already initializing.');
+    }
+    
+    const isWebGpuSupported = await checkWebGPUAvailability();
+    if (!isWebGpuSupported) {
+      throw new Error("WebGPU is not supported. Please use the ONNX CPU translation models instead.");
     }
     
     this.isInitializing = true;

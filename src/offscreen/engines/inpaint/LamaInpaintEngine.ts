@@ -1,4 +1,5 @@
 import type { IInpaintEngine, Point2D } from './BaseInpaintEngine';
+import { checkWebGPUAvailability } from '../../utils/hardware';
 
 /**
  * Tier 4 Inpainting Engine: LaMa (Large Mask Inpainting).
@@ -8,6 +9,7 @@ import type { IInpaintEngine, Point2D } from './BaseInpaintEngine';
 export class LamaInpaintEngine implements IInpaintEngine {
   private platform: any;
   private session: any = null;
+  private ort: any = null;
 
   constructor(platform: any) {
     this.platform = platform;
@@ -17,18 +19,21 @@ export class LamaInpaintEngine implements IInpaintEngine {
     if (this.session) return;
     
     const isNode = typeof window === 'undefined';
-    let ort: any;
+    const isWebGpuSupported = await checkWebGPUAvailability();
+    const providers = isWebGpuSupported ? ['webgpu', 'wasm'] : ['wasm'];
+
     if (isNode) {
-      ort = await import('onnxruntime-node');
+      this.ort = await import('onnxruntime-node');
       const modelPath = 'src/test/models/lama/lama-manga.onnx';
       try {
-        console.log(`[LamaInpaintEngine] Loading LaMa from ${modelPath}...`);
-        this.session = await ort.InferenceSession.create(modelPath);
+        console.log(`[LamaInpaintEngine] Loading LaMa from ${modelPath} using ${providers[0]}...`);
+        this.session = await this.ort.InferenceSession.create(modelPath, { executionProviders: providers });
         console.log(`[LamaInpaintEngine] LaMa loaded successfully.`);
       } catch (e) {
         console.warn(`[LamaInpaintEngine] Failed to load ONNX model:`, e);
       }
     } else {
+      this.ort = await import('onnxruntime-web');
       throw new Error('[LamaInpaintEngine] Browser loading not yet implemented');
     }
   }
@@ -72,9 +77,6 @@ export class LamaInpaintEngine implements IInpaintEngine {
       throw new Error('[LamaInpaintEngine] Model not initialized');
     }
 
-    const isNode = typeof window === 'undefined';
-    const ort = isNode ? await import('onnxruntime-node') : null;
-
     // 1. Prepare image canvas
     const imgCanvas = await this.platform.canvas.prepareCanvas(imageBuffer);
     const ctx = imgCanvas.getContext('2d');
@@ -104,7 +106,16 @@ export class LamaInpaintEngine implements IInpaintEngine {
 
     // 3. Cluster bounding boxes for patch cropping
     class BoundingBox {
-      constructor(public minX: number, public minY: number, public maxX: number, public maxY: number) {}
+      minX: number;
+      minY: number;
+      maxX: number;
+      maxY: number;
+      constructor(minX: number, minY: number, maxX: number, maxY: number) {
+        this.minX = minX;
+        this.minY = minY;
+        this.maxX = maxX;
+        this.maxY = maxY;
+      }
       intersects(other: BoundingBox, padding: number): boolean {
         return !(this.maxX + padding < other.minX - padding || 
                  this.minX - padding > other.maxX + padding || 
@@ -205,8 +216,8 @@ export class LamaInpaintEngine implements IInpaintEngine {
         }
       }
 
-      const imageTensor = new ort.Tensor('float32', imgFloat, [1, 3, cropH, cropW]);
-      const maskTensor = new ort.Tensor('float32', maskFloat, [1, 1, cropH, cropW]);
+      const imageTensor = new this.ort.Tensor('float32', imgFloat, [1, 3, cropH, cropW]);
+      const maskTensor = new this.ort.Tensor('float32', maskFloat, [1, 1, cropH, cropW]);
       const feeds = { image: imageTensor, mask: maskTensor };
       const results = await this.session.run(feeds);
       

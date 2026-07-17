@@ -18,4 +18,6 @@ export class NoneInpaintEngine implements IInpaintEngine {
     // Return a copy of the original buffer to avoid mutating any external references
     return imageBuffer.slice(0);
   }
+
+  async destroy(): Promise<void> {}
 }

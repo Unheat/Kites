@@ -22,8 +22,10 @@ export interface PopupState {
   concurrency: number;
   isDark: boolean;
   activeEngineId: string;
+  activeInpaintId: string;
   fallbackChain: string[];
   customApis: CustomApiConfig[];
+  webgpuSupported: boolean | null;
 }
 
 function PopupApp() {
@@ -36,11 +38,21 @@ function PopupApp() {
     concurrency: 3,
     isDark: true,
     activeEngineId: 'nllb-200',
+    activeInpaintId: 'lama-manga',
     fallbackChain: [],
-    customApis: []
+    customApis: [],
+    webgpuSupported: null
   });
 
   useEffect(() => {
+    // Also trigger hardware check on mount to ensure we have it if it's missing from storage
+    import('../offscreen/utils/hardware').then(({ checkWebGPUAvailability }) => {
+      checkWebGPUAvailability().then(supported => {
+        setState(prev => ({ ...prev, webgpuSupported: supported }));
+      });
+    }).catch(err => {
+      console.warn("Failed to load hardware util in popup", err);
+    });
     chrome.storage.local.get(['popupState'], (result) => {
       if (result.popupState && typeof result.popupState === 'object') {
         setState(prev => ({ ...prev, ...(result.popupState as Partial<PopupState>) }));

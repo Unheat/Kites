@@ -1,4 +1,5 @@
 import type { IInpaintEngine, Point2D } from './BaseInpaintEngine';
+import { checkWebGPUAvailability } from '../../utils/hardware';
 
 /**
  * Tier 3 Inpainting Engine: AOT-GAN.
@@ -8,6 +9,7 @@ import type { IInpaintEngine, Point2D } from './BaseInpaintEngine';
 export class AotInpaintEngine implements IInpaintEngine {
   private platform: any;
   private session: any = null;
+  private ort: any = null;
 
   constructor(platform: any) {
     this.platform = platform;
@@ -19,19 +21,22 @@ export class AotInpaintEngine implements IInpaintEngine {
     // In our test environment, we load it via onnxruntime-node.
     // In production extension, it will be onnxruntime-web.
     const isNode = typeof window === 'undefined';
-    let ort: any;
+    const isWebGpuSupported = await checkWebGPUAvailability();
+    const providers = isWebGpuSupported ? ['webgpu', 'wasm'] : ['wasm'];
+
     if (isNode) {
-      ort = await import('onnxruntime-node');
+      this.ort = await import('onnxruntime-node');
       // For Node, we load the locally cached model from our visual test runner.
       const modelPath = 'src/test/models/aot/aotgan.onnx';
       try {
-        console.log(`[AotInpaintEngine] Loading AOT-GAN from ${modelPath}...`);
-        this.session = await ort.InferenceSession.create(modelPath);
+        console.log(`[AotInpaintEngine] Loading AOT-GAN from ${modelPath} using ${providers[0]}...`);
+        this.session = await this.ort.InferenceSession.create(modelPath, { executionProviders: providers });
         console.log(`[AotInpaintEngine] AOT-GAN loaded successfully.`);
       } catch (e) {
         console.warn(`[AotInpaintEngine] Failed to load ONNX model:`, e);
       }
     } else {
+      this.ort = await import('onnxruntime-web');
       // Extension loading logic goes here (fetching from IndexedDB/Cache)
       throw new Error('[AotInpaintEngine] Browser loading not yet implemented');
     }
@@ -75,9 +80,6 @@ export class AotInpaintEngine implements IInpaintEngine {
     if (!this.session) {
       throw new Error('[AotInpaintEngine] Model not initialized');
     }
-
-    const isNode = typeof window === 'undefined';
-    const ort = isNode ? await import('onnxruntime-node') : null; // Temp workaround
 
     // 1. Prepare image canvas
     const imgCanvas = await this.platform.canvas.prepareCanvas(imageBuffer);
@@ -132,8 +134,8 @@ export class AotInpaintEngine implements IInpaintEngine {
     }
 
     // 4. Run Inference with dynamic axes
-    const imageTensor = new ort.Tensor('float32', floatImgData, [1, 3, height, width]);
-    const maskTensor = new ort.Tensor('float32', floatMaskData, [1, 1, height, width]);
+    const imageTensor = new this.ort.Tensor('float32', floatImgData, [1, 3, height, width]);
+    const maskTensor = new this.ort.Tensor('float32', floatMaskData, [1, 1, height, width]);
     
     const feeds = { image: imageTensor, mask: maskTensor };
     const results = await this.session.run(feeds);
