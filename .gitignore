@@ -28,3 +28,9 @@ docs
 .env
 PaddleOCR
 test/
+
+# Python & ML Models
+venv/
+*.ckpt
+*.pth
+__pycache__/
