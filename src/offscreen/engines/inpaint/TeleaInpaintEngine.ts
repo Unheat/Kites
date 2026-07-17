@@ -1,5 +1,4 @@
 import type { IInpaintEngine, Point2D } from './BaseInpaintEngine';
-import { Binarizer } from './Binarizer';
 
 /**
  * Tier 2 Inpainting Engine: Mathematical Fast Marching Method (FMM) Diffusion.
@@ -30,9 +29,27 @@ export class TeleaInpaintEngine implements IInpaintEngine {
       return imageBuffer;
     }
 
-    // 2. Generate the precise global stroke-level mask canvas
-    const maskCanvas = Binarizer.extractStrokeMask(this.platform, sourceCanvas, maskPolygons);
+    // 2. Generate an inflated solid mask canvas
+    const maskCanvas = await this.platform.canvas.prepareCanvas(imageBuffer);
     const maskCtx = maskCanvas.getContext('2d');
+    maskCtx.fillStyle = '#000000';
+    maskCtx.fillRect(0, 0, width, height);
+
+    maskCtx.fillStyle = '#ffffff';
+    maskCtx.strokeStyle = '#ffffff';
+    maskCtx.lineWidth = 12; // Dilation amount (6px outward inflation)
+    maskCtx.lineJoin = 'round';
+    
+    for (const poly of maskPolygons) {
+      maskCtx.beginPath();
+      maskCtx.moveTo(poly[0].x, poly[0].y);
+      for (let j = 1; j < poly.length; j++) {
+        maskCtx.lineTo(poly[j].x, poly[j].y);
+      }
+      maskCtx.closePath();
+      maskCtx.fill();
+      maskCtx.stroke(); // Inflates the edges to swallow the grey anti-aliasing
+    }
 
     // 3. Process each bounding box locally
     for (const poly of maskPolygons) {

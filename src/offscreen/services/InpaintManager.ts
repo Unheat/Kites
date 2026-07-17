@@ -5,7 +5,6 @@ import { AotInpaintEngine } from '../engines/inpaint/AotInpaintEngine';
 import { LamaInpaintEngine } from '../engines/inpaint/LamaInpaintEngine';
 import { NoneInpaintEngine } from '../engines/inpaint/NoneInpaintEngine';
 import { OriginalInpaintEngine } from '../engines/inpaint/OriginalInpaintEngine';
-import { Binarizer } from '../engines/inpaint/Binarizer';
 
 export type InpaintTier = 'simple' | 'telea' | 'aot' | 'lama' | 'none' | 'original';
 
@@ -16,12 +15,9 @@ export type InpaintTier = 'simple' | 'telea' | 'aot' | 'lama' | 'none' | 'origin
 export class InpaintManager {
   private platform: any = null;
   private engines: Map<InpaintTier, IInpaintEngine> = new Map();
-  private binarizer: Binarizer;
   private isInitialized = false;
 
-  constructor() {
-    this.binarizer = new Binarizer();
-  }
+  constructor() {}
 
   /**
    * Initializes the platform abstraction provider dynamically.
