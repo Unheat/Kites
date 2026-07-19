@@ -20,7 +20,7 @@ const mockChromeStorageGet = vi.fn();
   },
 } as any;
 
-// 2. Mock the WebLLMEngine using an ES6 class so it can be 'new'ed
+// 2. Mock the Engines
 vi.mock('../engines/WebLLMEngine', () => {
   return {
     WebLLMEngine: class {
@@ -36,12 +36,58 @@ vi.mock('../engines/WebLLMEngine', () => {
           throw new Error('Fatal API Error');
         }
         if (mocks.failFirstTranslate && mocks.engineCounter === 1) {
-          throw new Error('WebGPU OOM Crash');
+          throw new Error('Crash');
         }
         return mocks.engineCounter === 1 ? ['Mock translated text'] : ['Mock translated from fallback'];
       });
       destroy = vi.fn().mockResolvedValue(undefined);
-    },
+    }
+  };
+});
+
+vi.mock('../engines/ChromeTranslatorEngine', () => {
+  return {
+    ChromeTranslatorEngine: class {
+      id = 'chrome-translator';
+      constructor() {
+        mocks.engineCounter++;
+        mocks.instantiatedIds.push('chrome-translator');
+      }
+      init = vi.fn().mockResolvedValue(undefined);
+      translate = vi.fn().mockImplementation(async () => {
+        if (mocks.failAllTranslate) {
+          throw new Error('Fatal API Error');
+        }
+        if (mocks.failFirstTranslate && mocks.engineCounter === 1) {
+          throw new Error('Crash');
+        }
+        return mocks.engineCounter === 1 ? ['Mock translated text'] : ['Mock translated from fallback'];
+      });
+      destroy = vi.fn().mockResolvedValue(undefined);
+    }
+  };
+});
+
+vi.mock('../engines/TransformersEngine', () => {
+  return {
+    TransformersEngine: class {
+      id = 'transformers';
+      constructor() {
+        mocks.engineCounter++;
+        mocks.instantiatedIds.push('transformers');
+      }
+      init = vi.fn().mockResolvedValue(undefined);
+      translate = vi.fn().mockImplementation(async () => {
+        if (mocks.failAllTranslate) {
+          throw new Error('Fatal API Error');
+        }
+        if (mocks.failFirstTranslate && mocks.engineCounter === 1) {
+          throw new Error('Crash');
+        }
+        return mocks.engineCounter === 1 ? ['Mock translated text'] : ['Mock translated from fallback'];
+      });
+      destroy = vi.fn().mockResolvedValue(undefined);
+    }
   };
 });
 
@@ -60,8 +106,8 @@ describe('TranslationManager Waterfall Logic', () => {
   it('should successfully translate using the primary engine without falling back', async () => {
     mockChromeStorageGet.mockResolvedValue({
       popupState: {
-        activeEngineId: 'engineA',
-        fallbackChain: ['engineB']
+        activeEngineId: 'chrome-translator',
+        fallbackChain: ['transformers']
       }
     });
 
@@ -69,14 +115,14 @@ describe('TranslationManager Waterfall Logic', () => {
     
     expect(result).toEqual(['Mock translated text']);
     expect(mocks.engineCounter).toBe(1);
-    expect(mocks.instantiatedIds[0]).toBe('engineA');
+    expect(mocks.instantiatedIds[0]).toBe('chrome-translator');
   });
 
   it('should fallback to the next engine if the primary engine throws an error', async () => {
     mockChromeStorageGet.mockResolvedValue({
       popupState: {
-        activeEngineId: 'engineA',
-        fallbackChain: ['engineB']
+        activeEngineId: 'chrome-translator',
+        fallbackChain: ['transformers']
       }
     });
 
@@ -86,14 +132,14 @@ describe('TranslationManager Waterfall Logic', () => {
     
     expect(result).toEqual(['Mock translated from fallback']);
     expect(mocks.engineCounter).toBe(2);
-    expect(mocks.instantiatedIds).toEqual(['engineA', 'engineB']);
+    expect(mocks.instantiatedIds).toEqual(['chrome-translator', 'transformers']);
   });
 
   it('should throw an error if all engines in the waterfall fail', async () => {
     mockChromeStorageGet.mockResolvedValue({
       popupState: {
-        activeEngineId: 'engineA',
-        fallbackChain: ['engineB']
+        activeEngineId: 'chrome-translator',
+        fallbackChain: ['transformers']
       }
     });
 
@@ -101,6 +147,6 @@ describe('TranslationManager Waterfall Logic', () => {
 
     await expect(manager.processTranslation(['Hello'])).rejects.toThrow('All engines in the waterfall chain failed.');
     expect(mocks.engineCounter).toBe(2);
-    expect(mocks.instantiatedIds).toEqual(['engineA', 'engineB']);
+    expect(mocks.instantiatedIds).toEqual(['chrome-translator', 'transformers']);
   });
 });

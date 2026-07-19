@@ -1,5 +1,7 @@
 import type { ITranslationEngine } from '../engines/BaseEngine';
 import { WebLLMEngine } from '../engines/WebLLMEngine';
+import { ChromeTranslatorEngine } from '../engines/ChromeTranslatorEngine';
+import { TransformersEngine } from '../engines/TransformersEngine';
 import type { PopupState } from '../../popup/index';
 
 export class TranslationManager {
@@ -85,7 +87,14 @@ export class TranslationManager {
     
     // For now, assume all local WebLLM models can just be passed to WebLLMEngine.
     // In the future, we will check if it's ONNX, Cloud, or UserAPI based on the registry.
-    const engine = new WebLLMEngine(engineId);
+    let engine: ITranslationEngine;
+    if (engineId === 'chrome-translator') {
+      engine = new ChromeTranslatorEngine();
+    } else if (engineId === 'transformers') {
+      engine = new TransformersEngine();
+    } else {
+      engine = new WebLLMEngine(engineId);
+    }
     
     await engine.init();
     

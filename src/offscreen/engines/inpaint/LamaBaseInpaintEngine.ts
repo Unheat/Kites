@@ -1,5 +1,6 @@
 import type { IInpaintEngine, Point2D } from './BaseInpaintEngine';
 import { checkWebGPUAvailability } from '../../utils/hardware';
+import { inpaintRegistry } from './inpaintRegistry';
 
 /**
  * Tier 4 Inpainting Engine: LaMa (Large Mask Inpainting).
@@ -47,8 +48,44 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
       }
     } else {
       this.ort = await import('onnxruntime-web');
-      throw new Error('[LamaBaseInpaintEngine] Browser loading not yet implemented');
+      const modelId = this.getModelId();
+      const registryEntry = inpaintRegistry[modelId];
+      if (!registryEntry) {
+        throw new Error(`[LamaBaseInpaintEngine] Model ID ${modelId} not found in registry.`);
+      }
+
+      console.log(`[LamaBaseInpaintEngine] Fetching model ${modelId} from ${registryEntry.onnxUrl}`);
+      
+      try {
+        const fetchOptions: RequestInit = { cache: 'force-cache' };
+        const onnxResponse = await fetch(registryEntry.onnxUrl, fetchOptions);
+        if (!onnxResponse.ok) throw new Error(`Failed to fetch ONNX: ${onnxResponse.statusText}`);
+        const onnxBuffer = await onnxResponse.arrayBuffer();
+
+        const sessionOptions: any = { 
+          executionProviders: providers,
+          logSeverityLevel: 3 
+        };
+
+        if (registryEntry.dataUrl) {
+          console.log(`[LamaBaseInpaintEngine] Fetching external data for ${modelId} from ${registryEntry.dataUrl}`);
+          const dataResponse = await fetch(registryEntry.dataUrl, fetchOptions);
+          if (!dataResponse.ok) throw new Error(`Failed to fetch ONNX data: ${dataResponse.statusText}`);
+          const dataBuffer = await dataResponse.arrayBuffer();
+          sessionOptions.externalData = [{ data: dataBuffer, path: `${modelId}.data` }];
+        }
+
+        this.session = await this.ort.InferenceSession.create(onnxBuffer, sessionOptions);
+        console.log(`[LamaBaseInpaintEngine] Browser model ${modelId} loaded successfully with ${providers[0]}.`);
+      } catch (e) {
+        console.error(`[LamaBaseInpaintEngine] Failed to load browser ONNX model:`, e);
+        throw e;
+      }
     }
+  }
+
+  protected getModelId(): string {
+    return 'lama-base';
   }
 
   protected getModelPath(): string {

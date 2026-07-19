@@ -11,6 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@huggingface/transformers": "^4.2.0",
     "@mlc-ai/web-llm": "^0.2.84",
     "@paddleocr/paddleocr-js": "^0.4.2",
     "clipper-lib": "^6.4.2",

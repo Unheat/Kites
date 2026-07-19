@@ -6,6 +6,10 @@ import { LamaBaseInpaintEngine } from './LamaBaseInpaintEngine';
  * Runs on ONNX Runtime. 
  */
 export class AotInpaintEngine extends LamaBaseInpaintEngine {
+  protected getModelId(): string {
+    return 'aotgan';
+  }
+
   protected getModelPath(): string {
     return 'src/test/models/aot/aotgan.onnx';
   }

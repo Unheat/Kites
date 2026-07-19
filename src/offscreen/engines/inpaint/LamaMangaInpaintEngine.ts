@@ -6,6 +6,10 @@ import { LamaBaseInpaintEngine } from './LamaBaseInpaintEngine';
  * Runs on ONNX Runtime. Requires ~207MB download.
  */
 export class LamaMangaInpaintEngine extends LamaBaseInpaintEngine {
+  protected getModelId(): string {
+    return 'lama-manga';
+  }
+
   protected getModelPath(): string {
     return 'src/test/models/lama/lama-manga.onnx';
   }

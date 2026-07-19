@@ -1,0 +1,41 @@
+name: Validate Inpaint Registry URLs
+
+on:
+  push:
+    branches: [ "main", "feature/*" ]
+  pull_request:
+    branches: [ "main" ]
+  schedule:
+    - cron: '0 0 * * 0' # Run weekly on Sundays
+
+jobs:
+  validate-urls:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract and Validate URLs
+        run: |
+          # Extract URLs from inpaintRegistry.ts
+          URLS=$(grep -o "https://huggingface.co/[^\']*'*" src/offscreen/engines/inpaint/inpaintRegistry.ts | tr -d "'")
+          
+          echo "Found URLs to validate:"
+          echo "$URLS"
+          
+          FAILED=0
+          
+          for URL in $URLS; do
+            echo "Checking $URL..."
+            # -s: silent, -f: fail on error, -I: fetch headers only (HEAD request)
+            if ! curl -s -f -I "$URL" > /dev/null; then
+              echo "❌ FAILED: $URL is unreachable or returned non-200 status."
+              FAILED=1
+            else
+              echo "✅ OK: $URL"
+            fi
+          done
+          
+          if [ $FAILED -eq 1 ]; then
+            echo "One or more URLs failed validation."
+            exit 1
+          fi
