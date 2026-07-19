@@ -17,7 +17,7 @@ export class SimpleInpaintEngine implements IInpaintEngine {
     return Promise.resolve();
   }
 
-  async inpaint(imageBuffer: ArrayBuffer, maskPolygons: Point2D[][]): Promise<ArrayBuffer> {
+  async inpaint(imageBuffer: ArrayBuffer, maskPolygons: Point2D[][], strokeMaskCanvas?: any): Promise<ArrayBuffer> {
     // 1. Prepare canvas containing the source image
     const canvas = await this.platform.canvas.prepareCanvas(imageBuffer);
     const ctx = canvas.getContext('2d');
@@ -52,38 +52,74 @@ export class SimpleInpaintEngine implements IInpaintEngine {
       const imgData = ctx.getImageData(x, y, w, h);
       const pixels = imgData.data;
 
-      // Sample pixels on the outer perimeter of the crop
-      let rSum = 0, gSum = 0, bSum = 0;
-      let count = 0;
-
-      for (let i = 0; i < w * h; i++) {
-        const pxX = i % w;
-        const pxY = Math.floor(i / w);
-
-        // Check if pixel lies on the 1-pixel boundary
-        if (pxX === 0 || pxX === w - 1 || pxY === 0 || pxY === h - 1) {
-          const idx = i * 4;
-          rSum += pixels[idx];
-          gSum += pixels[idx + 1];
-          bSum += pixels[idx + 2];
-          count++;
+      // 2. Sample average background color
+      let maskImgData;
+      if (strokeMaskCanvas) {
+        try {
+          const maskCtx = strokeMaskCanvas.getContext('2d');
+          maskImgData = maskCtx.getImageData(x, y, w, h);
+        } catch (e) {
+          // Fallback for ppu-paddle-ocr CanvasElement wrapper
+          const maskCtx = strokeMaskCanvas.ctx || strokeMaskCanvas.getContext('2d');
+          maskImgData = maskCtx.getImageData(x, y, w, h);
         }
       }
 
-      // Compute average boundary color
+      // Generate a polygon mask to restrict sampling strictly to inside the text bubble
+      const polyCanvas = this.platform.createCanvas(w, h);
+      const polyCtx = polyCanvas.getContext('2d');
+      polyCtx.fillStyle = '#FFFFFF';
+      polyCtx.beginPath();
+      polyCtx.moveTo(poly[0].x - x, poly[0].y - y);
+      for (let j = 1; j < poly.length; j++) {
+        polyCtx.lineTo(poly[j].x - x, poly[j].y - y);
+      }
+      polyCtx.closePath();
+      polyCtx.fill();
+      const polyData = polyCtx.getImageData(0, 0, w, h).data;
+
+      let rSum = 0, gSum = 0, bSum = 0, count = 0;
+      for (let i = 0; i < w * h; i++) {
+        const idx = i * 4;
+        
+        // Pixel must be strictly inside the OCR polygon
+        if (polyData[idx] > 0) {
+          // If we have a text mask, strictly exclude the text pixels from the average
+          if (!maskImgData || maskImgData.data[idx] === 0) {
+            rSum += pixels[idx];
+            gSum += pixels[idx + 1];
+            bSum += pixels[idx + 2];
+            count++;
+          }
+        }
+      }
+
+      // Compute average background color
       const r = count > 0 ? Math.round(rSum / count) : 255;
       const g = count > 0 ? Math.round(gSum / count) : 255;
       const b = count > 0 ? Math.round(bSum / count) : 255;
 
       // 3. Fill the polygon path with the sampled color
-      ctx.fillStyle = `rgb(${r},${g},${b})`;
-      ctx.beginPath();
-      ctx.moveTo(poly[0].x, poly[0].y);
-      for (let j = 1; j < poly.length; j++) {
-        ctx.lineTo(poly[j].x, poly[j].y);
+      if (maskImgData) {
+        for (let i = 0; i < w * h; i++) {
+          if (maskImgData.data[i * 4] > 127) { // If mask pixel is white
+            const idx = i * 4;
+            pixels[idx] = r;
+            pixels[idx + 1] = g;
+            pixels[idx + 2] = b;
+          }
+        }
+        ctx.putImageData(imgData, x, y);
+      } else {
+        ctx.fillStyle = `rgb(${r},${g},${b})`;
+        ctx.beginPath();
+        ctx.moveTo(poly[0].x, poly[0].y);
+        for (let j = 1; j < poly.length; j++) {
+          ctx.lineTo(poly[j].x, poly[j].y);
+        }
+        ctx.closePath();
+        ctx.fill();
       }
-      ctx.closePath();
-      ctx.fill();
     }
 
     // 4. Return clean canvas image data as an ArrayBuffer

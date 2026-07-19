@@ -4,6 +4,7 @@ import type { Point2D } from './BaseInpaintEngine';
  * Extracts a refined text stroke mask for the given image canvas.
  * Implements a pure JS grayscale + Otsu thresholding + polygon clip masking pipeline.
  */
+const PADDING_RATIO = 0.1; // Dynamic padding ratio for Circular Dilation
 export class Binarizer {
   /**
    * Generates a binary mask of the same width and height as the source image,
@@ -136,26 +137,37 @@ export class Binarizer {
           tempImgBytes[idx] = 0;
           tempImgBytes[idx + 1] = 0;
           tempImgBytes[idx + 2] = 0;
-          tempImgBytes[idx + 3] = 255;
+          tempImgBytes[idx + 3] = 0; // Transparent background for dilation
         }
       }
       tempCtx.putImageData(tempImgData, 0, 0);
 
-      // 6. Draw binarized strokes onto global mask canvas respecting the polygon boundary clipping path
-      maskCtx.save();
-      maskCtx.beginPath();
-      maskCtx.moveTo(poly[0].x, poly[0].y);
+      // 6. Clip the binarized source to the exact polygon before dilation, so we don't pick up noise outside the text area
+      tempCtx.globalCompositeOperation = 'destination-in';
+      tempCtx.beginPath();
+      tempCtx.moveTo(poly[0].x - x, poly[0].y - y);
       for (let p = 1; p < poly.length; p++) {
-        maskCtx.lineTo(poly[p].x, poly[p].y);
+        tempCtx.lineTo(poly[p].x - x, poly[p].y - y);
       }
-      maskCtx.closePath();
-      maskCtx.clip();
+      tempCtx.closePath();
+      tempCtx.fill();
+      tempCtx.globalCompositeOperation = 'source-over'; // restore
 
-      // drawImage respects the clipping path
-      maskCtx.drawImage(tempCanvas, x, y);
-      maskCtx.restore();
+      // 7. Dynamic Circular Dilation (mimicking OpenCV cv2.dilate with MORPH_ELLIPSE)
+      // Cotrans dynamically sets dilate_size based on text size: dilate_size = int(text_size * 0.3)
+      // Since padding is radius, padding = text_size * 0.15
+      const dynamicPadding = Math.max(Math.floor(Math.min(w, h) * PADDING_RATIO), 1);
+
+      const radiusSq = dynamicPadding * dynamicPadding;
+      for (let dy = -dynamicPadding; dy <= dynamicPadding; dy++) {
+        for (let dx = -dynamicPadding; dx <= dynamicPadding; dx++) {
+          if (dx * dx + dy * dy <= radiusSq) {
+            maskCtx.drawImage(tempCtx.canvas || tempCanvas, x + dx, y + dy);
+          }
+        }
+      }
     }
 
-    return maskCanvas;
+    return maskCtx.canvas || maskCanvas;
   }
 }

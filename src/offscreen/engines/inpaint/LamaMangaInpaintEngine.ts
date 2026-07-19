@@ -9,4 +9,8 @@ export class LamaMangaInpaintEngine extends LamaBaseInpaintEngine {
   protected getModelPath(): string {
     return 'src/test/models/lama/lama-manga.onnx';
   }
+
+  protected denormalizeImagePixel(value: number): number {
+    return value * 255.0;
+  }
 }

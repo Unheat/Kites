@@ -60,7 +60,7 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
   }
 
   protected denormalizeImagePixel(value: number): number {
-    return value * 255.0;
+    return value;
   }
 
   private async createCanvas(width: number, height: number): Promise<any> {
@@ -76,18 +76,17 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
   }
 
   private async canvasToArrayBuffer(canvas: any): Promise<ArrayBuffer> {
-    const isNode = typeof window === 'undefined';
-    if (isNode) {
-      const buf = canvas.toBuffer('image/png');
-      return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+    if (typeof window === 'undefined') {
+      return new Uint8Array(canvas.toBuffer('image/jpeg', { quality: 1.0 })).buffer;
     } else {
-      // Use the modern native Promise-based API (Chrome 76+) instead of the
-      // legacy FileReader callback pattern — faster and simpler.
-      return new Promise<ArrayBuffer>((resolve, reject) => {
-        canvas.toBlob((blob: Blob | null) => {
-          if (!blob) return reject(new Error('[LamaBaseInpaintEngine] Canvas to Blob failed'));
-          blob.arrayBuffer().then(resolve).catch(reject);
-        }, 'image/png');
+      return new Promise((resolve, reject) => {
+        canvas.toBlob((blob: Blob) => {
+          if (!blob) return reject(new Error('Canvas to Blob failed'));
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as ArrayBuffer);
+          reader.onerror = reject;
+          reader.readAsArrayBuffer(blob);
+        }, 'image/jpeg', 1.0);
       });
     }
   }
@@ -95,7 +94,7 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
   async inpaint(
     imageBuffer: ArrayBuffer,
     polygons: Point2D[][],
-    strokeMaskCanvas?: OffscreenCanvas | HTMLCanvasElement
+    strokeMaskCanvas?: any
   ): Promise<ArrayBuffer> {
     if (!this.session) {
       throw new Error('[LamaBaseInpaintEngine] Model not initialized');
@@ -112,7 +111,21 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
     const maskCtx = maskCanvas.getContext('2d');
     
     if (strokeMaskCanvas) {
-      maskCtx.drawImage(strokeMaskCanvas, 0, 0);
+      try {
+        maskCtx.drawImage(strokeMaskCanvas, 0, 0);
+      } catch (e) {
+        // Fallback: If strokeMaskCanvas is a wrapper (e.g. CanvasElement from ppu-paddle-ocr)
+        // or node-canvas rejects it, use ImageData instead.
+        const w = strokeMaskCanvas.width || width;
+        const h = strokeMaskCanvas.height || height;
+        const strokeCtx = strokeMaskCanvas.getContext('2d');
+        const imgData = strokeCtx.getImageData(0, 0, w, h);
+        
+        // Ensure it's a native ImageData object to avoid TypeError in node-canvas
+        const nativeImgData = maskCtx.createImageData(w, h);
+        nativeImgData.data.set(imgData.data);
+        maskCtx.putImageData(nativeImgData, 0, 0);
+      }
     } else {
       maskCtx.fillStyle = 'black';
       maskCtx.fillRect(0, 0, width, height);

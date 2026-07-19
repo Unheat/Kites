@@ -18,7 +18,7 @@ async function runVisualTest() {
   console.log('--- Starting OCR Visual Integration Test ---');
   
   const testImgDir = path.join(__dirname, 'test-img');
-  const resultDir = path.join(__dirname, 'result');
+  const resultDir = path.join(__dirname, 'result', 'ocr');
   
   if (!fs.existsSync(resultDir)) {
     fs.mkdirSync(resultDir, { recursive: true });
@@ -26,11 +26,11 @@ async function runVisualTest() {
 
   // Get all images from test-img folder
   const testImages = [
-    'Messy-Fonts-35024994-1.jpg',
-    'all_tilt_text.jpg',
-    'animal-crossing-japanese-460_x2.jpg',
     'image1.jpg',
-    't3qWG.png'
+    'image2.jpg',
+    'image3.jpg',
+    'image4.jpg',
+    'image5.png'
   ];
 
   const files = fs.readdirSync(testImgDir).filter((file: string) => 
