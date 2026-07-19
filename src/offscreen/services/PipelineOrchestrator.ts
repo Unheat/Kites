@@ -15,16 +15,14 @@ export class PipelineOrchestrator {
     this.inpaintManager = new InpaintManager();
   }
 
-  /**
-   * Converts a Blob to an ArrayBuffer using the modern native API.
-   * Blob.arrayBuffer() is a native Promise-based method available in Chrome 76+
-   * and avoids the overhead of a FileReader wrapper.
-   *
-   * @param blob - The Blob to convert.
-   * @returns A promise that resolves to the ArrayBuffer.
-   */
+  // helper to convert Blob to ArrayBuffer
   private async blobToArrayBuffer(blob: Blob): Promise<ArrayBuffer> {
-    return blob.arrayBuffer();
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as ArrayBuffer);
+      reader.onerror = reject;
+      reader.readAsArrayBuffer(blob);
+    });
   }
 
   /**
@@ -37,8 +35,8 @@ export class PipelineOrchestrator {
       await db.translationJobs.update(jobId, { status: 'processing' });
 
       // 1. Fetch user config
-      const data = await chrome.storage.local.get('kites_popup_state');
-      const popupState = data.kites_popup_state as PopupState | undefined;
+      const data = await chrome.storage.local.get('popupState');
+      const popupState = data.popupState as PopupState | undefined;
       const inpaintTier = popupState?.activeInpaintId || 'none';
 
       // 2. Fetch image from DB
@@ -64,24 +62,12 @@ export class PipelineOrchestrator {
         return;
       }
 
-      // 4 + 5. Translation and Inpainting run concurrently where possible.
-      //
+      // 4 + 5. Translation and Inpainting run concurrently.
       // After OCR, Translation only needs ocrResult.texts and Inpainting only needs
       // ocrResult.polygons — they are completely independent of each other.
-      //
-      // GPU contention guard: if both the translation engine (WebLLM) and the inpainting
-      // engine (LaMa/AOT) need the GPU simultaneously, we serialize them to avoid VRAM
-      // exhaustion (WebLLM alone can hold 2–4 GB). In all other combos (cloud API,
-      // CPU-only inpainting, etc.) we run them in parallel for a free speedup.
-      const primaryEngineId: string = (popupState as any)?.activeEngineId ?? '';
-      const isWebLlmEngine = primaryEngineId.toLowerCase().includes('webllm') ||
-                             primaryEngineId.toLowerCase().includes('qwen') ||
-                             primaryEngineId.toLowerCase().includes('llama') ||
-                             primaryEngineId.toLowerCase().includes('phi') ||
-                             primaryEngineId.toLowerCase().includes('gemma');
-      const isGpuInpaint = ['lama', 'aot'].includes(inpaintTier);
-      const bothOnGpu = isWebLlmEngine && isGpuInpaint;
-
+      // 
+      // VRAM Contention: We previously serialized WebGPU models to avoid OOM.
+      // Now, users manually control WebGPU overrides per-engine via the UI.
       const shouldInpaint = inpaintTier !== 'original' && inpaintTier !== 'none' && ocrResult.polygons;
       const polygons = ocrResult.polygons as Point2D[][];
 
@@ -90,21 +76,11 @@ export class PipelineOrchestrator {
 
       if (shouldInpaint) {
         const inpaintEngine = await this.inpaintManager.getEngine(inpaintTier as InpaintTier);
-
-        if (bothOnGpu) {
-          // Sequential: protect VRAM — WebLLM already occupies most GPU memory
-          console.log(`[PipelineOrchestrator] GPU contention detected (${primaryEngineId} + ${inpaintTier}). Running translation then inpainting sequentially.`);
-          translatedTexts = await translationManager.processTranslation(ocrResult.texts, 'auto', 'English');
-          console.log(`[PipelineOrchestrator] Inpainting using tier: ${inpaintTier}`);
-          cleanedImageBuffer = await inpaintEngine.inpaint(imageBuffer, polygons);
-        } else {
-          // Parallel: translation (network/CPU) and inpainting (CPU/GPU) use different resources
-          console.log(`[PipelineOrchestrator] Running translation and inpainting in parallel (tier: ${inpaintTier}).`);
-          [translatedTexts, cleanedImageBuffer] = await Promise.all([
-            translationManager.processTranslation(ocrResult.texts, 'auto', 'English'),
-            inpaintEngine.inpaint(imageBuffer, polygons),
-          ]);
-        }
+        console.log(`[PipelineOrchestrator] Running translation and inpainting in parallel (tier: ${inpaintTier}).`);
+        [translatedTexts, cleanedImageBuffer] = await Promise.all([
+          translationManager.processTranslation(ocrResult.texts, 'auto', 'English'),
+          inpaintEngine.inpaint(imageBuffer, polygons),
+        ]);
       } else {
         // No inpainting — just translate
         console.log(`[PipelineOrchestrator] Translating ${ocrResult.texts.length} text blocks (no inpainting)...`);
@@ -119,22 +95,26 @@ export class PipelineOrchestrator {
         translatedImageBlob: cleanedBlob
       });
 
-      // Map OCR results to text block records and insert in a single bulk transaction.
-      // bulkAdd() is significantly faster than N sequential add() calls because it
-      // opens only one IndexedDB transaction instead of one per text block.
-      const textBlocksToAdd = ocrResult.texts.map((text, i) => ({
-        imageId: imageRecord.id!,
-        originalText: text,
-        translatedText: translatedTexts[i] || 'Error',
-        posX: ocrResult.boxes[i].x,
-        posY: ocrResult.boxes[i].y,
-        width: ocrResult.boxes[i].w,
-        height: ocrResult.boxes[i].h,
-        fontSize: 24, // Placeholder for now until font sizing logic is built
-        fontFamily: 'sans-serif',
-        color: '#000000'
-      }));
-      await db.textBlocks.bulkAdd(textBlocksToAdd);
+      // Map OCR results back to DB text blocks
+      const textBlocksToSave = ocrResult.texts.map((text, i) => {
+        const box = ocrResult.boxes[i];
+        return {
+          imageId: imageRecord.id!,
+          originalText: text,
+          translatedText: translatedTexts[i] || 'Error',
+          posX: box.x,
+          posY: box.y,
+          width: box.w,
+          height: box.h,
+          fontSize: 24, // Placeholder for now until font sizing logic is built
+          fontFamily: 'sans-serif',
+          color: '#000000'
+        };
+      });
+
+      if (textBlocksToSave.length > 0) {
+        await db.textBlocks.bulkAdd(textBlocksToSave);
+      }
 
       await db.translationJobs.update(jobId, { status: 'completed' });
       console.log(`[PipelineOrchestrator] Pipeline complete for job ${jobId}`);

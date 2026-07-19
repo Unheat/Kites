@@ -68,7 +68,7 @@ describe('PipelineOrchestrator', () => {
       storage: {
         local: {
           get: vi.fn().mockResolvedValue({
-            kites_popup_state: {
+            popupState: {
               activeInpaintId: 'simple'
             }
           })
@@ -84,7 +84,7 @@ describe('PipelineOrchestrator', () => {
       jobId: 100,
       rawImageBlob: new Blob(['fake image data'], { type: 'image/png' })
     };
-    (db.images.first as any).mockResolvedValue(mockImageRecord);
+    ((db.images as any).first as any).mockResolvedValue(mockImageRecord);
 
     // Spy on the blob helper to avoid FileReader issues in Node/JSDOM
     const blobSpy = vi.spyOn(pipelineOrchestrator as any, 'blobToArrayBuffer')
@@ -124,7 +124,7 @@ describe('PipelineOrchestrator', () => {
       jobId: 100,
       rawImageBlob: new Blob(['fake image data'], { type: 'image/png' })
     };
-    (db.images.first as any).mockResolvedValue(mockImageRecord);
+    ((db.images as any).first as any).mockResolvedValue(mockImageRecord);
 
     // Override OCR mock for this test
     // We have to reach into the instance, so we mock the prototype instead or use a simpler trick:

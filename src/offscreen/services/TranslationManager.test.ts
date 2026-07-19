@@ -59,7 +59,7 @@ describe('TranslationManager Waterfall Logic', () => {
 
   it('should successfully translate using the primary engine without falling back', async () => {
     mockChromeStorageGet.mockResolvedValue({
-      kites_popup_state: {
+      popupState: {
         activeEngineId: 'engineA',
         fallbackChain: ['engineB']
       }
@@ -74,7 +74,7 @@ describe('TranslationManager Waterfall Logic', () => {
 
   it('should fallback to the next engine if the primary engine throws an error', async () => {
     mockChromeStorageGet.mockResolvedValue({
-      kites_popup_state: {
+      popupState: {
         activeEngineId: 'engineA',
         fallbackChain: ['engineB']
       }
@@ -91,7 +91,7 @@ describe('TranslationManager Waterfall Logic', () => {
 
   it('should throw an error if all engines in the waterfall fail', async () => {
     mockChromeStorageGet.mockResolvedValue({
-      kites_popup_state: {
+      popupState: {
         activeEngineId: 'engineA',
         fallbackChain: ['engineB']
       }

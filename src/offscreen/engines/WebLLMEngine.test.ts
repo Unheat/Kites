@@ -27,6 +27,20 @@ vi.mock('../utils/hardware', () => {
   };
 });
 
+// Mock chrome
+(global as any).chrome = {
+  storage: {
+    local: {
+      get: vi.fn().mockResolvedValue({ 
+        popupState: { 
+          webgpuMaster: true,
+          webgpuOverrides: { llm: true }
+        } 
+      })
+    }
+  }
+};
+
 describe('WebLLMEngine Delimiter Batching', () => {
   let engine: WebLLMEngine;
 

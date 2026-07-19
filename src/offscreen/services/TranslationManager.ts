@@ -19,8 +19,8 @@ export class TranslationManager {
     console.log('[TranslationManager] Starting translation process...');
     
     // 1. Fetch the user's PopupState from chrome.storage
-    const data = await chrome.storage.local.get('kites_popup_state');
-    const popupState = data.kites_popup_state as PopupState | undefined;
+    const data = await chrome.storage.local.get('popupState');
+    const popupState = data.popupState as PopupState | undefined;
 
     if (!popupState) {
       throw new Error('No popup state found. Cannot determine which translation engine to use.');

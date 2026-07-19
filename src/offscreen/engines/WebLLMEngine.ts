@@ -30,8 +30,13 @@ export class WebLLMEngine implements ITranslationEngine {
     }
     
     const isWebGpuSupported = await checkWebGPUAvailability();
-    if (!isWebGpuSupported) {
-      throw new Error("WebGPU is not supported. Please use the ONNX CPU translation models instead.");
+    const data = await chrome.storage.local.get('popupState');
+    const state = (data.popupState as any) || {};
+    const masterOn = state.webgpuMaster === true;
+    const llmOn = state.webgpuOverrides?.llm !== false; // default true if undefined
+    
+    if (!isWebGpuSupported || !masterOn || !llmOn) {
+      throw new Error("WebGPU is disabled or not supported. Please use the ONNX CPU translation models instead.");
     }
     
     this.isInitializing = true;
