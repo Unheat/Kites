@@ -112,12 +112,12 @@ Due to browser security, `your-website.com` and `chrome-extension://...` cannot 
 
 ### E. The "Out of Bounds" Translation Problem (Auto-Scaling Font Size)
 *The Problem:* As you noted by looking at the PP-OCRv6 JSON, the OCR only gives us the bounding box coordinates (`rec_boxes` / `dt_polys`) of the *original* Japanese text. English translations are usually much longer and will overflow the original box. The OCR does not tell us what font size to use for the new text.
-*The Solution (The Manga-Translator Logic & Resolving the DOM/Canvas Contradiction):* 
-Because our architecture uses both HTML DOM Overlays (for on-page translation) and a React-Konva Canvas (for the dashboard editor), we must use two different scaling mathematical approaches to prevent text overflow mismatches:
-1. **For the Canvas Dashboard (React-Konva):** We use Canvas `context.measureText()` to wrap words and perform a binary search, shrinking the `font-size` until the total wrapped height fits perfectly inside the bounding box.
-2. **For the Content Script (HTML Overlays):** We cannot use Canvas `measureText()` because it lacks CSS engine nuance (line-height, browser-specific font rendering). Instead, we create an invisible, off-screen `<div>` with the exact width constraints of the bounding box. We inject the text, check `div.scrollHeight`, and recursively shrink the font size using a binary search until it matches the target height. This guarantees 1:1 CSS rendering accuracy.
-3. **Centering:** We center the text horizontally and vertically within the bounding box.
-*Result:* Exactly like the Python `manga-image-translator`, the text will automatically shrink and wrap to fit perfectly inside the speech bubble. Because it is a React component, the user can also manually tweak the font size via a UI slider if they don't like the automatic calculation.
+*The Solution (The Dual-Architecture Typesetting Engine):* 
+Because our architecture serves two different contexts—Live Web Translation vs. the Interactive Dashboard—we must use a dual-render approach to solve the problem of CSS layout interference (z-index clipping, sticky headers):
+1. **For the Live Web (Content Script):** We do **not** use HTML DOM Overlays because floating text nodes over the page will clip on top of sticky website navigation bars (e.g., Facebook, Twitter) and break CSS flexbox layouts. Instead, we use Canvas `context.measureText()` and `fillText()` inside the Offscreen Document to burn the English text directly into the inpainted image pixels. We then replace the website's original `<img>` `src` with the new Base64 image. This guarantees **0% chance of breaking host website layouts** while obeying all native scroll and z-index bounds.
+2. **For the Canvas Dashboard (React-Konva/DOM):** When a user opens their Dashboard to manually edit an image, they do not want baked-in pixels. The Database saves both the *clean inpainted image* and the *raw JSON text blocks*. The Dashboard uses React-Konva or DOM overlays so the user can interactively click, resize, and rewrite the text boxes over the clean image.
+3. **Centering & Rotation:** We calculate the true width, height, and angle of the speech bubble by extracting geometry from the 4-point OCR polygons (`dt_polys`). We use binary search to shrink the `font-size` until the total wrapped height fits perfectly inside the bounding box, centered horizontally and vertically.
+*Result:* The text will perfectly wrap and scale to fit inside speech bubbles. The live web remains 100% stable without DOM clipping bugs, and the Dashboard remains fully editable.
 
 ### F. Removing the Original Text Cleanly (Inpainting)
 

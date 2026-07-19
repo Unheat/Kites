@@ -5,6 +5,7 @@ import { translationManager } from './TranslationManager';
 import { InpaintManager } from './InpaintManager';
 import type { InpaintTier } from './InpaintManager';
 import type { Point2D } from '../engines/inpaint/BaseInpaintEngine';
+import { drawTextInPolygon } from '../utils/canvasTypesetting';
 
 export class PipelineOrchestrator {
   private ocrManager: OcrManager;
@@ -28,8 +29,11 @@ export class PipelineOrchestrator {
   /**
    * Reads the project from IndexedDB, extracts text using OCR, runs the TranslationManager Waterfall, 
    * cleans the image using InpaintManager, and saves the output back to the database.
+   * 
+   * Returns a base64 DataURL of the "baked" image (with translated text burned in) 
+   * for the Content Script to immediately display without layout breakage.
    */
-  async runPipeline(jobId: number): Promise<void> {
+  async runPipeline(jobId: number): Promise<string> {
     try {
       console.log(`[PipelineOrchestrator] Starting pipeline for Job ID: ${jobId}`);
       await db.translationJobs.update(jobId, { status: 'processing' });
@@ -59,7 +63,13 @@ export class PipelineOrchestrator {
           translatedImageBlob: imageRecord.rawImageBlob
         });
         await db.translationJobs.update(jobId, { status: 'completed' });
-        return;
+        
+        // Convert to base64 to return
+        const reader = new FileReader();
+        reader.readAsDataURL(imageRecord.rawImageBlob);
+        return new Promise<string>((resolve) => {
+          reader.onloadend = () => resolve(reader.result as string);
+        });
       }
 
       // 4 + 5. Translation and Inpainting run concurrently.
@@ -87,8 +97,38 @@ export class PipelineOrchestrator {
         translatedTexts = await translationManager.processTranslation(ocrResult.texts, 'auto', 'English');
       }
 
-      // 6. Save back to DB
-      console.log(`[PipelineOrchestrator] Saving results to database...`);
+      // 6. Bake the translated text into the image for the Live Web return
+      console.log(`[PipelineOrchestrator] Baking translated text into Canvas for Live Web...`);
+      
+      const cleanedBlob = new Blob([cleanedImageBuffer], { type: 'image/png' });
+      const bitmap = await createImageBitmap(cleanedBlob);
+      const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+      const ctx = canvas.getContext('2d') as OffscreenCanvasRenderingContext2D;
+      
+      // Draw the clean inpainted image
+      ctx.drawImage(bitmap, 0, 0);
+      
+      // Draw each translated text block on top
+      for (let i = 0; i < translatedTexts.length; i++) {
+        const text = translatedTexts[i];
+        const poly = polygons[i];
+        if (text && poly) {
+          // White stroke, Black text is standard for manga
+          drawTextInPolygon(ctx, text, poly, '#000000', '#FFFFFF');
+        }
+      }
+      
+      const bakedBlob = await canvas.convertToBlob({ type: 'image/png' });
+      
+      // Convert baked image to Data URL (base64) to return to Content Script
+      const bakedBase64 = await new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.readAsDataURL(bakedBlob);
+      });
+
+      // 7. Save back to DB (Dashboard gets the RAW clean image, NOT the baked one!)
+      console.log(`[PipelineOrchestrator] Saving raw clean results to database...`);
       
       const cleanedBlob = new Blob([cleanedImageBuffer], { type: 'image/png' });
       await db.images.update(imageRecord.id!, {
@@ -118,6 +158,8 @@ export class PipelineOrchestrator {
 
       await db.translationJobs.update(jobId, { status: 'completed' });
       console.log(`[PipelineOrchestrator] Pipeline complete for job ${jobId}`);
+
+      return bakedBase64;
 
     } catch (error) {
       console.error(`[PipelineOrchestrator] Pipeline failed for job ${jobId}:`, error);

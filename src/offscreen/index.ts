@@ -6,7 +6,7 @@ chrome.runtime.onMessage.addListener((message: ProcessJobMessage | any, _sender:
     
     // We run this asynchronously so we don't block the listener
     runTranslationPipeline(message.payload.jobId)
-      .then(() => sendResponse({ status: 'success' }))
+      .then((bakedBase64) => sendResponse({ status: 'success', bakedBase64 }))
       .catch((err) => sendResponse({ status: 'error', error: err.message }));
       
     return true; // Keep the message channel open for async response
@@ -87,7 +87,7 @@ async function handleCheckStatus(modelId: string): Promise<boolean> {
 /**
  * Executes the Translation Pipeline Orchestrator for a given job.
  */
-async function runTranslationPipeline(jobId: number) {
+async function runTranslationPipeline(jobId: number): Promise<string> {
   const { pipelineOrchestrator } = await import('./services/PipelineOrchestrator');
-  await pipelineOrchestrator.runPipeline(jobId);
+  return await pipelineOrchestrator.runPipeline(jobId);
 }
