@@ -21,14 +21,14 @@ vi.mock('@mlc-ai/web-llm', () => {
 });
 
 // Mock hardware check so tests can pass without real WebGPU
-vi.mock('../utils/hardware', () => {
+vi.mock('../../utils/hardware', () => {
   return {
     checkWebGPUAvailability: vi.fn().mockResolvedValue(true)
   };
 });
 
 // Mock chrome
-(global as any).chrome = {
+(globalThis as any).chrome = {
   storage: {
     local: {
       get: vi.fn().mockResolvedValue({ 
@@ -36,7 +36,8 @@ vi.mock('../utils/hardware', () => {
           webgpuMaster: true,
           webgpuOverrides: { llm: true }
         } 
-      })
+      }),
+      set: vi.fn().mockResolvedValue(undefined)
     }
   }
 };

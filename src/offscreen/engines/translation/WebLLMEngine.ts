@@ -1,7 +1,7 @@
 import { MLCEngine, CreateMLCEngine } from '@mlc-ai/web-llm';
 import type { InitProgressCallback } from '@mlc-ai/web-llm';
 import type { ITranslationEngine } from './BaseEngine';
-import { checkWebGPUAvailability } from '../utils/hardware';
+import { checkWebGPUAvailability } from '../../utils/hardware';
 
 export class WebLLMEngine implements ITranslationEngine {
   private engine: MLCEngine | null = null;

@@ -1,7 +1,7 @@
-import type { ITranslationEngine } from '../engines/BaseEngine';
-import { WebLLMEngine } from '../engines/WebLLMEngine';
-import { ChromeTranslatorEngine } from '../engines/ChromeTranslatorEngine';
-import { TransformersEngine } from '../engines/TransformersEngine';
+import type { ITranslationEngine } from '../engines/translation/BaseEngine';
+import { WebLLMEngine } from '../engines/translation/WebLLMEngine';
+import { ChromeTranslatorEngine } from '../engines/translation/ChromeTranslatorEngine';
+import { TransformersEngine } from '../engines/translation/TransformersEngine';
 import type { PopupState } from '../../popup/index';
 
 export class TranslationManager {

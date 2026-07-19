@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { TranslationManager } from './TranslationManager';
-import { WebLLMEngine } from '../engines/WebLLMEngine';
+import { WebLLMEngine } from '../engines/translation/WebLLMEngine';
 export type { WebLLMEngine };
 
 const mocks = vi.hoisted(() => ({
@@ -21,7 +21,7 @@ const mockChromeStorageGet = vi.fn();
 } as any;
 
 // 2. Mock the Engines
-vi.mock('../engines/WebLLMEngine', () => {
+vi.mock('../engines/translation/WebLLMEngine', () => {
   return {
     WebLLMEngine: class {
       id: string;
@@ -45,7 +45,7 @@ vi.mock('../engines/WebLLMEngine', () => {
   };
 });
 
-vi.mock('../engines/ChromeTranslatorEngine', () => {
+vi.mock('../engines/translation/ChromeTranslatorEngine', () => {
   return {
     ChromeTranslatorEngine: class {
       id = 'chrome-translator';
@@ -68,7 +68,7 @@ vi.mock('../engines/ChromeTranslatorEngine', () => {
   };
 });
 
-vi.mock('../engines/TransformersEngine', () => {
+vi.mock('../engines/translation/TransformersEngine', () => {
   return {
     TransformersEngine: class {
       id = 'transformers';
