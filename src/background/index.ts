@@ -1,5 +1,5 @@
 import { db } from '../db';
-import type { TranslateImageMessage, ProcessJobMessage } from '../shared/types';
+import type { TranslateImageMessage, ProcessJobMessage, StartModelDownloadMessage, CheckModelStatusMessage, PreloadActiveEngineMessage } from '../shared/types';
 
 // Magic Number: Limit concurrency to avoid network/CPU throttling
 const MAX_CONCURRENT_TRANSLATIONS = 3;
@@ -29,6 +29,35 @@ chrome.runtime.onMessage.addListener((message: TranslateImageMessage | any, _sen
       .catch((err) => sendResponse({ status: 'error', error: err instanceof Error ? err.message : String(err) }));
     return true; // Keep message channel open for async response
   }
+  
+  if (message.type === 'START_MODEL_DOWNLOAD' || message.type === 'CHECK_MODEL_STATUS' || message.type === 'PRELOAD_ACTIVE_ENGINE') {
+    console.log(`[Background] Received ${message.type}. Forwarding to Offscreen...`);
+    setupOffscreenDocument('src/offscreen/offscreen.html')
+      .then(() => {
+        chrome.runtime.sendMessage(message, (response) => {
+          sendResponse(response);
+        });
+      })
+      .catch((err) => {
+        console.error(`[Background] Failed to setup offscreen for ${message.type}:`, err);
+        sendResponse({ status: 'error', error: err instanceof Error ? err.message : String(err) });
+      });
+    return true; // Keep message channel open for async response
+  }
+});
+
+// Trigger preload on extension boot
+chrome.runtime.onStartup.addListener(() => {
+  console.log('[Background] Extension startup. Preloading active engine...');
+  setupOffscreenDocument('src/offscreen/offscreen.html').then(() => {
+    chrome.runtime.sendMessage({ type: 'PRELOAD_ACTIVE_ENGINE' } as PreloadActiveEngineMessage);
+  });
+});
+chrome.runtime.onInstalled.addListener(() => {
+  console.log('[Background] Extension installed/updated. Preloading active engine...');
+  setupOffscreenDocument('src/offscreen/offscreen.html').then(() => {
+    chrome.runtime.sendMessage({ type: 'PRELOAD_ACTIVE_ENGINE' } as PreloadActiveEngineMessage);
+  });
 });
 
 // Atomic locks

@@ -9,6 +9,28 @@ export class TranslationManager {
   private activeEngineId: string | null = null;
 
   /**
+   * Preloads the active engine into memory to avoid cold-start delays.
+   * Typically called on extension startup.
+   */
+  async preload(engineId: string): Promise<void> {
+    console.log(`[TranslationManager] Preloading engine: ${engineId}`);
+    try {
+      await this.getOrLoadEngine(engineId);
+      console.log(`[TranslationManager] Successfully preloaded engine: ${engineId}`);
+    } catch (error) {
+      console.error(`[TranslationManager] Failed to preload engine ${engineId}:`, error);
+    }
+  }
+
+  /**
+   * Explicitly triggers a model download and tracks progress.
+   */
+  async downloadModel(engineId: string, progressCallback: (info: any) => void): Promise<void> {
+    console.log(`[TranslationManager] Triggering explicit download for: ${engineId}`);
+    await this.getOrLoadEngine(engineId, progressCallback);
+  }
+
+  /**
    * Translates text blocks by reading the user's settings, trying the primary engine,
    * and falling back to the waterfall chain if an error occurs.
    * 
@@ -72,9 +94,10 @@ export class TranslationManager {
    * This is a simple factory method.
    * 
    * @param engineId - The identifier of the translation engine.
+   * @param progressCallback - Optional callback for download progress.
    * @returns A promise that resolves to the instantiated translation engine.
    */
-  private async getOrLoadEngine(engineId: string): Promise<ITranslationEngine> {
+  private async getOrLoadEngine(engineId: string, progressCallback?: (info: any) => void): Promise<ITranslationEngine> {
     // If the requested engine is already loaded, reuse it
     if (this.activeEngine && this.activeEngineId === engineId) {
       return this.activeEngine;
@@ -96,7 +119,7 @@ export class TranslationManager {
       engine = new WebLLMEngine(engineId);
     }
     
-    await engine.init();
+    await engine.init?.(progressCallback);
     
     this.activeEngine = engine;
     this.activeEngineId = engineId;

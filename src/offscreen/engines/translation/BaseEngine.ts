@@ -13,7 +13,7 @@ export interface ITranslationEngine {
    * Initializes the engine. For local models, this might involve downloading weights 
    * or compiling WebGPU shaders. For cloud models, this might just verify API keys.
    */
-  init?(): Promise<void>;
+  init?(progressCallback?: (info: any) => void): Promise<void>;
 
   /**
    * Cleans up resources used by the engine (e.g., freeing VRAM when swapping models).

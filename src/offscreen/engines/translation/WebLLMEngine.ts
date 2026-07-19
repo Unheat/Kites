@@ -23,7 +23,7 @@ export class WebLLMEngine implements ITranslationEngine {
    * @param onProgress - Optional callback function to track initialization progress.
    * @returns A promise that resolves when the engine is fully bootstrapped.
    */
-  async init(onProgress?: InitProgressCallback): Promise<void> {
+  async init(progressCallback?: (info: any) => void): Promise<void> {
     if (this.engine) return;
     if (this.isInitializing) {
       throw new Error('Engine is already initializing.');
@@ -45,14 +45,16 @@ export class WebLLMEngine implements ITranslationEngine {
       
       const initProgressCallback = (initProgress: any) => {
         console.log(`[WebLLMEngine] Initialization progress: ${Math.round(initProgress.progress * 100)}% - ${initProgress.text}`);
-        if (onProgress) {
-          onProgress(initProgress);
+        if (progressCallback) {
+          progressCallback(initProgress);
         }
       };
 
       // CreateMLCEngine automatically loads the model into WebGPU
       this.engine = await CreateMLCEngine(this.modelId, {
-        initProgressCallback: initProgressCallback
+        initProgressCallback: (progress) => {
+          initProgressCallback(progress);
+        }
       });
 
       console.log(`[WebLLMEngine] Successfully initialized model: ${this.modelId}`);

@@ -10,7 +10,7 @@ export class TransformersEngine implements ITranslationEngine {
     this.modelId = modelId;
   }
 
-  async init(onProgress?: (progress: any) => void): Promise<void> {
+  async init(progressCallback?: (progress: any) => void): Promise<void> {
     if (this.translatorPipeline) return;
     if (this.isInitializing) {
       throw new Error('Engine is already initializing.');
@@ -32,7 +32,7 @@ export class TransformersEngine implements ITranslationEngine {
       this.translatorPipeline = await pipeline('translation', this.modelId, {
         device: device,
         dtype: 'q8',
-        progress_callback: onProgress,
+        progress_callback: progressCallback,
       });
 
       console.log(`[TransformersEngine] Successfully initialized model: ${this.modelId} on ${device}`);
