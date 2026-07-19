@@ -121,14 +121,8 @@ function GlobalOverlay() {
         const targetImg = imgs.find(img => img.src === originalUrl);
         
         if (targetImg) {
-          // Swap the image natively!
-          // We apply a smooth transition for a premium feel
-          targetImg.style.transition = 'opacity 0.3s ease-in-out';
-          targetImg.style.opacity = '0';
-          setTimeout(() => {
-            targetImg.src = bakedBase64;
-            targetImg.style.opacity = '1';
-          }, 300);
+          // Instant native swap!
+          targetImg.src = bakedBase64;
         }
       }
     };
