@@ -34,11 +34,14 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
 
     if (isNode) {
       this.ort = await import('onnxruntime-node');
-      const modelPath = 'src/test/models/lama/lama-normal.onnx';
+      const modelPath = this.getModelPath();
       try {
-        console.log(`[LamaBaseInpaintEngine] Loading LaMa Base from ${modelPath} using ${providers[0]}...`);
-        this.session = await this.ort.InferenceSession.create(modelPath, { executionProviders: providers });
-        console.log(`[LamaBaseInpaintEngine] LaMa Base loaded successfully.`);
+        console.log(`[LamaBaseInpaintEngine] Loading model from ${modelPath} using ${providers[0]}...`);
+        this.session = await this.ort.InferenceSession.create(modelPath, { 
+          executionProviders: providers,
+          logSeverityLevel: 3 // Silence unused initializer warnings
+        });
+        console.log(`[LamaBaseInpaintEngine] Model loaded successfully.`);
       } catch (e) {
         console.warn(`[LamaBaseInpaintEngine] Failed to load ONNX model:`, e);
       }
@@ -46,6 +49,18 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
       this.ort = await import('onnxruntime-web');
       throw new Error('[LamaBaseInpaintEngine] Browser loading not yet implemented');
     }
+  }
+
+  protected getModelPath(): string {
+    return 'src/test/models/lama/lama-base.onnx';
+  }
+
+  protected normalizeImagePixel(value: number): number {
+    return value / 255.0;
+  }
+
+  protected denormalizeImagePixel(value: number): number {
+    return value * 255.0;
   }
 
   private async createCanvas(width: number, height: number): Promise<any> {
@@ -214,9 +229,9 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
           const maskVal = patchMaskImgData[offset] / 255.0;
           const m = maskVal >= 0.5 ? 1.0 : 0.0;
           maskFloat[outOffset] = m;
-          imgFloat[0 * (cropH * cropW) + outOffset] = (imgData[offset] / 255.0) * (1.0 - m);
-          imgFloat[1 * (cropH * cropW) + outOffset] = (imgData[offset + 1] / 255.0) * (1.0 - m);
-          imgFloat[2 * (cropH * cropW) + outOffset] = (imgData[offset + 2] / 255.0) * (1.0 - m);
+          imgFloat[0 * (cropH * cropW) + outOffset] = this.normalizeImagePixel(imgData[offset]) * (1.0 - m);
+          imgFloat[1 * (cropH * cropW) + outOffset] = this.normalizeImagePixel(imgData[offset + 1]) * (1.0 - m);
+          imgFloat[2 * (cropH * cropW) + outOffset] = this.normalizeImagePixel(imgData[offset + 2]) * (1.0 - m);
         }
       }
 
@@ -244,9 +259,9 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
         for (let x = 0; x < cropW; x++) {
           const outOffset = y * cropW + x;
           const i = (y * cropW + x) * 4;
-          let r = outData[0 * (cropH * cropW) + outOffset];
-          let g = outData[1 * (cropH * cropW) + outOffset];
-          let b = outData[2 * (cropH * cropW) + outOffset];
+          let r = this.denormalizeImagePixel(outData[0 * (cropH * cropW) + outOffset]);
+          let g = this.denormalizeImagePixel(outData[1 * (cropH * cropW) + outOffset]);
+          let b = this.denormalizeImagePixel(outData[2 * (cropH * cropW) + outOffset]);
           outImgData.data[i] = Math.max(0, Math.min(255, r));
           outImgData.data[i+1] = Math.max(0, Math.min(255, g));
           outImgData.data[i+2] = Math.max(0, Math.min(255, b));
