@@ -26,7 +26,7 @@ export class PaddleOcrEngine implements IOcrEngine {
         // Node environment (Visual Unit Tests)
         console.log('[PaddleOcrEngine] Detected Node.js environment. Loading native backend...');
         // @ts-ignore - The module exists at runtime for Node
-        const moduleName = 'ppu-paddle-ocr' + '/node';
+        const moduleName = 'ppu-paddle-ocr';
         const pkg = await import(/* @vite-ignore */ moduleName);
         PaddleOcrService = pkg.PaddleOcrService;
         MODEL_PRESETS = pkg.MODEL_PRESETS;
@@ -38,7 +38,18 @@ export class PaddleOcrEngine implements IOcrEngine {
         MODEL_PRESETS = pkg.MODEL_PRESETS;
       }
 
-      const useWebGpu = await checkWebGPUAvailability();
+      let useWebGpu = await checkWebGPUAvailability();
+      
+      if (!isNode && typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+        const data = await chrome.storage.local.get('popupState');
+        const state = (data.popupState as any) || {};
+        const masterOn = state.webgpuMaster === true;
+        const ocrOn = state.webgpuOverrides?.ocr !== false;
+        if (!masterOn || !ocrOn) {
+          useWebGpu = false;
+        }
+      }
+      
       console.log(`[PaddleOcrEngine] WebGPU Available: ${useWebGpu}. Initializing service...`);
 
       // Explicitly declare execution providers

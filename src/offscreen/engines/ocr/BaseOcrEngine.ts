@@ -5,11 +5,24 @@ export interface OcrBox {
   h: number;
 }
 
+/**
+ * Standardized output format for OCR engines.
+ * 
+ * Note: All arrays are perfectly aligned by index.
+ * For example, `texts[i]` corresponds to `boxes[i]`, `scores[i]`, and `polygons[i]`.
+ */
 export interface OcrResult {
+  /** The extracted text strings for each detected text block. */
   texts: string[];
+  
+  /** Standard axis-aligned bounding boxes for each text block. */
   boxes: OcrBox[];
+  
+  /** Optional confidence scores (0.0 to 1.0) for each text block. Can be used for filtering out low-quality predictions. */
   scores?: number[];
-  polygons?: {x: number, y: number}[][]; // Array of 4-point corners [TopLeft, TopRight, BottomRight, BottomLeft]
+  
+  /** Optional precise rotated quadrilaterals outlining the text. Array of 4-point corners [TopLeft, TopRight, BottomRight, BottomLeft]. */
+  polygons?: {x: number, y: number}[][];
 }
 
 export interface IOcrEngine {
