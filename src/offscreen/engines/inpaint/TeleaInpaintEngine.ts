@@ -18,7 +18,7 @@ export class TeleaInpaintEngine implements IInpaintEngine {
     return Promise.resolve();
   }
 
-  async inpaint(imageBuffer: ArrayBuffer, maskPolygons: Point2D[][]): Promise<ArrayBuffer> {
+  async inpaint(imageBuffer: ArrayBuffer, maskPolygons: Point2D[][], strokeMaskCanvas?: any): Promise<ArrayBuffer> {
     // 1. Prepare canvases
     const sourceCanvas = await this.platform.canvas.prepareCanvas(imageBuffer);
     const ctx = sourceCanvas.getContext('2d');

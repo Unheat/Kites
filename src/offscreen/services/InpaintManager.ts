@@ -6,7 +6,9 @@ import { LamaBaseInpaintEngine } from '../engines/inpaint/LamaBaseInpaintEngine'
 import { LamaMangaInpaintEngine } from '../engines/inpaint/LamaMangaInpaintEngine';
 import { NoneInpaintEngine } from '../engines/inpaint/NoneInpaintEngine';
 import { OriginalInpaintEngine } from '../engines/inpaint/OriginalInpaintEngine';
+import { Binarizer } from '../engines/inpaint/Binarizer';
 
+const PADDING = 60; // Padding for the Stroke Mask (for AOT and Simple)
 export type InpaintTier = 'simple' | 'telea' | 'aot' | 'lama' | 'lama-manga' | 'none' | 'original';
 
 /**
@@ -111,8 +113,18 @@ export class InpaintManager {
       return await engine.inpaint(imageBuffer, maskPolygons);
     }
 
-    // Pass polygons. (TODO: integrate the Binarizer output if engine needs it)
-    return await engine.inpaint(imageBuffer, maskPolygons);
+    // Binarizer Stroke Mask generation (only for specific engines)
+    let strokeMaskCanvas = undefined;
+    if (tier === 'simple' || tier === 'aot') {
+      const sourceCanvas = await this.platform.canvas.prepareCanvas(imageBuffer);
+      
+      // Use larger brush (padding = 6) for simple, small brush (padding = 0) for aot
+      const padding = (tier === 'simple') ? PADDING : 0;
+      strokeMaskCanvas = Binarizer.extractStrokeMask(this.platform, sourceCanvas, maskPolygons, padding);
+      console.log(`[InpaintManager] Generated stroke mask for tier: ${tier} with padding ${padding}`);
+    }
+
+    return await engine.inpaint(imageBuffer, maskPolygons, strokeMaskCanvas);
   }
 
   /**
