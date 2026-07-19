@@ -109,6 +109,34 @@ function GlobalOverlay() {
     });
   }, []);
 
+  // 2. Listen for the pub/sub IMAGE_TRANSLATED broadcast from Background Worker
+  useEffect(() => {
+    const handleMessage = (message: any) => {
+      if (message.type === 'IMAGE_TRANSLATED' && message.payload) {
+        const { originalUrl, bakedBase64 } = message.payload;
+        console.log(`[Content Script] Received translated image for: ${originalUrl}`);
+        
+        // Find the image on the page that matches the original URL
+        const imgs = Array.from(document.querySelectorAll('img'));
+        const targetImg = imgs.find(img => img.src === originalUrl);
+        
+        if (targetImg) {
+          // Swap the image natively!
+          // We apply a smooth transition for a premium feel
+          targetImg.style.transition = 'opacity 0.3s ease-in-out';
+          targetImg.style.opacity = '0';
+          setTimeout(() => {
+            targetImg.src = bakedBase64;
+            targetImg.style.opacity = '1';
+          }, 300);
+        }
+      }
+    };
+
+    chrome.runtime.onMessage.addListener(handleMessage);
+    return () => chrome.runtime.onMessage.removeListener(handleMessage);
+  }, []);
+
   useEffect(() => {
     if (mode === 'persistent') { // Consistent Mode
       const updateImages = () => {

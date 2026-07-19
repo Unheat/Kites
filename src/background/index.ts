@@ -2,7 +2,8 @@ import { db } from '../db';
 import type { TranslateImageMessage, ProcessJobMessage, StartModelDownloadMessage, CheckModelStatusMessage, PreloadActiveEngineMessage } from '../shared/types';
 
 // Magic Number: Limit concurrency to avoid network/CPU throttling
-const MAX_CONCURRENT_TRANSLATIONS = 3;
+// We now dynamically load this from user's PopupState (fallback to 3)
+// const MAX_CONCURRENT_TRANSLATIONS = 3; //pass the param from UI here
 
 chrome.contextMenus.create({
   id: 'translate-image',
@@ -14,7 +15,7 @@ chrome.contextMenus.onClicked.addListener(async (info: chrome.contextMenus.OnCli
   if (info.menuItemId === 'translate-image' && info.srcUrl) {
     console.log('[Background] Context menu clicked. Target URL:', info.srcUrl);
     try {
-      await queueTranslation(info.srcUrl);
+      await queueTranslation(info.srcUrl, _tab?.id);
     } catch (error) {
       console.error('[Background] Context menu translation failed:', error);
     }
@@ -24,7 +25,7 @@ chrome.contextMenus.onClicked.addListener(async (info: chrome.contextMenus.OnCli
 chrome.runtime.onMessage.addListener((message: TranslateImageMessage | any, _sender: chrome.runtime.MessageSender, sendResponse: (response?: any) => void) => {
   if (message.type === 'TRANSLATE_IMAGE' && message.url) {
     console.log('[Background] Received TRANSLATE_IMAGE from content script. URL:', message.url);
-    queueTranslation(message.url)
+    queueTranslation(message.url, _sender.tab?.id)
       .then(() => sendResponse({ status: 'queued' }))
       .catch((err) => sendResponse({ status: 'error', error: err instanceof Error ? err.message : String(err) }));
     return true; // Keep message channel open for async response
@@ -94,14 +95,16 @@ async function setupOffscreenDocument(path: string) {
  * Inserts the image URL into the Dexie queue as "queued" and triggers the queue loop.
  * 
  * @param {string} srcUrl - The URL of the image to queue.
+ * @param {number} tabId - The ID of the tab that requested the translation (for returning result).
  * @returns {Promise<void>}
  */
-async function queueTranslation(srcUrl: string) {
+async function queueTranslation(srcUrl: string, tabId?: number) {
   console.log('[Background] Queuing image URL:', srcUrl);
   await db.translationJobs.add({
     timestamp: Date.now(),
     status: 'queued',
-    srcUrl: srcUrl
+    srcUrl: srcUrl,
+    tabId: tabId
   });
   
   // Kick off the queue processor
@@ -118,17 +121,21 @@ async function processQueue() {
   isProcessingQueue = true;
   
   try {
+    // Dynamically fetch concurrency setting
+    const stateData = await chrome.storage.local.get('popupState');
+    const concurrency = stateData.popupState?.concurrency || 3;
+
     // Check how many are currently active
     const downloadingCount = await db.translationJobs.where('status').equals('downloading').count();
     const processingCount = await db.translationJobs.where('status').equals('processing').count();
     const activeCount = downloadingCount + processingCount;
     
-    if (activeCount >= MAX_CONCURRENT_TRANSLATIONS) {
-      console.log(`[Background] Queue at capacity (${activeCount}/${MAX_CONCURRENT_TRANSLATIONS}). Waiting...`);
+    if (activeCount >= concurrency) {
+      console.log(`[Background] Queue at capacity (${activeCount}/${concurrency}). Waiting...`);
       return;
     }
     
-    const slotsAvailable = MAX_CONCURRENT_TRANSLATIONS - activeCount;
+    const slotsAvailable = concurrency - activeCount;
     console.log(`[Background] Queue slots available: ${slotsAvailable}. Pulling next jobs...`);
     
     // Dexie implicitly orders by primary key ('id') so this fetches chronologically oldest
@@ -141,7 +148,7 @@ async function processQueue() {
       await db.translationJobs.update(job.id, { status: 'downloading' });
       
       // Fire it off asynchronously so we process all available slots in parallel
-      processImageTranslation(job.id, job.srcUrl).catch(e => {
+      processImageTranslation(job.id, job.srcUrl, job.tabId).catch(e => {
         console.error(`[Background] Unhandled error processing job ${job.id}:`, e);
       });
     }
@@ -158,10 +165,11 @@ async function processQueue() {
  * 
  * @param {number} jobId - The ID of the queued translation job.
  * @param {string} srcUrl - The URL of the image to fetch and process.
+ * @param {number} tabId - The ID of the tab that requested the translation.
  * @returns {Promise<void>} Resolves when the image is successfully saved to the database and the processing task is queued.
  * @throws {Error} Throws an error if the image fetch fails or database write fails.
  */
-async function processImageTranslation(jobId: number, srcUrl: string) {
+async function processImageTranslation(jobId: number, srcUrl: string, tabId?: number) {
   try {
     console.log(`[Background] Fetching image for job ${jobId} from URL: ${srcUrl}`);
     const response = await fetch(srcUrl);
@@ -196,6 +204,20 @@ async function processImageTranslation(jobId: number, srcUrl: string) {
       }
       
       console.log(`[Background] Offscreen completed job ${jobId} with status:`, response?.status);
+      
+      // If successful, we receive the bakedBase64 image back from the Offscreen Document
+      // Broadcast it back to the specific Tab so the Content Script can swap the image natively!
+      if (response?.status === 'success' && response?.bakedBase64 && tabId) {
+        console.log(`[Background] Sending IMAGE_TRANSLATED back to tab ${tabId}...`);
+        chrome.tabs.sendMessage(tabId, {
+          type: 'IMAGE_TRANSLATED',
+          payload: {
+            originalUrl: srcUrl,
+            bakedBase64: response.bakedBase64
+          }
+        });
+      }
+      
       // Trigger the queue to pull the next available image!
       processQueue();
     });

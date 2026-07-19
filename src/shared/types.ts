@@ -23,6 +23,13 @@ export interface ProcessJobMessage {
   };
 }
 
+export interface ImageTranslatedMessage {
+  type: 'IMAGE_TRANSLATED';
+  payload: {
+    originalUrl: string;
+    bakedBase64: string;
+  };
+}
 export interface StartModelDownloadMessage {
   type: 'START_MODEL_DOWNLOAD';
   payload: {

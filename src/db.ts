@@ -7,6 +7,7 @@ export interface TranslationJob {
   srcUrl?: string;
   mockTranslatedBlocks?: any[];
   folderId?: number; // Optional reference to a ProjectFolder
+  tabId?: number; // Tracks which tab requested this job for the Pub/Sub response
 }
 
 export interface ProjectFolder {
