@@ -24,6 +24,23 @@ export default function EngineDropdown({ state, updateState }: EngineDropdownPro
   const [showAddApi, setShowAddApi] = useState(false);
   const [showWebGpuConfig, setShowWebGpuConfig] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [downloads, setDownloads] = useState<Record<string, { progress: number; status: string }>>({});
+  
+  useEffect(() => {
+    const listener = (message: any) => {
+      if (message.type === 'MODEL_DOWNLOAD_PROGRESS') {
+        setDownloads(prev => ({
+          ...prev,
+          [message.payload.modelId]: {
+            progress: message.payload.progress,
+            status: message.payload.status
+          }
+        }));
+      }
+    };
+    chrome.runtime.onMessage.addListener(listener);
+    return () => chrome.runtime.onMessage.removeListener(listener);
+  }, []);
   
   const inpaintingEngines = useMemo(() => [
     { id: 'none', name: 'None', type: 'local', isDownloaded: true },
@@ -154,6 +171,25 @@ export default function EngineDropdown({ state, updateState }: EngineDropdownPro
             <ChevronDown size={16} className={`text-[var(--color-dust)] transition-transform ${isOpen ? 'rotate-180' : ''}`} />
           </button>
 
+          {downloads[activeEngine.id] && downloads[activeEngine.id].progress < 1 && (
+            <div className="absolute top-full left-0 right-0 mt-1 p-2 bg-[var(--color-paper)]/90 backdrop-blur-md border border-[var(--color-dust)] rounded-md shadow-sm z-40 animate-in fade-in slide-in-from-top-1">
+              <div className="flex justify-between items-end mb-1.5">
+                <span className="text-[10px] font-medium text-[var(--color-dust)] uppercase tracking-wider truncate max-w-[80%]">
+                  {downloads[activeEngine.id].status}
+                </span>
+                <span className="text-xs font-bold text-[var(--color-ink)]">
+                  {Math.round(downloads[activeEngine.id].progress * 100)}%
+                </span>
+              </div>
+              <div className="h-1.5 w-full bg-[var(--color-vellum)] rounded-full overflow-hidden">
+                <div 
+                  className="h-full bg-[var(--color-editorial)] transition-all duration-300 ease-out" 
+                  style={{ width: `${downloads[activeEngine.id].progress * 100}%` }}
+                />
+              </div>
+            </div>
+          )}
+
           {isOpen && (
             <div className="mt-1 bg-[var(--color-paper)] border border-[var(--color-dust)] rounded-md shadow-sm overflow-hidden flex flex-col max-h-[350px]">
               {!showAddApi ? (
@@ -196,7 +232,19 @@ export default function EngineDropdown({ state, updateState }: EngineDropdownPro
                           {state.activeEngineId === engine.id ? (
                             <Check size={14} className="text-[var(--color-editorial)]" />
                           ) : engine.type === 'local' && !engine.isDownloaded ? (
-                            <Download size={14} className="text-[var(--color-dust)] hover:text-[var(--color-ink)]" />
+                            <div 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                chrome.runtime.sendMessage({ type: 'START_MODEL_DOWNLOAD', payload: { modelId: engine.id } });
+                                // Automatically select the engine so they can see the progress bar
+                                updateState({ activeEngineId: engine.id });
+                                setIsOpen(false);
+                              }}
+                              className="p-1 -mr-1 rounded hover:bg-[var(--color-paper)] transition-colors cursor-pointer"
+                              title="Download model"
+                            >
+                              <Download size={14} className="text-[var(--color-dust)] hover:text-[var(--color-ink)]" />
+                            </div>
                           ) : null}
                         </div>
                       </button>
