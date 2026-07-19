@@ -6,7 +6,7 @@ import { checkWebGPUAvailability } from '../../utils/hardware';
  * Uses Fast Fourier Convolutions for excellent global structure hallucination.
  * Runs on ONNX Runtime. Requires ~207MB download.
  */
-export class LamaInpaintEngine implements IInpaintEngine {
+export class LamaMangaInpaintEngine implements IInpaintEngine {
   private platform: any;
   private session: any = null;
   private ort: any = null;
@@ -19,8 +19,18 @@ export class LamaInpaintEngine implements IInpaintEngine {
     if (this.session) return;
     
     const isNode = typeof window === 'undefined';
-    const isWebGpuSupported = await checkWebGPUAvailability();
-    const providers = isWebGpuSupported ? ['webgpu', 'wasm'] : ['wasm'];
+    let isWebGpuSupported = await checkWebGPUAvailability();
+    
+    if (!isNode && typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      const data = await chrome.storage.local.get('popupState');
+      const state = (data.popupState as any) || {};
+      const masterOn = state.webgpuMaster === true;
+      const inpaintOn = state.webgpuOverrides?.inpaint !== false;
+      if (!masterOn || !inpaintOn) {
+        isWebGpuSupported = false;
+      }
+    }
+    const providers = isNode ? ['cpu'] : (isWebGpuSupported ? ['webgpu', 'wasm'] : ['wasm']);
 
     if (isNode) {
       this.ort = await import('onnxruntime-node');

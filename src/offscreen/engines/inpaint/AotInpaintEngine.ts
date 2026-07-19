@@ -21,8 +21,18 @@ export class AotInpaintEngine implements IInpaintEngine {
     // In our test environment, we load it via onnxruntime-node.
     // In production extension, it will be onnxruntime-web.
     const isNode = typeof window === 'undefined';
-    const isWebGpuSupported = await checkWebGPUAvailability();
-    const providers = isWebGpuSupported ? ['webgpu', 'wasm'] : ['wasm'];
+    let isWebGpuSupported = await checkWebGPUAvailability();
+    
+    if (!isNode && typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      const data = await chrome.storage.local.get('popupState');
+      const state = (data.popupState as any) || {};
+      const masterOn = state.webgpuMaster === true;
+      const inpaintOn = state.webgpuOverrides?.inpaint !== false;
+      if (!masterOn || !inpaintOn) {
+        isWebGpuSupported = false;
+      }
+    }
+    const providers = isNode ? ['cpu'] : (isWebGpuSupported ? ['webgpu', 'wasm'] : ['wasm']);
 
     if (isNode) {
       this.ort = await import('onnxruntime-node');
