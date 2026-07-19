@@ -40,21 +40,34 @@ Only used for authentication and subscription management when the user opts for 
 
 ### A. How to run AI locally for Non-Tech Users (Zero Setup)
 *The Problem:* We want users to translate locally without installing Python, Docker, or external keys.
-*The Solution:* We use WebAssembly (Wasm) and WebGPU to run compressed models directly in JavaScript. We use a **Dual-Local Compute Strategy**:
-1.  **Transformers.js (ONNX Runtime Web):** Hugging Face's JS library runs purpose-built translation models like **NLLB-200** or **MarianMT**. These models are extremely lightweight (~50-600MB) and run instantly in the browser on CPU or WebGL, perfect for any standard laptop.
-2.  **WebLLM (WebGPU):** For users with capable GPUs, we provide WebLLM to run full Large Language Models (like Llama-3.2-1B or Qwen-1.5B). LLMs provide superior contextual translation quality but require more resources.
+*The Solution:* We use WebAssembly (Wasm) and WebGPU to run compressed models directly in JavaScript. We use a **Triple-Tier Local Translation Compute Strategy**:
+1.  **Chrome Translator API (Default):** The primary default translation engine uses Chrome's built-in Translation and Language Detector APIs (available natively in Chrome 138+). It runs Gemini Nano on-device, requiring 0MB download and zero user setup, providing completely free, offline, and unlimited translation.
+2.  **Transformers.js v3 (@huggingface/transformers):** Serves as a local fallback to support over 200 languages using specialized translation models like **NLLB-200** or **MarianMT**. Unlike v2, v3 supports both WebGPU and WASM execution. It integrates with our GPU acceleration settings: if WebGPU is enabled, it initializes with `device: 'webgpu'`; otherwise, it falls back to CPU via `device: 'wasm'`.
+3.  **WebLLM (WebGPU):** For users with capable GPUs, we provide WebLLM to run full Large Language Models (like Llama-3.2-1B or Qwen-1.5B). LLMs provide superior contextual translation quality but require more resources and run exclusively on WebGPU.
 
 **Unified Model Search Registry & Optimizations:**
-Instead of hardcoding a massive list of downloadable models in our UI, we have implemented a high-performance dynamic model search bar combining two registries:
+Instead of hardcoding a massive list of downloadable models in our UI, we have implemented a high-performance dynamic model search bar combining multiple registries:
 *   **WebLLM:** We read the `webllm.prebuiltAppConfig.model_list` directly from the NPM package, guaranteeing the compiled WebAssembly binaries match the engine version perfectly.
-*   **ONNX / Transformers.js (Static Registry):** Instead of querying the Hugging Face API directly (which hits rate limits for 10,000+ users), we fetch a static JSON file from a GitHub CDN (`raw.githubusercontent.com`). A GitHub Action cron job updates this file daily.
-*   **MiniSearch & DOM Capping:** The UI merges both lists and displays badges (`[WebGPU]` / `[CPU]`). To ensure the popup never lags while rendering 150+ models, we use `MiniSearch` for lightning-fast fuzzy autocomplete, and hard-cap the DOM to only render the top 50 results at a time.
+*   **ONNX / Transformers.js (Static Registry):** Instead of querying the Hugging Face API directly (which hits rate limits for 10,000+ users), we fetch a static JSON file from a GitHub CDN (`raw.githubusercontent.com`). A GitHub Action cron job updates this file weekly.
+*   **MiniSearch & DOM Capping:** The UI merges both lists and displays badges (`[WebGPU]` / `[CPU]`). To ensure the popup never lags while rendering 150+ models, we use `MiniSearch` for fuzzy autocomplete, and hard-cap the DOM to only render the top 50 results at a time.
 
-**The User Flow (Extension Dashboard):**
-1. User opens the extension Dashboard and toggles "Auto-Translate" or manually selects a translation engine.
-2. The UI displays a progress bar as the engine caches the model weights.
-3. The weights are cached permanently in Chrome's local cache. On all future translations, the model loads in milliseconds from disk.
-4. When translating, the Offscreen Document processes the image locally. Zero API keys, zero server costs.
+**The User Flow (Extension Dashboard & Setup):**
+1. **Instant Access:** Upon extension installation, no translation model download is triggered. The default engine is set to the **Chrome Translator API**, allowing users to translate images immediately.
+2. **Lazy-Loading:** If the user selects a custom NLLB-200 or WebLLM model, the dashboard displays a progress bar and begins downloading the model weights.
+3. **Persistent Disk Cache:** The weights are cached permanently in Chrome's local storage (Cache API). Future translation runs load the model instantly from the local disk cache in milliseconds.
+4. **VRAM/RAM Resident Singleton:** Once loaded, the engine instance is kept active in memory by the `TranslationManager` singleton. This avoids reloading weights or recompiling WebGPU shaders for subsequent images, preventing VRAM churn.
+
+#### VRAM/Memory Lifetime & Storage Matrix
+
+This matrix describes how each of the 5 model categories is downloaded, cached on disk, loaded into memory, and how they handle WebGPU vs. WASM fallback using the local GPU settings:
+
+| Model Category | Download Source | Disk Caching | Memory Residency (VRAM/RAM) | GPU / WASM Fallback Logic |
+| :--- | :--- | :--- | :--- | :--- |
+| **1. WebLLM** | MLC CDN (auto-resolved by ID) | Cache API (automatic) | Kept in VRAM via `WebLLMEngine` singleton | WebGPU only. If GPU setting or hardware check fails, falls back to throwing an error pointing to CPU models. |
+| **2. Transformers.js v3** | HuggingFace CDN (auto-resolved by ID) | Cache API (automatic) | Kept in RAM/VRAM via `TransformersEngine` singleton | Automatic fallback based on settings (`popupState`): calls `pipeline(..., { device: useWebGpu ? 'webgpu' : 'wasm' })`. |
+| **3. PaddleOCR** | SDK CDN (auto-resolved by preset ID) | SDK internal cache | Kept in RAM/VRAM via `PaddleOcrEngine` singleton | Automatic fallback based on settings: initializes the SDK service with `executionProviders: useWebGpu ? ['webgpu', 'wasm'] : ['wasm']`. |
+| **4. LaMa / AOT-GAN** | Custom HF Repo (resolves from local TS registry) | Browser HTTP Cache | Kept in RAM/VRAM via `InpaintManager` singleton | Automatic fallback based on settings: passes `executionProviders: useWebGpu ? ['webgpu', 'wasm'] : ['wasm']` to `InferenceSession.create()`. |
+| **5. Chrome Translator** | Chrome internal (downloaded by browser) | Chrome internal cache | Managed internally by browser API | Pure CPU-based Gemini Nano on-device (no GPU setting required). |
 
 ### B. The OCR & Detection Breakthrough (PaddleOCR ONNX)
 *The Problem:* We need a robust tool that does TWO things: finds the exact X/Y coordinates of text (detection) AND reads it accurately (recognition) across multiple popular languages (not just Japanese manga), all while running locally in the browser without Python.
@@ -65,6 +78,8 @@ Instead of piecing together separate complex models, we will use a pre-packaged 
 3.  **Low Complexity:** By using an NPM wrapper around the ONNX models, we avoid writing custom WebGL/WebGPU tensor logic ourselves.
 *Handling Rotated Text (Polygons):* PaddleOCR returns `dt_polys` (4-point polygons) rather than simple rectangles. Because manga text is often tilted, we will use a small geometry utility to calculate the rotation angle from the polygon and apply it to our HTML overlays via CSS `transform: rotate(Xdeg)`. This ensures text perfectly aligns with slanted speech bubbles.
 *Result:* We get the exact relative positions AND highly accurate multi-language text, allowing us to perfectly overlay editable text boxes over the original image. It runs entirely in the user's browser, caching the model after the first download.
+
+*Future Implementation (Manga-Specific OCR):* While PaddleOCR is excellent for general-purpose text, future updates will introduce an optional `MangaOcrEngine.ts`. This engine will use manga-finetuned DBNet and CTC ONNX models (e.g., from `Skepsun/manga-translator-ui-onnx`). Because these models share the same DBNet architecture, their raw probability heatmaps can be fed directly into our existing pure-JS `extractPolygons()` logic to yield identical 4-point polygons, perfectly satisfying our `IOcrEngine` interface without architectural rewrites.
 
 ### C. The Chrome Extension Architecture (Web Scraping & Capture)
 *The Goal:* Provide frictionless translation with two distinct modes (Auto vs Manual) controlled via a setting, while gracefully handling DRM and long WebToon strips.
@@ -164,12 +179,16 @@ Instead of masking the entire blocky bounding box, we extract a **pixel-perfect 
 5. **Tier 5: None:** Bypasses inpainting entirely. Returns the original image. The OCR and translation pipeline will still overlay translated text on top of the original text.
 6. **Tier 6: Original:** Bypasses the entire translation/inpainting pipeline and just returns a raw copy of the original image without any modifications.
 
+#### Custom Inpainting Model Registry & URL Management
+Because adding a completely new inpainting model architecture requires specific custom pre-processing and post-processing code (e.g. AOT-GAN's input tensor shape differs from LaMa's), we do not need a remote dynamic registry for inpainting. Instead, we manage custom model options via an internal local TypeScript registry file (`inpaintRegistry.ts`). This local registry maps model configurations to their remote download links (hosted on Hugging Face).
+* **CI/CD Link Validation:** To ensure download URLs do not become broken or stale, we include a GitHub Action pipeline. Whenever the local registry file is modified, the action runs a validation script that fires HEAD requests to all configured Hugging Face URLs to ensure they return a valid HTTP `200 OK` response.
+
 ### G. Two-Part Frontend UX (Tampermonkey Style)
 *The Problem:* How do we provide quick access to settings while also giving the user a robust, full-screen canvas editor?
 *The Solution (Local-First Design):* We structure the frontend into two distinct React interfaces, mirroring extensions like Tampermonkey:
 1. **The Popup Window (Quick Actions):** A small window that opens when clicking the extension icon. It handles quick operational toggles (`Auto-Translate` vs `Manual Selection Method (Hover/Persistent)`), Translation Engine selection (Local/API/Custom), and Max Concurrent Translations.
 2. **The Standalone Dashboard (Full UI):** A full-screen React app hosted on an extension tab (`chrome-extension://.../index.html`). This is the "Main Brain" UI where the user accesses the interactive Canvas Editor, Recent History, Favorites, and can manually upload screenshots taken with their OS snipping tool for protected sites. All images and history are saved into the extension's local `IndexedDB`.
-3. **Swappable Engine Router:** We implement a Strategy Pattern for compute. When a user translates an image, the UI calls a generic `translationService.translate()`. Depending on the popup's selected engine, it runs Wasm via an Offscreen Document, uses WebGPU for WebLLM, or sends the request to a Custom API Endpoint.
+3. **Swappable Engine Router & Waterfall Execution:** We implement a compute Strategy Pattern. When the user initiates a translation, the Background Worker routes the task to the Offscreen Document. The Offscreen Document's `TranslationManager` reads the active engine selection and fallback waterfall chain (`[activeEngineId, ...fallbackChain]`) directly from `chrome.storage.local`. It then executes the fallback loop entirely inside the Offscreen Document, trying each engine in order. If one fails, it unloads it and dynamically spins up the next engine. This eliminates message-passing roundtrips to the UI and guarantees translation persistence even if the user closes the popup.
 *Result:* This provides the absolute best UX. The user gets a completely private, full-featured app via the extension, with quick access via the popup and deep editing via the dashboard tab.
 
 ## 5. Implementation Phases

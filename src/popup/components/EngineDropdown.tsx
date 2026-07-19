@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Download, Check, Upload, ChevronDown, Plus, Search } from 'lucide-react';
+import { Download, Upload, ChevronDown, Plus, Search, Check } from 'lucide-react';
 import type { PopupState } from '../index';
 import AddApiForm from './AddApiForm';
 import MiniSearch from 'minisearch';
@@ -22,15 +22,16 @@ export default function EngineDropdown({ state, updateState }: EngineDropdownPro
   const [isOpen, setIsOpen] = useState(false);
   const [isOpenInpaint, setIsOpenInpaint] = useState(false);
   const [showAddApi, setShowAddApi] = useState(false);
+  const [showWebGpuConfig, setShowWebGpuConfig] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   
   const inpaintingEngines = useMemo(() => [
-    { id: 'none', name: 'None (Bypass)', type: 'local', isDownloaded: true },
-    { id: 'simple', name: 'Simple Fill (Fast)', type: 'local', isDownloaded: true },
-    { id: 'telea', name: 'Telea Diffusion (Smooth)', type: 'local', isDownloaded: true },
-    { id: 'aot', name: 'AOT-GAN (Fast, General)', type: 'local', isDownloaded: false },
-    { id: 'lama', name: 'LaMa (High Quality, General)', type: 'local', isDownloaded: false },
-    { id: 'lama-manga', name: 'LaMa-Manga (High Quality, Comics)', type: 'local', isDownloaded: false },
+    { id: 'none', name: 'None', type: 'local', isDownloaded: true },
+    { id: 'simple', name: 'Simple Fill', type: 'local', isDownloaded: true },
+    { id: 'telea', name: 'Telea Diffusion', type: 'local', isDownloaded: true },
+    { id: 'aot', name: 'AOT-GAN', type: 'local', isDownloaded: false },
+    { id: 'lama', name: 'LaMa Base', type: 'local', isDownloaded: false },
+    { id: 'lama-manga', name: 'LaMa Manga', type: 'local', isDownloaded: false },
   ], []);
   
   const [baseEngines, setBaseEngines] = useState<Engine[]>([]);
@@ -92,16 +93,11 @@ export default function EngineDropdown({ state, updateState }: EngineDropdownPro
           </div>
           <button 
             onClick={() => updateState({ isAuto: !state.isAuto })}
-            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none cursor-pointer ${
-              state.isAuto ? 'bg-[var(--color-editorial)]' : 'bg-[var(--color-dust)]'
-            }`}
+            className="kites-switch kites-switch-md"
+            data-state={state.isAuto ? 'checked' : 'unchecked'}
           >
             <span className="sr-only">Toggle auto-translate</span>
-            <span
-              className={`inline-block h-4 w-4 transform rounded-full bg-[var(--color-paper)] transition-transform ${
-                state.isAuto ? 'translate-x-6' : 'translate-x-1'
-              }`}
-            />
+            <span className="kites-switch-thumb" />
           </button>
         </div>
 
@@ -134,15 +130,17 @@ export default function EngineDropdown({ state, updateState }: EngineDropdownPro
       <hr className="border-[var(--color-dust)] opacity-50" />
 
       {/* Engine Selection */}
-      <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-6">
+        
         {/* Translation Engine */}
-        <div>
+        <div className="relative mt-2">
           <div className="flex items-center gap-1.5 mb-2 relative">
             <h2 className="text-sm font-medium">Translation Engine</h2>
-            <div className="group relative flex items-center">
-              <div className="w-4 h-4 rounded-full border border-[var(--color-dust)] flex items-center justify-center text-[10px] text-[var(--color-dust)] cursor-help">?</div>
-              <div className="absolute left-0 top-6 w-64 p-2 bg-[var(--color-ink)] text-[var(--color-paper)] text-xs rounded shadow-lg opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-50">
-                <span className="font-semibold">[CPU] Local</span> models run on your processor. <span className="font-semibold">[WEBGPU] Local</span> models use your graphics card for faster speeds with the exact same accuracy.
+            <div className="peer w-4 h-4 rounded-full border border-[var(--color-dust)] flex items-center justify-center text-[10px] text-[var(--color-dust)] cursor-help hover:bg-[var(--color-dust)] hover:text-[var(--color-paper)] transition-colors">?</div>
+            
+            <div className="absolute left-0 top-full pt-1.5 w-[280px] max-w-[85vw] z-50 opacity-0 pointer-events-none peer-hover:opacity-100 peer-hover:pointer-events-auto hover:opacity-100 hover:pointer-events-auto transition-opacity">
+              <div className="p-2.5 bg-[var(--color-ink)] text-[var(--color-paper)] text-xs rounded-md shadow-xl">
+                <span className="font-semibold text-[var(--color-paper)]">[CPU] Local</span> models run on your processor. <span className="font-semibold text-[var(--color-paper)]">[WEBGPU] Local</span> models use your graphics card for faster speeds with the exact same accuracy.
               </div>
             </div>
           </div>
@@ -239,19 +237,19 @@ export default function EngineDropdown({ state, updateState }: EngineDropdownPro
           )}
         </div>
         </div>
-      </div>
 
-      {/* Inpainting Engine */}
-      <div>
-        <div className="flex items-center gap-1.5 mb-2 relative">
-          <h2 className="text-sm font-medium">Inpainting Engine</h2>
-          <div className="group relative flex items-center">
-            <div className="w-4 h-4 rounded-full border border-[var(--color-dust)] flex items-center justify-center text-[10px] text-[var(--color-dust)] cursor-help">?</div>
-            <div className="absolute left-0 top-6 w-64 p-2 bg-[var(--color-ink)] text-[var(--color-paper)] text-xs rounded shadow-lg opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-50">
-              Your device {state.webgpuSupported === true ? 'supports' : 'does not support'} WebGPU acceleration. If unsupported, the system gracefully falls back to your CPU. Accuracy remains exactly the same, but processing will be slower.
+        {/* Image Cleaning Engine */}
+        <div className="relative mt-2">
+          <div className="flex items-center gap-1.5 mb-2 relative">
+            <h2 className="text-sm font-medium">Image Cleaning Engine</h2>
+            <div className="peer w-4 h-4 rounded-full border border-[var(--color-dust)] flex items-center justify-center text-[10px] text-[var(--color-dust)] cursor-help hover:bg-[var(--color-dust)] hover:text-[var(--color-paper)] transition-colors">?</div>
+            
+            <div className="absolute left-0 top-full pt-1.5 w-[280px] max-w-[85vw] z-50 opacity-0 pointer-events-none peer-hover:opacity-100 peer-hover:pointer-events-auto hover:opacity-100 hover:pointer-events-auto transition-opacity">
+              <div className="p-2.5 bg-[var(--color-ink)] text-[var(--color-paper)] text-xs rounded-md shadow-xl">
+                Your device {state.webgpuSupported === true ? 'supports' : 'does not support'} WebGPU acceleration. If unsupported, the system gracefully falls back to your CPU. Accuracy remains exactly the same, but processing will be slower.
+              </div>
             </div>
           </div>
-        </div>
 
         <div className="relative">
           <button 
@@ -291,6 +289,133 @@ export default function EngineDropdown({ state, updateState }: EngineDropdownPro
                   </button>
                 ))}
               </div>
+            </div>
+          )}
+        </div>
+      </div>
+      </div>
+
+      <div className="relative mt-2">
+        <div className="flex items-center gap-1.5 mb-2 relative">
+          <span className="font-medium text-sm">GPU Acceleration</span>
+          <div className="peer w-4 h-4 rounded-full border border-[var(--color-dust)] flex items-center justify-center text-[10px] text-[var(--color-dust)] cursor-help hover:bg-[var(--color-dust)] hover:text-[var(--color-paper)] transition-colors">?</div>
+          
+          <div className="absolute left-0 top-full pt-1.5 w-[260px] max-w-[85vw] z-50 opacity-0 pointer-events-none peer-hover:opacity-100 peer-hover:pointer-events-auto hover:opacity-100 hover:pointer-events-auto transition-opacity">
+            <div className="p-2.5 bg-[var(--color-ink)] text-[var(--color-paper)] text-xs rounded-md shadow-xl">
+              Run models locally on your graphics card for maximum speed. Turn off specific pipelines below if you run out of memory.
+            </div>
+          </div>
+        </div>
+
+        <div className="relative">
+          {/* Master Switch */}
+          <button 
+            onClick={() => {
+              if (state.webgpuSupported === true && state.webgpuMaster) {
+                setShowWebGpuConfig(!showWebGpuConfig);
+              }
+            }}
+            className={`w-full flex items-center justify-between p-3 bg-[var(--color-paper)] border-2 transition-colors ${state.webgpuSupported === true && state.webgpuMaster ? 'border-[var(--color-dust)] cursor-pointer hover:border-[var(--color-editorial)]' : 'border-[var(--color-dust)] border-opacity-50'} rounded-lg shadow-sm`}
+          >
+            <div className="flex items-center gap-2">
+              <span className={`text-[11px] px-2 py-0.5 rounded-md font-medium flex items-center justify-center ${
+                state.webgpuSupported === true ? 'bg-green-500/10 text-green-500 border border-green-500/30' : 
+                state.webgpuSupported === false ? 'bg-red-500/10 text-red-500 border border-red-500/30' : 
+                'bg-gray-500/10 text-gray-400 border border-gray-500/30'
+              }`}>
+                {state.webgpuSupported === true ? '✓' : 
+                 state.webgpuSupported === false ? '✗' : 
+                 '...'}
+              </span>
+              
+              {state.webgpuSupported !== null && (
+                <button 
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    const { checkWebGPUAvailability } = await import('../../offscreen/utils/hardware');
+                    updateState({ webgpuSupported: null });
+                    const supported = await checkWebGPUAvailability();
+                    updateState({ webgpuSupported: supported });
+                  }}
+                  className="px-2 py-0.5 border border-[var(--color-dust)] hover:border-[var(--color-ink)] text-[10px] text-[var(--color-dust)] hover:text-[var(--color-ink)] font-medium rounded transition-colors cursor-pointer"
+                >
+                  Re-check
+                </button>
+              )}
+            </div>
+
+            <div className="flex items-center gap-4">
+              {state.webgpuSupported === true && state.webgpuMaster && (
+                <ChevronDown size={18} className={`text-[var(--color-ink)] transition-transform duration-200 ${showWebGpuConfig ? 'rotate-180' : ''}`} />
+              )}
+              
+              <div onClick={(e) => e.stopPropagation()}>
+                <button 
+                  onClick={() => {
+                    if (state.webgpuSupported === true) {
+                      updateState({ webgpuMaster: !state.webgpuMaster });
+                      if (!state.webgpuMaster) setShowWebGpuConfig(true);
+                      else setShowWebGpuConfig(false);
+                    }
+                  }}
+                  disabled={state.webgpuSupported !== true}
+                  className="kites-switch kites-switch-md"
+                  data-state={state.webgpuMaster && state.webgpuSupported === true ? 'checked' : 'unchecked'}
+                  data-disabled={state.webgpuSupported !== true ? 'true' : 'false'}
+                >
+                  <span className="sr-only">Toggle WebGPU Master</span>
+                  <span className="kites-switch-thumb" />
+                </button>
+              </div>
+            </div>
+          </button>
+
+          {/* Granular Toggles (Child Switches) */}
+          {showWebGpuConfig && state.webgpuSupported === true && state.webgpuMaster && (
+            <div className="mt-2 bg-[var(--color-vellum)] border border-[var(--color-dust)] border-opacity-40 rounded-lg overflow-hidden flex flex-col p-1.5 gap-1 shadow-inner">
+              
+              <div className="flex items-center justify-between p-2.5 rounded-md hover:bg-[var(--color-paper)] transition-colors">
+                <div className="flex flex-col text-left">
+                  <span className="font-medium text-sm text-[var(--color-ink)]">Translation</span>
+                  <span className="text-[10px] text-[var(--color-dust)] font-medium">High VRAM (3-4GB)</span>
+                </div>
+                <button 
+                  onClick={() => updateState({ webgpuOverrides: { ...state.webgpuOverrides, llm: !state.webgpuOverrides.llm }})}
+                  className="kites-switch kites-switch-sm"
+                  data-state={state.webgpuOverrides?.llm !== false ? 'checked' : 'unchecked'}
+                >
+                  <span className="kites-switch-thumb" />
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between p-2.5 rounded-md hover:bg-[var(--color-paper)] transition-colors">
+                <div className="flex flex-col text-left">
+                  <span className="font-medium text-sm text-[var(--color-ink)]">Image Cleaning</span>
+                  <span className="text-[10px] text-[var(--color-dust)] font-medium">Low VRAM (~200MB)</span>
+                </div>
+                <button 
+                  onClick={() => updateState({ webgpuOverrides: { ...state.webgpuOverrides, inpaint: !state.webgpuOverrides.inpaint }})}
+                  className="kites-switch kites-switch-sm"
+                  data-state={state.webgpuOverrides?.inpaint !== false ? 'checked' : 'unchecked'}
+                >
+                  <span className="kites-switch-thumb" />
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between p-2.5 rounded-md hover:bg-[var(--color-paper)] transition-colors">
+                <div className="flex flex-col text-left">
+                  <span className="font-medium text-sm text-[var(--color-ink)]">Text Detection</span>
+                  <span className="text-[10px] text-[var(--color-dust)] font-medium">Tiny VRAM (~100MB)</span>
+                </div>
+                <button 
+                  onClick={() => updateState({ webgpuOverrides: { ...state.webgpuOverrides, ocr: !state.webgpuOverrides.ocr }})}
+                  className="kites-switch kites-switch-sm"
+                  data-state={state.webgpuOverrides?.ocr !== false ? 'checked' : 'unchecked'}
+                >
+                  <span className="kites-switch-thumb" />
+                </button>
+              </div>
+
             </div>
           )}
         </div>

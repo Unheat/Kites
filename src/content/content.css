@@ -1,0 +1,10 @@
+@import "tailwindcss/theme";
+@import "tailwindcss/utilities";
+
+/* Scope minimal resets only to our Kites components to avoid breaking host websites like Gmail */
+#kites-translate-btn, 
+#kites-global-overlay * {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}

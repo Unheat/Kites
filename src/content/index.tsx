@@ -1,7 +1,8 @@
 import { createRoot } from 'react-dom/client';
 import { useEffect, useState, useRef } from 'react';
-import '../index.css'; 
+import './content.css'; 
 import { Languages } from 'lucide-react';
+import type { PopupState } from '../popup/index';
 
 // Minimum image size to avoid detect small icons
 const MIN_WIDTH_IMAGE_PX = 150;
@@ -37,12 +38,10 @@ function TranslateButton({ srcUrl, anchorName }: { srcUrl: string, anchorName: s
     }
     setIsTranslating(true);
     console.log('[Content Script] Sending TRANSLATE_IMAGE to background:', srcUrl);
-    chrome.runtime.sendMessage({ type: 'TRANSLATE_IMAGE', url: srcUrl }, (response) => {
+    chrome.runtime.sendMessage({ type: 'TRANSLATE_IMAGE', url: srcUrl }, () => {
       setIsTranslating(false);
       if (chrome.runtime.lastError) {
         console.error('[Content Script] Message failed:', chrome.runtime.lastError.message);
-      } else {
-        console.log('[Content Script] Response from background:', response);
       }
     });
   };
@@ -58,7 +57,7 @@ function TranslateButton({ srcUrl, anchorName }: { srcUrl: string, anchorName: s
       }}
       // We use 'fixed' instead of 'absolute' so the viewport is the containing block.
       // This is required for CSS Anchors to target elements outside the React root.
-      className={`fixed z-[999999] w-8 h-8 flex items-center justify-center rounded-full bg-transparent hover:bg-black/5 transition-all cursor-pointer border-none text-black ${isTranslating ? 'animate-spin' : ''}`}
+      className={`fixed z-[999999] w-8 h-8 flex items-center justify-center rounded-full bg-transparent hover:bg-black/5 transition-colors cursor-pointer border-none text-black ${isTranslating ? 'animate-spin' : ''}`}
       style={{ 
         marginTop: '8px',
         marginLeft: '8px',
@@ -71,11 +70,6 @@ function TranslateButton({ srcUrl, anchorName }: { srcUrl: string, anchorName: s
   );
 }
 
-// Toggle this flag to test Consistent Mode vs Hover Mode
-const TEST_CONSISTENT_MODE = true;
-
-// Toggle this flag to automatically translate images found on the page without clicking
-const AUTO_TRANSLATE_ENABLED = true;
 // Keep track of which URLs we have already sent to the background to avoid spamming
 const processedUrls = new Set<string>();
 
@@ -90,17 +84,45 @@ function GlobalOverlay() {
   const [activeImg, setActiveImg] = useState<{ srcUrl: string, imgElement: HTMLImageElement, anchorName: string } | null>(null);
   const [consistentImages, setConsistentImages] = useState<{ srcUrl: string, anchorName: string }[]>([]);
   
+  const [mode, setMode] = useState<'hover' | 'persistent'>('hover');
+  const [autoTranslate, setAutoTranslate] = useState(false);
+
   const activeImgRef = useRef(activeImg);
   activeImgRef.current = activeImg;
 
+  // 1. Fetch User Settings
   useEffect(() => {
-    if (TEST_CONSISTENT_MODE) { // Consistent Mode
+    const loadSettings = () => {
+      chrome.storage.local.get('popupState', (data) => {
+        const state = data.popupState as PopupState | undefined;
+        if (state) {
+          setMode(state.manualMode || 'hover');
+          setAutoTranslate(state.isAuto || false);
+        }
+      });
+    };
+    loadSettings();
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area === 'local' && changes.popupState) {
+        loadSettings();
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    if (mode === 'persistent') { // Consistent Mode
       const updateImages = () => {
         const imgs = Array.from(document.querySelectorAll('img'));
         const validImgs = imgs.filter(img => {
           // Use getBoundingClientRect for accurate rendered size, bypassing lazy-load 0 width attributes
           const rect = img.getBoundingClientRect();
-          return img.src && rect.width >= MIN_WIDTH_IMAGE_PX && rect.height >= MIN_HEIGHT_IMAGE_PX;
+          if (!img.src || rect.width < MIN_WIDTH_IMAGE_PX || rect.height < MIN_HEIGHT_IMAGE_PX) return false;
+          
+          // Ignore Reddit background images or other elements with CSS filters that break CSS Anchors
+          const style = window.getComputedStyle(img);
+          if (style.filter !== 'none' || style.opacity === '0' || style.visibility === 'hidden') return false;
+          
+          return true;
         });
 
         const newConsistentImages = validImgs.map(img => {
@@ -110,7 +132,7 @@ function GlobalOverlay() {
             img.style.setProperty('anchor-name', anchorName);
           }
           
-          if (AUTO_TRANSLATE_ENABLED && !processedUrls.has(img.src)) {
+          if (autoTranslate && !processedUrls.has(img.src)) {
             processedUrls.add(img.src);
             console.log('[Content Script] Auto-Translating image:', img.src);
             chrome.runtime.sendMessage({ type: 'TRANSLATE_IMAGE', url: img.src }, () => {
@@ -212,9 +234,9 @@ function GlobalOverlay() {
         document.removeEventListener('mousemove', handleMouseMove);
       };
     }
-  }, []);
+  }, [mode, autoTranslate]);
 
-  if (TEST_CONSISTENT_MODE) {
+  if (mode === 'persistent') {
     return (
       <>
         {consistentImages.map((img) => (

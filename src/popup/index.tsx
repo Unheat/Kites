@@ -26,6 +26,12 @@ export interface PopupState {
   fallbackChain: string[];
   customApis: CustomApiConfig[];
   webgpuSupported: boolean | null;
+  webgpuMaster: boolean;
+  webgpuOverrides: {
+    llm: boolean;
+    inpaint: boolean;
+    ocr: boolean;
+  };
 }
 
 function PopupApp() {
@@ -41,7 +47,9 @@ function PopupApp() {
     activeInpaintId: 'lama-manga',
     fallbackChain: [],
     customApis: [],
-    webgpuSupported: null
+    webgpuSupported: null,
+    webgpuMaster: false,
+    webgpuOverrides: { llm: true, inpaint: true, ocr: true }
   });
 
   useEffect(() => {

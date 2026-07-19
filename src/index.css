@@ -51,3 +51,41 @@ html.kites-extension-page, body.kites-extension-page {
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background: var(--color-editorial);
 }
+
+/* Reusable Switch Components */
+.kites-switch {
+  @apply relative inline-flex items-center rounded-full transition-colors focus:outline-none cursor-pointer;
+  background-color: var(--color-dust);
+}
+.kites-switch[data-state="checked"] {
+  background-color: var(--color-editorial);
+}
+.kites-switch[data-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.kites-switch-thumb {
+  @apply inline-block transform rounded-full bg-[var(--color-paper)] shadow transition-transform;
+}
+
+/* Medium size (Auto-Translate, Master WebGPU) */
+.kites-switch-md {
+  @apply h-6 w-11;
+}
+.kites-switch-md .kites-switch-thumb {
+  @apply h-4 w-4 translate-x-1;
+}
+.kites-switch-md[data-state="checked"] .kites-switch-thumb {
+  @apply translate-x-6;
+}
+
+/* Small size (WebGPU child overrides) */
+.kites-switch-sm {
+  @apply h-4 w-7;
+}
+.kites-switch-sm .kites-switch-thumb {
+  @apply h-3 w-3 translate-x-0.5;
+}
+.kites-switch-sm[data-state="checked"] .kites-switch-thumb {
+  @apply translate-x-3.5;
+}
