@@ -8,26 +8,12 @@ import SettingsView from './components/SettingsView';
 import { Settings, Home, Power } from 'lucide-react';
 
 import type { PopupState } from '../shared/types';
+import { DEFAULT_POPUP_STATE } from '../shared/types';
 
 function PopupApp() {
   const [activeTab, setActiveTab] = useState<'home' | 'settings'>('home');
   const [isLoaded, setIsLoaded] = useState(false);
-  const [state, setState] = useState<PopupState>({
-    isExtensionEnabled: true,
-    isAuto: true,
-    manualMode: 'hover',
-    concurrency: 3,
-    isDark: true,
-    sourceLang: 'auto',
-    targetLang: 'en',
-    activeEngineId: 'chrome-translator',
-    activeInpaintId: 'lama-manga',
-    fallbackChain: [],
-    customApis: [],
-    webgpuSupported: null,
-    webgpuMaster: false,
-    webgpuOverrides: { llm: true, inpaint: true, ocr: true }
-  });
+  const [state, setState] = useState<PopupState>(DEFAULT_POPUP_STATE);
 
   useEffect(() => {
     // Also trigger hardware check on mount to ensure we have it if it's missing from storage

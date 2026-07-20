@@ -92,10 +92,14 @@ export class PipelineOrchestrator {
       if (shouldInpaint) {
         const inpaintEngine = await this.inpaintManager.getEngine(inpaintTier as InpaintTier);
         console.log(`[PipelineOrchestrator] Running translation and inpainting in parallel (tier: ${inpaintTier}).`);
-        [translatedTexts, cleanedImageBuffer] = await Promise.all([
-          translationManager.processTranslation(ocrResult.texts, sourceLang, targetLang),
-          inpaintEngine.inpaint(imageBuffer, polygons),
-        ]);
+        
+        const translationPromise = translationManager.processTranslation(ocrResult.texts, sourceLang, targetLang);
+        const inpaintPromise = inpaintEngine.inpaint(imageBuffer, polygons).catch(err => {
+          console.warn(`[PipelineOrchestrator] Inpainting failed (likely WebGPU shape mismatch). Falling back to original image. Error:`, err);
+          return imageBuffer; // Fallback to original image
+        });
+
+        [translatedTexts, cleanedImageBuffer] = await Promise.all([translationPromise, inpaintPromise]);
       } else {
         // No inpainting — just translate
         console.log(`[PipelineOrchestrator] Translating ${ocrResult.texts.length} text blocks (no inpainting)...`);

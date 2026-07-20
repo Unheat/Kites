@@ -213,3 +213,52 @@ The following tools and libraries are critical references for the development of
 *   **[LaMa (Large Mask Inpainting)](https://github.com/advimman/lama)**: The reference repository for high-quality image inpainting used for text removal.
 ### Extension & Web APIs
 *   **[Chrome Offscreen Documents API](https://developer.chrome.com/docs/extensions/reference/api/offscreen)**: Documentation on managing invisible documents for image/tensor processing in Manifest V3 background scripts.
+
+
+===========================================================================
+                      KITES IMAGE PROCESSING PIPELINE
+===========================================================================
+
+[1. RAW IMAGE UPLOAD] 
+         │
+         ▼
+[2. OCR TEXT DETECTION (PaddleOCR / ONNX)]
+    │  - Scans image for text.
+    │  - Outputs raw individual text polygons & Japanese characters.
+    │
+    ▼
+[3. GEOMETRIC COMBINER (src/shared/utils/geometry.ts & OcrManager)]  <-- YOU ARE DEBUGGING THIS
+    │  - Evaluates distance & overlap between all raw polygons.
+    │  - Merges text boxes that are geometrically close.
+    │  - Calculates a single, unified bounding polygon (hull) for the merged group.
+    │
+    ├─────────────────────────────────────────────────┐
+    │                                                 │
+    ▼                                                 ▼
+[4A. INPAINTING PIPELINE]                     [4B. TRANSLATION PIPELINE]
+    │                                                 │
+    ▼                                                 ▼
+ [Binarizer (Otsu Threshold)]                  [Translation Engine]
+    │  - Takes the geometrically COMBINED polygons.   │ - Takes combined Japanese text.
+    │  - Scans pixels ONLY inside those combined      │ - Translates to English.
+    │    boundaries.                                  │
+    │  - Outputs a "Stroke Mask".                     │
+    │                                                 │
+    ▼                                                 ▼
+ [Inpaint Engine (Simple / LaMa)]             (Translated English Text)
+    │  - Erases ONLY the text ink using the mask.     │
+    │  - Fills empty space with background color.     │
+    │                                                 │
+    ▼                                                 │
+(Cleaned, Text-Free Image)                            │
+    │                                                 │
+    └──────────────────────┬──────────────────────────┘
+                           │
+                           ▼
+[5. TEXT RENDERER]
+    │  - Takes the Cleaned Image.
+    │  - Takes the Translated English Text.
+    │  - Draws the English text perfectly inside the erased bubbles.
+    │
+    ▼
+[6. FINAL TRANSLATED IMAGE DELIVERED TO USER]

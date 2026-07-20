@@ -1,5 +1,6 @@
 import { db, cleanupOldJobs } from '../db';
 import type { ProcessJobMessage, PopupState, PreloadActiveEngineMessage } from '../shared/types';
+import { DEFAULT_POPUP_STATE } from '../shared/types';
 
 // Magic Number: Limit concurrency to avoid network/CPU throttling
 // We now dynamically load this from user's PopupState (fallback to 3)
@@ -26,7 +27,7 @@ chrome.contextMenus.onClicked.addListener(async (info: chrome.contextMenus.OnCli
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'GET_POPUP_STATE') {
     chrome.storage.local.get('popupState').then(data => {
-      sendResponse(data.popupState || {});
+      sendResponse(data.popupState || DEFAULT_POPUP_STATE);
     });
     return true; // Keep channel open
   }

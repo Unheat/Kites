@@ -87,11 +87,14 @@ export class OcrManager {
   }
 
   /**
-   * 👱‍♀️ ponytail: Minimal O(N^2) greedy clustering algorithm for Manga text.
-   * Merges adjacent vertical columns into a single Convex Hull polygon 
+   * Evaluates proximity and geometry to group multiple text lines into single cohesive blocks.
+   * [ARCHITECTURE NOTE]: This logic is strictly decoupled. If a "Combine Text Bubbles" toggle is requested in the future, simply bypass calling this function to instantly revert to raw, uncombined text boxes.
+   * Based on the strict `quadrilateral_can_merge_region` logic from Cotrans.
+   * Uses convex hull to generate accurate bounding polygons for merged blocks,
    * and concatenates text right-to-left.
    */
   private mergeTextBlocks(result: OcrResult): OcrResult {
+    // Merge algorithm entry point
     const { texts, polygons = [], scores = [] } = result;
     if (texts.length <= 1 || polygons.length === 0) return result;
 

@@ -85,3 +85,24 @@ export interface PopupState {
     ocr: boolean;
   };
 }
+
+export const DEFAULT_POPUP_STATE: PopupState = {
+  isExtensionEnabled: true,
+  isAuto: false,
+  manualMode: 'hover',
+  concurrency: 1,
+  isDark: true,
+  sourceLang: 'auto',
+  targetLang: 'en',
+  activeEngineId: 'chrome-translator',
+  activeInpaintId: 'simple',
+  fallbackChain: [],
+  customApis: [],
+  webgpuSupported: null,
+  webgpuMaster: false,
+  webgpuOverrides: {
+    llm: true,
+    inpaint: true,
+    ocr: true,
+  }
+};

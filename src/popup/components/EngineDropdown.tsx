@@ -397,7 +397,7 @@ export default function EngineDropdown({ state, updateState }: EngineDropdownPro
 
         <div className="relative">
           {/* Master Switch */}
-          <button 
+          <div 
             onClick={() => {
               if (state.webgpuSupported === true && state.webgpuMaster) {
                 setShowWebGpuConfig(!showWebGpuConfig);
@@ -456,7 +456,7 @@ export default function EngineDropdown({ state, updateState }: EngineDropdownPro
                 </button>
               </div>
             </div>
-          </button>
+          </div>
 
           {/* Granular Toggles (Child Switches) */}
           {showWebGpuConfig && state.webgpuSupported === true && state.webgpuMaster && (

@@ -1,5 +1,6 @@
 import { prebuiltAppConfig } from '@mlc-ai/web-llm';
 import type { Engine } from '../components/EngineDropdown';
+import onnxRegistryData from '../../../onnx-registry.json';
 
 // We will fetch ONNX models from the user's Github repo. 
 // If the fetch fails (or the repo doesn't have the file yet), we fallback to these verified models.
@@ -14,11 +15,7 @@ export class ModelRegistry {
    */
   private static async fetchOnnxModels(): Promise<Engine[]> {
     try {
-      const response = await fetch('https://raw.githubusercontent.com/Unheat/Kites/main/onnx-registry.json');
-      if (!response.ok) throw new Error('Failed to fetch ONNX registry');
-      
-      const models = await response.json();
-      return models.map((m: any) => ({
+      return onnxRegistryData.map((m: any) => ({
         id: m.id,
         name: m.name,
         type: 'local',

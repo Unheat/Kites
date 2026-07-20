@@ -13,6 +13,13 @@ export default defineConfig({
     tailwindcss(),
     crx({ manifest }),
   ],
+  optimizeDeps: {
+    exclude: [
+      '@napi-rs/canvas',
+      '@napi-rs/canvas-darwin-arm64',
+      'ppu-paddle-ocr'
+    ]
+  },
   build: {
     rollupOptions: {
       external: [

@@ -23,7 +23,7 @@ export class TranslationManager {
       await this.getOrLoadEngine(engineId);
       console.log(`[TranslationManager] Successfully preloaded engine: ${engineId}`);
     } catch (error) {
-      console.error(`[TranslationManager] Failed to preload engine ${engineId}:`, error);
+      console.warn(`[TranslationManager] Failed to preload engine ${engineId}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
