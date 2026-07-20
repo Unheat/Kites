@@ -236,6 +236,14 @@ async function processImageTranslation(jobId: number, srcUrl: string, tabId?: nu
   } catch (error) {
     console.error(`[Background] Failed to process image for job ${jobId}:`, error);
     await db.translationJobs.update(jobId, { status: 'error' });
+    
+    if (tabId) {
+      chrome.tabs.sendMessage(tabId, {
+        type: 'TRANSLATION_ERROR',
+        payload: { originalUrl: srcUrl }
+      }).catch(() => {});
+    }
+
     // Trigger queue again in case a slot opened up due to this error
     processQueue();
     throw error;
