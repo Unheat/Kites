@@ -33,6 +33,11 @@ export class PaddleOcrEngine implements IOcrEngine {
       } else {
         // Browser environment (Chrome Extension)
         console.log('[PaddleOcrEngine] Detected Browser environment. Loading web backend...');
+        
+        // Ensure ORT does not fallback to CDN under Manifest V3
+        const ort = await import('onnxruntime-web');
+        ort.env.wasm.wasmPaths = chrome.runtime.getURL('/ort-wasm/');
+
         const pkg = await import('ppu-paddle-ocr/web');
         PaddleOcrService = pkg.PaddleOcrService;
         MODEL_PRESETS = pkg.MODEL_PRESETS;

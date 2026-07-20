@@ -135,17 +135,19 @@ export class SimpleInpaintEngine implements IInpaintEngine {
       const buf = canvas.toBuffer('image/png');
       return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
     } else {
-      return new Promise((resolve, reject) => {
-        canvas.toBlob((blob: Blob | null) => {
-          if (!blob) return reject(new Error('[SimpleInpaintEngine] Failed to convert canvas to blob'));
-          const reader = new FileReader();
-          reader.onloadend = () => {
-            resolve(reader.result as ArrayBuffer);
-          };
-          reader.onerror = reject;
-          reader.readAsArrayBuffer(blob);
-        }, 'image/png');
-      });
+      if (typeof canvas.convertToBlob === 'function') {
+        // OffscreenCanvas
+        const blob = await canvas.convertToBlob({ type: 'image/png' });
+        return await blob.arrayBuffer();
+      } else {
+        // Standard HTMLCanvasElement
+        return new Promise((resolve, reject) => {
+          canvas.toBlob((blob: Blob | null) => {
+            if (!blob) return reject(new Error('[SimpleInpaintEngine] Failed to convert canvas to blob'));
+            blob.arrayBuffer().then(resolve).catch(reject);
+          });
+        });
+      }
     }
   }
 

@@ -119,15 +119,17 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
     if (typeof window === 'undefined') {
       return new Uint8Array(canvas.toBuffer('image/jpeg', { quality: 1.0 })).buffer;
     } else {
-      return new Promise((resolve, reject) => {
-        canvas.toBlob((blob: Blob) => {
-          if (!blob) return reject(new Error('Canvas to Blob failed'));
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result as ArrayBuffer);
-          reader.onerror = reject;
-          reader.readAsArrayBuffer(blob);
-        }, 'image/jpeg', 1.0);
-      });
+      if (typeof canvas.convertToBlob === 'function') {
+        const blob = await canvas.convertToBlob({ type: 'image/png' });
+        return await blob.arrayBuffer();
+      } else {
+        return new Promise((resolve, reject) => {
+          canvas.toBlob((blob: Blob | null) => {
+            if (!blob) return reject(new Error('[LamaBaseInpaintEngine] Failed to convert canvas to blob'));
+            blob.arrayBuffer().then(resolve).catch(reject);
+          }, 'image/png');
+        });
+      }
     }
   }
 

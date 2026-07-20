@@ -5,10 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "copy-wasm": "mkdir -p public/ort-wasm && cp node_modules/onnxruntime-web/dist/*.wasm node_modules/onnxruntime-web/dist/*.mjs public/ort-wasm/ 2>/dev/null || true",
+    "build": "npm run copy-wasm && tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:e2e": "node scripts/test-extension.js"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",
@@ -39,6 +41,7 @@
     "onnxruntime-node": "^1.27.0",
     "oxlint": "^1.71.0",
     "postcss": "^8.5.17",
+    "puppeteer": "^24.43.1",
     "tailwindcss": "^4.3.2",
     "tsx": "^4.23.1",
     "typescript": "~6.0.2",

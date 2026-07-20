@@ -34,3 +34,6 @@ venv/
 *.ckpt
 *.pth
 __pycache__/
+
+# Local WebAssembly binaries
+public/ort-wasm/

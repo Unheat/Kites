@@ -1,8 +1,13 @@
 import type { ITranslationEngine } from '../engines/translation/BaseEngine';
+import { env } from '@huggingface/transformers';
 import { WebLLMEngine } from '../engines/translation/WebLLMEngine';
 import { ChromeTranslatorEngine } from '../engines/translation/ChromeTranslatorEngine';
 import { TransformersEngine } from '../engines/translation/TransformersEngine';
+import { GoogleTranslateEngine } from '../engines/translation/GoogleTranslateEngine';
 import type { PopupState } from '../../shared/types';
+
+// Fix CDN fetching for Manifest V3
+env.backends.onnx.wasm!.wasmPaths = chrome.runtime.getURL('/ort-wasm/');
 
 export class TranslationManager {
   private activeEngine: ITranslationEngine | null = null;
@@ -116,6 +121,8 @@ export class TranslationManager {
     let engine: ITranslationEngine;
     if (engineId === 'chrome-translator') {
       engine = new ChromeTranslatorEngine();
+    } else if (engineId === 'gg-translate') {
+      engine = new GoogleTranslateEngine();
     } else if (engineId.startsWith('Xenova/')) {
       engine = new TransformersEngine(engineId);
     } else {

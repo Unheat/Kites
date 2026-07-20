@@ -35,9 +35,9 @@ export class InpaintManager {
       this.platform = (dummy as any).platform;
     } else {
       // Browser environment (Chrome Extension)
-      // @ts-ignore - The module exists at runtime
-      const { WebPlatformProvider } = await import(/* @vite-ignore */ 'ppu-paddle-ocr/web/platform.web.js');
-      this.platform = new WebPlatformProvider();
+      const { PaddleOcrService } = await import('ppu-paddle-ocr/web');
+      const dummy = new PaddleOcrService();
+      this.platform = (dummy as any).platform;
     }
 
     this.isInitialized = true;

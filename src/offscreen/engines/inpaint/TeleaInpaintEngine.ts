@@ -206,12 +206,17 @@ export class TeleaInpaintEngine implements IInpaintEngine {
     } else {
       // Use the modern native Promise-based API (Chrome 76+) instead of the
       // legacy FileReader callback pattern — faster and simpler.
-      return new Promise<ArrayBuffer>((resolve, reject) => {
-        canvas.toBlob((blob: Blob | null) => {
-          if (!blob) return reject(new Error('[TeleaInpaintEngine] Failed to convert canvas to blob'));
-          blob.arrayBuffer().then(resolve).catch(reject);
-        }, 'image/png');
-      });
+      if (typeof canvas.convertToBlob === 'function') {
+        const blob = await canvas.convertToBlob({ type: 'image/png' });
+        return await blob.arrayBuffer();
+      } else {
+        return new Promise((resolve, reject) => {
+          canvas.toBlob((blob: Blob | null) => {
+            if (!blob) return reject(new Error('[TeleaInpaintEngine] Failed to convert canvas to blob'));
+            blob.arrayBuffer().then(resolve).catch(reject);
+          }, 'image/png');
+        });
+      }
     }
   }
 

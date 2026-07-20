@@ -6,6 +6,15 @@
 </head>
 <body>
   <!-- This document is completely invisible to the user. It exists solely to give Chrome a DOM context to run heavy WebAssembly/ONNX processing without memory limits. -->
-  <script type="module" src="./index.ts"></script>
+  <script>
+    window.ort = {
+      env: {
+        wasm: {
+          wasmPaths: '/ort-wasm/'
+        }
+      }
+    };
+  </script>
+  <script type="module" src="/src/offscreen/index.ts"></script>
 </body>
 </html>
