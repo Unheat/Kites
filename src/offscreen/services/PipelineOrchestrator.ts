@@ -42,6 +42,8 @@ export class PipelineOrchestrator {
       const data = await chrome.storage.local.get('popupState');
       const popupState = data.popupState as PopupState | undefined;
       const inpaintTier = popupState?.activeInpaintId || 'none';
+      const sourceLang = popupState?.sourceLang || 'auto';
+      const targetLang = popupState?.targetLang || 'en';
 
       // 2. Fetch image from DB
       const imageRecord = await db.images.where('jobId').equals(jobId).first();
@@ -88,13 +90,13 @@ export class PipelineOrchestrator {
         const inpaintEngine = await this.inpaintManager.getEngine(inpaintTier as InpaintTier);
         console.log(`[PipelineOrchestrator] Running translation and inpainting in parallel (tier: ${inpaintTier}).`);
         [translatedTexts, cleanedImageBuffer] = await Promise.all([
-          translationManager.processTranslation(ocrResult.texts, 'auto', 'English'),
+          translationManager.processTranslation(ocrResult.texts, sourceLang, targetLang),
           inpaintEngine.inpaint(imageBuffer, polygons),
         ]);
       } else {
         // No inpainting — just translate
         console.log(`[PipelineOrchestrator] Translating ${ocrResult.texts.length} text blocks (no inpainting)...`);
-        translatedTexts = await translationManager.processTranslation(ocrResult.texts, 'auto', 'English');
+        translatedTexts = await translationManager.processTranslation(ocrResult.texts, sourceLang, targetLang);
       }
 
       // 6. Bake the translated text into the image for the Live Web return

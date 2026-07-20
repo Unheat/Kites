@@ -98,7 +98,7 @@ export class OcrManager {
     const mergedPolygons: any[] = [];
     const mergedTexts: string[] = [];
     const mergedScores: number[] = [];
-    const mergedBoxes: BoundingBox[] = [];
+    const mergedBoxes: { x: number, y: number, w: number, h: number }[] = [];
 
     // Pre-calculate bounding boxes for fast distance checks
     const boxes = polygons.map(p => calculateBoundingBox(p));
@@ -156,10 +156,11 @@ export class OcrManager {
       mergedTexts.push(groupText);
       mergedScores.push(groupScore);
       mergedPolygons.push(hull);
-      mergedBoxes.push(calculateBoundingBox(hull));
+      const hullBox = calculateBoundingBox(hull);
+      mergedBoxes.push({ x: hullBox.x, y: hullBox.y, w: hullBox.width, h: hullBox.height });
     }
     
-    return { texts: mergedTexts, polygons: mergedPolygons, scores: mergedScores, boxes: mergedBoxes as any };
+    return { texts: mergedTexts, polygons: mergedPolygons, scores: mergedScores, boxes: mergedBoxes };
   }
 
   /**
