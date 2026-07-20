@@ -1,5 +1,5 @@
 import { db } from '../../db';
-import type { PopupState } from '../../popup/index';
+import type { PopupState } from '../../shared/types';
 import { OcrManager } from './OcrManager';
 import { translationManager } from './TranslationManager';
 import { InpaintManager } from './InpaintManager';

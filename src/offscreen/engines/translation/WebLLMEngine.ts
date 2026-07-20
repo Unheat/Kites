@@ -1,6 +1,7 @@
 import { MLCEngine, CreateMLCEngine } from '@mlc-ai/web-llm';
 import type { ITranslationEngine } from './BaseEngine';
 import { checkWebGPUAvailability } from '../../utils/hardware';
+import { getLanguageName } from '../../../shared/utils/LanguageRegistry';
 
 export class WebLLMEngine implements ITranslationEngine {
   private engine: MLCEngine | null = null;
@@ -77,10 +78,13 @@ export class WebLLMEngine implements ITranslationEngine {
    * @param targetLang - The target language name (e.g. 'English'). Defaults to 'English'.
    * @returns A promise that resolves to an array of translated strings in the original order.
    */
-  async translate(texts: string[], sourceLang: string = 'auto', targetLang: string = 'English'): Promise<string[]> {
+  async translate(texts: string[], sourceLangId: string = 'auto', targetLangId: string = 'en'): Promise<string[]> {
     if (!this.engine) {
       throw new Error('WebLLMEngine is not initialized. Call init() first.');
     }
+
+    const sourceLang = sourceLangId === 'auto' ? 'the source language' : getLanguageName(sourceLangId);
+    const targetLang = getLanguageName(targetLangId);
 
     if (!texts || texts.length === 0) return [];
 

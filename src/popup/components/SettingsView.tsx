@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { PopupState } from '../index';
+import type { PopupState } from '../../shared/types';
 import { Moon, Sun, KeyRound, Network } from 'lucide-react';
 import ApiManagerPanel from './ApiManagerPanel';
 import FallbackConfigPanel from './FallbackConfigPanel';

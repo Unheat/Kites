@@ -7,32 +7,7 @@ import SettingsView from './components/SettingsView';
 
 import { Settings, Home, Power } from 'lucide-react';
 
-export interface CustomApiConfig {
-  id: string;
-  provider: 'openai' | 'openai-compatible' | 'gemini' | 'claude';
-  modelName: string;
-  apiKey: string;
-  baseUrl?: string; // Optional for openAI-compatible
-}
-
-export interface PopupState {
-  isExtensionEnabled: boolean;
-  isAuto: boolean;
-  manualMode: 'hover' | 'persistent';
-  concurrency: number;
-  isDark: boolean;
-  activeEngineId: string;
-  activeInpaintId: string;
-  fallbackChain: string[];
-  customApis: CustomApiConfig[];
-  webgpuSupported: boolean | null;
-  webgpuMaster: boolean;
-  webgpuOverrides: {
-    llm: boolean;
-    inpaint: boolean;
-    ocr: boolean;
-  };
-}
+import type { PopupState } from '../shared/types';
 
 function PopupApp() {
   const [activeTab, setActiveTab] = useState<'home' | 'settings'>('home');
@@ -43,6 +18,8 @@ function PopupApp() {
     manualMode: 'hover',
     concurrency: 3,
     isDark: true,
+    sourceLang: 'auto',
+    targetLang: 'en',
     activeEngineId: 'chrome-translator',
     activeInpaintId: 'lama-manga',
     fallbackChain: [],

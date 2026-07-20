@@ -2,7 +2,7 @@ import { createRoot } from 'react-dom/client';
 import { useEffect, useState, useRef } from 'react';
 import './content.css'; 
 import { Languages } from 'lucide-react';
-import type { PopupState } from '../popup/index';
+import type { PopupState } from '../shared/types';
 
 // Minimum image size to avoid detect small icons
 const MIN_WIDTH_IMAGE_PX = 150;

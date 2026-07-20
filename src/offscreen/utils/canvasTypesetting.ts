@@ -69,10 +69,10 @@ function calculateOptimalFontSize(
   
   // 👱‍♀️ ponytail: Smart Aspect Ratio Padding. Taller bubbles get more side padding 
   // so text doesn't clip the curved ellipse edges.
-  const aspectRatio = height / Math.max(1, width);
-  const widthPadding = aspectRatio > 1.5 ? 0.75 : 0.95;
-  const targetWidth = Math.max(10, width * widthPadding);
-  const targetHeight = Math.max(10, height * 0.90);
+  // The max inscribed rectangle of an ellipse is ~0.707 of its width/height.
+  // We use 0.8 to be conservative but not waste too much space for rectangular bubbles.
+  const targetWidth = Math.max(10, width * 0.82);
+  const targetHeight = Math.max(10, height * 0.82);
 
   while (minSize <= maxSize) {
     const midSize = Math.floor((minSize + maxSize) / 2);

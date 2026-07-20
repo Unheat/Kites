@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { CustomApiConfig } from '../index';
+import type { CustomApiConfig } from '../../shared/types';
 
 interface AddApiFormProps {
   onSave: (api: CustomApiConfig) => void;

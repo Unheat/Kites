@@ -1,5 +1,6 @@
 import { pipeline, env } from '@huggingface/transformers';
 import type { ITranslationEngine } from './BaseEngine';
+import { getNllbCode } from '../../../shared/utils/LanguageRegistry';
 
 export class TransformersEngine implements ITranslationEngine {
   private modelId: string;
@@ -47,10 +48,14 @@ export class TransformersEngine implements ITranslationEngine {
     }
   }
 
-  async translate(texts: string[], sourceLang: string = 'jpn_Jpan', targetLang: string = 'eng_Latn'): Promise<string[]> {
+  async translate(texts: string[], sourceLangId: string = 'ja', targetLangId: string = 'en'): Promise<string[]> {
     if (!this.translatorPipeline) {
       throw new Error('TransformersEngine is not initialized.');
     }
+
+    // Map internal canonical language IDs to FLORES-200 NLLB codes
+    const sourceLang = sourceLangId === 'auto' ? 'eng_Latn' : getNllbCode(sourceLangId);
+    const targetLang = getNllbCode(targetLangId);
 
     if (!texts || texts.length === 0) return [];
 

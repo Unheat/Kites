@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Plus, Trash2, X } from 'lucide-react';
-import type { PopupState } from '../index';
+import type { PopupState } from '../../shared/types';
 import AddApiForm from './AddApiForm';
 
 interface ApiManagerPanelProps {

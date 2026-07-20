@@ -1,4 +1,5 @@
 import type { ITranslationEngine } from './BaseEngine';
+import { getBcp47Code } from '../../../shared/utils/LanguageRegistry';
 
 export class ChromeTranslatorEngine implements ITranslationEngine {
   private translator: any = null;
@@ -36,7 +37,7 @@ export class ChromeTranslatorEngine implements ITranslationEngine {
     }
   }
 
-  async translate(texts: string[], sourceLang: string = 'ja', targetLang: string = 'en'): Promise<string[]> {
+  async translate(texts: string[], sourceLangId: string = 'ja', targetLangId: string = 'en'): Promise<string[]> {
     const ai = (self as any).ai;
     if (!ai || !ai.translator) {
       throw new Error('Chrome translation API is not available.');
@@ -44,9 +45,12 @@ export class ChromeTranslatorEngine implements ITranslationEngine {
 
     if (!texts || texts.length === 0) return [];
 
+    const sourceLang = getBcp47Code(sourceLangId);
+    const targetLang = getBcp47Code(targetLangId);
+
     // Create a translator instance for the specific pair
     const translator = await ai.translator.create({
-      sourceLanguage: sourceLang,
+      sourceLanguage: sourceLang === 'auto' ? undefined : sourceLang,
       targetLanguage: targetLang,
     });
 

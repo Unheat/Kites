@@ -2,7 +2,7 @@ import type { ITranslationEngine } from '../engines/translation/BaseEngine';
 import { WebLLMEngine } from '../engines/translation/WebLLMEngine';
 import { ChromeTranslatorEngine } from '../engines/translation/ChromeTranslatorEngine';
 import { TransformersEngine } from '../engines/translation/TransformersEngine';
-import type { PopupState } from '../../popup/index';
+import type { PopupState } from '../../shared/types';
 
 export class TranslationManager {
   private activeEngine: ITranslationEngine | null = null;

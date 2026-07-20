@@ -56,3 +56,32 @@ export interface CheckModelStatusMessage {
 export interface PreloadActiveEngineMessage {
   type: 'PRELOAD_ACTIVE_ENGINE';
 }
+
+export interface CustomApiConfig {
+  id: string;
+  provider: 'openai' | 'openai-compatible' | 'gemini' | 'claude';
+  modelName: string;
+  apiKey: string;
+  baseUrl?: string; // Optional for openAI-compatible
+}
+
+export interface PopupState {
+  isExtensionEnabled: boolean;
+  isAuto: boolean;
+  manualMode: 'hover' | 'persistent';
+  concurrency: number;
+  isDark: boolean;
+  sourceLang: string;
+  targetLang: string;
+  activeEngineId: string;
+  activeInpaintId: string;
+  fallbackChain: string[];
+  customApis: CustomApiConfig[];
+  webgpuSupported: boolean | null;
+  webgpuMaster: boolean;
+  webgpuOverrides: {
+    llm: boolean;
+    inpaint: boolean;
+    ocr: boolean;
+  };
+}

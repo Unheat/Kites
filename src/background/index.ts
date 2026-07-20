@@ -1,6 +1,5 @@
 import { db, cleanupOldJobs } from '../db';
-import type { ProcessJobMessage, PreloadActiveEngineMessage } from '../shared/types';
-import type { PopupState } from '../popup/index';
+import type { ProcessJobMessage, PopupState, PreloadActiveEngineMessage } from '../shared/types';
 
 // Magic Number: Limit concurrency to avoid network/CPU throttling
 // We now dynamically load this from user's PopupState (fallback to 3)

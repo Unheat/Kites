@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { X, ChevronDown, Plus } from 'lucide-react';
-import type { PopupState } from '../index';
+import type { PopupState } from '../../shared/types';
 import type { Engine } from './EngineDropdown';
 import { ModelRegistry } from '../services/ModelRegistry';
 

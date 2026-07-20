@@ -1,5 +1,7 @@
 import type { IOcrEngine, OcrResult } from '../engines/ocr/BaseOcrEngine';
 import { PaddleOcrEngine } from '../engines/ocr/PaddleOcrEngine';
+import type { Point2D, BoundingBox } from '../../shared/utils/geometry';
+import { calculateBoundingBox, computeConvexHull, polygonDistance, calculateRotationAngle } from '../../shared/utils/geometry';
 
 export class OcrManager {
   private engine: IOcrEngine | null = null;
@@ -31,6 +33,136 @@ export class OcrManager {
   }
 
   /**
+   * 👱‍♀️ ponytail: Ported 1:1 from Cotrans quadrilateral_can_merge_region.
+   */
+  private canMergeQuadrilaterals(
+    p1: Point2D[], p2: Point2D[], b1: BoundingBox, b2: BoundingBox,
+    ratio = 1.9, discard_connection_gap = 2, 
+    char_gap_tolerance = 0.6, char_gap_tolerance2 = 1.5, 
+    font_size_ratio_tol = 1.5, aspect_ratio_tol = 2
+  ): boolean {
+    const fs1 = Math.min(b1.width, b1.height);
+    const fs2 = Math.min(b2.width, b2.height);
+    const charSize = Math.min(fs1, fs2);
+    
+    const x1 = b1.x, y1 = b1.y, w1 = b1.width, h1 = b1.height;
+    const x2 = b2.x, y2 = b2.y, w2 = b2.width, h2 = b2.height;
+
+    const dist = polygonDistance(p1, p2);
+    
+    if (dist > discard_connection_gap * charSize) return false;
+    if (Math.max(fs1, fs2) / charSize > font_size_ratio_tol) return false;
+    
+    const ar1 = w1 / h1;
+    const ar2 = w2 / h2;
+    if (ar1 > aspect_ratio_tol && ar2 < 1 / aspect_ratio_tol) return false;
+    if (ar2 > aspect_ratio_tol && ar1 < 1 / aspect_ratio_tol) return false;
+
+    // Both are Axis-Aligned (since paddle OCR boxes are almost always axis-aligned)
+    if (dist < charSize * char_gap_tolerance) {
+      if (Math.abs(x1 + w1 / 2 - (x2 + w2 / 2)) < char_gap_tolerance2) return true;
+      if (w1 > h1 * ratio && h2 > w2 * ratio) return false;
+      if (w2 > h2 * ratio && h1 > w1 * ratio) return false;
+      if (w1 > h1 * ratio || w2 > h2 * ratio) {
+        // Horizontal
+        return Math.abs(x1 - x2) < charSize * char_gap_tolerance2 || Math.abs(x1 + w1 - (x2 + w2)) < charSize * char_gap_tolerance2;
+      } else if (h1 > w1 * ratio || h2 > w2 * ratio) {
+        // Vertical
+        return Math.abs(y1 - y2) < charSize * char_gap_tolerance2 || Math.abs(y1 + h1 - (y2 + h2)) < charSize * char_gap_tolerance2;
+      }
+      return false;
+    }
+    
+    // Fallback for N-point convex hulls or non-axis-aligned
+    // Cotrans falls back to checking poly_distance again
+    const angle1 = calculateRotationAngle(p1);
+    const angle2 = calculateRotationAngle(p2);
+    if (Math.abs(angle1 - angle2) < 15 * Math.PI / 180) {
+      if (dist > charSize * char_gap_tolerance2) return false;
+      if (Math.abs(fs1 - fs2) / charSize > 0.25) return false;
+      return true;
+    }
+    
+    return false;
+  }
+
+  /**
+   * 👱‍♀️ ponytail: Minimal O(N^2) greedy clustering algorithm for Manga text.
+   * Merges adjacent vertical columns into a single Convex Hull polygon 
+   * and concatenates text right-to-left.
+   */
+  private mergeTextBlocks(result: OcrResult): OcrResult {
+    const { texts, polygons = [], scores = [] } = result;
+    if (texts.length <= 1 || polygons.length === 0) return result;
+
+    const mergedPolygons: any[] = [];
+    const mergedTexts: string[] = [];
+    const mergedScores: number[] = [];
+    const mergedBoxes: BoundingBox[] = [];
+
+    // Pre-calculate bounding boxes for fast distance checks
+    const boxes = polygons.map(p => calculateBoundingBox(p));
+    
+    // Union-Find data structure
+    const parent = Array.from({ length: texts.length }, (_, i) => i);
+    const find = (i: number): number => {
+      if (parent[i] === i) return i;
+      return parent[i] = find(parent[i]);
+    };
+    const union = (i: number, j: number) => {
+      const rootI = find(i);
+      const rootJ = find(j);
+      if (rootI !== rootJ) {
+        parent[rootI] = rootJ;
+      }
+    };
+
+    // Pairwise distance checking
+    for (let i = 0; i < texts.length; i++) {
+      for (let j = i + 1; j < texts.length; j++) {
+        // We use Cotrans' char_gap_tolerance=1, char_gap_tolerance2=3 for manga translation
+        // (these values are used in manga_translator/textline_merge/__init__.py)
+        const shouldMerge = this.canMergeQuadrilaterals(
+          polygons[i], polygons[j], boxes[i], boxes[j],
+          1.9, 2.0, 1.0, 3.0, 2.0, 1.3
+        );
+
+        if (shouldMerge) {
+          union(i, j);
+        }
+      }
+    }
+
+    // Group by connected components
+    const groups = new Map<number, number[]>();
+    for (let i = 0; i < texts.length; i++) {
+      const root = find(i);
+      if (!groups.has(root)) groups.set(root, []);
+      groups.get(root)!.push(i);
+    }
+
+    // Process each group
+    for (const groupIndices of groups.values()) {
+      // Sort group right-to-left for standard manga reading order
+      groupIndices.sort((a, b) => boxes[b].x - boxes[a].x);
+      
+      const groupText = groupIndices.map(idx => texts[idx]).join('');
+      console.log(`[OcrManager] Merged Group: "${groupText}" from ${groupIndices.length} columns`);
+      const groupScore = groupIndices.reduce((sum, idx) => sum + (scores[idx] || 1), 0) / groupIndices.length;
+      
+      const allPoints = groupIndices.flatMap(idx => polygons[idx]);
+      const hull = computeConvexHull(allPoints);
+      
+      mergedTexts.push(groupText);
+      mergedScores.push(groupScore);
+      mergedPolygons.push(hull);
+      mergedBoxes.push(calculateBoundingBox(hull));
+    }
+    
+    return { texts: mergedTexts, polygons: mergedPolygons, scores: mergedScores, boxes: mergedBoxes as any };
+  }
+
+  /**
    * Process the image buffer to extract text and bounding boxes.
    *
    * @param imageBuffer - The raw ArrayBuffer of the image.
@@ -38,7 +170,8 @@ export class OcrManager {
    */
   async processImage(imageBuffer: ArrayBuffer): Promise<OcrResult> {
     const engine = await this.getOrLoadEngine();
-    return await engine.recognize(imageBuffer);
+    const rawResult = await engine.recognize(imageBuffer);
+    return this.mergeTextBlocks(rawResult);
   }
 
   /**
