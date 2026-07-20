@@ -22,11 +22,14 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
     const isNode = typeof window === 'undefined';
     let isWebGpuSupported = await checkWebGPUAvailability();
     
-    if (!isNode && typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-      const data = await chrome.storage.local.get('popupState');
-      const state = (data.popupState as any) || {};
-      const masterOn = state.webgpuMaster === true;
-      const inpaintOn = state.webgpuOverrides?.inpaint !== false;
+    if (!isNode && typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+      const popupState = await new Promise<any>((resolve) => {
+        chrome.runtime.sendMessage({ type: 'GET_POPUP_STATE' }, (response) => {
+          resolve(response || {});
+        });
+      });
+      const masterOn = popupState.webgpuMaster === true;
+      const inpaintOn = popupState.webgpuOverrides?.inpaint !== false;
       if (!masterOn || !inpaintOn) {
         isWebGpuSupported = false;
       }

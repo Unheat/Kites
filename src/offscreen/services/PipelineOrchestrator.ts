@@ -39,8 +39,11 @@ export class PipelineOrchestrator {
       await db.translationJobs.update(jobId, { status: 'processing' });
 
       // 1. Fetch user config
-      const data = await chrome.storage.local.get('popupState');
-      const popupState = data.popupState as PopupState | undefined;
+      const popupState = await new Promise<PopupState | undefined>((resolve) => {
+        chrome.runtime.sendMessage({ type: 'GET_POPUP_STATE' }, (response) => {
+          resolve(response as PopupState | undefined);
+        });
+      });
       const inpaintTier = popupState?.activeInpaintId || 'none';
       const sourceLang = popupState?.sourceLang || 'auto';
       const targetLang = popupState?.targetLang || 'en';
