@@ -43,7 +43,7 @@ function PopupApp() {
     manualMode: 'hover',
     concurrency: 3,
     isDark: true,
-    activeEngineId: 'nllb-200',
+    activeEngineId: 'chrome-translator',
     activeInpaintId: 'lama-manga',
     fallbackChain: [],
     customApis: [],

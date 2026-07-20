@@ -18,8 +18,11 @@ export class TransformersEngine implements ITranslationEngine {
 
     this.isInitializing = true;
     try {
-      const data = await chrome.storage.local.get('popupState');
-      const state = (data.popupState as any) || {};
+      const state = await new Promise<any>((resolve) => {
+        chrome.runtime.sendMessage({ type: 'GET_POPUP_STATE' }, (response) => {
+          resolve(response || {});
+        });
+      });
       const masterOn = state.webgpuMaster === true;
       const llmOn = state.webgpuOverrides?.llm !== false;
 

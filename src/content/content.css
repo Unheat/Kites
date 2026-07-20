@@ -1,10 +1,36 @@
-@import "tailwindcss/theme";
-@import "tailwindcss/utilities";
-
-/* Scope minimal resets only to our Kites components to avoid breaking host websites like Gmail */
+/* Scope minimal resets only to our Kites components to avoid breaking host websites */
 #kites-translate-btn, 
 #kites-global-overlay * {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
+}
+
+#kites-translate-btn {
+  position: fixed;
+  z-index: 999999;
+  border: none;
+  background-color: transparent;
+  color: #000;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  cursor: pointer;
+  transition: background-color 0.2s ease, opacity 0.2s ease;
+}
+
+#kites-translate-btn:hover {
+  background-color: rgba(0, 0, 0, 0.05);
+}
+
+.kites-anim-spin {
+  animation: kites-spin 1s linear infinite;
+}
+
+@keyframes kites-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }

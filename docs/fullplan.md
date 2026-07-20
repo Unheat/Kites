@@ -46,9 +46,12 @@ Only used for authentication and subscription management when the user opts for 
 3.  **WebLLM (WebGPU):** For users with capable GPUs, we provide WebLLM to run full Large Language Models (like Llama-3.2-1B or Qwen-1.5B). LLMs provide superior contextual translation quality but require more resources and run exclusively on WebGPU.
 
 **Unified Model Search Registry & Optimizations:**
-Instead of hardcoding a massive list of downloadable models in our UI, we have implemented a high-performance dynamic model search bar combining multiple registries:
-*   **WebLLM:** We read the `webllm.prebuiltAppConfig.model_list` directly from the NPM package, guaranteeing the compiled WebAssembly binaries match the engine version perfectly.
-*   **ONNX / Transformers.js (Static Registry):** Instead of querying the Hugging Face API directly (which hits rate limits for 10,000+ users), we fetch a static JSON file from a GitHub CDN (`raw.githubusercontent.com`). A GitHub Action cron job updates this file weekly.
+Instead of hardcoding a massive list of downloadable models in our UI, we have implemented a high-performance model search bar combining multiple registries. Each registry has a specific update strategy:
+
+*   **ONNX / Transformers.js (Dynamic GitHub Registry):** Instead of querying the Hugging Face API directly (which causes rate limits), we dynamically fetch `onnx-registry.json` from `raw.githubusercontent.com`. 
+    *   **How to Update:** Run `node scripts/generate-registry.cjs` to scrape Hugging Face and rebuild the JSON file, then commit it to GitHub. Extension users will see the new models *instantly* without needing a new Chrome Extension release.
+*   **WebLLM (Hardcoded NPM Registry):** We read the `webllm.prebuiltAppConfig.model_list` directly from the NPM package. We intentionally DO NOT fetch this dynamically over the internet because WebLLM models are tightly coupled to the exact WebAssembly/WebGPU shader code in the NPM package. If we dynamically updated models, older extension engines would crash trying to load them.
+    *   **How to Update:** Run `npm update @mlc-ai/web-llm`, run `npm run build` to recompile the extension, and publish a new version to the Chrome Web Store.
 *   **MiniSearch & DOM Capping:** The UI merges both lists and displays badges (`[WebGPU]` / `[CPU]`). To ensure the popup never lags while rendering 150+ models, we use `MiniSearch` for fuzzy autocomplete, and hard-cap the DOM to only render the top 50 results at a time.
 
 **The User Flow (Extension Dashboard & Setup):**

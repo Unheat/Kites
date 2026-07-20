@@ -36,6 +36,11 @@ export default function EngineDropdown({ state, updateState }: EngineDropdownPro
             status: message.payload.status
           }
         }));
+        
+        // If done, update the engine state so download button disappears
+        if (message.payload.progress >= 1 || message.payload.status === 'ready') {
+          setBaseEngines(prev => prev.map(e => e.id === message.payload.modelId ? { ...e, isDownloaded: true } : e));
+        }
       }
     };
     chrome.runtime.onMessage.addListener(listener);
@@ -212,6 +217,10 @@ export default function EngineDropdown({ state, updateState }: EngineDropdownPro
                       <button
                         key={engine.id}
                         onClick={() => {
+                          if (state.activeEngineId === engine.id) return;
+                          if (engine.type === 'local' && !engine.isDownloaded) {
+                            chrome.runtime.sendMessage({ type: 'START_MODEL_DOWNLOAD', payload: { modelId: engine.id } });
+                          }
                           updateState({ activeEngineId: engine.id });
                           setIsOpen(false);
                           setSearchQuery('');

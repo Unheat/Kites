@@ -1,14 +1,15 @@
 import { describe, it, expect } from 'vitest';
-import { calculateBoundingBox, calculateRotationAngle, Point2D } from './geometry';
+import type { Point2D } from './geometry';
+import { calculateBoundingBox, calculateRotationAngle } from './geometry';
 
 describe('Geometry Utilities', () => {
   describe('calculateBoundingBox', () => {
     it('calculates bounds for a perfectly straight box', () => {
       const straightBox: Point2D[] = [
-        [0, 0],    // top-left
-        [100, 0],  // top-right
-        [100, 50], // bottom-right
-        [0, 50]    // bottom-left
+        {x: 0, y: 0},    // top-left
+        {x: 100, y: 0},  // top-right
+        {x: 100, y: 50}, // bottom-right
+        {x: 0, y: 50}    // bottom-left
       ];
       
       const box = calculateBoundingBox(straightBox);
@@ -21,10 +22,10 @@ describe('Geometry Utilities', () => {
     it('calculates bounds for a slanted box (45 degrees)', () => {
       // Math.sqrt(50^2 + 50^2) = ~70.71
       const slantedBox: Point2D[] = [
-        [50, 0],     // top-left (tilted up)
-        [100, 50],   // top-right
-        [50, 100],   // bottom-right
-        [0, 50]      // bottom-left
+        {x: 50, y: 0},     // top-left (tilted up)
+        {x: 100, y: 50},   // top-right
+        {x: 50, y: 100},   // bottom-right
+        {x: 0, y: 50}      // bottom-left
       ];
       
       const box = calculateBoundingBox(slantedBox);
@@ -37,20 +38,20 @@ describe('Geometry Utilities', () => {
 
   describe('calculateRotationAngle', () => {
     it('returns 0 for a straight horizontal line', () => {
-      const box: Point2D[] = [[0, 0], [100, 0], [100, 50], [0, 50]];
+      const box: Point2D[] = [{x: 0, y: 0}, {x: 100, y: 0}, {x: 100, y: 50}, {x: 0, y: 50}];
       expect(calculateRotationAngle(box)).toBe(0);
     });
 
     it('calculates correct angle for 45 degrees tilt', () => {
       // 45 degrees tilt (pi/4 radians)
-      const box: Point2D[] = [[0, 0], [10, 10], [0, 20], [-10, 10]];
+      const box: Point2D[] = [{x: 0, y: 0}, {x: 10, y: 10}, {x: 0, y: 20}, {x: -10, y: 10}];
       const angle = calculateRotationAngle(box);
       expect(angle).toBeCloseTo(Math.PI / 4, 3);
     });
     
     it('calculates correct angle for -45 degrees tilt', () => {
       // -45 degrees tilt (-pi/4 radians)
-      const box: Point2D[] = [[0, 10], [10, 0], [20, 10], [10, 20]];
+      const box: Point2D[] = [{x: 0, y: 10}, {x: 10, y: 0}, {x: 20, y: 10}, {x: 10, y: 20}];
       const angle = calculateRotationAngle(box);
       expect(angle).toBeCloseTo(-Math.PI / 4, 3);
     });

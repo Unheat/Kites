@@ -59,6 +59,33 @@ vi.mock('./InpaintManager', () => {
   };
 });
 
+// Mock browser globals for jsdom/node
+global.createImageBitmap = vi.fn().mockResolvedValue({ width: 100, height: 100 });
+global.OffscreenCanvas = class {
+  width: number;
+  height: number;
+  constructor(w: number, h: number) { this.width = w; this.height = h; }
+  getContext() {
+    return { 
+      drawImage: vi.fn(), fillText: vi.fn(), strokeText: vi.fn(), measureText: vi.fn().mockReturnValue({ width: 10 }),
+      save: vi.fn(), restore: vi.fn(), translate: vi.fn(), rotate: vi.fn(), clearRect: vi.fn(),
+      beginPath: vi.fn(), moveTo: vi.fn(), lineTo: vi.fn(), closePath: vi.fn(), stroke: vi.fn(), fill: vi.fn()
+    };
+  }
+  convertToBlob() {
+    return Promise.resolve(new Blob(['fake'], { type: 'image/png' }));
+  }
+} as any;
+global.FileReader = class {
+  result: string = 'data:image/png;base64,fake';
+  onloadend: any;
+  readAsDataURL() {
+    setTimeout(() => {
+      if (this.onloadend) this.onloadend();
+    }, 0);
+  }
+} as any;
+
 describe('PipelineOrchestrator', () => {
   beforeEach(() => {
     vi.clearAllMocks();

@@ -1,5 +1,6 @@
-import { db } from '../db';
-import type { TranslateImageMessage, ProcessJobMessage, StartModelDownloadMessage, CheckModelStatusMessage, PreloadActiveEngineMessage } from '../shared/types';
+import { db, cleanupOldJobs } from '../db';
+import type { ProcessJobMessage, PreloadActiveEngineMessage } from '../shared/types';
+import type { PopupState } from '../popup/index';
 
 // Magic Number: Limit concurrency to avoid network/CPU throttling
 // We now dynamically load this from user's PopupState (fallback to 3)
@@ -22,7 +23,15 @@ chrome.contextMenus.onClicked.addListener(async (info: chrome.contextMenus.OnCli
   }
 });
 
-chrome.runtime.onMessage.addListener((message: TranslateImageMessage | any, _sender: chrome.runtime.MessageSender, sendResponse: (response?: any) => void) => {
+// Forward messages from content script or offscreen to popup
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message.type === 'GET_POPUP_STATE') {
+    chrome.storage.local.get('popupState').then(data => {
+      sendResponse(data.popupState || {});
+    });
+    return true; // Keep channel open
+  }
+
   if (message.type === 'TRANSLATE_IMAGE' && message.url) {
     console.log('[Background] Received TRANSLATE_IMAGE from content script. URL:', message.url);
     queueTranslation(message.url, _sender.tab?.id)
@@ -50,12 +59,14 @@ chrome.runtime.onMessage.addListener((message: TranslateImageMessage | any, _sen
 // Trigger preload on extension boot
 chrome.runtime.onStartup.addListener(() => {
   console.log('[Background] Extension startup. Preloading active engine...');
+  cleanupOldJobs(7);
   setupOffscreenDocument('src/offscreen/offscreen.html').then(() => {
     chrome.runtime.sendMessage({ type: 'PRELOAD_ACTIVE_ENGINE' } as PreloadActiveEngineMessage);
   });
 });
 chrome.runtime.onInstalled.addListener(() => {
   console.log('[Background] Extension installed/updated. Preloading active engine...');
+  cleanupOldJobs(7);
   setupOffscreenDocument('src/offscreen/offscreen.html').then(() => {
     chrome.runtime.sendMessage({ type: 'PRELOAD_ACTIVE_ENGINE' } as PreloadActiveEngineMessage);
   });
@@ -123,7 +134,8 @@ async function processQueue() {
   try {
     // Dynamically fetch concurrency setting
     const stateData = await chrome.storage.local.get('popupState');
-    const concurrency = stateData.popupState?.concurrency || 3;
+    const popupState = stateData.popupState as PopupState | undefined;
+    const concurrency = popupState?.concurrency || 3;
 
     // Check how many are currently active
     const downloadingCount = await db.translationJobs.where('status').equals('downloading').count();

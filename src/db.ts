@@ -73,4 +73,20 @@ db.translationJobs.hook('deleting', function(jobId) {
   });
 });
 
+export async function cleanupOldJobs(daysToKeep: number = 7) {
+  const cutoffTime = Date.now() - (daysToKeep * 24 * 60 * 60 * 1000);
+  try {
+    console.log(`[Database] Running cleanup for jobs older than ${daysToKeep} days...`);
+    const oldJobs = await db.translationJobs.where('timestamp').below(cutoffTime).primaryKeys();
+    if (oldJobs.length > 0) {
+      await db.translationJobs.bulkDelete(oldJobs);
+      console.log(`[Database] Cleaned up ${oldJobs.length} old jobs.`);
+    } else {
+      console.log(`[Database] No old jobs to clean up.`);
+    }
+  } catch (error) {
+    console.error(`[Database] Cleanup failed:`, error);
+  }
+}
+
 export { db };

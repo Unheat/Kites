@@ -3,7 +3,10 @@
  * into 4-point OCR polygons.
  */
 
-export type Point2D = [number, number];
+export interface Point2D {
+  x: number;
+  y: number;
+}
 
 export interface BoundingBox {
   x: number;
@@ -26,22 +29,22 @@ export function calculateBoundingBox(polygon: Point2D[]): BoundingBox {
   const [tl, tr, br, bl] = polygon;
 
   // Calculate width using distance between top-left and top-right
-  const widthTop = Math.hypot(tr[0] - tl[0], tr[1] - tl[1]);
-  const widthBottom = Math.hypot(br[0] - bl[0], br[1] - bl[1]);
+  const widthTop = Math.hypot(tr.x - tl.x, tr.y - tl.y);
+  const widthBottom = Math.hypot(br.x - bl.x, br.y - bl.y);
   const width = Math.max(widthTop, widthBottom);
 
   // Calculate height using distance between top-left and bottom-left
-  const heightLeft = Math.hypot(bl[0] - tl[0], bl[1] - tl[1]);
-  const heightRight = Math.hypot(br[0] - tr[0], br[1] - tr[1]);
+  const heightLeft = Math.hypot(bl.x - tl.x, bl.y - tl.y);
+  const heightRight = Math.hypot(br.x - tr.x, br.y - tr.y);
   const height = Math.max(heightLeft, heightRight);
   
   // The center is the average of all 4 points
-  const centerX = (tl[0] + tr[0] + br[0] + bl[0]) / 4;
-  const centerY = (tl[1] + tr[1] + br[1] + bl[1]) / 4;
+  const centerX = (tl.x + tr.x + br.x + bl.x) / 4;
+  const centerY = (tl.y + tr.y + br.y + bl.y) / 4;
 
   return {
-    x: tl[0],
-    y: tl[1],
+    x: tl.x,
+    y: tl.y,
     width,
     height,
     centerX,
@@ -58,5 +61,5 @@ export function calculateRotationAngle(polygon: Point2D[]): number {
   
   const [tl, tr] = polygon;
   // Angle between top-left and top-right
-  return Math.atan2(tr[1] - tl[1], tr[0] - tl[0]);
+  return Math.atan2(tr.y - tl.y, tr.x - tl.x);
 }

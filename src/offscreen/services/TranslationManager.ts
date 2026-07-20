@@ -113,8 +113,8 @@ export class TranslationManager {
     let engine: ITranslationEngine;
     if (engineId === 'chrome-translator') {
       engine = new ChromeTranslatorEngine();
-    } else if (engineId === 'transformers') {
-      engine = new TransformersEngine();
+    } else if (engineId.startsWith('Xenova/')) {
+      engine = new TransformersEngine(engineId);
     } else {
       engine = new WebLLMEngine(engineId);
     }

@@ -65,10 +65,10 @@ export class PipelineOrchestrator {
         await db.translationJobs.update(jobId, { status: 'completed' });
         
         // Convert to base64 to return
-        const reader = new FileReader();
-        reader.readAsDataURL(imageRecord.rawImageBlob);
         return new Promise<string>((resolve) => {
+          const reader = new FileReader();
           reader.onloadend = () => resolve(reader.result as string);
+          reader.readAsDataURL(imageRecord.rawImageBlob);
         });
       }
 
@@ -114,7 +114,7 @@ export class PipelineOrchestrator {
         const poly = polygons[i];
         if (text && poly) {
           // White stroke, Black text is standard for manga
-          drawTextInPolygon(ctx, text, poly, '#000000', '#FFFFFF');
+          drawTextInPolygon(ctx, text, poly as any, '#000000', '#FFFFFF');
         }
       }
       
@@ -129,8 +129,7 @@ export class PipelineOrchestrator {
 
       // 7. Save back to DB (Dashboard gets the RAW clean image, NOT the baked one!)
       console.log(`[PipelineOrchestrator] Saving raw clean results to database...`);
-      
-      const cleanedBlob = new Blob([cleanedImageBuffer], { type: 'image/png' });
+      console.log(`[PipelineOrchestrator] Saving raw clean results to database...`);
       await db.images.update(imageRecord.id!, {
         translatedImageBlob: cleanedBlob
       });

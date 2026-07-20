@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
+import type { Point2D } from '../../shared/utils/geometry';
 import { drawTextInPolygon } from './canvasTypesetting';
-import { Point2D } from '../../shared/utils/geometry';
 
 describe('Canvas Typesetting', () => {
   it('calculates font size and draws text correctly (Mocked)', () => {
@@ -25,10 +25,10 @@ describe('Canvas Typesetting', () => {
     } as unknown as OffscreenCanvasRenderingContext2D;
 
     const straightBox: Point2D[] = [
-      [0, 0],    // top-left
-      [100, 0],  // top-right
-      [100, 100], // bottom-right
-      [0, 100]    // bottom-left
+      {x: 0, y: 0},    // top-left
+      {x: 100, y: 0},  // top-right
+      {x: 100, y: 100}, // bottom-right
+      {x: 0, y: 100}    // bottom-left
     ];
 
     // Bounding box is 100x100.

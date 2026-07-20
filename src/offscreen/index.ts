@@ -35,22 +35,48 @@ chrome.runtime.onMessage.addListener((message: ProcessJobMessage | any, _sender:
 });
 
 async function handlePreloadEngine() {
-  const { translationManager } = await import('./services/PipelineOrchestrator');
-  const data = await chrome.storage.local.get('popupState');
-  const activeEngineId = data.popupState?.activeEngineId;
+  const { translationManager } = await import('./services/TranslationManager');
+  const popupState = await new Promise<any>((resolve) => {
+    chrome.runtime.sendMessage({ type: 'GET_POPUP_STATE' }, (response) => {
+      resolve(response || {});
+    });
+  });
+  const activeEngineId = popupState?.activeEngineId;
   if (activeEngineId) {
     await translationManager.preload(activeEngineId);
   }
 }
 
+const activeDownloads: Record<string, { [file: string]: { loaded: number, total: number } }> = {};
+
 async function handleStartDownload(modelId: string) {
-  const { translationManager } = await import('./services/PipelineOrchestrator');
+  const { translationManager } = await import('./services/TranslationManager');
+  
+  activeDownloads[modelId] = {};
+
   const progressCallback = (info: any) => {
     let progressValue = info.progress || 0;
+    let statusText = info.status || info.text || 'Downloading...';
     
-    // Normalize Transformers vs WebLLM progress structures
-    if (typeof progressValue === 'number' && progressValue > 1) {
-       progressValue = progressValue / 100; // if it was 0-100
+    // Transformers.js sends { status: 'progress', file: '...', loaded: ..., total: ... }
+    if (info.status === 'progress' && info.file) {
+      activeDownloads[modelId][info.file] = { loaded: info.loaded || 0, total: info.total || 0 };
+      
+      let totalLoaded = 0;
+      let totalSize = 0;
+      for (const fileData of Object.values(activeDownloads[modelId])) {
+        totalLoaded += fileData.loaded;
+        totalSize += fileData.total;
+      }
+      
+      if (totalSize > 0) {
+        progressValue = totalLoaded / totalSize;
+      }
+      statusText = `Downloading ${Object.keys(activeDownloads[modelId]).length} files...`;
+    } 
+    // WebLLM sends 0-1
+    else if (typeof progressValue === 'number' && progressValue > 1) {
+       progressValue = progressValue / 100;
     }
     
     chrome.runtime.sendMessage({
@@ -58,12 +84,25 @@ async function handleStartDownload(modelId: string) {
       payload: {
         modelId,
         progress: progressValue,
-        status: info.status || info.text || 'Downloading...'
+        status: statusText
       }
-    });
+    }).catch(() => {}); // ignore error if popup closed
   };
 
-  await translationManager.downloadModel(modelId, progressCallback);
+  try {
+    await translationManager.downloadModel(modelId, progressCallback);
+    // When done, send a final event
+    chrome.runtime.sendMessage({
+      type: 'MODEL_DOWNLOAD_PROGRESS',
+      payload: {
+        modelId,
+        progress: 1,
+        status: 'ready'
+      }
+    }).catch(() => {});
+  } catch (err) {
+    throw err;
+  }
 }
 
 async function handleCheckStatus(modelId: string): Promise<boolean> {

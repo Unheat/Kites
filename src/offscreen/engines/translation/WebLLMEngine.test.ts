@@ -29,6 +29,16 @@ vi.mock('../../utils/hardware', () => {
 
 // Mock chrome
 (globalThis as any).chrome = {
+  runtime: {
+    sendMessage: vi.fn().mockImplementation((msg, callback) => {
+      if (msg.type === 'GET_POPUP_STATE') {
+        callback({
+          webgpuMaster: true,
+          webgpuOverrides: { llm: true }
+        });
+      }
+    })
+  },
   storage: {
     local: {
       get: vi.fn().mockResolvedValue({ 

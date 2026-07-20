@@ -1,5 +1,4 @@
 import { MLCEngine, CreateMLCEngine } from '@mlc-ai/web-llm';
-import type { InitProgressCallback } from '@mlc-ai/web-llm';
 import type { ITranslationEngine } from './BaseEngine';
 import { checkWebGPUAvailability } from '../../utils/hardware';
 
@@ -30,8 +29,12 @@ export class WebLLMEngine implements ITranslationEngine {
     }
     
     const isWebGpuSupported = await checkWebGPUAvailability();
-    const data = await chrome.storage.local.get('popupState');
-    const state = (data.popupState as any) || {};
+    
+    const state = await new Promise<any>((resolve) => {
+      chrome.runtime.sendMessage({ type: 'GET_POPUP_STATE' }, (response) => {
+        resolve(response || {});
+      });
+    });
     const masterOn = state.webgpuMaster === true;
     const llmOn = state.webgpuOverrides?.llm !== false; // default true if undefined
     

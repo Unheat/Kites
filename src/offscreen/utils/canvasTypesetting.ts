@@ -1,4 +1,5 @@
-import { Point2D, calculateBoundingBox, calculateRotationAngle } from '../../shared/utils/geometry';
+import type { Point2D } from '../../shared/utils/geometry';
+import { calculateBoundingBox, calculateRotationAngle } from '../../shared/utils/geometry';
 
 /**
  * Wraps text into an array of lines that fit within maxWidth.
@@ -8,24 +9,45 @@ function wrapText(
   text: string,
   maxWidth: number
 ): string[] {
-  // Very basic word wrap (split by spaces)
-  // For CJK languages, we'd need a more advanced splitting algorithm.
-  // Assuming English translation for now based on standard manga workflow.
-  const words = text.split(' ');
   const lines: string[] = [];
-  let currentLine = words[0];
+  const words = text.split(/\s+/);
+  let currentLine = '';
 
-  for (let i = 1; i < words.length; i++) {
-    const word = words[i];
-    const width = ctx.measureText(currentLine + ' ' + word).width;
-    if (width < maxWidth) {
-      currentLine += ' ' + word;
+  for (const word of words) {
+    if (!word) continue;
+
+    const testLine = currentLine ? currentLine + ' ' + word : word;
+    const testWidth = ctx.measureText(testLine).width;
+
+    if (testWidth <= maxWidth) {
+      currentLine = testLine;
     } else {
-      lines.push(currentLine);
-      currentLine = word;
+      if (currentLine) {
+        lines.push(currentLine);
+        currentLine = '';
+      }
+
+      // 👱‍♀️ ponytail: Simple character-level word breaker for massive words. 
+      // Upgrade path: Dictionary-based hyphenation for correct syllable breaks.
+      let currentWordPart = '';
+      for (const char of word) {
+        const testPart = currentWordPart + char;
+        const testWidth = ctx.measureText(testPart + '-').width;
+        
+        // Keep adding characters if they fit, or if the part is empty (ensure at least 1 char per line)
+        if (testWidth <= maxWidth || !currentWordPart) {
+          currentWordPart = testPart;
+        } else {
+          lines.push(currentWordPart + '-');
+          currentWordPart = char;
+        }
+      }
+      currentLine = currentWordPart;
     }
   }
-  lines.push(currentLine);
+  if (currentLine) {
+    lines.push(currentLine);
+  }
   return lines;
 }
 
@@ -45,9 +67,12 @@ function calculateOptimalFontSize(
   let bestSize = minSize;
   let bestLines: string[] = [text];
   
-  // Account for some padding
-  const targetWidth = Math.max(10, width * 0.95);
-  const targetHeight = Math.max(10, height * 0.95);
+  // 👱‍♀️ ponytail: Smart Aspect Ratio Padding. Taller bubbles get more side padding 
+  // so text doesn't clip the curved ellipse edges.
+  const aspectRatio = height / Math.max(1, width);
+  const widthPadding = aspectRatio > 1.5 ? 0.75 : 0.95;
+  const targetWidth = Math.max(10, width * widthPadding);
+  const targetHeight = Math.max(10, height * 0.90);
 
   while (minSize <= maxSize) {
     const midSize = Math.floor((minSize + maxSize) / 2);
@@ -69,6 +94,10 @@ function calculateOptimalFontSize(
       maxSize = midSize - 1;
     }
   }
+  
+  // Re-calculate the best lines at the final bestSize to ensure exact fit
+  ctx.font = `bold ${bestSize}px ${fontFamily}`;
+  bestLines = wrapText(ctx, text, targetWidth);
   
   return { 
     fontSize: bestSize, 
@@ -99,6 +128,8 @@ export function drawTextInPolygon(
   
   // Calculate best font size
   const { fontSize, lines, lineHeight } = calculateOptimalFontSize(ctx, text, box.width, box.height);
+  
+  console.log(`[drawTextInPolygon] text="${text}", box=${box.width}x${box.height}, angle=${angle.toFixed(2)}, fontSize=${fontSize}, lines=${lines.length}`);
   
   // Set styling
   ctx.font = `bold ${fontSize}px sans-serif`;

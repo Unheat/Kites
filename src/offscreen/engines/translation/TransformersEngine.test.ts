@@ -12,11 +12,26 @@ vi.mock('@huggingface/transformers', () => ({
 describe('TransformersEngine', () => {
   let engine: TransformersEngine;
 
+  let mockWebGpuMaster = true;
+  let mockLlmOverride = { llm: true };
+
   beforeEach(() => {
     engine = new TransformersEngine('test-model');
+    mockWebGpuMaster = true;
+    mockLlmOverride = { llm: true };
     
     // Mock chrome storage
     (global as any).chrome = {
+      runtime: { 
+        sendMessage: vi.fn().mockImplementation((msg, callback) => {
+          if (msg.type === 'GET_POPUP_STATE') {
+            callback({
+              webgpuMaster: mockWebGpuMaster,
+              webgpuOverrides: mockLlmOverride
+            });
+          }
+        })
+      },
       storage: {
         local: {
           get: vi.fn().mockResolvedValue({
@@ -46,12 +61,8 @@ describe('TransformersEngine', () => {
   });
 
   it('initializes with WASM when WebGPU settings are off', async () => {
-    (global as any).chrome.storage.local.get.mockResolvedValue({
-      popupState: {
-        webgpuMaster: true,
-        webgpuOverrides: { llm: false }
-      }
-    });
+    mockWebGpuMaster = false;
+    mockLlmOverride = { llm: false };
 
     const pipelineMock = vi.fn().mockResolvedValue([{ translation_text: 'Translated text' }]);
     (transformers.pipeline as any).mockResolvedValue(pipelineMock);
