@@ -315,6 +315,12 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
       const outName = this.session.outputNames[0];
       const outData = results[outName].data as Float32Array;
 
+      // 2. Explicit Memory Management: Dispose of tensors to prevent WebGPU VRAM leaks!
+      imageTensor.dispose();
+      maskTensor.dispose();
+      // Dispose of the result tensor as well once we've copied/referenced its data array
+      results[outName].dispose();
+
       patchJobs.push({ outData, sx, sy, size });
     }
 

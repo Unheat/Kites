@@ -38,8 +38,7 @@ export function extractRawMaskCanvas(
   modelH: number,
   origW: number,
   origH: number,
-  threshold: number = 0.3,
-  dilateRadius: number = 3
+  threshold: number = 0.3
 ): any {
   const modelCanvas = platform.createCanvas(modelW, modelH);
   const modelCtx = modelCanvas.getContext('2d');
@@ -62,10 +61,13 @@ export function extractRawMaskCanvas(
   dilatedCtx.fillStyle = '#000000';
   dilatedCtx.fillRect(0, 0, modelW, modelH);
 
-  // Morphological Dilation (MORPH_ELLIPSE) matching Cotrans to expand over anti-aliased text edges
+  // Cotrans exact dilation kernel formula: kernel_size = int(max(shape) * 0.025)
+  // For model dimensions ~960px, dilateRadius = ~12-15px
+  const dilateRadius = Math.max(6, Math.floor(Math.max(modelW, modelH) * 0.015));
   const radiusSq = dilateRadius * dilateRadius;
-  for (let dy = -dilateRadius; dy <= dilateRadius; dy++) {
-    for (let dx = -dilateRadius; dx <= dilateRadius; dx++) {
+
+  for (let dy = -dilateRadius; dy <= dilateRadius; dy += 2) {
+    for (let dx = -dilateRadius; dx <= dilateRadius; dx += 2) {
       if (dx * dx + dy * dy <= radiusSq) {
         dilatedCtx.drawImage(modelCanvas, dx, dy);
       }

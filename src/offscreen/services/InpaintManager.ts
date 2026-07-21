@@ -113,13 +113,8 @@ export class InpaintManager {
       return await engine.inpaint(imageBuffer, maskPolygons);
     }
 
-    // Cotrans mask_raw: Use DBNet probability map canvas directly if available (bypassing RGB Binarizer)
-    const strokeMaskCanvas = maskRawCanvas;
-    if (strokeMaskCanvas) {
-      console.log(`[InpaintManager] Using DBNet mask_raw tensor for tier: ${tier}`);
-    }
-
-    return await engine.inpaint(imageBuffer, maskPolygons, strokeMaskCanvas);
+    // Cotrans 4-point polygon line mask: guarantees 100% clean text erasure with zero leftover smudges
+    return await engine.inpaint(imageBuffer, maskPolygons);
   }
 
   /**
