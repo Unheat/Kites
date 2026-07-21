@@ -112,12 +112,10 @@ export class InpaintManager {
       return await engine.inpaint(imageBuffer, maskPolygons);
     }
 
-    // Binarizer Stroke Mask generation (only for specific engines)
+    // Binarizer Stroke Mask generation (only for specific engines to preserve artwork)
     let strokeMaskCanvas = undefined;
     if (tier === 'simple' || tier === 'aot' || tier === 'lama-base' || tier === 'lama-manga') {
       const sourceCanvas = await this.platform.canvas.prepareCanvas(imageBuffer);
-      
-      // Generate the stroke mask (padding is calculated dynamically inside the Binarizer)
       strokeMaskCanvas = Binarizer.extractStrokeMask(this.platform, sourceCanvas, maskPolygons);
       console.log(`[InpaintManager] Generated stroke mask for tier: ${tier}`);
     }
