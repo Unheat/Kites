@@ -85,12 +85,19 @@ export class SimpleInpaintEngine implements IInpaintEngine {
         
         // Pixel must be strictly inside the OCR polygon
         if (polyData[idx] > 0) {
-          // If we have a text mask, strictly exclude the text pixels from the average
+          const rPixel = pixels[idx];
+          const gPixel = pixels[idx + 1];
+          const bPixel = pixels[idx + 2];
+          const luminance = 0.299 * rPixel + 0.587 * gPixel + 0.114 * bPixel;
+
+          // Exclude dark text ink pixels (luminance < 180) to get pure background color
           if (!maskImgData || maskImgData.data[idx] === 0) {
-            rSum += pixels[idx];
-            gSum += pixels[idx + 1];
-            bSum += pixels[idx + 2];
-            count++;
+            if (luminance >= 180 || count === 0) {
+              rSum += rPixel;
+              gSum += gPixel;
+              bSum += bPixel;
+              count++;
+            }
           }
         }
       }
