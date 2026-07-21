@@ -23,6 +23,9 @@ export interface OcrResult {
   
   /** Optional precise rotated quadrilaterals outlining the text. Array of 4-point corners [TopLeft, TopRight, BottomRight, BottomLeft]. */
   polygons?: {x: number, y: number}[][];
+  
+  /** Optional raw unmerged line quadrilaterals for inpainting engines. */
+  rawPolygons?: {x: number, y: number}[][];
 }
 
 export interface IOcrEngine {

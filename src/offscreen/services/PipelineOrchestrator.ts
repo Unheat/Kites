@@ -84,7 +84,7 @@ export class PipelineOrchestrator {
       // VRAM Contention: We previously serialized WebGPU models to avoid OOM.
       // Now, users manually control WebGPU overrides per-engine via the UI.
       const shouldInpaint = inpaintTier !== 'original' && inpaintTier !== 'none' && ocrResult.polygons;
-      const polygons = ocrResult.polygons as Point2D[][];
+      const inpaintPolygons = (ocrResult.rawPolygons || ocrResult.polygons) as Point2D[][];
 
       let translatedTexts: string[];
       let cleanedImageBuffer: ArrayBuffer = imageBuffer;
@@ -94,7 +94,7 @@ export class PipelineOrchestrator {
         console.log(`[PipelineOrchestrator] Running translation and inpainting in parallel (tier: ${inpaintTier}).`);
         
         const translationPromise = translationManager.processTranslation(ocrResult.texts, sourceLang, targetLang);
-        const inpaintPromise = inpaintEngine.inpaint(imageBuffer, polygons).catch(err => {
+        const inpaintPromise = inpaintEngine.inpaint(imageBuffer, inpaintPolygons).catch(err => {
           console.warn(`[PipelineOrchestrator] Inpainting failed (likely WebGPU shape mismatch). Falling back to original image. Error:`, err);
           return imageBuffer; // Fallback to original image
         });
@@ -120,10 +120,10 @@ export class PipelineOrchestrator {
       // Draw each translated text block on top
       for (let i = 0; i < translatedTexts.length; i++) {
         const text = translatedTexts[i];
-        const poly = polygons[i];
+        const poly = ocrResult.polygons ? ocrResult.polygons[i] : null;
         if (text && poly) {
           // White stroke, Black text is standard for manga
-          drawTextInPolygon(ctx, text, poly as any, '#000000', '#FFFFFF');
+          drawTextInPolygon(ctx, text, poly as any, '#000000', '#FFFFFF', targetLang);
         }
       }
       
