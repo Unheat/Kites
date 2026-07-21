@@ -94,7 +94,7 @@ export class PipelineOrchestrator {
         console.log(`[PipelineOrchestrator] Running translation and inpainting in parallel (tier: ${inpaintTier}).`);
         
         const translationPromise = translationManager.processTranslation(ocrResult.texts, sourceLang, targetLang);
-        const inpaintPromise = inpaintEngine.inpaint(imageBuffer, inpaintPolygons).catch(err => {
+        const inpaintPromise = this.inpaintManager.eraseText(imageBuffer, inpaintPolygons, inpaintTier as InpaintTier, ocrResult.maskRawCanvas).catch(err => {
           console.warn(`[PipelineOrchestrator] Inpainting failed (likely WebGPU shape mismatch). Falling back to original image. Error:`, err);
           return imageBuffer; // Fallback to original image
         });

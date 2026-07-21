@@ -103,8 +103,8 @@ export class PaddleOcrEngine implements IOcrEngine {
     try {
       console.log('[PaddleOcrEngine] Starting recognition...');
       
-      // 1. Get perfect rotated bounding boxes via pure JS detector
-      const polygons = await this.customDetector.detectPolygons(imageBuffer);
+      // 1. Get perfect rotated bounding boxes and Cotrans mask_raw via pure JS detector
+      const { polygons, maskRawCanvas } = await this.customDetector.detectPolygons(imageBuffer);
       
       console.log(`[PaddleOcrEngine] Extracted ${polygons.length} text polygons. Running custom rotated recognition...`);
 
@@ -114,8 +114,6 @@ export class PaddleOcrEngine implements IOcrEngine {
       const recognitor = this.service.recognitor;
       const ctx = recognitor.buildContext();
       const dictionary = this.service.options.recognition?.charactersDictionary;
-
-
 
       // 3. Crop, warp, and recognize each text polygon in parallel
       const promises = polygons.map(async (poly, i) => {
@@ -168,8 +166,8 @@ export class PaddleOcrEngine implements IOcrEngine {
 
       console.log(`[PaddleOcrEngine] Recognition complete. Found ${texts.length} text blocks.`);
       
-      // Return texts, boxes, scores, and polygons (perfectly aligned by index)
-      return { texts, boxes, scores, polygons };
+      // Return texts, boxes, scores, polygons, and maskRawCanvas (perfectly aligned by index)
+      return { texts, boxes, scores, polygons, maskRawCanvas };
     } catch (e) {
       console.error('[PaddleOcrEngine] Recognition failed:', e);
       throw e;

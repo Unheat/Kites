@@ -98,7 +98,8 @@ export class InpaintManager {
   async eraseText(
     imageBuffer: ArrayBuffer,
     maskPolygons: Point2D[][],
-    tier: InpaintTier = 'telea'
+    tier: InpaintTier = 'telea',
+    maskRawCanvas?: any
   ): Promise<ArrayBuffer> {
     if (!maskPolygons || maskPolygons.length === 0) {
       return imageBuffer;
@@ -112,12 +113,10 @@ export class InpaintManager {
       return await engine.inpaint(imageBuffer, maskPolygons);
     }
 
-    // Binarizer Stroke Mask generation (only for specific engines to preserve artwork)
-    let strokeMaskCanvas = undefined;
-    if (tier === 'simple' || tier === 'aot' || tier === 'lama-base' || tier === 'lama-manga') {
-      const sourceCanvas = await this.platform.canvas.prepareCanvas(imageBuffer);
-      strokeMaskCanvas = Binarizer.extractStrokeMask(this.platform, sourceCanvas, maskPolygons);
-      console.log(`[InpaintManager] Generated stroke mask for tier: ${tier}`);
+    // Cotrans mask_raw: Use DBNet probability map canvas directly if available (bypassing RGB Binarizer)
+    const strokeMaskCanvas = maskRawCanvas;
+    if (strokeMaskCanvas) {
+      console.log(`[InpaintManager] Using DBNet mask_raw tensor for tier: ${tier}`);
     }
 
     return await engine.inpaint(imageBuffer, maskPolygons, strokeMaskCanvas);

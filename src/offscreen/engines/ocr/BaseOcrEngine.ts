@@ -26,6 +26,9 @@ export interface OcrResult {
   
   /** Optional raw unmerged line quadrilaterals for inpainting engines. */
   rawPolygons?: {x: number, y: number}[][];
+
+  /** Optional raw DBNet probability heat map canvas (Cotrans mask_raw). */
+  maskRawCanvas?: any;
 }
 
 export interface IOcrEngine {

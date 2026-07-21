@@ -184,7 +184,7 @@ export class OcrManager {
     }
     
     // rawPolygons retains the raw unmerged 4-point line quadrilaterals for inpainting
-    return { texts: mergedTexts, polygons: mergedPolygons, scores: mergedScores, boxes: mergedBoxes, rawPolygons: polygons };
+    return { texts: mergedTexts, polygons: mergedPolygons, scores: mergedScores, boxes: mergedBoxes, rawPolygons: polygons, maskRawCanvas: result.maskRawCanvas };
   }
 
   /**

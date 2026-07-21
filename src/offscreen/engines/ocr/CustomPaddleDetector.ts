@@ -1,4 +1,9 @@
-import { extractPolygons, type Point2D } from './extractPolygons';
+import { extractPolygons, extractRawMaskCanvas, type Point2D } from './extractPolygons';
+
+export interface DetectionOutput {
+  polygons: Point2D[][];
+  maskRawCanvas?: any;
+}
 
 /**
  * CustomPaddleDetector wraps the internal DetectionService from ppu-paddle-ocr
@@ -18,12 +23,12 @@ export class CustomPaddleDetector {
   }
 
   /**
-   * Runs the underlying ONNX detection model on the image buffer and returns extracted text polygons.
+   * Runs the underlying ONNX detection model on the image buffer and returns extracted text polygons and raw probability mask.
    * 
    * @param imageBuffer - The raw ArrayBuffer of the image.
-   * @returns A promise that resolves to an array of oriented 4-point bounding polygons.
+   * @returns A promise that resolves to an object containing polygons and optional maskRawCanvas.
    */
-  async detectPolygons(imageBuffer: ArrayBuffer): Promise<Point2D[][]> {
+  async detectPolygons(imageBuffer: ArrayBuffer): Promise<DetectionOutput> {
     if (!this.service || !this.service.detector) {
       throw new Error('CustomPaddleDetector: PaddleOcrService is not initialized.');
     }
@@ -42,8 +47,10 @@ export class CustomPaddleDetector {
 
     if (!probabilityMap) {
       console.warn('[CustomPaddleDetector] Probability map is null. No text found.');
-      return [];
+      return { polygons: [] };
     }
+
+    const thresh = this.service.options.detection?.probabilityThreshold ?? 0.3;
 
     // 3. Post-process the raw tensor map using our pure JS polygon extractor
     console.log('[CustomPaddleDetector] Extracting oriented polygons from probability map...');
@@ -53,12 +60,23 @@ export class CustomPaddleDetector {
       input.height,
       input.originalWidth,
       input.originalHeight,
-      this.service.options.detection?.probabilityThreshold ?? 0.3,
+      thresh,
       2.0, // unclip ratio (matches Baidu's DBPostProcess default 2.0)
       input.resizeRatio
     );
 
-    console.log(`[CustomPaddleDetector] Found ${polygons.length} text polygons.`);
-    return polygons;
+    // 4. Extract Cotrans-style raw probability mask (mask_raw)
+    const maskRawCanvas = extractRawMaskCanvas(
+      platform,
+      probabilityMap,
+      input.width,
+      input.height,
+      input.originalWidth,
+      input.originalHeight,
+      thresh
+    );
+
+    console.log(`[CustomPaddleDetector] Found ${polygons.length} text polygons and extracted maskRawCanvas.`);
+    return { polygons, maskRawCanvas };
   }
 }
