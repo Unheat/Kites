@@ -20,7 +20,7 @@ chrome.runtime.onMessage.addListener((message: ProcessJobMessage | any, _sender:
   }
 
   if (message.type === 'START_MODEL_DOWNLOAD' && message.payload?.modelId) {
-    handleStartDownload(message.payload.modelId)
+    handleStartDownload(message.payload.modelId, message.payload.category)
       .then(() => sendResponse({ status: 'success' }))
       .catch((err) => sendResponse({ status: 'error', error: err.message }));
     return true;
@@ -49,7 +49,35 @@ async function handlePreloadEngine() {
 
 const activeDownloads: Record<string, { [file: string]: { loaded: number, total: number } }> = {};
 
-async function handleStartDownload(modelId: string) {
+async function handleStartDownload(modelId: string, category?: string) {
+  if (category === 'inpaint') {
+    const { inpaintRegistry } = await import('./engines/inpaint/inpaintRegistry');
+    const { InpaintCacheManager } = await import('./services/InpaintCacheManager');
+    
+    activeDownloads[modelId] = {};
+    const progressCallback = (progress: number) => {
+      chrome.runtime.sendMessage({
+        type: 'MODEL_DOWNLOAD_PROGRESS',
+        payload: { modelId, progress, status: 'Downloading weights...' }
+      }).catch(() => {});
+    };
+    
+    const entry = inpaintRegistry[modelId];
+    if (!entry) throw new Error(`Unknown inpaint engine: ${modelId}`);
+    
+    await InpaintCacheManager.downloadModelWithProgress(entry.onnxUrl, progressCallback);
+    if (entry.dataUrl) {
+       await InpaintCacheManager.downloadModelWithProgress(entry.dataUrl, (p) => progressCallback(0.5 + p/2));
+    }
+    
+    chrome.runtime.sendMessage({
+      type: 'MODEL_DOWNLOAD_PROGRESS',
+      payload: { modelId, progress: 1, status: 'ready' }
+    }).catch(() => {});
+    
+    return;
+  }
+
   const { translationManager } = await import('./services/TranslationManager');
   
   activeDownloads[modelId] = {};

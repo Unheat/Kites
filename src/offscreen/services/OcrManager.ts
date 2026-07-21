@@ -1,7 +1,7 @@
 import type { IOcrEngine, OcrResult } from '../engines/ocr/BaseOcrEngine';
 import { PaddleOcrEngine } from '../engines/ocr/PaddleOcrEngine';
 import type { Point2D, BoundingBox } from '../../shared/utils/geometry';
-import { calculateBoundingBox, computeConvexHull, polygonDistance, calculateRotationAngle } from '../../shared/utils/geometry';
+import { calculateBoundingBox, computeConvexHull, polygonDistance, calculateRotationAngle, splitTextRegion } from '../../shared/utils/geometry';
 
 export class OcrManager {
   private engine: IOcrEngine | null = null;
@@ -144,8 +144,17 @@ export class OcrManager {
       groups.get(root)!.push(i);
     }
 
-    // Process each group
+    // Step 2: Postprocess - further split each region using Cotrans Kruskal MST math
+    const finalGroups: number[][] = [];
     for (const groupIndices of groups.values()) {
+      const splitSets = splitTextRegion(polygons, boxes, new Set(groupIndices));
+      for (const set of splitSets) {
+        finalGroups.push(Array.from(set));
+      }
+    }
+
+    // Process each split group
+    for (const groupIndices of finalGroups) {
       // Sort group right-to-left for standard manga reading order
       groupIndices.sort((a, b) => boxes[b].x - boxes[a].x);
       

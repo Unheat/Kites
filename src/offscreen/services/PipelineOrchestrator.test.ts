@@ -90,18 +90,12 @@ describe('PipelineOrchestrator', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     
-    // Mock chrome storage
-    global.chrome = {
-      storage: {
-        local: {
-          get: vi.fn().mockResolvedValue({
-            popupState: {
-              activeInpaintId: 'simple'
-            }
-          })
-        }
+    // Mock chrome storage using spy
+    (vi.spyOn(chrome.storage.local, 'get') as any).mockResolvedValue({
+      popupState: {
+        activeInpaintId: 'simple'
       }
-    } as any;
+    });
   });
 
   it('should run the full pipeline successfully', async () => {

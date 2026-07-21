@@ -146,3 +146,241 @@ export function polygonDistance(poly1: Point2D[], poly2: Point2D[]): number {
 
   return minDistance;
 }
+
+/**
+ * Calculates the area of a polygon using the Shoelace formula.
+ */
+export function polygonArea(points: Point2D[]): number {
+  if (!points || points.length < 3) return 0;
+  let area = 0;
+  for (let i = 0; i < points.length; i++) {
+    const j = (i + 1) % points.length;
+    area += points[i].x * points[j].y - points[j].x * points[i].y;
+  }
+  return Math.abs(area) / 2;
+}
+
+/**
+ * Returns the Cotrans "structure" (midpoints of the 4 edges).
+ * Requires exactly 4 points: [tl, tr, br, bl].
+ * p1: top midpoint
+ * p2: bottom midpoint
+ * p3: right midpoint
+ * p4: left midpoint
+ */
+export function getQuadrilateralStructure(pts: Point2D[]): Point2D[] {
+  if (pts.length !== 4) return pts;
+  const p1 = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
+  const p2 = { x: (pts[2].x + pts[3].x) / 2, y: (pts[2].y + pts[3].y) / 2 };
+  const p3 = { x: (pts[1].x + pts[2].x) / 2, y: (pts[1].y + pts[2].y) / 2 };
+  const p4 = { x: (pts[3].x + pts[0].x) / 2, y: (pts[3].y + pts[0].y) / 2 };
+  return [p1, p2, p3, p4];
+}
+
+/**
+ * Returns the Cotrans "font_size".
+ */
+export function getQuadrilateralFontSize(pts: Point2D[]): number {
+  const struct = getQuadrilateralStructure(pts);
+  if (struct.length !== 4) return 0;
+  const [l1a, l1b, l2a, l2b] = struct;
+  const dist1 = Math.hypot(l1b.x - l1a.x, l1b.y - l1a.y); // top to bottom dist? No, l1a to l1b is p1 to p2 (top-mid to bottom-mid)
+  const dist2 = Math.hypot(l2b.x - l2a.x, l2b.y - l2a.y); // right-mid to left-mid
+  return Math.min(dist1, dist2);
+}
+
+const dist = (x1: number, y1: number, x2: number, y2: number) => Math.hypot(x1 - x2, y1 - y2);
+
+/**
+ * Port of Cotrans Quadrilateral.distance_impl.
+ * We assume direction is horizontal for now as Manga mostly reads horizontal or we don't have direction parsing yet.
+ */
+export function getCotransDistance(pts1: Point2D[], pts2: Point2D[], direction: 'h' | 'v' = 'h', rho: number = 0.5): number {
+  const fs = Math.max(getQuadrilateralFontSize(pts1), getQuadrilateralFontSize(pts2));
+  
+  if (direction === 'h') {
+    const poly1 = computeConvexHull([pts1[0], pts1[3], pts2[0], pts2[3]]);
+    const poly2 = computeConvexHull([pts1[2], pts1[1], pts2[2], pts2[1]]);
+    
+    const s1 = getQuadrilateralStructure(pts1);
+    const s2 = getQuadrilateralStructure(pts2);
+    const poly3 = computeConvexHull([s1[0], s1[1], s2[0], s2[1]]);
+    
+    const dist1 = polygonArea(poly1) / fs;
+    const dist2 = polygonArea(poly2) / fs;
+    const dist3 = polygonArea(poly3) / fs;
+    
+    let pattern = 'h_left';
+    if (dist1 < fs * rho) pattern = 'h_left';
+    if (dist2 < fs * rho && dist2 < dist1) pattern = 'h_right';
+    if (dist3 < fs * rho && dist3 < dist1 && dist3 < dist2) pattern = 'h_middle';
+    
+    if (pattern === 'h_left') {
+      return dist(pts1[0].x, pts1[0].y, pts2[0].x, pts2[0].y);
+    } else if (pattern === 'h_right') {
+      return dist(pts1[1].x, pts1[1].y, pts2[1].x, pts2[1].y);
+    } else {
+      return dist(s1[0].x, s1[0].y, s2[0].x, s2[0].y);
+    }
+  } else {
+    const poly1 = computeConvexHull([pts1[0], pts1[1], pts2[0], pts2[1]]);
+    const poly2 = computeConvexHull([pts1[2], pts1[3], pts2[2], pts2[3]]);
+    
+    const dist1 = polygonArea(poly1) / fs;
+    const dist2 = polygonArea(poly2) / fs;
+    
+    let pattern = 'v_top';
+    if (dist1 < fs * rho) pattern = 'v_top';
+    if (dist2 < fs * rho && dist2 < dist1) pattern = 'v_bottom';
+    
+    if (pattern === 'v_top') {
+      return dist(pts1[0].x, pts1[0].y, pts2[0].x, pts2[0].y);
+    } else {
+      return dist(pts1[2].x, pts1[2].y, pts2[2].x, pts2[2].y);
+    }
+  }
+}
+
+export class Graph {
+  nodes = new Set<number>();
+  edges: { u: number; v: number; weight: number }[] = [];
+
+  addNode(n: number) { this.nodes.add(n); }
+  addEdge(u: number, v: number, weight: number = 0) { this.edges.push({ u, v, weight }); }
+
+  kruskalMST(): { u: number; v: number; weight: number }[] {
+    const parent = new Map<number, number>();
+    const find = (i: number): number => {
+      if (!parent.has(i)) parent.set(i, i);
+      if (parent.get(i) === i) return i;
+      parent.set(i, find(parent.get(i)!));
+      return parent.get(i)!;
+    };
+    const union = (i: number, j: number) => {
+      const rootI = find(i);
+      const rootJ = find(j);
+      if (rootI !== rootJ) parent.set(rootI, rootJ);
+    };
+
+    const sortedEdges = [...this.edges].sort((a, b) => a.weight - b.weight);
+    const mst: { u: number; v: number; weight: number }[] = [];
+
+    for (const edge of sortedEdges) {
+      if (find(edge.u) !== find(edge.v)) {
+        union(edge.u, edge.v);
+        mst.push(edge);
+      }
+    }
+    return mst;
+  }
+
+  connectedComponents(): Set<number>[] {
+    const parent = new Map<number, number>();
+    for (const n of this.nodes) parent.set(n, n);
+
+    const find = (i: number): number => {
+      if (parent.get(i) === i) return i;
+      parent.set(i, find(parent.get(i)!));
+      return parent.get(i)!;
+    };
+    const union = (i: number, j: number) => {
+      const rootI = find(i);
+      const rootJ = find(j);
+      if (rootI !== rootJ) parent.set(rootI, rootJ);
+    };
+
+    for (const edge of this.edges) {
+      union(edge.u, edge.v);
+    }
+
+    const groups = new Map<number, Set<number>>();
+    for (const n of this.nodes) {
+      const root = find(n);
+      if (!groups.has(root)) groups.set(root, new Set());
+      groups.get(root)!.add(n);
+    }
+    return Array.from(groups.values());
+  }
+}
+
+/**
+ * 1:1 strict port of Cotrans `split_text_region`
+ */
+export function splitTextRegion(
+  polygons: Point2D[][],
+  boxes: BoundingBox[],
+  connectedIndices: Set<number>,
+  gamma = 0.5,
+  sigma = 2
+): Set<number>[] {
+  const indices = Array.from(connectedIndices);
+  
+  if (indices.length === 1) return [new Set(indices)];
+  
+  if (indices.length === 2) {
+    const fs1 = getQuadrilateralFontSize(polygons[indices[0]]);
+    const fs2 = getQuadrilateralFontSize(polygons[indices[1]]);
+    const fs = Math.max(fs1, fs2);
+    const dist = getCotransDistance(polygons[indices[0]], polygons[indices[1]]);
+    const angle1 = calculateRotationAngle(polygons[indices[0]]);
+    const angle2 = calculateRotationAngle(polygons[indices[1]]);
+    
+    if (dist < (1 + gamma) * fs && Math.abs(angle1 - angle2) < 0.2 * Math.PI) {
+      return [new Set(indices)];
+    } else {
+      return [new Set([indices[0]]), new Set([indices[1]])];
+    }
+  }
+  
+  const graph = new Graph();
+  for (const idx of indices) graph.addNode(idx);
+  
+  for (let i = 0; i < indices.length; i++) {
+    for (let j = i + 1; j < indices.length; j++) {
+      const u = indices[i];
+      const v = indices[j];
+      const weight = getCotransDistance(polygons[u], polygons[v]);
+      graph.addEdge(u, v, weight);
+    }
+  }
+  
+  const edges = graph.kruskalMST();
+  edges.sort((a, b) => b.weight - a.weight); // reverse=True
+  
+  const distancesSorted = edges.map(e => e.weight);
+  const fontSizes = indices.map(idx => getQuadrilateralFontSize(polygons[idx]));
+  const fontsizeMean = fontSizes.reduce((a, b) => a + b, 0) / fontSizes.length;
+  
+  const distancesMean = distancesSorted.reduce((a, b) => a + b, 0) / distancesSorted.length;
+  // Sample standard deviation to match numpy.std with ddof=0
+  const distancesStd = Math.sqrt(distancesSorted.reduce((a, b) => a + Math.pow(b - distancesMean, 2), 0) / distancesSorted.length);
+  
+  const stdThreshold = Math.max(0.3 * fontsizeMean + 5, 5);
+  
+  const b1 = boxes[edges[0].u];
+  const b2 = boxes[edges[0].v];
+  const maxPolyDistance = polygonDistance(polygons[edges[0].u], polygons[edges[0].v]);
+  const maxCentroidAlignment = Math.min(Math.abs(b1.centerX - b2.centerX), Math.abs(b1.centerY - b2.centerY));
+  
+  if (
+    (distancesSorted[0] <= distancesMean + distancesStd * sigma || distancesSorted[0] <= fontsizeMean * (1 + gamma)) &&
+    (distancesStd < stdThreshold || (maxPolyDistance === 0 && maxCentroidAlignment < 5))
+  ) {
+    return [new Set(indices)];
+  } else {
+    const splitGraph = new Graph();
+    for (const idx of indices) splitGraph.addNode(idx);
+    
+    // Split out the most deviating bbox by skipping edges[0]
+    for (let i = 1; i < edges.length; i++) {
+      splitGraph.addEdge(edges[i].u, edges[i].v);
+    }
+    
+    const ans: Set<number>[] = [];
+    const components = splitGraph.connectedComponents();
+    for (const component of components) {
+      ans.push(...splitTextRegion(polygons, boxes, component, gamma, sigma));
+    }
+    return ans;
+  }
+}

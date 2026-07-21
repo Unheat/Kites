@@ -41,6 +41,7 @@ export default function EngineDropdown({ state, updateState }: EngineDropdownPro
         // If done, update the engine state so download button disappears
         if (message.payload.progress >= 1 || message.payload.status === 'ready') {
           setBaseEngines(prev => prev.map(e => e.id === message.payload.modelId ? { ...e, isDownloaded: true } : e));
+          setInpaintBaseEngines(prev => prev.map(e => e.id === message.payload.modelId ? { ...e, isDownloaded: true } : e));
         }
       }
     };
@@ -48,14 +49,34 @@ export default function EngineDropdown({ state, updateState }: EngineDropdownPro
     return () => chrome.runtime.onMessage.removeListener(listener);
   }, []);
   
-  const inpaintingEngines = useMemo(() => [
+  const [inpaintBaseEngines, setInpaintBaseEngines] = useState<Engine[]>([
     { id: 'none', name: 'None', type: 'local', isDownloaded: true },
     { id: 'simple', name: 'Simple Fill', type: 'local', isDownloaded: true },
     { id: 'telea', name: 'Telea Diffusion', type: 'local', isDownloaded: true },
-    { id: 'aot', name: 'AOT-GAN', type: 'local', isDownloaded: false },
-    { id: 'lama', name: 'LaMa Base', type: 'local', isDownloaded: false },
+    { id: 'aotgan', name: 'AOT-GAN', type: 'local', isDownloaded: false },
+    { id: 'lama-base', name: 'LaMa Base', type: 'local', isDownloaded: false },
     { id: 'lama-manga', name: 'LaMa Manga', type: 'local', isDownloaded: false },
-  ], []);
+  ]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const hasCache = await caches.has('kites-inpaint-models-v1');
+        if (!hasCache) return;
+        const cache = await caches.open('kites-inpaint-models-v1');
+        const keys = await cache.keys();
+        const urls = keys.map(k => k.url);
+        setInpaintBaseEngines(prev => prev.map(e => {
+          if (e.id === 'aotgan') return { ...e, isDownloaded: urls.some(u => u.includes('aotgan')) };
+          if (e.id === 'lama-base') return { ...e, isDownloaded: urls.some(u => u.includes('lama_fp32')) };
+          if (e.id === 'lama-manga') return { ...e, isDownloaded: urls.some(u => u.includes('lama-manga')) };
+          return e;
+        }));
+      } catch (e) {
+        console.warn('Inpaint cache check failed:', e);
+      }
+    })();
+  }, []);
   
   const [baseEngines, setBaseEngines] = useState<Engine[]>([]);
   
@@ -345,7 +366,7 @@ export default function EngineDropdown({ state, updateState }: EngineDropdownPro
             className="w-full flex items-center justify-between p-3 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md hover:border-[var(--color-ink)] transition-colors cursor-pointer"
           >
             <span className="font-medium truncate pr-2">
-              {inpaintingEngines.find(e => e.id === state.activeInpaintId)?.name || 'Loading...'}
+              {inpaintBaseEngines.find(e => e.id === state.activeInpaintId)?.name || 'Loading...'}
             </span>
             <ChevronDown size={16} className={`text-[var(--color-dust)] transition-transform ${isOpenInpaint ? 'rotate-180' : ''}`} />
           </button>
@@ -353,7 +374,7 @@ export default function EngineDropdown({ state, updateState }: EngineDropdownPro
           {isOpenInpaint && (
             <div className="mt-1 bg-[var(--color-paper)] border border-[var(--color-dust)] rounded-md shadow-sm overflow-hidden flex flex-col max-h-[350px]">
               <div className="overflow-y-auto flex-1 p-1 custom-scrollbar">
-                {inpaintingEngines.map((engine) => (
+                {inpaintBaseEngines.map((engine) => (
                   <button
                     key={engine.id}
                     onClick={() => {
@@ -371,7 +392,19 @@ export default function EngineDropdown({ state, updateState }: EngineDropdownPro
                       {state.activeInpaintId === engine.id ? (
                         <Check size={14} className="text-[var(--color-editorial)]" />
                       ) : !engine.isDownloaded ? (
-                        <Download size={14} className="text-[var(--color-dust)] hover:text-[var(--color-ink)]" />
+                        <div 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            chrome.runtime.sendMessage({ type: 'START_MODEL_DOWNLOAD', payload: { modelId: engine.id, category: 'inpaint' } });
+                            // Automatically select the engine so they can see the progress bar
+                            updateState({ activeInpaintId: engine.id });
+                            setIsOpenInpaint(false);
+                          }}
+                          className="p-1 -mr-1 rounded hover:bg-[var(--color-paper)] transition-colors cursor-pointer"
+                          title="Download model"
+                        >
+                          <Download size={14} className="text-[var(--color-dust)] hover:text-[var(--color-ink)]" />
+                        </div>
                       ) : null}
                     </div>
                   </button>
@@ -380,6 +413,26 @@ export default function EngineDropdown({ state, updateState }: EngineDropdownPro
             </div>
           )}
         </div>
+        
+        {/* Render progress bar for inpainting if downloading */}
+        {downloads[state.activeInpaintId || ''] && downloads[state.activeInpaintId || ''].progress < 1 && (
+          <div className="absolute top-[80px] left-0 right-0 mt-1 p-2 bg-[var(--color-paper)]/90 backdrop-blur-md border border-[var(--color-dust)] rounded-md shadow-sm z-40 animate-in fade-in slide-in-from-top-1">
+            <div className="flex justify-between items-end mb-1.5">
+              <span className="text-[10px] font-medium text-[var(--color-dust)] uppercase tracking-wider truncate max-w-[80%]">
+                {downloads[state.activeInpaintId || ''].status}
+              </span>
+              <span className="text-xs font-bold text-[var(--color-ink)]">
+                {Math.round(downloads[state.activeInpaintId || ''].progress * 100)}%
+              </span>
+            </div>
+            <div className="h-1.5 w-full bg-[var(--color-vellum)] rounded-full overflow-hidden">
+              <div 
+                className="h-full bg-[var(--color-editorial)] transition-all duration-300 ease-out" 
+                style={{ width: `${downloads[state.activeInpaintId || ''].progress * 100}%` }}
+              />
+            </div>
+          </div>
+        )}
       </div>
       </div>
 

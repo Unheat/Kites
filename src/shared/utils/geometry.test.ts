@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import type { Point2D } from './geometry';
-import { calculateBoundingBox, calculateRotationAngle } from './geometry';
+import type { Point2D, BoundingBox } from './geometry';
+import { calculateBoundingBox, calculateRotationAngle, splitTextRegion } from './geometry';
 
 describe('Geometry Utilities', () => {
   describe('calculateBoundingBox', () => {
@@ -54,6 +54,44 @@ describe('Geometry Utilities', () => {
       const box: Point2D[] = [{x: 0, y: 10}, {x: 10, y: 0}, {x: 20, y: 10}, {x: 10, y: 20}];
       const angle = calculateRotationAngle(box);
       expect(angle).toBeCloseTo(-Math.PI / 4, 3);
+    });
+  });
+
+  describe('splitTextRegion (Kruskal MST)', () => {
+    it('splits disconnected regions accurately based on Cotrans algorithm', () => {
+      // Box 1 and Box 2 are very close (should merge)
+      const b1 = [{x: 0, y: 0}, {x: 20, y: 0}, {x: 20, y: 20}, {x: 0, y: 20}];
+      const b2 = [{x: 22, y: 0}, {x: 42, y: 0}, {x: 42, y: 20}, {x: 22, y: 20}];
+      
+      // Box 3 is very far away (should be split)
+      const b3 = [{x: 200, y: 200}, {x: 220, y: 200}, {x: 220, y: 220}, {x: 200, y: 220}];
+
+      const polygons = [b1, b2, b3];
+      const boxes: BoundingBox[] = polygons.map(p => calculateBoundingBox(p));
+      const connectedIndices = new Set([0, 1, 2]);
+
+      const groups = splitTextRegion(polygons, boxes, connectedIndices);
+      
+      // Expect it to split into two groups: [0, 1] and [2]
+      expect(groups.length).toBe(2);
+      
+      const groupArrays = groups.map(g => Array.from(g).sort((a, b) => a - b));
+      // Sort by first element to ensure consistent test order
+      groupArrays.sort((a, b) => a[0] - b[0]);
+      
+      expect(groupArrays[0]).toEqual([0, 1]);
+      expect(groupArrays[1]).toEqual([2]);
+    });
+    
+    it('keeps a single box as one region', () => {
+      const b1 = [{x: 0, y: 0}, {x: 20, y: 0}, {x: 20, y: 20}, {x: 0, y: 20}];
+      const polygons = [b1];
+      const boxes = polygons.map(p => calculateBoundingBox(p));
+      const connectedIndices = new Set([0]);
+      
+      const groups = splitTextRegion(polygons, boxes, connectedIndices);
+      expect(groups.length).toBe(1);
+      expect(Array.from(groups[0])).toEqual([0]);
     });
   });
 });

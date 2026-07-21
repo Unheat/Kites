@@ -1,6 +1,6 @@
 import type { IInpaintEngine, Point2D } from './BaseInpaintEngine';
-import { checkWebGPUAvailability } from '../../utils/hardware';
 import { inpaintRegistry } from './inpaintRegistry';
+import { InpaintCacheManager } from '../../services/InpaintCacheManager';
 
 /**
  * Tier 4 Inpainting Engine: LaMa (Large Mask Inpainting).
@@ -20,21 +20,11 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
     if (this.session) return;
     
     const isNode = typeof window === 'undefined';
-    let isWebGpuSupported = await checkWebGPUAvailability();
     
-    if (!isNode && typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
-      const popupState = await new Promise<any>((resolve) => {
-        chrome.runtime.sendMessage({ type: 'GET_POPUP_STATE' }, (response) => {
-          resolve(response || {});
-        });
-      });
-      const masterOn = popupState.webgpuMaster === true;
-      const inpaintOn = popupState.webgpuOverrides?.inpaint !== false;
-      if (!masterOn || !inpaintOn) {
-        isWebGpuSupported = false;
-      }
-    }
-    const providers = isNode ? ['cpu'] : (isWebGpuSupported ? ['webgpu', 'wasm'] : ['wasm']);
+    // WebGPU fails with "Can't perform binary op" on Add nodes inside Chrome Extension 
+    // Offscreen Documents due to WebGPU sandbox limitations, even when using raw ort.webgpu.mjs.
+    // We must force WASM.
+    const providers = isNode ? ['cpu'] : ['wasm'];
 
     if (isNode) {
       this.ort = await import('onnxruntime-node');
@@ -51,6 +41,7 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
       }
     } else {
       this.ort = await import('onnxruntime-web');
+      
       const modelId = this.getModelId();
       const registryEntry = inpaintRegistry[modelId];
       if (!registryEntry) {
@@ -60,21 +51,16 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
       console.log(`[LamaBaseInpaintEngine] Fetching model ${modelId} from ${registryEntry.onnxUrl}`);
       
       try {
-        const fetchOptions: RequestInit = { cache: 'force-cache' };
-        const onnxResponse = await fetch(registryEntry.onnxUrl, fetchOptions);
-        if (!onnxResponse.ok) throw new Error(`Failed to fetch ONNX: ${onnxResponse.statusText}`);
-        const onnxBuffer = await onnxResponse.arrayBuffer();
+        const onnxBuffer = await InpaintCacheManager.getModelBuffer(registryEntry.onnxUrl);
 
         const sessionOptions: any = { 
           executionProviders: providers,
-          logSeverityLevel: 3 
+          logSeverityLevel: (import.meta as any).env?.DEV ? 2 : 3 // 2 = Warnings only, so it won't flood verbose logs
         };
 
         if (registryEntry.dataUrl) {
           console.log(`[LamaBaseInpaintEngine] Fetching external data for ${modelId} from ${registryEntry.dataUrl}`);
-          const dataResponse = await fetch(registryEntry.dataUrl, fetchOptions);
-          if (!dataResponse.ok) throw new Error(`Failed to fetch ONNX data: ${dataResponse.statusText}`);
-          const dataBuffer = await dataResponse.arrayBuffer();
+          const dataBuffer = await InpaintCacheManager.getModelBuffer(registryEntry.dataUrl);
           sessionOptions.externalData = [{ data: dataBuffer, path: `${modelId}.data` }];
         }
 
@@ -248,12 +234,19 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
     const cropW = 512;
     const cropH = 512;
 
-    // Phase 1: Prepare all patches and run all ONNX inferences in parallel.
-    // The GPU can process multiple small jobs concurrently, so submitting all at once
-    // is faster than waiting for each to finish before starting the next.
+    let startTime = 0;
+    if ((import.meta as any).env?.DEV) {
+      startTime = performance.now();
+      console.log(`[LamaBaseInpaintEngine] Starting Phase 1 inference for ${boxes.length} patches...`);
+    }
+
+    // Phase 1: Prepare all patches and run all ONNX inferences sequentially.
+    // ONNX Runtime Web does NOT support concurrent session.run() calls on the same
+    // session instance. Using Promise.all here triggers a "Session already started" error.
     // We capture all geometry (sx, sy, size) in the job result so Phase 2 can apply
     // results back without re-computing patch positions.
-    const patchJobs = await Promise.all(boxes.map(async (box) => {
+    const patchJobs = [];
+    for (const box of boxes) {
       const boxW = box.maxX - box.minX;
       const boxH = box.maxY - box.minY;
       const size = Math.max(boxW, boxH, 128) + 64; // Force square, min 128px + 64px extra padding around text
@@ -294,13 +287,18 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
       const maskTensor = new this.ort.Tensor('float32', maskFloat, [1, 1, cropH, cropW]);
       const feeds = { image: imageTensor, mask: maskTensor };
 
-      // This await is the expensive ONNX inference — all patches run concurrently
+      // ONNX inference — runs strictly sequentially to avoid concurrent session crashes
       const results = await this.session.run(feeds);
       const outName = this.session.outputNames[0];
       const outData = results[outName].data as Float32Array;
 
-      return { outData, sx, sy, size };
-    }));
+      patchJobs.push({ outData, sx, sy, size });
+    }
+
+    if ((import.meta as any).env?.DEV) {
+      const endTime = performance.now();
+      console.log(`[LamaBaseInpaintEngine] Inference finished in ${(endTime - startTime).toFixed(2)}ms for ${boxes.length} patches.`);
+    }
 
     // Phase 2: Apply all inference results back to finalCtx sequentially.
     // Sequential application is required because patches may overlap — a later patch

@@ -20,7 +20,7 @@ export class SimpleInpaintEngine implements IInpaintEngine {
   async inpaint(imageBuffer: ArrayBuffer, maskPolygons: Point2D[][], strokeMaskCanvas?: any): Promise<ArrayBuffer> {
     // 1. Prepare canvas containing the source image
     const canvas = await this.platform.canvas.prepareCanvas(imageBuffer);
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
     const width = canvas.width;
     const height = canvas.height;
 
@@ -56,18 +56,19 @@ export class SimpleInpaintEngine implements IInpaintEngine {
       let maskImgData;
       if (strokeMaskCanvas) {
         try {
-          const maskCtx = strokeMaskCanvas.getContext('2d');
+          const maskCtx = strokeMaskCanvas.getContext('2d', { willReadFrequently: true });
           maskImgData = maskCtx.getImageData(x, y, w, h);
         } catch (e) {
           // Fallback for ppu-paddle-ocr CanvasElement wrapper
-          const maskCtx = strokeMaskCanvas.ctx || strokeMaskCanvas.getContext('2d');
+          const maskCtx = strokeMaskCanvas.ctx || strokeMaskCanvas.getContext('2d', { willReadFrequently: true });
           maskImgData = maskCtx.getImageData(x, y, w, h);
         }
       }
 
       // Generate a polygon mask to restrict sampling strictly to inside the text bubble
       const polyCanvas = this.platform.createCanvas(w, h);
-      const polyCtx = polyCanvas.getContext('2d');
+      const polyCtx = polyCanvas.getContext('2d', { willReadFrequently: true });
+      polyCtx.clearRect(0, 0, w, h);
       polyCtx.fillStyle = '#FFFFFF';
       polyCtx.beginPath();
       polyCtx.moveTo(poly[0].x - x, poly[0].y - y);

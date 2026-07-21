@@ -8,7 +8,7 @@ import { NoneInpaintEngine } from '../engines/inpaint/NoneInpaintEngine';
 import { OriginalInpaintEngine } from '../engines/inpaint/OriginalInpaintEngine';
 import { Binarizer } from '../engines/inpaint/Binarizer';
 
-export type InpaintTier = 'simple' | 'telea' | 'aot' | 'lama' | 'lama-manga' | 'none' | 'original';
+export type InpaintTier = 'simple' | 'telea' | 'aot' | 'lama-base' | 'lama-manga' | 'none' | 'original';
 
 /**
  * Orchestrator and single entry-point for the image inpainting / background erasing pipeline.
@@ -66,7 +66,7 @@ export class InpaintManager {
       case 'aot':
         engine = new AotInpaintEngine(this.platform);
         break;
-      case 'lama':
+      case 'lama-base':
         engine = new LamaBaseInpaintEngine(this.platform);
         break;
       case 'lama-manga':
@@ -114,7 +114,7 @@ export class InpaintManager {
 
     // Binarizer Stroke Mask generation (only for specific engines)
     let strokeMaskCanvas = undefined;
-    if (tier === 'simple' || tier === 'aot' || tier === 'lama' || tier === 'lama-manga') {
+    if (tier === 'simple' || tier === 'aot' || tier === 'lama-base' || tier === 'lama-manga') {
       const sourceCanvas = await this.platform.canvas.prepareCanvas(imageBuffer);
       
       // Generate the stroke mask (padding is calculated dynamically inside the Binarizer)

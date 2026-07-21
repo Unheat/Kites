@@ -11,14 +11,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 // 1. Mock the Chrome API globally
-const mockChromeStorageGet = vi.fn();
-(globalThis as any).chrome = {
-  storage: {
-    local: {
-      get: mockChromeStorageGet,
-    },
-  },
-} as any;
+const mockChromeSendMessage = vi.spyOn(chrome.runtime, 'sendMessage');
 
 // 2. Mock the Engines
 vi.mock('../engines/translation/WebLLMEngine', () => {
@@ -104,11 +97,12 @@ describe('TranslationManager Waterfall Logic', () => {
   });
 
   it('should successfully translate using the primary engine without falling back', async () => {
-    mockChromeStorageGet.mockResolvedValue({
-      popupState: {
+    (mockChromeSendMessage as any).mockImplementation((_msg: any, callback: any) => {
+      if (callback) callback({
         activeEngineId: 'chrome-translator',
         fallbackChain: ['transformers']
-      }
+      });
+      return Promise.resolve();
     });
 
     const result = await manager.processTranslation(['Hello']);
@@ -119,11 +113,12 @@ describe('TranslationManager Waterfall Logic', () => {
   });
 
   it('should fallback to the next engine if the primary engine throws an error', async () => {
-    mockChromeStorageGet.mockResolvedValue({
-      popupState: {
+    (mockChromeSendMessage as any).mockImplementation((_msg: any, callback: any) => {
+      if (callback) callback({
         activeEngineId: 'chrome-translator',
         fallbackChain: ['transformers']
-      }
+      });
+      return Promise.resolve();
     });
 
     mocks.failFirstTranslate = true;
@@ -136,11 +131,12 @@ describe('TranslationManager Waterfall Logic', () => {
   });
 
   it('should throw an error if all engines in the waterfall fail', async () => {
-    mockChromeStorageGet.mockResolvedValue({
-      popupState: {
+    (mockChromeSendMessage as any).mockImplementation((_msg: any, callback: any) => {
+      if (callback) callback({
         activeEngineId: 'chrome-translator',
         fallbackChain: ['transformers']
-      }
+      });
+      return Promise.resolve();
     });
 
     mocks.failAllTranslate = true;

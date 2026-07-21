@@ -39,6 +39,7 @@ export default defineConfig({
       '**/node_modules/**', 
       '**/dist/**', 
       '**/docs/reference/**'
-    ]
+    ],
+    setupFiles: ['./test.setup.ts']
   }
 })

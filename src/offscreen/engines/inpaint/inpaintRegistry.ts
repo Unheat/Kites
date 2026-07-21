@@ -5,7 +5,8 @@ export interface InpaintModelRegistryEntry {
 
 export const inpaintRegistry: Record<string, InpaintModelRegistryEntry> = {
   'lama-base': {
-    onnxUrl: 'https://huggingface.co/Unhead/lama-base/resolve/main/lama-base.onnx'
+    onnxUrl: 'https://huggingface.co/g-ronimo/lama/resolve/main/lama_fp32.onnx'
+    //https://huggingface.co/Unhead/lama-base/resolve/main/lama-base.onnx
   },
   'lama-manga': {
     onnxUrl: 'https://huggingface.co/Unhead/lama-manga/resolve/main/lama-manga.onnx'
