@@ -1,7 +1,6 @@
 import type { IOcrEngine, OcrResult } from '../engines/ocr/BaseOcrEngine';
 import { PaddleOcrEngine } from '../engines/ocr/PaddleOcrEngine';
-import type { Point2D, BoundingBox } from '../../shared/utils/geometry';
-import { calculateBoundingBox, computeConvexHull, polygonDistance, calculateRotationAngle, splitTextRegion } from '../../shared/utils/geometry';
+import { Point2D, BoundingBox, Quadrilateral, calculateBoundingBox, computeConvexHull, polygonDistance, calculateRotationAngle, splitTextRegion } from '../../shared/utils/geometry';
 
 export class OcrManager {
   private engine: IOcrEngine | null = null;

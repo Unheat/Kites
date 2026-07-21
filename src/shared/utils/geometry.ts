@@ -18,131 +18,6 @@ export interface BoundingBox {
 }
 
 /**
- * 1:1 port of Cotrans `sort_pnts` (utils/generic.py:324).
- * Sorts 4-point polygon coordinates using long-side structure vector slopes,
- * returning deterministically ordered points [TopLeft, TopRight, BottomRight, BottomLeft]
- * and the detected orientation ('v' | 'h').
- */
-export function sortPnts(pts: Point2D[]): { points: Point2D[]; isVertical: boolean } {
-  if (!pts || pts.length !== 4) {
-    return { points: pts || [], isVertical: false };
-  }
-
-  // 1. Calculate all 16 pairwise vectors and their Euclidean norms
-  const pairs: { u: Point2D; norm: number }[] = [];
-  for (let i = 0; i < 4; i++) {
-    for (let j = 0; j < 4; j++) {
-      const dx = pts[j].x - pts[i].x;
-      const dy = pts[j].y - pts[i].y;
-      const norm = Math.hypot(dx, dy);
-      pairs.push({ u: { x: dx, y: dy }, norm });
-    }
-  }
-
-  // 2. Sort pairs ascending by norm
-  // Array of indices: 0..3 self (0), 4..7 short sides, 8..11 long sides, 12..15 diagonals
-  const sortedPairs = [...pairs].sort((a, b) => a.norm - b.norm);
-  const vec1 = sortedPairs[8].u;
-  const vec2 = sortedPairs[10].u;
-
-  // Align direction of vec1 with vec2 if inner product is negative
-  let v1x = vec1.x;
-  let v1y = vec1.y;
-  const innerProd = v1x * vec2.x + v1y * vec2.y;
-  if (innerProd < 0) {
-    v1x = -v1x;
-    v1y = -v1y;
-  }
-
-  // Average structure vector
-  const strucVecX = Math.abs((v1x + vec2.x) / 2);
-  const strucVecY = Math.abs((v1y + vec2.y) / 2);
-  const isVertical = strucVecX <= strucVecY;
-
-  const ptsCopy = [...pts];
-
-  if (isVertical) {
-    // Sort by Y ascending
-    ptsCopy.sort((a, b) => a.y - b.y);
-    const top2 = ptsCopy.slice(0, 2).sort((a, b) => a.x - b.x);
-    const bot2 = ptsCopy.slice(2, 4).sort((a, b) => b.x - a.x); // descending X
-    return {
-      points: [top2[0], top2[1], bot2[0], bot2[1]],
-      isVertical: true
-    };
-  } else {
-    // Sort by X ascending
-    ptsCopy.sort((a, b) => a.x - b.x);
-    const left2 = ptsCopy.slice(0, 2).sort((a, b) => a.y - b.y);
-    const right2 = ptsCopy.slice(2, 4).sort((a, b) => a.y - b.y);
-    return {
-      points: [left2[0], right2[0], right2[1], left2[1]],
-      isVertical: false
-    };
-  }
-}
-
-/**
- * 1:1 port of Cotrans `Quadrilateral` class (utils/generic.py:356).
- */
-export class Quadrilateral {
-  pts: Point2D[];
-  direction: 'v' | 'h';
-  text: string;
-  prob: number;
-  fgColor: { r: number; g: number; b: number };
-  bgColor: { r: number; g: number; b: number };
-  textlines: Quadrilateral[];
-
-  constructor(
-    pts: Point2D[],
-    text: string = '',
-    prob: number = 1.0,
-    fgColor = { r: 0, g: 0, b: 0 },
-    bgColor = { r: 255, g: 255, b: 255 }
-  ) {
-    const { points, isVertical } = sortPnts(pts);
-    this.pts = points;
-    this.direction = isVertical ? 'v' : 'h';
-    this.text = text;
-    this.prob = prob;
-    this.fgColor = fgColor;
-    this.bgColor = bgColor;
-    this.textlines = [];
-  }
-
-  get structure(): Point2D[] {
-    if (this.pts.length !== 4) return this.pts;
-    const p1 = { x: (this.pts[0].x + this.pts[1].x) / 2, y: (this.pts[0].y + this.pts[1].y) / 2 };
-    const p2 = { x: (this.pts[2].x + this.pts[3].x) / 2, y: (this.pts[2].y + this.pts[3].y) / 2 };
-    const p3 = { x: (this.pts[1].x + this.pts[2].x) / 2, y: (this.pts[1].y + this.pts[2].y) / 2 };
-    const p4 = { x: (this.pts[3].x + this.pts[0].x) / 2, y: (this.pts[3].y + this.pts[0].y) / 2 };
-    return [p1, p2, p3, p4];
-  }
-
-  get fontSize(): number {
-    const struct = this.structure;
-    if (struct.length !== 4) return 0;
-    const dist1 = Math.hypot(struct[1].x - struct[0].x, struct[1].y - struct[0].y);
-    const dist2 = Math.hypot(struct[3].x - struct[2].x, struct[3].y - struct[2].y);
-    return Math.min(dist1, dist2);
-  }
-
-  get aspectRatio(): number {
-    const struct = this.structure;
-    if (struct.length !== 4) return 1.0;
-    const dist1 = Math.hypot(struct[1].x - struct[0].x, struct[1].y - struct[0].y);
-    const dist2 = Math.hypot(struct[3].x - struct[2].x, struct[3].y - struct[2].y);
-    return dist2 / (dist1 || 1);
-  }
-
-  get aabb(): BoundingBox {
-    return calculateBoundingBox(this.pts);
-  }
-}
-
-
-/**
  * Calculates the bounding box of a polygon.
  * If 4 points, assumes [top-left, top-right, bottom-right, bottom-left].
  * If >4 points, uses an Axis-Aligned Bounding Box (AABB).
@@ -309,9 +184,29 @@ export function getQuadrilateralFontSize(pts: Point2D[]): number {
   const struct = getQuadrilateralStructure(pts);
   if (struct.length !== 4) return 0;
   const [l1a, l1b, l2a, l2b] = struct;
-  const dist1 = Math.hypot(l1b.x - l1a.x, l1b.y - l1a.y); // top to bottom dist? No, l1a to l1b is p1 to p2 (top-mid to bottom-mid)
-  const dist2 = Math.hypot(l2b.x - l2a.x, l2b.y - l2a.y); // right-mid to left-mid
+  const dist1 = Math.hypot(l1b.x - l1a.x, l1b.y - l1a.y);
+  const dist2 = Math.hypot(l2b.x - l2a.x, l2b.y - l2a.y);
   return Math.min(dist1, dist2);
+}
+
+/**
+ * Cotrans Quadrilateral data structure wrapper.
+ */
+export class Quadrilateral {
+  pts: Point2D[];
+  font_size: number;
+  direction: 'h' | 'v';
+  aspect_ratio: number;
+  centroid: Point2D;
+
+  constructor(pts: Point2D[]) {
+    this.pts = pts;
+    this.font_size = getQuadrilateralFontSize(pts);
+    const box = calculateBoundingBox(pts);
+    this.centroid = { x: box.centerX, y: box.centerY };
+    this.aspect_ratio = box.height > 0 ? box.width / box.height : 1.0;
+    this.direction = this.aspect_ratio < 0.95 ? 'v' : 'h';
+  }
 }
 
 const dist = (x1: number, y1: number, x2: number, y2: number) => Math.hypot(x1 - x2, y1 - y2);
