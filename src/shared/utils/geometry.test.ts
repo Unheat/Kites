@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { Point2D, BoundingBox } from './geometry';
-import { calculateBoundingBox, calculateRotationAngle, splitTextRegion } from './geometry';
+import { calculateBoundingBox, calculateRotationAngle, splitTextRegion, sortPnts, Quadrilateral } from './geometry';
 
 describe('Geometry Utilities', () => {
   describe('calculateBoundingBox', () => {
@@ -56,6 +56,43 @@ describe('Geometry Utilities', () => {
       expect(angle).toBeCloseTo(-Math.PI / 4, 3);
     });
   });
+
+  describe('sortPnts & Quadrilateral', () => {
+    it('sorts points and detects horizontal orientation correctly', () => {
+      // Unsorted horizontal box
+      const pts: Point2D[] = [
+        { x: 100, y: 50 },  // top-right
+        { x: 0, y: 50 },    // top-left
+        { x: 0, y: 100 },   // bottom-left
+        { x: 100, y: 100 }  // bottom-right
+      ];
+      const quad = new Quadrilateral(pts);
+      expect(quad.direction).toBe('h');
+      expect(quad.pts[0]).toEqual({ x: 0, y: 50 });    // Top-Left
+      expect(quad.pts[1]).toEqual({ x: 100, y: 50 });  // Top-Right
+      expect(quad.pts[2]).toEqual({ x: 100, y: 100 }); // Bottom-Right
+      expect(quad.pts[3]).toEqual({ x: 0, y: 100 });   // Bottom-Left
+      expect(quad.fontSize).toBe(50);
+    });
+
+    it('sorts points and detects vertical orientation correctly', () => {
+      // Unsorted tall vertical box (e.g. 20px wide, 150px tall)
+      const pts: Point2D[] = [
+        { x: 40, y: 160 }, // bottom-right
+        { x: 20, y: 160 }, // bottom-left
+        { x: 20, y: 10 },  // top-left
+        { x: 40, y: 10 }   // top-right
+      ];
+      const quad = new Quadrilateral(pts);
+      expect(quad.direction).toBe('v');
+      expect(quad.pts[0]).toEqual({ x: 20, y: 10 });   // Top-Left
+      expect(quad.pts[1]).toEqual({ x: 40, y: 10 });   // Top-Right
+      expect(quad.pts[2]).toEqual({ x: 40, y: 160 });  // Bottom-Right
+      expect(quad.pts[3]).toEqual({ x: 20, y: 160 });  // Bottom-Left
+      expect(quad.fontSize).toBe(20);
+    });
+  });
+
 
   describe('splitTextRegion (Kruskal MST)', () => {
     it('splits disconnected regions accurately based on Cotrans algorithm', () => {

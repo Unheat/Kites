@@ -1,7 +1,7 @@
 import type { IOcrEngine, OcrResult } from '../engines/ocr/BaseOcrEngine';
 import { PaddleOcrEngine } from '../engines/ocr/PaddleOcrEngine';
 import type { Point2D, BoundingBox } from '../../shared/utils/geometry';
-import { calculateBoundingBox, computeConvexHull, polygonDistance, calculateRotationAngle, splitTextRegion } from '../../shared/utils/geometry';
+import { calculateBoundingBox, computeConvexHull, polygonDistance, calculateRotationAngle, splitTextRegion, Quadrilateral } from '../../shared/utils/geometry';
 
 export class OcrManager {
   private engine: IOcrEngine | null = null;
@@ -88,23 +88,21 @@ export class OcrManager {
 
   /**
    * Evaluates proximity and geometry to group multiple text lines into single cohesive blocks.
-   * [ARCHITECTURE NOTE]: This logic is strictly decoupled. If a "Combine Text Bubbles" toggle is requested in the future, simply bypass calling this function to instantly revert to raw, uncombined text boxes.
-   * Based on the strict `quadrilateral_can_merge_region` logic from Cotrans.
-   * Uses convex hull to generate accurate bounding polygons for merged blocks,
-   * and concatenates text right-to-left.
+   * Based on the strict `quadrilateral_can_merge_region` and direction voting from Cotrans.
    */
   private mergeTextBlocks(result: OcrResult): OcrResult {
-    // Merge algorithm entry point
     const { texts, polygons = [], scores = [] } = result;
     if (texts.length <= 1 || polygons.length === 0) return result;
 
-    const mergedPolygons: any[] = [];
+    // Build Quadrilateral objects for each detection
+    const quads = polygons.map((poly, i) => new Quadrilateral(poly, texts[i], scores[i] || 1.0));
+
+    const mergedPolygons: Point2D[][] = [];
     const mergedTexts: string[] = [];
     const mergedScores: number[] = [];
     const mergedBoxes: { x: number, y: number, w: number, h: number }[] = [];
 
-    // Pre-calculate bounding boxes for fast distance checks
-    const boxes = polygons.map(p => calculateBoundingBox(p));
+    const boxes = quads.map(q => q.aabb);
     
     // Union-Find data structure
     const parent = Array.from({ length: texts.length }, (_, i) => i);
@@ -120,16 +118,13 @@ export class OcrManager {
       }
     };
 
-    // Pairwise distance checking
+    // Pairwise distance checking using Quadrilateral properties
     for (let i = 0; i < texts.length; i++) {
       for (let j = i + 1; j < texts.length; j++) {
-        // We use Cotrans' char_gap_tolerance=1, char_gap_tolerance2=3 for manga translation
-        // (these values are used in manga_translator/textline_merge/__init__.py)
         const shouldMerge = this.canMergeQuadrilaterals(
-          polygons[i], polygons[j], boxes[i], boxes[j],
+          quads[i].pts, quads[j].pts, boxes[i], boxes[j],
           1.9, 2.0, 1.0, 3.0, 2.0, 1.3
         );
-
         if (shouldMerge) {
           union(i, j);
         }
@@ -144,7 +139,7 @@ export class OcrManager {
       groups.get(root)!.push(i);
     }
 
-    // Step 2: Postprocess - further split each region using Cotrans Kruskal MST math
+    // Postprocess - further split each region using Kruskal MST
     const finalGroups: number[][] = [];
     for (const groupIndices of groups.values()) {
       const splitSets = splitTextRegion(polygons, boxes, new Set(groupIndices));
@@ -153,23 +148,35 @@ export class OcrManager {
       }
     }
 
-    // Process each split group
+    // Process each split group with Cotrans direction voting
     for (const groupIndices of finalGroups) {
-      // Sort group right-to-left for standard manga reading order
-      groupIndices.sort((a, b) => boxes[b].x - boxes[a].x);
+      const groupQuads = groupIndices.map(idx => quads[idx]);
       
-      const groupText = groupIndices.map(idx => texts[idx]).join('');
-      console.log(`[OcrManager] Merged Group: "${groupText}" from ${groupIndices.length} columns`);
+      // Direction voting (utils/generic.py:157)
+      const vCount = groupQuads.filter(q => q.direction === 'v').length;
+      const hCount = groupQuads.filter(q => q.direction === 'h').length;
+      const isVerticalGroup = vCount >= hCount;
+
+      if (isVerticalGroup) {
+        // Vertical Japanese text lines: sort right-to-left, join without spaces
+        groupIndices.sort((a, b) => boxes[b].centerX - boxes[a].centerX);
+      } else {
+        // Horizontal text lines: sort top-to-bottom, join with spaces
+        groupIndices.sort((a, b) => boxes[a].centerY - boxes[b].centerY);
+      }
+
+      const joinDelimiter = isVerticalGroup ? '' : ' ';
+      const groupText = groupIndices.map(idx => texts[idx]).join(joinDelimiter);
       const groupScore = groupIndices.reduce((sum, idx) => sum + (scores[idx] || 1), 0) / groupIndices.length;
-      
-      const allPoints = groupIndices.flatMap(idx => polygons[idx]);
-      const hull = computeConvexHull(allPoints);
-      
-      mergedTexts.push(groupText);
-      mergedScores.push(groupScore);
-      mergedPolygons.push(hull);
-      const hullBox = calculateBoundingBox(hull);
-      mergedBoxes.push({ x: hullBox.x, y: hullBox.y, w: hullBox.width, h: hullBox.height });
+
+      // Retain child line polygons directly
+      for (const idx of groupIndices) {
+        mergedTexts.push(texts[idx]);
+        mergedScores.push(scores[idx] || groupScore);
+        mergedPolygons.push(polygons[idx]);
+        const box = boxes[idx];
+        mergedBoxes.push({ x: box.x, y: box.y, w: box.width, h: box.height });
+      }
     }
     
     return { texts: mergedTexts, polygons: mergedPolygons, scores: mergedScores, boxes: mergedBoxes };

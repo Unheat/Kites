@@ -1,4 +1,5 @@
 import clipperLibModule from 'clipper-lib';
+import { sortPnts, Quadrilateral } from '../../../shared/utils/geometry';
 const ClipperLib = (clipperLibModule as any).default || clipperLibModule;
 
 export interface Point {
@@ -12,21 +13,11 @@ export interface Point2D {
 }
 
 /**
- * Replicates the DBPostProcess logic from PaddleOCR.
+ * Replicates and enhances the DBPostProcess logic using Cotrans geometry:
  * 1. Finds connected components (blobs).
- * 2. Finds the convex hull of each blob.
- * 3. Expands the hull using Vatti clipping (clipper-lib) by ratio.
- * 4. Calculates the Minimum Area Bounding Rectangle using Rotating Calipers.
- * 
- * @param probMap - The probability heat map output from the DB text detector model.
- * @param width - The width of the resized image fed into the model.
- * @param height - The height of the resized image fed into the model.
- * @param originalWidth - The original width of the input image.
- * @param originalHeight - The original height of the input image.
- * @param threshold - The binary threshold to binarize the probability map. Defaults to 0.3.
- * @param unclipRatio - The expansion factor to unclip the bounding box. Defaults to 2.0.
- * @param resizeRatio - Optional predefined resize ratio mapping model size back to original size.
- * @returns An array of perfectly aligned 4-point bounding polygons scaled back to original dimensions.
+ * 2. Scales blobs to original image dimensions FIRST so unclipping occurs in real pixel space.
+ * 3. Expands the 4-point rectangle using Vatti clipping (clipper-lib) by ratio.
+ * 4. Sorts points deterministically using long-side structure vector slopes (`sortPnts`).
  */
 export function extractPolygons(
   probMap: Float32Array,
@@ -95,7 +86,6 @@ export function extractPolygons(
 
   for (const blob of blobs) {
     // 1. Box Score Thresholding (det_db_box_thresh = 0.6)
-    // Filter out weak detections (e.g. background drawings, bushes, grass)
     let scoreSum = 0;
     for (const p of blob) {
       scoreSum += probMap[p.Y * width + p.X];
@@ -103,39 +93,45 @@ export function extractPolygons(
     const avgScore = scoreSum / blob.length;
     if (avgScore < 0.6) continue;
 
-    // 2. Convex Hull
-    const hull = getConvexHull(blob);
+    // Scale blob coordinates to original image space FIRST before unclipping!
+    const scaledBlob: Point[] = blob.map(p => ({
+      X: p.X * resizeRatioX,
+      Y: p.Y * resizeRatioY
+    }));
+
+    // 2. Convex Hull on original resolution
+    const hull = getConvexHull(scaledBlob);
     if (hull.length < 3) continue;
 
-    // 3. Initial Min Area Rect (find minAreaRect first)
+    // 3. Initial Min Area Rect
     const initialMinRect = minAreaRect(hull);
     if (initialMinRect.length < 4) continue;
 
-    // Filter by initial box side size (sside >= 3)
     const w0 = dist(initialMinRect[0], initialMinRect[1]);
     const h0 = dist(initialMinRect[0], initialMinRect[3]);
     if (Math.min(w0, h0) < 3) continue;
 
-    // 4. Unclip (Expand) the 4-point rectangle instead of the hull
+    // 4. Unclip (Expand) in original pixel space
     const expandedPoly = unclip(initialMinRect, unclipRatio);
     if (expandedPoly.length < 3) continue;
 
-    // 5. Final Min Area Rect (find minAreaRect again on expanded polygon)
+    // 5. Final Min Area Rect
     const finalMinRect = minAreaRect(expandedPoly);
     if (finalMinRect.length < 4) continue;
 
-    // Filter by expanded box side size (sside >= 5)
     const w1 = dist(finalMinRect[0], finalMinRect[1]);
     const h1 = dist(finalMinRect[0], finalMinRect[3]);
     if (Math.min(w1, h1) < 5) continue;
     
-    // Scale back to original
-    const scaledRect = finalMinRect.map(p => ({
-      x: Math.max(0, Math.min(originalWidth, p.X * resizeRatioX)),
-      y: Math.max(0, Math.min(originalHeight, p.Y * resizeRatioY))
+    // Clamp coordinates within original image boundaries
+    const scaledRect: Point2D[] = finalMinRect.map(p => ({
+      x: Math.max(0, Math.min(originalWidth, p.X)),
+      y: Math.max(0, Math.min(originalHeight, p.Y))
     }));
     
-    polygons.push(scaledRect);
+    // Pass through Cotrans Quadrilateral constructor to run sortPnts
+    const quad = new Quadrilateral(scaledRect);
+    polygons.push(quad.pts);
   }
 
   return polygons;
@@ -300,24 +296,9 @@ function minAreaRect(hull: Point[]): Point[] {
   }
 
   if (bestRect.length === 4) {
-    // Deterministic sorting identical to Baidu's get_mini_boxes in predict_system.py
-    // 1. Sort points by X coordinate to separate left and right sides
-    const sortedByX = [...bestRect].sort((a, b) => a.X - b.X);
-    
-    const leftPts = [sortedByX[0], sortedByX[1]];
-    const rightPts = [sortedByX[2], sortedByX[3]];
-    
-    // 2. Sort left points by Y to distinguish Top-Left and Bottom-Left
-    leftPts.sort((a, b) => a.Y - b.Y);
-    const topLeft = leftPts[0];
-    const bottomLeft = leftPts[1];
-    
-    // 3. Sort right points by Y to distinguish Top-Right and Bottom-Right
-    rightPts.sort((a, b) => a.Y - b.Y);
-    const topRight = rightPts[0];
-    const bottomRight = rightPts[1];
-
-    return [topLeft, topRight, bottomRight, bottomLeft];
+    const pts2D: Point2D[] = bestRect.map(p => ({ x: p.X, y: p.Y }));
+    const { points } = sortPnts(pts2D);
+    return points.map(p => ({ X: p.x, Y: p.y }));
   }
 
   return bestRect;
