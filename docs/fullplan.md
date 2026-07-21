@@ -105,6 +105,21 @@ To keep the foundation clean (YAGNI), we will build the extraction UI in stages:
 Content Scripts run on the host website and **cannot** write to the extension's local `IndexedDB`. Data flow must strictly be: Content Script -> Service Worker -> Offscreen Document -> DB. 
 Crucially, the Background Service Worker acts *only* as a lightweight traffic cop. It handles the volatile lifecycle of the Offscreen Document (which Chrome kills when idle), queuing messages until the document boots. It fetches the image buffer and passes it directly to the **Offscreen Document**, which has full DOM access and high memory limits, to execute the heavy ONNX translation and save the results to the database. This guarantees Chrome will not kill the Service Worker.
 
+```mermaid
+sequenceDiagram
+    participant CS as Content Script
+    participant SW as Background Service Worker
+    participant OD as Offscreen Document (DOM Context & IndexedDB)
+
+    CS->>SW: chrome.runtime.sendMessage({ action: "TRANSLATE_IMAGE", data: imageData })
+    Note over SW: Queues message & ensures<br/>Offscreen Document is active
+    SW->>OD: chrome.runtime.sendMessage({ action: "EXECUTE_TRANSLATION", data: imageData })
+    Note over OD: Performs heavy OCR, Inpainting & Translation<br/>Writes project/image results to IndexedDB
+    OD->>SW: chrome.runtime.sendMessage({ action: "TRANSLATION_RESULT", results: boundingBoxes })
+    SW->>CS: Relay translation results / Base64 image
+```
+
+
 *Model Syncing (Website vs Extension & The Communication Bottleneck):*
 Due to browser security, `your-website.com` and `chrome-extension://...` cannot share the same `IndexedDB` file. To solve this without hitting the **Web-to-Extension Communication Bottleneck** (passing heavy Base64 image blobs via `postMessage` crashes memory and breaks on navigation): 
 1. The website will pass only the **Image URL** or use **Transferable Objects (`ArrayBuffer`)** via `window.postMessage` to the extension. Transferable objects are zero-copy and do not duplicate memory.
