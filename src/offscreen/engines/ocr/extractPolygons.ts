@@ -38,7 +38,8 @@ export function extractRawMaskCanvas(
   modelH: number,
   origW: number,
   origH: number,
-  threshold: number = 0.3
+  threshold: number = 0.3,
+  dilateRadius: number = 3
 ): any {
   const modelCanvas = platform.createCanvas(modelW, modelH);
   const modelCtx = modelCanvas.getContext('2d');
@@ -52,13 +53,29 @@ export function extractRawMaskCanvas(
     data[idx] = isText ? 255 : 0;
     data[idx + 1] = isText ? 255 : 0;
     data[idx + 2] = isText ? 255 : 0;
-    data[idx + 3] = 255;
+    data[idx + 3] = isText ? 255 : 0;
   }
   modelCtx.putImageData(imgData, 0, 0);
 
+  const dilatedCanvas = platform.createCanvas(modelW, modelH);
+  const dilatedCtx = dilatedCanvas.getContext('2d');
+  dilatedCtx.fillStyle = '#000000';
+  dilatedCtx.fillRect(0, 0, modelW, modelH);
+
+  // Morphological Dilation (MORPH_ELLIPSE) matching Cotrans to expand over anti-aliased text edges
+  const radiusSq = dilateRadius * dilateRadius;
+  for (let dy = -dilateRadius; dy <= dilateRadius; dy++) {
+    for (let dx = -dilateRadius; dx <= dilateRadius; dx++) {
+      if (dx * dx + dy * dy <= radiusSq) {
+        dilatedCtx.drawImage(modelCanvas, dx, dy);
+      }
+    }
+  }
+
   const origCanvas = platform.createCanvas(origW, origH);
   const origCtx = origCanvas.getContext('2d');
-  origCtx.drawImage(modelCanvas, 0, 0, modelW, modelH, 0, 0, origW, origH);
+  origCtx.imageSmoothingEnabled = false;
+  origCtx.drawImage(dilatedCanvas, 0, 0, modelW, modelH, 0, 0, origW, origH);
 
   return origCanvas;
 }
