@@ -1,4 +1,5 @@
 import type { IInpaintEngine, Point2D } from './BaseInpaintEngine';
+import { checkWebGPUAvailability } from '../../utils/hardware';
 import { inpaintRegistry } from './inpaintRegistry';
 import { InpaintCacheManager } from '../../services/InpaintCacheManager';
 
@@ -20,11 +21,27 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
     if (this.session) return;
     
     const isNode = typeof window === 'undefined';
+    let isWebGpuSupported = false;
+    if (!isNode) {
+      isWebGpuSupported = await checkWebGPUAvailability();
+      
+      if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+        const popupState = await new Promise<any>((resolve) => {
+          chrome.runtime.sendMessage({ type: 'GET_POPUP_STATE' }, (response) => {
+            resolve(response || {});
+          });
+        });
+        const masterOn = popupState.webgpuMaster === true;
+        const inpaintOn = popupState.webgpuOverrides?.inpaint !== false;
+        if (!masterOn || !inpaintOn) {
+          isWebGpuSupported = false;
+        }
+      }
+    }
     
-    // WebGPU fails with "Can't perform binary op" on Add nodes inside Chrome Extension 
-    // Offscreen Documents due to WebGPU sandbox limitations, even when using raw ort.webgpu.mjs.
-    // We must force WASM.
-    const providers = isNode ? ['cpu'] : ['wasm'];
+    // Attempting WebGPU Revival with 1.27.0 + high-performance powerPreference
+    const providers = isNode ? ['cpu'] : (isWebGpuSupported ? ['webgpu'] : ['wasm']);
+    console.log(`[LamaBaseInpaintEngine] Hardware checks complete. Selected provider: ${providers[0]}`);
 
     if (isNode) {
       this.ort = await import('onnxruntime-node');
@@ -40,7 +57,16 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
         console.warn(`[LamaBaseInpaintEngine] Failed to load ONNX model:`, e);
       }
     } else {
-      this.ort = await import('onnxruntime-web');
+      // Bypass Vite's bundler and load the raw ort.webgpu.mjs file to avoid collision
+      // with ppu-paddle-ocr's standard onnxruntime-web import.
+      const ortUrl = chrome.runtime.getURL('/ort-wasm/ort.webgpu.mjs');
+      this.ort = await import(/* @vite-ignore */ ortUrl);
+      
+      // Explicitly demand the high-performance GPU to bypass Chrome's background throttling
+      if (this.ort.env.webgpu) {
+        this.ort.env.webgpu.powerPreference = 'high-performance';
+      }
+      this.ort.env.wasm.wasmPaths = chrome.runtime.getURL('/ort-wasm/');
       
       const modelId = this.getModelId();
       const registryEntry = inpaintRegistry[modelId];
@@ -234,11 +260,8 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
     const cropW = 512;
     const cropH = 512;
 
-    let startTime = 0;
-    if ((import.meta as any).env?.DEV) {
-      startTime = performance.now();
-      console.log(`[LamaBaseInpaintEngine] Starting Phase 1 inference for ${boxes.length} patches...`);
-    }
+    let startTime = performance.now();
+    console.log(`[LamaBaseInpaintEngine] Starting Phase 1 inference for ${boxes.length} patches using ${this.session.options?.executionProviders?.[0] || 'unknown'}...`);
 
     // Phase 1: Prepare all patches and run all ONNX inferences sequentially.
     // ONNX Runtime Web does NOT support concurrent session.run() calls on the same
@@ -295,10 +318,8 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
       patchJobs.push({ outData, sx, sy, size });
     }
 
-    if ((import.meta as any).env?.DEV) {
-      const endTime = performance.now();
-      console.log(`[LamaBaseInpaintEngine] Inference finished in ${(endTime - startTime).toFixed(2)}ms for ${boxes.length} patches.`);
-    }
+    const endTime = performance.now();
+    console.log(`[LamaBaseInpaintEngine] Inference finished in ${(endTime - startTime).toFixed(2)}ms for ${boxes.length} patches.`);
 
     // Phase 2: Apply all inference results back to finalCtx sequentially.
     // Sequential application is required because patches may overlap — a later patch
