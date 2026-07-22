@@ -135,31 +135,15 @@ export class PaddleOcrEngine implements IOcrEngine {
       const ctx = recognitor.buildContext();
       const dictionary = this.service.options.recognition?.charactersDictionary;
 
-      // 3. Crop, warp, and recognize each text polygon in parallel
-      const promises = polygons.map(async (poly, i) => {
-        // Perspective crop/rotate to straighten text and handle vertical manga layout
-        const finalCropCanvas = cropAndWarp(this.service.platform, sourceCanvas, poly);
-        
-        // Save crops to disk in Node environment for developer visual debugging
-        if (typeof window === 'undefined') {
-          try {
-            const fs = await import('fs');
-            const path = await import('path');
-            const cropDir = path.join(process.cwd(), 'src/test/result/crops');
-            if (!fs.existsSync(cropDir)) {
-              fs.mkdirSync(cropDir, { recursive: true });
-            }
-            const cropBuffer = finalCropCanvas.toBuffer('image/png');
-            fs.writeFileSync(path.join(cropDir, `crop_${i}.png`), cropBuffer);
-          } catch (err) {
-            console.error('[PaddleOcrEngine] Failed to save debug crop:', err);
-          }
-        }
-        
-        // Execute CRNN text recognition on the straightened crop
-        const { text, confidence } = await recognitor.recognizeTextViaContext(finalCropCanvas, ctx, dictionary);
+      // 3. Batch crop recognition to run single-pass ONNX tensor inference
+      const targetHeight = 48;
+      const SEPARATOR_GAP = 20;
+      const BATCH_SIZE = 10;
 
-        // Generate standard axis-aligned OcrBox for legacy rendering support
+      // Crop and calculate bounding box for each polygon
+      const croppedItems = polygons.map((poly, i) => {
+        const cropCanvas = cropAndWarp(this.service.platform, sourceCanvas, poly);
+        
         let minX = Infinity, minY = Infinity;
         let maxX = -Infinity, maxY = -Infinity;
         for (const p of poly) {
@@ -175,17 +159,82 @@ export class PaddleOcrEngine implements IOcrEngine {
           h: Math.max(1, Math.round(maxY - minY))
         };
 
-        return { text, confidence, box };
+        const ar = cropCanvas.width / (cropCanvas.height || 1);
+        const resizedWidth = Math.max(16, Math.round(targetHeight * ar));
+
+        return { index: i, poly, cropCanvas, box, resizedWidth };
       });
 
-      const results = await Promise.all(promises);
+      // Split into batches of up to BATCH_SIZE crops
+      const batches: (typeof croppedItems)[] = [];
+      for (let i = 0; i < croppedItems.length; i += BATCH_SIZE) {
+        batches.push(croppedItems.slice(i, i + BATCH_SIZE));
+      }
+
+      const results: { text: string; confidence: number; box: any; index: number }[] = [];
+
+      for (const batch of batches) {
+        if (batch.length === 0) continue;
+
+        if (batch.length === 1) {
+          // Single crop direct inference
+          const item = batch[0];
+          const { text, confidence } = await recognitor.recognizeTextViaContext(item.cropCanvas, ctx, dictionary);
+          results.push({ text, confidence, box: item.box, index: item.index });
+        } else {
+          // Stitch batch into a single horizontal canvas
+          const stretchedWidths = batch.map(item => item.resizedWidth);
+          const totalCropWidth = stretchedWidths.reduce((sum, w) => sum + w, 0);
+          const totalBatchWidth = totalCropWidth + SEPARATOR_GAP * (batch.length - 1);
+
+          const batchCanvas = this.service.platform.createCanvas(totalBatchWidth, targetHeight);
+          const bctx = batchCanvas.getContext('2d');
+          bctx.fillStyle = '#FFFFFF';
+          bctx.fillRect(0, 0, totalBatchWidth, targetHeight);
+
+          let offsetX = 0;
+          for (let k = 0; k < batch.length; k++) {
+            const item = batch[k];
+            const drawWidth = stretchedWidths[k];
+            bctx.drawImage(
+              item.cropCanvas,
+              0, 0, item.cropCanvas.width, item.cropCanvas.height,
+              offsetX, 0, drawWidth, targetHeight
+            );
+            offsetX += drawWidth + SEPARATOR_GAP;
+          }
+
+          // Single ONNX Session Run for the entire batch canvas
+          const { text: batchText, confidence: batchConf } = await recognitor.recognizeTextViaContext(batchCanvas, ctx, dictionary);
+
+          // Split batch text proportionally by width
+          const chars = [...(batchText || '')];
+          const totalW = stretchedWidths.reduce((a, b) => a + b, 0);
+          const charWidth = chars.length > 0 ? totalW / chars.length : 0;
+          
+          let charIdx = 0;
+          for (let k = 0; k < batch.length; k++) {
+            const item = batch[k];
+            const w = stretchedWidths[k];
+            const propCount = k < batch.length - 1 ? Math.round(w / (charWidth || 1)) : chars.length - charIdx;
+            const end = Math.min(charIdx + propCount, chars.length);
+            const lineText = chars.slice(charIdx, end).join('');
+            charIdx = end;
+
+            results.push({ text: lineText, confidence: batchConf, box: item.box, index: item.index });
+          }
+        }
+      }
+
+      // Sort back to original polygon order
+      results.sort((a, b) => a.index - b.index);
 
       const texts = results.map(r => r.text);
       const scores = results.map(r => r.confidence);
       const boxes = results.map(r => r.box);
 
       const totalDuration = (performance.now() - startTime).toFixed(2);
-      console.log(`[PaddleOcrEngine] Recognition complete in ${totalDuration}ms. Found ${texts.length} text blocks.`);
+      console.log(`[PaddleOcrEngine] Tensor Batch Recognition complete in ${totalDuration}ms. Found ${texts.length} text blocks.`);
       
       // Return texts, boxes, scores, polygons, and maskRawCanvas (perfectly aligned by index)
       return { texts, boxes, scores, polygons, maskRawCanvas };
