@@ -38,13 +38,23 @@ function TranslateButton({ srcUrl, anchorName }: { srcUrl: string, anchorName: s
     }
     setIsTranslating(true);
     console.log('[Content Script] Sending TRANSLATE_IMAGE to background:', srcUrl);
-    chrome.runtime.sendMessage({ type: 'TRANSLATE_IMAGE', url: srcUrl }, (response) => {
-      if (chrome.runtime.lastError || response?.status === 'error') {
+    
+    try {
+      if (!chrome.runtime?.id) {
         setIsTranslating(false);
-        console.error('[Content Script] Message failed:', chrome.runtime.lastError?.message || response?.error);
+        console.warn('[Content Script] Extension context invalidated. Please refresh the page.');
+        return;
       }
-      // If status is 'queued', we leave it spinning!
-    });
+      chrome.runtime.sendMessage({ type: 'TRANSLATE_IMAGE', url: srcUrl }, (response) => {
+        if (chrome.runtime.lastError || response?.status === 'error') {
+          setIsTranslating(false);
+          console.error('[Content Script] Message failed:', chrome.runtime.lastError?.message || response?.error);
+        }
+      });
+    } catch (err) {
+      setIsTranslating(false);
+      console.warn('[Content Script] Chrome runtime call failed (extension reloaded/invalidated):', err);
+    }
   };
 
   useEffect(() => {
@@ -55,8 +65,18 @@ function TranslateButton({ srcUrl, anchorName }: { srcUrl: string, anchorName: s
         }
       }
     };
-    chrome.runtime.onMessage.addListener(handleMessage);
-    return () => chrome.runtime.onMessage.removeListener(handleMessage);
+    try {
+      if (chrome.runtime?.id) {
+        chrome.runtime.onMessage.addListener(handleMessage);
+        return () => {
+          try {
+            if (chrome.runtime?.id) {
+              chrome.runtime.onMessage.removeListener(handleMessage);
+            }
+          } catch (e) {}
+        };
+      }
+    } catch (e) {}
   }, [srcUrl]);
 
   return (
@@ -106,20 +126,36 @@ function GlobalOverlay() {
   // 1. Fetch User Settings
   useEffect(() => {
     const loadSettings = () => {
-      chrome.storage.local.get('popupState', (data) => {
-        const state = data.popupState as PopupState | undefined;
-        if (state) {
-          setMode(state.manualMode || 'hover');
-          setAutoTranslate(state.isAuto || false);
-        }
-      });
+      try {
+        if (!chrome.runtime?.id) return;
+        chrome.storage.local.get('popupState', (data) => {
+          if (chrome.runtime.lastError) return;
+          const state = data?.popupState as PopupState | undefined;
+          if (state) {
+            setMode(state.manualMode || 'hover');
+            setAutoTranslate(state.isAuto || false);
+          }
+        });
+      } catch (e) {}
     };
     loadSettings();
-    chrome.storage.onChanged.addListener((changes, area) => {
+    const handleStorageChange = (changes: any, area: string) => {
       if (area === 'local' && changes.popupState) {
         loadSettings();
       }
-    });
+    };
+    try {
+      if (chrome.runtime?.id) {
+        chrome.storage.onChanged.addListener(handleStorageChange);
+        return () => {
+          try {
+            if (chrome.runtime?.id) {
+              chrome.storage.onChanged.removeListener(handleStorageChange);
+            }
+          } catch (e) {}
+        };
+      }
+    } catch (e) {}
   }, []);
 
   // 2. Listen for the pub/sub IMAGE_TRANSLATED broadcast from Background Worker

@@ -58,9 +58,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     console.log(`[Background] Received ${message.type}. Forwarding to Offscreen...`);
     setupOffscreenDocument('src/offscreen/offscreen.html')
       .then(() => {
-        chrome.runtime.sendMessage(message, (response) => {
-          sendResponse(response);
-        });
+        setTimeout(() => {
+          chrome.runtime.sendMessage(message, (response) => {
+            if (chrome.runtime.lastError) {
+              console.warn(`[Background] Message warning for ${message.type}:`, chrome.runtime.lastError.message);
+              sendResponse({ status: 'error', error: chrome.runtime.lastError.message });
+              return;
+            }
+            sendResponse(response);
+          });
+        }, 100);
       })
       .catch((err) => {
         console.error(`[Background] Failed to setup offscreen for ${message.type}:`, err);
@@ -75,7 +82,13 @@ chrome.runtime.onStartup.addListener(() => {
   console.log('[Background] Extension startup. Preloading active engine...');
   cleanupOldJobs(7);
   setupOffscreenDocument('src/offscreen/offscreen.html').then(() => {
-    chrome.runtime.sendMessage({ type: 'PRELOAD_ACTIVE_ENGINE' } as PreloadActiveEngineMessage);
+    setTimeout(() => {
+      chrome.runtime.sendMessage({ type: 'PRELOAD_ACTIVE_ENGINE' } as PreloadActiveEngineMessage, () => {
+        if (chrome.runtime.lastError) {
+          console.warn('[Background] Preload warning on startup:', chrome.runtime.lastError.message);
+        }
+      });
+    }, 100);
   });
 });
 chrome.runtime.onInstalled.addListener(() => {
@@ -83,7 +96,13 @@ chrome.runtime.onInstalled.addListener(() => {
   setupContextMenu();
   cleanupOldJobs(7);
   setupOffscreenDocument('src/offscreen/offscreen.html').then(() => {
-    chrome.runtime.sendMessage({ type: 'PRELOAD_ACTIVE_ENGINE' } as PreloadActiveEngineMessage);
+    setTimeout(() => {
+      chrome.runtime.sendMessage({ type: 'PRELOAD_ACTIVE_ENGINE' } as PreloadActiveEngineMessage, () => {
+        if (chrome.runtime.lastError) {
+          console.warn('[Background] Preload warning on install:', chrome.runtime.lastError.message);
+        }
+      });
+    }, 100);
   });
 });
 
