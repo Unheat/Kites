@@ -59,19 +59,27 @@ export class OcrManager {
 
     // Both are Axis-Aligned (since paddle OCR boxes are almost always axis-aligned)
     if (dist < charSize * char_gap_tolerance) {
-      if (Math.abs(x1 + w1 / 2 - (x2 + w2 / 2)) < char_gap_tolerance2) return true;
-      if (w1 > h1 * ratio && h2 > w2 * ratio) return false;
-      if (w2 > h2 * ratio && h1 > w1 * ratio) return false;
-      if (w1 > h1 * ratio || w2 > h2 * ratio) {
-        // Horizontal
-        return Math.abs(x1 - x2) < charSize * char_gap_tolerance2 || Math.abs(x1 + w1 - (x2 + w2)) < charSize * char_gap_tolerance2;
-      } else if (h1 > w1 * ratio || h2 > w2 * ratio) {
-        // Vertical
-        return Math.abs(y1 - y2) < charSize * char_gap_tolerance2 || Math.abs(y1 + h1 - (y2 + h2)) < charSize * char_gap_tolerance2;
+      const centerDiff = Math.abs(x1 + w1 / 2 - (x2 + w2 / 2));
+      const isBothH = w1 > h1 * ratio && w2 > h2 * ratio;
+      const isBothV = h1 > w1 * ratio && h2 > w2 * ratio;
+      
+      let res = false;
+      if (centerDiff < char_gap_tolerance2) {
+        res = true;
+      } else if (w1 > h1 * ratio && h2 > w2 * ratio) {
+        res = false;
+      } else if (w2 > h2 * ratio && h1 > w1 * ratio) {
+        res = false;
+      } else if (isBothH) {
+        res = Math.abs(x1 - x2) < charSize * char_gap_tolerance2 || Math.abs(x1 + w1 - (x2 + w2)) < charSize * char_gap_tolerance2;
+      } else if (isBothV) {
+        res = Math.abs(y1 - y2) < charSize * char_gap_tolerance2 || Math.abs(y1 + h1 - (y2 + h2)) < charSize * char_gap_tolerance2;
+      } else {
+        res = false;
       }
-      return false;
+
+      return res;
     } else {
-      // 1:1 Cotrans generic.py line 687: If dist >= charSize * char_gap_tolerance for axis-aligned boxes, MUST return false!
       return false;
     }
     
@@ -144,11 +152,11 @@ export class OcrManager {
     // Pairwise distance checking
     for (let i = 0; i < texts.length; i++) {
       for (let j = i + 1; j < texts.length; j++) {
-        // We use Cotrans' char_gap_tolerance=1, char_gap_tolerance2=3 for manga translation
-        // (these values are used in manga_translator/textline_merge/__init__.py)
+        // Standard Cotrans parameters from generic.py quadrilateral_can_merge_region:
+        // ratio=1.9, discard_connection_gap=2, char_gap_tolerance=0.6, char_gap_tolerance2=1.5, font_size_ratio_tol=1.5, aspect_ratio_tol=2
         const shouldMerge = this.canMergeQuadrilaterals(
           polygons[i], polygons[j], boxes[i], boxes[j],
-          1.9, 2.0, 1.0, 3.0, 2.0, 1.3
+          1.9, 2.0, 0.6, 1.5, 1.5, 2.0
         );
 
         if (shouldMerge) {

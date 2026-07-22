@@ -331,7 +331,7 @@ export function splitTextRegion(
   boxes: BoundingBox[],
   connectedIndices: Set<number>,
   direction: 'h' | 'v' = 'h',
-  gamma = 0.5,
+  gamma = 0.2,
   sigma = 2
 ): Set<number>[] {
   const indices = Array.from(connectedIndices);
