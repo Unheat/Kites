@@ -61,20 +61,43 @@ export class TransformersEngine implements ITranslationEngine {
 
     const results: string[] = new Array(texts.length).fill('');
     
-    // Process one by one to avoid OOM or parallel execution issues in WASM/WebGPU
+    // Collect non-empty text blocks to translate in a single batched pass
+    const validInputs: { index: number; text: string }[] = [];
     for (let i = 0; i < texts.length; i++) {
-      const text = texts[i].trim();
-      if (!text) continue;
-
-      try {
-        const output = await this.translatorPipeline(text, {
-          src_lang: sourceLang,
-          tgt_lang: targetLang,
-        });
-        results[i] = output[0]?.translation_text || '';
-      } catch (e) {
-        console.error(`[TransformersEngine] Failed to translate chunk:`, e);
+      const trimmed = texts[i]?.trim();
+      if (trimmed) {
+        validInputs.push({ index: i, text: trimmed });
       }
+    }
+
+    if (validInputs.length === 0) return results;
+
+    const startTime = performance.now();
+    console.log(`[TransformersEngine] Batch translating ${validInputs.length} text blocks on ${this.modelId}...`);
+
+    try {
+      // Pass array of text strings directly to Transformers.js for single-pass GPU batching
+      const batchInput = validInputs.map(item => item.text);
+      const outputs = await this.translatorPipeline(batchInput, {
+        src_lang: sourceLang,
+        tgt_lang: targetLang,
+      });
+
+      // Map translations back to their original array indices
+      if (Array.isArray(outputs)) {
+        for (let k = 0; k < validInputs.length; k++) {
+          const item = validInputs[k];
+          const out = outputs[k];
+          results[item.index] = out?.translation_text || '';
+        }
+      } else if (outputs && (outputs as any).translation_text) {
+        results[validInputs[0].index] = (outputs as any).translation_text;
+      }
+
+      const duration = (performance.now() - startTime).toFixed(2);
+      console.log(`[TransformersEngine] Batch translation complete in ${duration}ms for ${validInputs.length} blocks.`);
+    } catch (e) {
+      console.error(`[TransformersEngine] Batch translation failed:`, e);
     }
 
     return results;

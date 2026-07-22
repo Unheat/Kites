@@ -75,13 +75,16 @@ describe('TransformersEngine', () => {
   });
 
   it('translates text arrays successfully', async () => {
-    const pipelineMock = vi.fn().mockResolvedValue([{ translation_text: 'Translated text' }]);
+    const pipelineMock = vi.fn().mockImplementation(async (inputs: string[]) => {
+      return inputs.map(() => ({ translation_text: 'Translated text' }));
+    });
     (transformers.pipeline as any).mockResolvedValue(pipelineMock);
 
     await engine.init();
     const results = await engine.translate(['Hello', 'World']);
     
     expect(results).toEqual(['Translated text', 'Translated text']);
-    expect(pipelineMock).toHaveBeenCalledTimes(2);
+    expect(pipelineMock).toHaveBeenCalledTimes(1);
+    expect(pipelineMock).toHaveBeenCalledWith(['Hello', 'World'], expect.any(Object));
   });
 });
