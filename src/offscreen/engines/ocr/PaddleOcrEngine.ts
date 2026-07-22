@@ -58,6 +58,7 @@ export class PaddleOcrEngine implements IOcrEngine {
         }
       }
       
+      const startTime = performance.now();
       console.log(`[PaddleOcrEngine] WebGPU Available: ${useWebGpu}. Initializing service...`);
 
       // Explicitly declare execution providers
@@ -71,6 +72,7 @@ export class PaddleOcrEngine implements IOcrEngine {
         },
         session: {
           executionProviders: isNode ? undefined : executionProviders,
+          graphOptimizationLevel: 'basic'
         },
         recognition: {
           // Bin-pack crops into a single tensor batch to eliminate transfer overhead
@@ -81,7 +83,8 @@ export class PaddleOcrEngine implements IOcrEngine {
       await this.service.initialize();
       this.customDetector = new CustomPaddleDetector(this.service);
       this.isInitialized = true;
-      console.log('[PaddleOcrEngine] Initialization complete.');
+      const initDuration = (performance.now() - startTime).toFixed(2);
+      console.log(`[PaddleOcrEngine] Initialization complete in ${initDuration}ms.`);
     } catch (e) {
       console.error('[PaddleOcrEngine] Failed to initialize:', e);
       throw e;
@@ -101,6 +104,7 @@ export class PaddleOcrEngine implements IOcrEngine {
     }
 
     try {
+      const startTime = performance.now();
       console.log('[PaddleOcrEngine] Starting recognition...');
       
       // 1. Get perfect rotated bounding boxes and Cotrans mask_raw via pure JS detector
@@ -164,7 +168,8 @@ export class PaddleOcrEngine implements IOcrEngine {
       const scores = results.map(r => r.confidence);
       const boxes = results.map(r => r.box);
 
-      console.log(`[PaddleOcrEngine] Recognition complete. Found ${texts.length} text blocks.`);
+      const totalDuration = (performance.now() - startTime).toFixed(2);
+      console.log(`[PaddleOcrEngine] Recognition complete in ${totalDuration}ms. Found ${texts.length} text blocks.`);
       
       // Return texts, boxes, scores, polygons, and maskRawCanvas (perfectly aligned by index)
       return { texts, boxes, scores, polygons, maskRawCanvas };

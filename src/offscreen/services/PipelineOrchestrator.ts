@@ -38,6 +38,8 @@ export class PipelineOrchestrator {
       console.log(`[PipelineOrchestrator] Starting pipeline for Job ID: ${jobId}`);
       await db.translationJobs.update(jobId, { status: 'processing' });
 
+      const totalPipelineStart = performance.now();
+
       // 1. Fetch user config
       const popupState = await new Promise<PopupState | undefined>((resolve) => {
         chrome.runtime.sendMessage({ type: 'GET_POPUP_STATE' }, (response) => {
@@ -58,8 +60,11 @@ export class PipelineOrchestrator {
       const imageBuffer = await this.blobToArrayBuffer(imageRecord.rawImageBlob);
 
       // 3. OCR Detection
+      const ocrStart = performance.now();
       console.log(`[PipelineOrchestrator] Running OCR...`);
       const ocrResult = await this.ocrManager.processImage(imageBuffer);
+      const ocrDuration = (performance.now() - ocrStart).toFixed(2);
+      console.log(`[PipelineOrchestrator] OCR stage complete in ${ocrDuration}ms.`);
       
       if (!ocrResult.texts || ocrResult.texts.length === 0) {
         console.log(`[PipelineOrchestrator] No text detected in image.`);
@@ -78,17 +83,13 @@ export class PipelineOrchestrator {
       }
 
       // 4 + 5. Translation and Inpainting run concurrently.
-      // After OCR, Translation only needs ocrResult.texts and Inpainting only needs
-      // ocrResult.polygons — they are completely independent of each other.
-      // 
-      // VRAM Contention: We previously serialized WebGPU models to avoid OOM.
-      // Now, users manually control WebGPU overrides per-engine via the UI.
       const shouldInpaint = inpaintTier !== 'original' && inpaintTier !== 'none' && ocrResult.polygons;
       const inpaintPolygons = (ocrResult.rawPolygons || ocrResult.polygons) as Point2D[][];
 
       let translatedTexts: string[];
       let cleanedImageBuffer: ArrayBuffer = imageBuffer;
 
+      const stage2Start = performance.now();
       if (shouldInpaint) {
         console.log(`[PipelineOrchestrator] Running translation and inpainting in parallel (tier: ${inpaintTier}).`);
         
@@ -99,10 +100,14 @@ export class PipelineOrchestrator {
         });
 
         [translatedTexts, cleanedImageBuffer] = await Promise.all([translationPromise, inpaintPromise]);
+        const stage2Duration = (performance.now() - stage2Start).toFixed(2);
+        console.log(`[PipelineOrchestrator] Parallel Inpainting (${inpaintTier}) & Translation complete in ${stage2Duration}ms.`);
       } else {
         // No inpainting — just translate
         console.log(`[PipelineOrchestrator] Translating ${ocrResult.texts.length} text blocks (no inpainting)...`);
         translatedTexts = await translationManager.processTranslation(ocrResult.texts, sourceLang, targetLang);
+        const stage2Duration = (performance.now() - stage2Start).toFixed(2);
+        console.log(`[PipelineOrchestrator] Translation complete in ${stage2Duration}ms.`);
       }
 
       // 6. Bake the translated text into the image for the Live Web return
@@ -164,6 +169,10 @@ export class PipelineOrchestrator {
       }
 
       await db.translationJobs.update(jobId, { status: 'completed' });
+      
+      const totalDuration = (performance.now() - totalPipelineStart).toFixed(2);
+      console.log(`[PipelineOrchestrator] Full Pipeline finished in ${totalDuration}ms.`);
+
       console.log(`[PipelineOrchestrator] Pipeline complete for job ${jobId}`);
 
       return bakedBase64;
