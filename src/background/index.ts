@@ -6,11 +6,25 @@ import { DEFAULT_POPUP_STATE } from '../shared/types';
 // We now dynamically load this from user's PopupState (fallback to 3)
 // const MAX_CONCURRENT_TRANSLATIONS = 3; //pass the param from UI here
 
-chrome.contextMenus.create({
-  id: 'translate-image',
-  title: 'Translate Image',
-  contexts: ['image'],
-});
+/**
+ * Safely creates context menu items, avoiding duplicate ID runtime errors.
+ */
+function setupContextMenu(): void {
+  chrome.contextMenus.removeAll(() => {
+    chrome.contextMenus.create(
+      {
+        id: 'translate-image',
+        title: 'Translate Image',
+        contexts: ['image'],
+      },
+      () => {
+        if (chrome.runtime.lastError) {
+          console.warn('[Background] Context menu setup warning:', chrome.runtime.lastError.message);
+        }
+      }
+    );
+  });
+}
 
 chrome.contextMenus.onClicked.addListener(async (info: chrome.contextMenus.OnClickData, _tab?: chrome.tabs.Tab) => {
   if (info.menuItemId === 'translate-image' && info.srcUrl) {
@@ -66,6 +80,7 @@ chrome.runtime.onStartup.addListener(() => {
 });
 chrome.runtime.onInstalled.addListener(() => {
   console.log('[Background] Extension installed/updated. Preloading active engine...');
+  setupContextMenu();
   cleanupOldJobs(7);
   setupOffscreenDocument('src/offscreen/offscreen.html').then(() => {
     chrome.runtime.sendMessage({ type: 'PRELOAD_ACTIVE_ENGINE' } as PreloadActiveEngineMessage);

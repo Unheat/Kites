@@ -12,7 +12,6 @@ export const inpaintRegistry: Record<string, InpaintModelRegistryEntry> = {
     onnxUrl: 'https://huggingface.co/Unhead/lama-manga/resolve/main/lama-manga.onnx'
   },
   'aotgan': {
-    onnxUrl: 'https://huggingface.co/Unhead/aotgan/resolve/main/aotgan.onnx',
-    dataUrl: 'https://huggingface.co/Unhead/aotgan/resolve/main/aotgan.data'
+    onnxUrl: 'https://huggingface.co/Unhead/aotgan/resolve/main/aotgan.onnx'
   }
 };

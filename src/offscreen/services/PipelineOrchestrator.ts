@@ -90,7 +90,6 @@ export class PipelineOrchestrator {
       let cleanedImageBuffer: ArrayBuffer = imageBuffer;
 
       if (shouldInpaint) {
-        const inpaintEngine = await this.inpaintManager.getEngine(inpaintTier as InpaintTier);
         console.log(`[PipelineOrchestrator] Running translation and inpainting in parallel (tier: ${inpaintTier}).`);
         
         const translationPromise = translationManager.processTranslation(ocrResult.texts, sourceLang, targetLang);

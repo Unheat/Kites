@@ -6,7 +6,6 @@ import { LamaBaseInpaintEngine } from '../engines/inpaint/LamaBaseInpaintEngine'
 import { LamaMangaInpaintEngine } from '../engines/inpaint/LamaMangaInpaintEngine';
 import { NoneInpaintEngine } from '../engines/inpaint/NoneInpaintEngine';
 import { OriginalInpaintEngine } from '../engines/inpaint/OriginalInpaintEngine';
-import { Binarizer } from '../engines/inpaint/Binarizer';
 
 export type InpaintTier = 'simple' | 'telea' | 'aot' | 'lama-base' | 'lama-manga' | 'none' | 'original';
 
@@ -99,7 +98,7 @@ export class InpaintManager {
     imageBuffer: ArrayBuffer,
     maskPolygons: Point2D[][],
     tier: InpaintTier = 'telea',
-    maskRawCanvas?: any
+    _maskRawCanvas?: any
   ): Promise<ArrayBuffer> {
     if (!maskPolygons || maskPolygons.length === 0) {
       return imageBuffer;
