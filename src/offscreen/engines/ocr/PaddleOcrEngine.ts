@@ -1,6 +1,7 @@
 import type { IOcrEngine, OcrResult } from './BaseOcrEngine';
 import { checkWebGPUAvailability } from '../../utils/hardware';
 import { CustomPaddleDetector } from './CustomPaddleDetector';
+import * as ort from 'onnxruntime-web';
 
 export class PaddleOcrEngine implements IOcrEngine {
   private service: any = null;
@@ -59,10 +60,25 @@ export class PaddleOcrEngine implements IOcrEngine {
       }
       
       const startTime = performance.now();
+      
+      // Explicitly demand high-performance hardware GPU to bypass Chrome background throttling
+      if ((ort as any).env?.webgpu) {
+        (ort as any).env.webgpu.powerPreference = 'high-performance';
+      }
+
       console.log(`[PaddleOcrEngine] WebGPU Available: ${useWebGpu}. Initializing service...`);
 
-      // Explicitly declare execution providers
-      const executionProviders = useWebGpu ? ['webgpu', 'wasm'] : ['wasm'];
+      // Explicitly declare execution providers with high-performance power preference
+      const executionProviders = useWebGpu 
+        ? [
+            {
+              name: 'webgpu',
+              deviceType: 'gpu',
+              powerPreference: 'high-performance'
+            },
+            'wasm'
+          ] 
+        : ['wasm'];
 
       // In Node.js, ppu-paddle-ocr natively uses CPU (wasm/cpu providers)
       this.service = new PaddleOcrService({
