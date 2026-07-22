@@ -242,10 +242,10 @@ The following tools and libraries are critical references for the development of
     │  - Outputs raw individual text polygons & Japanese characters.
     │
     ▼
-[3. GEOMETRIC COMBINER (src/shared/utils/geometry.ts & OcrManager)]  <-- YOU ARE DEBUGGING THIS
+[3. GEOMETRIC COMBINER & CONVEX HULL (src/shared/utils/geometry.ts & OcrManager)]
     │  - Evaluates distance & overlap between all raw polygons.
     │  - Merges text boxes that are geometrically close.
-    │  - Calculates a single, unified bounding polygon (hull) for the merged group.
+    │  - [CONVEX HULL]: Calculates a single, unified bounding polygon (hull) wrapping around the merged group coordinates (GEOMETRY).
     │
     ├─────────────────────────────────────────────────┐
     │                                                 │
@@ -253,10 +253,11 @@ The following tools and libraries are critical references for the development of
 [4A. INPAINTING PIPELINE]                     [4B. TRANSLATION PIPELINE]
     │                                                 │
     ▼                                                 ▼
- [Binarizer (Otsu Threshold)]                  [Translation Engine]
+ [Binarizer (Otsu Pixel Thresholding)]        [Translation Engine]
     │  - Takes the geometrically COMBINED polygons.   │ - Takes combined Japanese text.
-    │  - Scans pixels ONLY inside those combined      │ - Translates to English.
-    │    boundaries.                                  │
+    │  - [BINARIZER]: Scans individual PIXEL colors   │ - Translates to English.
+    │    inside those combined boundaries to separate │
+    │    dark text ink from light background paper.   │
     │  - Outputs a "Stroke Mask".                     │
     │                                                 │
     ▼                                                 ▼
