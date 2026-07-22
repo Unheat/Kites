@@ -1,6 +1,6 @@
 import type { IOcrEngine, OcrResult } from '../engines/ocr/BaseOcrEngine';
 import { PaddleOcrEngine } from '../engines/ocr/PaddleOcrEngine';
-import { type Point2D, type BoundingBox, Quadrilateral, calculateBoundingBox, computeMinAreaRect, polygonDistance, calculateRotationAngle, splitTextRegion } from '../../shared/utils/geometry';
+import { type Point2D, type BoundingBox, Quadrilateral, calculateBoundingBox, computeMinAreaRect, polygonDistance, polygonArea, getQuadrilateralFontSize, calculateRotationAngle, splitTextRegion } from '../../shared/utils/geometry';
 
 export class OcrManager {
   private engine: IOcrEngine | null = null;
@@ -94,8 +94,48 @@ export class OcrManager {
    */
   private mergeTextBlocks(result: OcrResult): OcrResult {
     // Merge algorithm entry point
-    const { texts, polygons = [], scores = [] } = result;
-    if (texts.length <= 1 || polygons.length === 0) return result;
+    const { texts: rawTexts, polygons: rawPolygons = [], scores: rawScores = [] } = result;
+    if (rawTexts.length <= 1 || rawPolygons.length === 0) return result;
+
+    // Stage 1: Cotrans Furigana & Tiny Noise Filtering (area > 16 & font_size relative threshold)
+    const validIndices: number[] = [];
+    for (let i = 0; i < rawTexts.length; i++) {
+      const poly = rawPolygons[i];
+      if (!poly || poly.length < 3) continue;
+
+      const area = polygonArea(poly);
+      if (area < 16) continue; // Cotrans area filter (area > 16)
+
+      const fs = getQuadrilateralFontSize(poly);
+
+      // Check if line is a Furigana annotation running parallel to a larger line
+      let isFurigana = false;
+      for (let j = 0; j < rawTexts.length; j++) {
+        if (i === j) continue;
+        const otherPoly = rawPolygons[j];
+        if (!otherPoly) continue;
+        const otherFs = getQuadrilateralFontSize(otherPoly);
+
+        // If another line in the panel is significantly larger and close by
+        if (otherFs > fs * 2.2) {
+          const dist = polygonDistance(poly, otherPoly);
+          if (dist < otherFs * 1.5) {
+            isFurigana = true;
+            break;
+          }
+        }
+      }
+
+      if (!isFurigana) {
+        validIndices.push(i);
+      }
+    }
+
+    const texts = validIndices.map(i => rawTexts[i]);
+    const polygons = validIndices.map(i => rawPolygons[i]);
+    const scores = validIndices.map(i => rawScores[i]);
+
+    if (texts.length === 0) return result;
 
     const mergedPolygons: any[] = [];
     const mergedTexts: string[] = [];

@@ -98,12 +98,14 @@ export function calculatePolygonCentroid(polygon: Point2D[]): Point2D {
 
 /**
  * Wraps text into an array of lines that fit within maxWidth.
+ * Cotrans segEng word-level wrapping logic (no blind hyphenation).
  */
 function wrapText(
   ctx: OffscreenCanvasRenderingContext2D,
   text: string,
   maxWidth: number,
-  isWestern: boolean = true
+  isWestern: boolean = true,
+  allowHyphenation: boolean = false
 ): string[] {
   const lines: string[] = [];
   const words = isWestern ? segEng(text) : text.split('');
@@ -125,7 +127,9 @@ function wrapText(
         currentLine = '';
       }
 
-      if (isWestern) {
+      const singleWordWidth = ctx.measureText(word).width;
+      if (isWestern && singleWordWidth > maxWidth && allowHyphenation && word.length > 5) {
+        // Hyphenate only if allowHyphenation is true and word > 5 chars
         let currentWordPart = '';
         for (const char of word) {
           const testPart = currentWordPart + char;
@@ -150,7 +154,7 @@ function wrapText(
 }
 
 /**
- * Calculates optimal font size fitting text into width/height box.
+ * Calculates optimal font size fitting text into width/height box (1:1 Cotrans Width-First Auto-Downscaler).
  */
 function calculateOptimalFontSize(
   ctx: OffscreenCanvasRenderingContext2D,
@@ -161,37 +165,43 @@ function calculateOptimalFontSize(
   fontFamily: string = 'sans-serif'
 ): { fontSize: number; lines: string[]; lineHeight: number } {
   let minSize = 8;
-  let maxSize = 80;
+  let maxSize = Math.min(80, Math.floor(height * 0.7)); // Cotrans max_font_size constraint
   let bestSize = minSize;
   let bestLines: string[] = [text];
 
-  const targetWidth = Math.max(10, width * 0.82);
-  const targetHeight = Math.max(10, height * 0.82);
+  const targetWidth = Math.max(10, width * 0.85);
+  const targetHeight = Math.max(10, height * 0.85);
 
   while (minSize <= maxSize) {
     const midSize = Math.floor((minSize + maxSize) / 2);
     ctx.font = `bold ${midSize}px ${fontFamily}`;
 
-    const lines = wrapText(ctx, text, targetWidth, isWestern);
-    const lineHeight = midSize * 1.2;
+    // Test line wrapping without hyphenation
+    const lines = wrapText(ctx, text, targetWidth, isWestern, false);
+    const lineHeight = midSize * 1.15;
     const totalHeight = lines.length * lineHeight;
 
-    if (totalHeight <= targetHeight) {
+    // Check if any single word exceeds targetWidth
+    const words = isWestern ? segEng(text) : text.split('');
+    const maxWordWidth = Math.max(...words.map(w => ctx.measureText(w).width));
+
+    if (totalHeight <= targetHeight && maxWordWidth <= targetWidth) {
       bestSize = midSize;
       bestLines = lines;
-      minSize = midSize + 1;
+      minSize = midSize + 1; // Try larger font
     } else {
-      maxSize = midSize - 1;
+      maxSize = midSize - 1; // Font too big, shrink font size to fit words
     }
   }
 
+  // If even minSize could not fit long words, fallback to minSize with hyphenation
   ctx.font = `bold ${bestSize}px ${fontFamily}`;
-  bestLines = wrapText(ctx, text, targetWidth, isWestern);
+  bestLines = wrapText(ctx, text, targetWidth, isWestern, bestSize <= 10);
 
   return {
     fontSize: bestSize,
     lines: bestLines,
-    lineHeight: bestSize * 1.2
+    lineHeight: bestSize * 1.15
   };
 }
 
