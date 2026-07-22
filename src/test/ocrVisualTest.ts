@@ -30,7 +30,8 @@ async function runVisualTest() {
     'image2.jpg',
     'image3.jpg',
     'image4.jpg',
-    'image5.png'
+    'image5.png',
+    'image6.jpg'
   ];
 
   const files = fs.readdirSync(testImgDir).filter((file: string) => 

@@ -1,6 +1,6 @@
 import type { IOcrEngine, OcrResult } from '../engines/ocr/BaseOcrEngine';
 import { PaddleOcrEngine } from '../engines/ocr/PaddleOcrEngine';
-import { type Point2D, type BoundingBox, Quadrilateral, calculateBoundingBox, computeMinAreaRect, polygonDistance, polygonArea, getQuadrilateralFontSize, calculateRotationAngle, splitTextRegion } from '../../shared/utils/geometry';
+import { type Point2D, type BoundingBox, Quadrilateral, calculateBoundingBox, computeMinAreaRect, polygonDistance, polygonArea, calculateRotationAngle, splitTextRegion } from '../../shared/utils/geometry';
 
 export class OcrManager {
   private engine: IOcrEngine | null = null;
@@ -70,10 +70,12 @@ export class OcrManager {
         return Math.abs(y1 - y2) < charSize * char_gap_tolerance2 || Math.abs(y1 + h1 - (y2 + h2)) < charSize * char_gap_tolerance2;
       }
       return false;
+    } else {
+      // 1:1 Cotrans generic.py line 687: If dist >= charSize * char_gap_tolerance for axis-aligned boxes, MUST return false!
+      return false;
     }
     
-    // Fallback for N-point convex hulls or non-axis-aligned
-    // Cotrans falls back to checking poly_distance again
+    // Fallback for non-axis-aligned rotated boxes
     const angle1 = calculateRotationAngle(p1);
     const angle2 = calculateRotationAngle(p2);
     if (Math.abs(angle1 - angle2) < 15 * Math.PI / 180) {
@@ -97,38 +99,18 @@ export class OcrManager {
     const { texts: rawTexts, polygons: rawPolygons = [], scores: rawScores = [] } = result;
     if (rawTexts.length <= 1 || rawPolygons.length === 0) return result;
 
-    // Stage 1: Cotrans Furigana & Tiny Noise Filtering (area > 16 & font_size relative threshold)
+    // Stage 1: Cotrans Noise Filtering (area > 16 and non-empty text - manga_translator.py line 764)
     const validIndices: number[] = [];
     for (let i = 0; i < rawTexts.length; i++) {
       const poly = rawPolygons[i];
+      const txt = rawTexts[i];
       if (!poly || poly.length < 3) continue;
+      if (!txt || !txt.trim()) continue;
 
       const area = polygonArea(poly);
       if (area < 16) continue; // Cotrans area filter (area > 16)
 
-      const fs = getQuadrilateralFontSize(poly);
-
-      // Check if line is a Furigana annotation running parallel to a larger line
-      let isFurigana = false;
-      for (let j = 0; j < rawTexts.length; j++) {
-        if (i === j) continue;
-        const otherPoly = rawPolygons[j];
-        if (!otherPoly) continue;
-        const otherFs = getQuadrilateralFontSize(otherPoly);
-
-        // If another line in the panel is significantly larger and close by
-        if (otherFs > fs * 2.2) {
-          const dist = polygonDistance(poly, otherPoly);
-          if (dist < otherFs * 1.5) {
-            isFurigana = true;
-            break;
-          }
-        }
-      }
-
-      if (!isFurigana) {
-        validIndices.push(i);
-      }
+      validIndices.push(i);
     }
 
     const texts = validIndices.map(i => rawTexts[i]);
@@ -186,7 +168,12 @@ export class OcrManager {
     // Step 2: Postprocess - further split each region using Cotrans Kruskal MST math
     const finalGroups: number[][] = [];
     for (const groupIndices of groups.values()) {
-      const splitSets = splitTextRegion(polygons, boxes, new Set(groupIndices));
+      const quads = groupIndices.map(idx => new Quadrilateral(polygons[idx]));
+      const vCount = quads.filter(q => q.direction === 'v').length;
+      const hCount = quads.filter(q => q.direction === 'h').length;
+      const groupDir: 'h' | 'v' = vCount >= hCount ? 'v' : 'h';
+
+      const splitSets = splitTextRegion(polygons, boxes, new Set(groupIndices), groupDir);
       for (const set of splitSets) {
         finalGroups.push(Array.from(set));
       }

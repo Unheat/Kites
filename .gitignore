@@ -28,7 +28,7 @@ docs
 .env
 PaddleOCR/
 test/
-
+scratches/
 # Python & ML Models
 venv/
 *.ckpt
