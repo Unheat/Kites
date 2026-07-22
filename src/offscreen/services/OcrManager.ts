@@ -1,6 +1,6 @@
 import type { IOcrEngine, OcrResult } from '../engines/ocr/BaseOcrEngine';
 import { PaddleOcrEngine } from '../engines/ocr/PaddleOcrEngine';
-import { type Point2D, type BoundingBox, Quadrilateral, calculateBoundingBox, computeConvexHull, polygonDistance, calculateRotationAngle, splitTextRegion } from '../../shared/utils/geometry';
+import { type Point2D, type BoundingBox, Quadrilateral, calculateBoundingBox, computeMinAreaRect, polygonDistance, calculateRotationAngle, splitTextRegion } from '../../shared/utils/geometry';
 
 export class OcrManager {
   private engine: IOcrEngine | null = null;
@@ -168,19 +168,44 @@ export class OcrManager {
         groupIndices.sort((a, b) => quads[groupIndices.indexOf(a)].centroid.y - quads[groupIndices.indexOf(b)].centroid.y);
       }
       
-      const joinDelimiter = isVerticalGroup ? '' : ' ';
-      const groupText = groupIndices.map(idx => texts[idx]).join(joinDelimiter);
+      // 1:1 Cotrans CJK aware text concatenation (textblock.py)
+      let groupText = '';
+      if (groupIndices.length > 0) {
+        groupText = texts[groupIndices[0]] || '';
+        for (let k = 1; k < groupIndices.length; k++) {
+          const txt = texts[groupIndices[k]] || '';
+          const lastChar = groupText.slice(-1);
+          const firstChar = txt.slice(0, 1);
+          const isLastCJK = lastChar >= '\u3000' && lastChar <= '\u9fff';
+          const isFirstCJK = firstChar >= '\u3000' && firstChar <= '\u9fff';
+
+          if (isLastCJK || isFirstCJK) {
+            groupText += txt;
+          } else {
+            groupText += ' ' + txt;
+          }
+        }
+      }
+
       console.log(`[OcrManager] Merged Speech Bubble: "${groupText}" (${isVerticalGroup ? 'v' : 'h'}) from ${groupIndices.length} lines`);
       const groupScore = groupIndices.reduce((sum, idx) => sum + (scores[idx] || 1), 0) / groupIndices.length;
       
-      const allPoints = groupIndices.flatMap(idx => polygons[idx]);
-      const hull = computeConvexHull(allPoints);
-      
+      // 1:1 Cotrans average angle calculation and threshold snapping (textline_merge/__init__.py)
+      const groupPolygons = groupIndices.map(idx => polygons[idx]);
+      const meanAngleRad = groupPolygons.reduce((sum, poly) => sum + calculateRotationAngle(poly), 0) / groupPolygons.length;
+      let angleDeg = (meanAngleRad * 180) / Math.PI;
+      if (Math.abs(angleDeg) < 3) {
+        angleDeg = 0;
+      }
+
+      // 1:1 Cotrans min_rect computation (textblock.py min_rect property - ALWAYS 4 points)
+      const minRect = computeMinAreaRect(groupPolygons, angleDeg);
+      const minBox = calculateBoundingBox(minRect);
+
       mergedTexts.push(groupText);
       mergedScores.push(groupScore);
-      mergedPolygons.push(hull);
-      const hullBox = calculateBoundingBox(hull);
-      mergedBoxes.push({ x: hullBox.x, y: hullBox.y, w: hullBox.width, h: hullBox.height });
+      mergedPolygons.push(minRect);
+      mergedBoxes.push({ x: minBox.x, y: minBox.y, w: minBox.width, h: minBox.height });
     }
     
     // rawPolygons retains the raw unmerged 4-point line quadrilaterals for inpainting

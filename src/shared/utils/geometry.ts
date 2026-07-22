@@ -404,3 +404,57 @@ export function splitTextRegion(
     return ans;
   }
 }
+
+/**
+ * 1:1 port of Cotrans TextBlock.min_rect.
+ * Un-rotates all polygon corners by angleDegrees, finds [minX, minY, maxX, maxY],
+ * constructs a 4-point bounding rectangle, and rotates it back by -angleDegrees.
+ */
+export function computeMinAreaRect(polygons: Point2D[][], angleDegrees: number = 0): Point2D[] {
+  const allPts = polygons.flat();
+  if (allPts.length === 0) return [];
+
+  const centerX = allPts.reduce((sum, p) => sum + p.x, 0) / allPts.length;
+  const centerY = allPts.reduce((sum, p) => sum + p.y, 0) / allPts.length;
+
+  const rad = (angleDegrees * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+
+  const unrotated = allPts.map(p => {
+    const dx = p.x - centerX;
+    const dy = p.y - centerY;
+    return {
+      x: centerX + (dx * cos - dy * sin),
+      y: centerY + (dx * sin + dy * cos)
+    };
+  });
+
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const p of unrotated) {
+    minX = Math.min(minX, p.x);
+    maxX = Math.max(maxX, p.x);
+    minY = Math.min(minY, p.y);
+    maxY = Math.max(maxY, p.y);
+  }
+
+  const unrotatedRect: Point2D[] = [
+    { x: minX, y: minY },
+    { x: maxX, y: minY },
+    { x: maxX, y: maxY },
+    { x: minX, y: maxY }
+  ];
+
+  const backRad = (-angleDegrees * Math.PI) / 180;
+  const backCos = Math.cos(backRad);
+  const backSin = Math.sin(backRad);
+
+  return unrotatedRect.map(p => {
+    const dx = p.x - centerX;
+    const dy = p.y - centerY;
+    return {
+      x: Math.round(centerX + (dx * backCos - dy * backSin)),
+      y: Math.round(centerY + (dx * backSin + dy * backCos))
+    };
+  });
+}
