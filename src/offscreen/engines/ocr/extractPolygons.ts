@@ -90,7 +90,7 @@ export function extractPolygons(
   originalHeight: number,
   threshold: number = 0.3,
   unclipRatio: number = 2.0,
-  resizeRatio?: number
+  _resizeRatio?: number
 ): Point2D[][] {
   const binaryMap = new Uint8Array(width * height);
   for (let i = 0; i < probMap.length; i++) {
