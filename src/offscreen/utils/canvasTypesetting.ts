@@ -136,7 +136,7 @@ function wrapText(
 /**
  * Calculates optimal font size fitting text into width/height box (1:1 Cotrans Width-First Auto-Downscaler).
  */
-function calculateOptimalFontSize(
+export function calculateOptimalFontSize(
   ctx: OffscreenCanvasRenderingContext2D,
   text: string,
   width: number,
@@ -169,9 +169,10 @@ function calculateOptimalFontSize(
   }
 
   let minSize = 10;
+  // 1:1 Cotrans font size cap: Manga speech bubble font sizes anchor between 13px and 22px, never inflating to 36px
   let maxSize = isWestern 
-    ? Math.min(36, Math.max(14, Math.floor(targetWidth * 0.35)))
-    : Math.min(60, Math.floor(height * 0.7));
+    ? Math.min(22, Math.max(13, Math.floor(height * 0.35)))
+    : Math.min(48, Math.floor(height * 0.7));
   let bestSize = minSize;
   let bestLines: string[] = [text];
 

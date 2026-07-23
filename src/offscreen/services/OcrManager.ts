@@ -123,21 +123,42 @@ export class OcrManager {
 
       for (let j = 0; j < rawTexts.length; j++) {
         if (i === j) continue;
+
+        // 1:1 Cotrans Furigana definition: Furigana consists strictly of Kana reading aids (Hiragana/Katakana \u3040-\u30ff)
+        const isKanaOnly = (str: string) => /^[\u3040-\u30ff\s\.\-‥]+$/.test(str.trim());
+        const hasKanji = (str: string) => /[\u4e00-\u9faf]/.test(str);
+
+        // If line i contains Kanji (full sentence), it is NEVER Furigana
+        if (hasKanji(txt) || !isKanaOnly(txt)) continue;
+
         const poly2 = rawPolygons[j];
         if (!poly2 || poly2.length < 3) continue;
         const b2 = calculateBoundingBox(poly2);
         const fs2 = Math.min(b2.width, b2.height);
 
-        // If main line j is significantly larger than line i (fs1 < 0.45 * fs2) and runs parallel nearby
+        // If main CJK line j is significantly larger than CJK line i (fs1 < 0.45 * fs2) and runs parallel right next to it
         if (fs1 < 0.45 * fs2) {
           const isBothV = b1.height > b1.width * 1.2 && b2.height > b2.width * 1.2;
           const isBothH = b1.width > b1.height * 1.2 && b2.width > b2.height * 1.2;
-          const isNearby = Math.abs(b1.x - b2.x) < b2.width * 2.5 && Math.abs(b1.y - b2.y) < b2.height * 1.5;
-
-          if ((isBothV || isBothH) && isNearby) {
-            isFurigana = true;
-            console.log(`[OcrManager] Filtered out Furigana line "${txt}" (fs=${fs1} vs main fs=${fs2})`);
-            break;
+          
+          if (isBothV) {
+            // Parallel vertical lines: Furigana runs side-by-side horizontally (small X gap)
+            const xGap = Math.abs(b1.x - b2.x);
+            const yOverlap = Math.max(0, Math.min(b1.y + b1.height, b2.y + b2.height) - Math.max(b1.y, b2.y));
+            if (xGap < fs2 * 1.5 && yOverlap > fs1 * 0.5) {
+              isFurigana = true;
+              console.log(`[OcrManager] Filtered out vertical Furigana line "${txt}" (fs=${fs1} vs main fs=${fs2})`);
+              break;
+            }
+          } else if (isBothH) {
+            // Parallel horizontal lines: Furigana runs above/below vertically (small Y gap)
+            const yGap = Math.abs(b1.y - b2.y);
+            const xOverlap = Math.max(0, Math.min(b1.x + b1.width, b2.x + b2.width) - Math.max(b1.x, b2.x));
+            if (yGap < fs2 * 1.5 && xOverlap > fs1 * 0.5) {
+              isFurigana = true;
+              console.log(`[OcrManager] Filtered out horizontal Furigana line "${txt}" (fs=${fs1} vs main fs=${fs2})`);
+              break;
+            }
           }
         }
       }
