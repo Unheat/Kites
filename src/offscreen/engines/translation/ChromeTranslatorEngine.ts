@@ -1,71 +1,69 @@
 import type { ITranslationEngine } from './BaseEngine';
 import { getBcp47Code } from '../../../shared/utils/LanguageRegistry';
-import { GoogleTranslateEngine } from './GoogleTranslateEngine';
 
+/**
+ * Native Chrome Built-in AI Translator Engine.
+ * Uses Chrome's experimental self.ai.translator API directly.
+ */
 export class ChromeTranslatorEngine implements ITranslationEngine {
-  private translator: any = null;
   private isInitializing: boolean = false;
-  private fallbackEngine: GoogleTranslateEngine;
-  
-  constructor() {
-    this.fallbackEngine = new GoogleTranslateEngine();
-  }
 
+  /**
+   * Initializes and validates Chrome's native translation capability.
+   */
   async init(): Promise<void> {
-    if (this.translator) return;
     if (this.isInitializing) {
-      throw new Error('Engine is already initializing.');
+      throw new Error('[ChromeTranslatorEngine] Engine is already initializing.');
     }
 
     this.isInitializing = true;
     try {
-      // Use native Chrome translation API via self.ai.translator
       const ai = (self as any).ai;
       if (!ai || !ai.translator) {
-        throw new Error("Chrome translation API (self.ai.translator) is not available.");
+        throw new Error("Chrome native translation API (self.ai.translator) is unavailable on this browser.");
       }
 
-      // Check capability
       const capabilities = await ai.translator.capabilities();
       if (capabilities.available === 'no') {
-        console.warn("[ChromeTranslatorEngine] Chrome translation is not available on this device. Will use Cloud fallback.");
-        return; // Don't throw, just rely on fallback
+        throw new Error("[ChromeTranslatorEngine] Chrome translation capability is unavailable on this device.");
       }
 
-      console.log(`[ChromeTranslatorEngine] Initializing translator...`);
-      console.log(`[ChromeTranslatorEngine] Initialization check passed.`);
-    } catch (error) {
-      console.warn(`[ChromeTranslatorEngine] Initialization failed, will use Cloud fallback: ${error instanceof Error ? error.message : String(error)}`);
-      // Do not throw error here, so the engine can still 'run' via fallback
+      console.log(`[ChromeTranslatorEngine] Initialized successfully. Native API status: ${capabilities.available}`);
     } finally {
       this.isInitializing = false;
     }
   }
 
+  /**
+   * Translates an array of text blocks using Chrome native translator.
+   * 
+   * @param texts - Array of strings to translate.
+   * @param sourceLangId - Source language ID (e.g. 'ja', 'auto').
+   * @param targetLangId - Target language ID (e.g. 'en').
+   * @returns Promise resolving to translated text array.
+   */
   async translate(texts: string[], sourceLangId: string = 'ja', targetLangId: string = 'en'): Promise<string[]> {
     if (!texts || texts.length === 0) return [];
 
     const ai = (self as any).ai;
-    
-    // If native API is unavailable, silently fall back to Google Cloud API
     if (!ai || !ai.translator) {
-      console.log('[ChromeTranslatorEngine] Native API missing. Falling back to GoogleTranslateEngine internally.');
-      return this.fallbackEngine.translate(texts, sourceLangId, targetLangId);
+      throw new Error('[ChromeTranslatorEngine] Chrome native translation API (self.ai.translator) is not available.');
     }
 
     const sourceLang = getBcp47Code(sourceLangId);
     const targetLang = getBcp47Code(targetLangId);
 
+    console.log(`[ChromeTranslatorEngine] Translating ${texts.length} items (${sourceLang} -> ${targetLang}) via Chrome AI...`);
+
     let translator;
     try {
-      // Create a translator instance for the specific pair
       translator = await ai.translator.create({
         sourceLanguage: sourceLang === 'auto' ? undefined : sourceLang,
         targetLanguage: targetLang,
       });
     } catch (err) {
-      console.warn('[ChromeTranslatorEngine] Failed to create native translator. Falling back to GoogleTranslateEngine.', err);
-      return this.fallbackEngine.translate(texts, sourceLangId, targetLangId);
+      console.error('[ChromeTranslatorEngine] Failed to create native translator instance:', err);
+      throw new Error(`Failed to create Chrome native translator: ${err instanceof Error ? err.message : String(err)}`);
     }
 
     const results: string[] = new Array(texts.length).fill('');
@@ -78,11 +76,10 @@ export class ChromeTranslatorEngine implements ITranslationEngine {
         }
       }
     } catch (err) {
-      console.warn('[ChromeTranslatorEngine] Translation failed midway. Falling back for remaining text.', err);
-      // In a real app we might only fallback for the failed texts, but for simplicity we'll just fall back the whole batch.
-      return this.fallbackEngine.translate(texts, sourceLangId, targetLangId);
+      console.error('[ChromeTranslatorEngine] Batch translation failed:', err);
+      throw err;
     } finally {
-      if (translator && translator.destroy) {
+      if (translator && typeof translator.destroy === 'function') {
         translator.destroy();
       }
     }
@@ -90,3 +87,4 @@ export class ChromeTranslatorEngine implements ITranslationEngine {
     return results;
   }
 }
+

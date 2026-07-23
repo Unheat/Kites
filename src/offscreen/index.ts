@@ -65,9 +65,11 @@ async function handleStartDownload(modelId: string, category?: string) {
     const entry = inpaintRegistry[modelId];
     if (!entry) throw new Error(`Unknown inpaint engine: ${modelId}`);
     
-    await InpaintCacheManager.downloadModelWithProgress(entry.onnxUrl, progressCallback);
     if (entry.dataUrl) {
-       await InpaintCacheManager.downloadModelWithProgress(entry.dataUrl, (p) => progressCallback(0.5 + p/2));
+      await InpaintCacheManager.downloadModelWithProgress(entry.onnxUrl, (p) => progressCallback(p * 0.5));
+      await InpaintCacheManager.downloadModelWithProgress(entry.dataUrl, (p) => progressCallback(0.5 + p * 0.5));
+    } else {
+      await InpaintCacheManager.downloadModelWithProgress(entry.onnxUrl, progressCallback);
     }
     
     chrome.runtime.sendMessage({

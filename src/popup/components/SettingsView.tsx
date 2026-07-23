@@ -3,6 +3,8 @@ import type { PopupState } from '../../shared/types';
 import { Moon, Sun, KeyRound, Network } from 'lucide-react';
 import ApiManagerPanel from './ApiManagerPanel';
 import FallbackConfigPanel from './FallbackConfigPanel';
+import EngineSelectionPanel from './EngineSelectionPanel';
+import GpuAccelerationPanel from './GpuAccelerationPanel';
 
 interface SettingsViewProps {
   state: PopupState;
@@ -16,7 +18,17 @@ export default function SettingsView({ state, updateState }: SettingsViewProps) 
   return (
     <div className="flex flex-col gap-6">
       
-      {/* Theme Toggle */}
+      {/* 1. Engine Selection (Translation & Image Cleaning) at Top */}
+      <EngineSelectionPanel state={state} updateState={updateState} />
+
+      <hr className="border-[var(--color-dust)] opacity-50" />
+
+      {/* 2. GPU Acceleration Panel */}
+      <GpuAccelerationPanel state={state} updateState={updateState} />
+
+      <hr className="border-[var(--color-dust)] opacity-50" />
+
+      {/* 3. Theme Toggle & Preferences Header */}
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold tracking-wide uppercase text-[var(--color-dust)]">Preferences</h2>
         <button 
@@ -28,62 +40,14 @@ export default function SettingsView({ state, updateState }: SettingsViewProps) 
         </button>
       </div>
 
-      {/* Auto-Translate Toggle */}
-      <div className="flex items-center justify-between p-3 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md">
-        <div>
-          <span className="font-medium block text-sm">Auto-Translate</span>
-          <span className="text-xs text-[var(--color-dust)]">
-            {state.isAuto ? 'Translates visible images' : 'Requires manual activation'}
-          </span>
-        </div>
-        <button 
-          onClick={() => updateState({ isAuto: !state.isAuto })}
-          className="kites-switch kites-switch-md"
-          data-state={state.isAuto ? 'checked' : 'unchecked'}
-        >
-          <span className="sr-only">Toggle auto-translate</span>
-          <span className="kites-switch-thumb" />
-        </button>
-      </div>
-
-      {/* Manual Selection Method */}
-      <div className={`transition-opacity ${state.isAuto ? 'opacity-50 pointer-events-none' : 'opacity-100'}`}>
-        <span className="font-medium block text-sm mb-2">Manual Translation Trigger</span>
-        <div className="flex p-1 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md">
-          <button
-            onClick={() => updateState({ manualMode: 'hover' })}
-            className={`flex-1 py-1.5 text-sm font-medium rounded-sm transition-colors cursor-pointer ${
-              state.manualMode === 'hover' ? 'bg-[var(--color-paper)] text-[var(--color-ink)] shadow-sm' : 'text-[var(--color-dust)] hover:text-[var(--color-ink)]'
-            }`}
-          >
-            Hover Overlay
-          </button>
-          <button
-            onClick={() => updateState({ manualMode: 'persistent' })}
-            className={`flex-1 py-1.5 text-sm font-medium rounded-sm transition-colors cursor-pointer ${
-              state.manualMode === 'persistent' ? 'bg-[var(--color-paper)] text-[var(--color-ink)] shadow-sm' : 'text-[var(--color-dust)] hover:text-[var(--color-ink)]'
-            }`}
-          >
-            Always Visible
-          </button>
-        </div>
-        <p className="text-xs text-[var(--color-dust)] mt-2 leading-relaxed">
-          {state.manualMode === 'hover' 
-            ? 'A subtle button fades in when you hover over images.' 
-            : 'A persistent button is pinned to every detectable image.'}
-        </p>
-      </div>
-
-
-
-      {/* Advanced Configurations */}
+      {/* 4. Advanced Configuration */}
       <div>
-        <div className="flex justify-between items-center mb-2 mt-4">
+        <div className="flex justify-between items-center mb-3">
           <span className="font-medium text-sm">Advanced Configuration</span>
         </div>
       
-      <div className="flex flex-col gap-5">
-          {/* Advanced Configurations */}
+        <div className="flex flex-col gap-5">
+          {/* Custom APIs & Fallback Chain */}
           <div className="flex flex-col gap-2">
             {!showApiManager ? (
               <button 

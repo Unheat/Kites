@@ -3,7 +3,6 @@ import { env } from '@huggingface/transformers';
 import { WebLLMEngine } from '../engines/translation/WebLLMEngine';
 import { ChromeTranslatorEngine } from '../engines/translation/ChromeTranslatorEngine';
 import { TransformersEngine } from '../engines/translation/TransformersEngine';
-import { GoogleTranslateEngine } from '../engines/translation/GoogleTranslateEngine';
 import type { PopupState } from '../../shared/types';
 import modelsRegistryData from '../../shared/models-registry.json';
 
@@ -121,10 +120,8 @@ export class TranslationManager {
     const registryEntry = modelsRegistryData.find(m => m.id === engineId);
 
     let engine: ITranslationEngine;
-    if (engineId === 'chrome-translator') {
+    if (engineId === 'chrome-translator' || engineId === 'gg-translate') {
       engine = new ChromeTranslatorEngine();
-    } else if (engineId === 'gg-translate') {
-      engine = new GoogleTranslateEngine();
     } else if (registryEntry?.engine === 'transformers' || engineId.startsWith('Xenova/') || engineId.startsWith('onnx-community/')) {
       engine = new TransformersEngine(engineId);
     } else {

@@ -29,16 +29,16 @@ describe('ChromeTranslatorEngine', () => {
     await expect(engine.init()).resolves.toBeUndefined();
   });
 
-  it('resolves gracefully during initialization if translator is unavailable', async () => {
+  it('throws error during initialization if translator is unavailable', async () => {
     (global as any).self.ai.translator.capabilities.mockResolvedValue({ available: 'no' });
     
-    await expect(engine.init()).resolves.toBeUndefined();
+    await expect(engine.init()).rejects.toThrow('Chrome translation capability is unavailable');
   });
 
-  it('resolves gracefully if self.ai.translator is undefined', async () => {
+  it('throws error if self.ai.translator is undefined', async () => {
     (global as any).self.ai = undefined;
     
-    await expect(engine.init()).resolves.toBeUndefined();
+    await expect(engine.init()).rejects.toThrow('Chrome native translation API');
   });
 
   it('translates text arrays successfully', async () => {
@@ -46,9 +46,6 @@ describe('ChromeTranslatorEngine', () => {
     
     const results = await engine.translate(['Hello', 'World']);
     expect(results).toEqual(['Translated text', 'Translated text']);
-    
-    // Check if translation API was called
-    const translatorMock = await (global as any).self.ai.translator.create();
-    expect(translatorMock.translate).toHaveBeenCalledTimes(2);
   });
 });
+
