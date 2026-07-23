@@ -206,61 +206,29 @@ function calculateOptimalFontSize(
 }
 
 /**
- * 1:1 Cotrans LANGUAGE_ORIENTATION_PRESETS map covering 200+ ISO-639 language codes.
- * Defaults to 'h' for any unlisted language.
+ * 1:1 Cotrans & LanguageRegistry LANGUAGE_ORIENTATION_PRESETS map determining render direction.
+ * Covers all 58 supported languages from LanguageRegistry.ts:
+ * - 'auto': CJK target languages (Japanese, Chinese) preserving vertical/horizontal source orientation.
+ * - 'hr': RTL target languages (Arabic, Hebrew, Persian, Urdu).
+ * - 'h': All Western, Latin, Cyrillic, Indic, and South-East Asian target languages (English, Vietnamese, Korean, Spanish, French, etc.).
  */
 export const LANGUAGE_ORIENTATION_PRESETS: Record<string, 'h' | 'v' | 'hr' | 'auto'> = {
-  // CJK (Auto vertical/horizontal depending on source bubble)
+  // CJK Auto Orientation
   'ja': 'auto', 'jpn': 'auto',
-  'zh': 'auto', 'chs': 'auto', 'cht': 'auto', 'zh-cn': 'auto', 'zh-tw': 'auto', 'zh-hans': 'auto', 'zh-hant': 'auto',
+  'zh': 'auto', 'chs': 'auto', 'cht': 'auto', 'zh-cn': 'auto', 'zh-tw': 'auto', 'zh-hant': 'auto',
 
-  // RTL (Right to Left)
+  // RTL (Right-To-Left)
   'ar': 'hr', 'ara': 'hr',
   'he': 'hr', 'heb': 'hr',
-  'fa': 'hr', 'fas': 'hr', 'per': 'hr',
+  'fa': 'hr', 'pes': 'hr',
   'ur': 'hr', 'urd': 'hr',
-  'ps': 'hr', 'pus': 'hr',
-  'yi': 'hr', 'yid': 'hr',
 
-  // Latin / Western / Cyrillic / Asian / World languages (Horizontal 'h')
-  'en': 'h', 'eng': 'h', 'en-us': 'h', 'en-gb': 'h',
-  'vi': 'h', 'vin': 'h', 'vie': 'h',
-  'fr': 'h', 'fra': 'h', 'fre': 'h',
-  'de': 'h', 'deu': 'h', 'ger': 'h',
-  'es': 'h', 'esp': 'h', 'spa': 'h',
-  'pt': 'h', 'ptb': 'h', 'por': 'h', 'pt-br': 'h',
-  'it': 'h', 'ita': 'h',
-  'ru': 'h', 'rus': 'h',
-  'pl': 'h', 'pol': 'h',
-  'tr': 'h', 'trk': 'h', 'tur': 'h',
-  'uk': 'h', 'ukr': 'h',
-  'nl': 'h', 'nld': 'h', 'dut': 'h',
-  'hu': 'h', 'hun': 'h',
-  'ro': 'h', 'rom': 'h', 'ron': 'h',
-  'cs': 'h', 'csy': 'h', 'cze': 'h', 'ces': 'h',
-  'ko': 'h', 'kor': 'h',
-  'id': 'h', 'ind': 'h',
-  'ms': 'h', 'may': 'h', 'msa': 'h',
-  'th': 'h', 'tha': 'h',
-  'tl': 'h', 'tgl': 'h', 'fil': 'h',
-  'hi': 'h', 'hin': 'h',
-  'bn': 'h', 'ben': 'h',
-  'el': 'h', 'ell': 'h', 'gre': 'h',
-  'sv': 'h', 'swe': 'h',
-  'da': 'h', 'dan': 'h',
-  'fi': 'h', 'fin': 'h',
-  'no': 'h', 'nor': 'h', 'nb': 'h', 'nob': 'h', 'nn': 'h', 'nno': 'h',
-  'sk': 'h', 'slo': 'h', 'slk': 'h',
-  'bg': 'h', 'bul': 'h',
-  'hr': 'h', 'hrv': 'h',
-  'sr': 'h', 'srp': 'h',
-  'sl': 'h', 'slv': 'h',
-  'lt': 'h', 'lit': 'h',
-  'lv': 'h', 'lav': 'h',
-  'et': 'h', 'est': 'h',
-  'ca': 'h', 'cat': 'h',
-  'eu': 'h', 'eus': 'h', 'baq': 'h',
-  'gl': 'h', 'glg': 'h'
+  // Default Horizontal for all 58 LanguageRegistry targets:
+  // English, Vietnamese, Korean, French, German, Spanish, Portuguese, Italian, Russian, Ukrainian,
+  // Hindi, Bengali, Gujarati, Kannada, Khmer, Malayalam, Marathi, Nepali, Punjabi, Tamil, Telugu, Thai,
+  // Dutch, Polish, Romanian, Turkish, Afrikaans, Albanian, Armenian, Bulgarian, Catalan, Croatian, Czech,
+  // Danish, Estonian, Filipino, Finnish, Greek, Hungarian, Icelandic, Indonesian, Latvian, Lithuanian,
+  // Malay, Norwegian, Serbian, Slovak, Slovenian, Swahili, Swedish, Welsh.
 };
 
 /**
