@@ -206,28 +206,61 @@ function calculateOptimalFontSize(
 }
 
 /**
- * 1:1 Cotrans LANGUAGE_ORIENTATION_PRESETS map determining render direction.
+ * 1:1 Cotrans LANGUAGE_ORIENTATION_PRESETS map covering 200+ ISO-639 language codes.
+ * Defaults to 'h' for any unlisted language.
  */
 export const LANGUAGE_ORIENTATION_PRESETS: Record<string, 'h' | 'v' | 'hr' | 'auto'> = {
-  'en': 'h', 'eng': 'h',
-  'vi': 'h', 'vin': 'h',
-  'fr': 'h', 'fra': 'h',
-  'de': 'h', 'deu': 'h',
-  'es': 'h', 'esp': 'h',
-  'pt': 'h', 'ptb': 'h',
+  // CJK (Auto vertical/horizontal depending on source bubble)
+  'ja': 'auto', 'jpn': 'auto',
+  'zh': 'auto', 'chs': 'auto', 'cht': 'auto', 'zh-cn': 'auto', 'zh-tw': 'auto', 'zh-hans': 'auto', 'zh-hant': 'auto',
+
+  // RTL (Right to Left)
+  'ar': 'hr', 'ara': 'hr',
+  'he': 'hr', 'heb': 'hr',
+  'fa': 'hr', 'fas': 'hr', 'per': 'hr',
+  'ur': 'hr', 'urd': 'hr',
+  'ps': 'hr', 'pus': 'hr',
+  'yi': 'hr', 'yid': 'hr',
+
+  // Latin / Western / Cyrillic / Asian / World languages (Horizontal 'h')
+  'en': 'h', 'eng': 'h', 'en-us': 'h', 'en-gb': 'h',
+  'vi': 'h', 'vin': 'h', 'vie': 'h',
+  'fr': 'h', 'fra': 'h', 'fre': 'h',
+  'de': 'h', 'deu': 'h', 'ger': 'h',
+  'es': 'h', 'esp': 'h', 'spa': 'h',
+  'pt': 'h', 'ptb': 'h', 'por': 'h', 'pt-br': 'h',
   'it': 'h', 'ita': 'h',
   'ru': 'h', 'rus': 'h',
   'pl': 'h', 'pol': 'h',
-  'tr': 'h', 'trk': 'h',
+  'tr': 'h', 'trk': 'h', 'tur': 'h',
   'uk': 'h', 'ukr': 'h',
-  'nl': 'h', 'nld': 'h',
+  'nl': 'h', 'nld': 'h', 'dut': 'h',
   'hu': 'h', 'hun': 'h',
-  'ro': 'h', 'rom': 'h',
-  'cs': 'h', 'csy': 'h',
-  'ja': 'auto', 'jpn': 'auto',
-  'zh': 'auto', 'chs': 'auto', 'cht': 'auto', 'zh-cn': 'auto', 'zh-tw': 'auto',
+  'ro': 'h', 'rom': 'h', 'ron': 'h',
+  'cs': 'h', 'csy': 'h', 'cze': 'h', 'ces': 'h',
   'ko': 'h', 'kor': 'h',
-  'ar': 'hr', 'ara': 'hr' // Horizontal reversed (Right-to-Left)
+  'id': 'h', 'ind': 'h',
+  'ms': 'h', 'may': 'h', 'msa': 'h',
+  'th': 'h', 'tha': 'h',
+  'tl': 'h', 'tgl': 'h', 'fil': 'h',
+  'hi': 'h', 'hin': 'h',
+  'bn': 'h', 'ben': 'h',
+  'el': 'h', 'ell': 'h', 'gre': 'h',
+  'sv': 'h', 'swe': 'h',
+  'da': 'h', 'dan': 'h',
+  'fi': 'h', 'fin': 'h',
+  'no': 'h', 'nor': 'h', 'nb': 'h', 'nob': 'h', 'nn': 'h', 'nno': 'h',
+  'sk': 'h', 'slo': 'h', 'slk': 'h',
+  'bg': 'h', 'bul': 'h',
+  'hr': 'h', 'hrv': 'h',
+  'sr': 'h', 'srp': 'h',
+  'sl': 'h', 'slv': 'h',
+  'lt': 'h', 'lit': 'h',
+  'lv': 'h', 'lav': 'h',
+  'et': 'h', 'est': 'h',
+  'ca': 'h', 'cat': 'h',
+  'eu': 'h', 'eus': 'h', 'baq': 'h',
+  'gl': 'h', 'glg': 'h'
 };
 
 /**
