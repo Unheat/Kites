@@ -331,7 +331,7 @@ export function splitTextRegion(
   boxes: BoundingBox[],
   connectedIndices: Set<number>,
   direction: 'h' | 'v' = 'h',
-  gamma = 0.2,
+  gamma = 0.5,
   sigma = 2
 ): Set<number>[] {
   const indices = Array.from(connectedIndices);
@@ -342,7 +342,7 @@ export function splitTextRegion(
     const fs1 = getQuadrilateralFontSize(polygons[indices[0]]);
     const fs2 = getQuadrilateralFontSize(polygons[indices[1]]);
     const fs = Math.max(fs1, fs2);
-    const dist = getCotransDistance(polygons[indices[0]], polygons[indices[1]], direction);
+    const dist = polygonDistance(polygons[indices[0]], polygons[indices[1]]);
     const angle1 = calculateRotationAngle(polygons[indices[0]]);
     const angle2 = calculateRotationAngle(polygons[indices[1]]);
     
@@ -360,7 +360,7 @@ export function splitTextRegion(
     for (let j = i + 1; j < indices.length; j++) {
       const u = indices[i];
       const v = indices[j];
-      const weight = getCotransDistance(polygons[u], polygons[v], direction);
+      const weight = polygonDistance(polygons[u], polygons[v]);
       graph.addEdge(u, v, weight);
     }
   }

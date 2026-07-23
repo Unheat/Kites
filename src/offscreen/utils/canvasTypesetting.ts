@@ -104,8 +104,7 @@ function wrapText(
   ctx: OffscreenCanvasRenderingContext2D,
   text: string,
   maxWidth: number,
-  isWestern: boolean = true,
-  allowHyphenation: boolean = false
+  isWestern: boolean = true
 ): string[] {
   const lines: string[] = [];
   const words = isWestern ? segEng(text) : text.split('');
@@ -124,27 +123,8 @@ function wrapText(
     } else {
       if (currentLine) {
         lines.push(currentLine);
-        currentLine = '';
       }
-
-      const singleWordWidth = ctx.measureText(word).width;
-      if (isWestern && singleWordWidth > maxWidth && allowHyphenation && word.length > 5) {
-        // Hyphenate only if allowHyphenation is true and word > 5 chars
-        let currentWordPart = '';
-        for (const char of word) {
-          const testPart = currentWordPart + char;
-          const testWidth = ctx.measureText(testPart + '-').width;
-          if (testWidth <= maxWidth || !currentWordPart) {
-            currentWordPart = testPart;
-          } else {
-            lines.push(currentWordPart + '-');
-            currentWordPart = char;
-          }
-        }
-        currentLine = currentWordPart;
-      } else {
-        currentLine = word;
-      }
+      currentLine = word;
     }
   }
   if (currentLine) {
@@ -164,25 +144,28 @@ function calculateOptimalFontSize(
   isWestern: boolean = true,
   fontFamily: string = 'sans-serif'
 ): { fontSize: number; lines: string[]; lineHeight: number } {
-  let minSize = 8;
-  let maxSize = Math.min(80, Math.floor(height * 0.7)); // Cotrans max_font_size constraint
+  const words = isWestern ? segEng(text) : text.split('');
+
+  // 1:1 Cotrans merge_seg_eng max_width formula: max(bbox_width, text_max_width) * size_ratio
+  ctx.font = `bold 14px ${fontFamily}`;
+  const maxWordWidthAt14 = Math.max(...words.map(w => ctx.measureText(w).width));
+  const targetWidth = isWestern ? Math.max(width * 0.85, maxWordWidthAt14 * 1.15) : Math.max(10, width * 0.85);
+  const targetHeight = Math.max(10, height * 0.85);
+
+  let minSize = 10;
+  let maxSize = Math.min(60, Math.floor(height * 0.7)); // Cotrans max_font_size constraint
   let bestSize = minSize;
   let bestLines: string[] = [text];
-
-  const targetWidth = Math.max(10, width * 0.85);
-  const targetHeight = Math.max(10, height * 0.85);
 
   while (minSize <= maxSize) {
     const midSize = Math.floor((minSize + maxSize) / 2);
     ctx.font = `bold ${midSize}px ${fontFamily}`;
 
     // Test line wrapping without hyphenation
-    const lines = wrapText(ctx, text, targetWidth, isWestern, false);
+    const lines = wrapText(ctx, text, targetWidth, isWestern);
     const lineHeight = midSize * 1.15;
     const totalHeight = lines.length * lineHeight;
 
-    // Check if any single word exceeds targetWidth
-    const words = isWestern ? segEng(text) : text.split('');
     const maxWordWidth = Math.max(...words.map(w => ctx.measureText(w).width));
 
     if (totalHeight <= targetHeight && maxWordWidth <= targetWidth) {
@@ -194,9 +177,8 @@ function calculateOptimalFontSize(
     }
   }
 
-  // If even minSize could not fit long words, fallback to minSize with hyphenation
   ctx.font = `bold ${bestSize}px ${fontFamily}`;
-  bestLines = wrapText(ctx, text, targetWidth, isWestern, bestSize <= 10);
+  bestLines = wrapText(ctx, text, targetWidth, isWestern);
 
   return {
     fontSize: bestSize,

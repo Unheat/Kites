@@ -139,9 +139,8 @@ export function extractPolygons(
     }
   }
 
-  const ratio = resizeRatio ?? (width / originalWidth);
-  const resizeRatioX = 1 / ratio;
-  const resizeRatioY = 1 / ratio;
+  const resizeRatioX = originalWidth / width;
+  const resizeRatioY = originalHeight / height;
   const polygons: Point2D[][] = [];
 
   const dist = (a: Point, b: Point) =>

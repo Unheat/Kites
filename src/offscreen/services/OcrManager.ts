@@ -37,8 +37,8 @@ export class OcrManager {
   private canMergeQuadrilaterals(
     p1: Point2D[], p2: Point2D[], b1: BoundingBox, b2: BoundingBox,
     ratio = 1.9, discard_connection_gap = 2, 
-    char_gap_tolerance = 0.6, char_gap_tolerance2 = 1.5, 
-    font_size_ratio_tol = 1.5, aspect_ratio_tol = 2
+    char_gap_tolerance = 1.0, char_gap_tolerance2 = 3.0, 
+    font_size_ratio_tol = 2.0, aspect_ratio_tol = 1.3
   ): boolean {
     const fs1 = Math.min(b1.width, b1.height);
     const fs2 = Math.min(b2.width, b2.height);
@@ -156,7 +156,7 @@ export class OcrManager {
         // ratio=1.9, discard_connection_gap=2, char_gap_tolerance=0.6, char_gap_tolerance2=1.5, font_size_ratio_tol=1.5, aspect_ratio_tol=2
         const shouldMerge = this.canMergeQuadrilaterals(
           polygons[i], polygons[j], boxes[i], boxes[j],
-          1.9, 2.0, 0.6, 1.5, 1.5, 2.0
+          1.9, 2.0, 1.0, 3.0, 2.0, 1.3
         );
 
         if (shouldMerge) {
