@@ -60,19 +60,17 @@ export class OcrManager {
     // Both are Axis-Aligned (since paddle OCR boxes are almost always axis-aligned)
     if (dist < charSize * char_gap_tolerance) {
       const centerDiff = Math.abs(x1 + w1 / 2 - (x2 + w2 / 2));
-      const isBothH = w1 > h1 * ratio && w2 > h2 * ratio;
-      const isBothV = h1 > w1 * ratio && h2 > w2 * ratio;
       
       let res = false;
-      if (centerDiff < char_gap_tolerance2) {
+      if (centerDiff < char_gap_tolerance2 * charSize) {
         res = true;
       } else if (w1 > h1 * ratio && h2 > w2 * ratio) {
         res = false;
       } else if (w2 > h2 * ratio && h1 > w1 * ratio) {
         res = false;
-      } else if (isBothH) {
+      } else if (w1 > h1 * ratio || w2 > h2 * ratio) { // horizontal
         res = Math.abs(x1 - x2) < charSize * char_gap_tolerance2 || Math.abs(x1 + w1 - (x2 + w2)) < charSize * char_gap_tolerance2;
-      } else if (isBothV) {
+      } else if (h1 > w1 * ratio || h2 > w2 * ratio) { // vertical
         res = Math.abs(y1 - y2) < charSize * char_gap_tolerance2 || Math.abs(y1 + h1 - (y2 + h2)) < charSize * char_gap_tolerance2;
       } else {
         res = false;

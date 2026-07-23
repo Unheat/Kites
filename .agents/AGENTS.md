@@ -34,6 +34,7 @@ The developer of this project is a beginner learning full-stack, web extension, 
 
 ## 4. Defensive Coding & Debugging
 
+*   **Impact Analysis / Ripple Effect Check**: After modifying any code, signature, data schema, or state flow, closely inspect all referencing sites and dependent modules across the codebase to ensure changes do not break or negatively impact other places, updating any affected areas promptly.
 *   **Fail Gracefully**: Always write defensive code. Assume network requests can fail, DOM elements might not exist, and databases can be locked or corrupted. Use `try/catch` blocks, null-checks, and optional chaining.
 *   **Targeted Logging**: Include `console.log` (for state transitions) and `console.error` (for failures) at critical junctions (e.g., message passing, database writes, and API calls) to aid debugging. Avoid messy or spammy logs in fast loops (like DOM observers).
 

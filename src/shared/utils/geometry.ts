@@ -342,7 +342,7 @@ export function splitTextRegion(
     const fs1 = getQuadrilateralFontSize(polygons[indices[0]]);
     const fs2 = getQuadrilateralFontSize(polygons[indices[1]]);
     const fs = Math.max(fs1, fs2);
-    const dist = polygonDistance(polygons[indices[0]], polygons[indices[1]]);
+    const dist = getCotransDistance(polygons[indices[0]], polygons[indices[1]], direction);
     const angle1 = calculateRotationAngle(polygons[indices[0]]);
     const angle2 = calculateRotationAngle(polygons[indices[1]]);
     
@@ -360,7 +360,7 @@ export function splitTextRegion(
     for (let j = i + 1; j < indices.length; j++) {
       const u = indices[i];
       const v = indices[j];
-      const weight = polygonDistance(polygons[u], polygons[v]);
+      const weight = getCotransDistance(polygons[u], polygons[v], direction);
       graph.addEdge(u, v, weight);
     }
   }
