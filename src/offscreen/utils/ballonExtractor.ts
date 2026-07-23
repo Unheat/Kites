@@ -688,3 +688,164 @@ export function extractBallonRegion(
 
   return { mask: ballonMask, xyxy: [x1, y1, x2, y2] };
 }
+
+/**
+ * 1:1 port of Cotrans `extract_ballon_region` using `@techstark/opencv-js` WASM bindings.
+ * Matches Cotrans Python opencv calls 1:1 when OpenCV runtime is present.
+ */
+export function extractBallonRegionOpenCV(
+  cv: any,
+  pageData: Uint8ClampedArray | Uint8Array,
+  pageWidth: number,
+  pageHeight: number,
+  ballonRect: [number, number, number, number],
+  enlargeRatio = 1
+): BallonRegionResult {
+  let x1 = ballonRect[0];
+  let y1 = ballonRect[1];
+  let x2 = ballonRect[2] + ballonRect[0];
+  let y2 = ballonRect[3] + ballonRect[1];
+  if (enlargeRatio > 1) {
+    [x1, y1, x2, y2] = enlargeWindow(
+      [x1, y1, x2, y2], pageWidth, pageHeight, enlargeRatio,
+      ballonRect[2] !== 0 ? ballonRect[3] / ballonRect[2] : 1
+    );
+  }
+  x1 = Math.max(0, Math.min(Math.round(x1), pageWidth - 1));
+  x2 = Math.max(x1 + 1, Math.min(Math.round(x2), pageWidth));
+  y1 = Math.max(0, Math.min(Math.round(y1), pageHeight - 1));
+  y2 = Math.max(y1 + 1, Math.min(Math.round(y2), pageHeight));
+
+  const oriW = x2 - x1;
+  const oriH = y2 - y1;
+
+  // Extract crop RGBA image data
+  const cropCanvas = new Uint8ClampedArray(oriW * oriH * 4);
+  for (let y = 0; y < oriH; y++) {
+    for (let x = 0; x < oriW; x++) {
+      const srcIdx = ((y + y1) * pageWidth + (x + x1)) * 4;
+      const dstIdx = (y * oriW + x) * 4;
+      cropCanvas[dstIdx] = pageData[srcIdx];
+      cropCanvas[dstIdx + 1] = pageData[srcIdx + 1];
+      cropCanvas[dstIdx + 2] = pageData[srcIdx + 2];
+      cropCanvas[dstIdx + 3] = pageData[srcIdx + 3];
+    }
+  }
+
+  let scaleR = 1;
+  if (oriH > 300 && oriW > 300) {
+    scaleR = 0.6;
+  } else if (oriH < 120 || oriW < 120) {
+    scaleR = 1.4;
+  }
+
+  let mat = cv.matFromImageData({ data: cropCanvas, width: oriW, height: oriH });
+  let srcMat = mat;
+  if (scaleR !== 1) {
+    const resized = new cv.Mat();
+    const dsize = new cv.Size(Math.trunc(oriW * scaleR), Math.trunc(oriH * scaleR));
+    cv.resize(mat, resized, dsize, 0, 0, cv.INTER_AREA);
+    srcMat = resized;
+  }
+
+  const h = srcMat.rows;
+  const w = srcMat.cols;
+  const imgArea = h * w;
+
+  // cv2.GaussianBlur(img, (3,3), cv2.BORDER_DEFAULT)
+  const cpimg = new cv.Mat();
+  cv.GaussianBlur(srcMat, cpimg, new cv.Size(3, 3), 0, 0, cv.BORDER_DEFAULT);
+
+  // cv2.Canny(cpimg, 70, 140, L2gradient=True, apertureSize=3)
+  const detectedEdges = new cv.Mat();
+  cv.Canny(cpimg, detectedEdges, CANNY_LOW, CANNY_HIGH, 3, true);
+
+  // cv2.rectangle(detectedEdges, (0, 0), (w-1, h-1), WHITE, 1, cv2.LINE_8)
+  const white = new cv.Scalar(255, 255, 255, 255);
+  const black = new cv.Scalar(0, 0, 0, 0);
+  cv.rectangle(detectedEdges, new cv.Point(0, 0), new cv.Point(w - 1, h - 1), white, 1, cv.LINE_8);
+
+  const contours = new cv.MatVector();
+  const hierarchy = new cv.Mat();
+  cv.findContours(detectedEdges, contours, hierarchy, cv.RETR_CCOMP, cv.CHAIN_APPROX_NONE);
+
+  cv.rectangle(detectedEdges, new cv.Point(0, 0), new cv.Point(w - 1, h - 1), black, 1, cv.LINE_8);
+
+  let ballonMask = cv.Mat.zeros(h, w, cv.CV_8UC1);
+  let minRetval = Infinity;
+  const seedPoint = new cv.Point(Math.trunc(w / 2), Math.trunc(h / 2));
+  const loDiff = new cv.Scalar(FLOOD_DIFF, FLOOD_DIFF, FLOOD_DIFF);
+  const upDiff = new cv.Scalar(FLOOD_DIFF, FLOOD_DIFF, FLOOD_DIFF);
+
+  for (let i = 0; i < contours.size(); i++) {
+    const rect = cv.boundingRect(contours.get(i));
+    if (rect.width * rect.height < imgArea * MIN_COMPONENT_RECT_RATIO) continue;
+
+    const mask = cv.Mat.zeros(h, w, cv.CV_8UC1);
+    cv.drawContours(mask, contours, i, new cv.Scalar(255), 2);
+    const cpmask = mask.clone();
+    cv.rectangle(mask, new cv.Point(0, 0), new cv.Point(w - 1, h - 1), white, 1, cv.LINE_8);
+
+    const filledRect = new cv.Rect();
+    const retval = cv.floodFill(cpmask, mask, seedPoint, new cv.Scalar(127), filledRect, loDiff, upDiff, 4);
+
+    if (retval <= imgArea * MIN_FILL_RATIO) {
+      cv.drawContours(mask, contours, i, black, 2);
+    }
+    if (retval < minRetval && retval > imgArea * MIN_FILL_RATIO) {
+      minRetval = retval;
+      ballonMask = cpmask;
+    }
+    mask.delete();
+  }
+
+  // 127 - ballonMask
+  const maskData = ballonMask.data;
+  for (let i = 0; i < maskData.length; i++) {
+    maskData[i] = (127 - maskData[i]) & 0xFF;
+  }
+
+  const kernel = cv.Mat.ones(3, 3, cv.CV_8UC1);
+  cv.dilate(ballonMask, ballonMask, kernel, new cv.Point(-1, -1), 1);
+
+  const filledRect = new cv.Rect();
+  const ballonArea = cv.floodFill(ballonMask, new cv.Mat(), seedPoint, new cv.Scalar(30), filledRect, loDiff, upDiff, 4);
+
+  for (let i = 0; i < maskData.length; i++) {
+    maskData[i] = (30 - maskData[i]) & 0xFF;
+  }
+
+  cv.threshold(ballonMask, ballonMask, 1, 255, cv.THRESH_BINARY);
+  cv.bitwise_not(ballonMask, ballonMask);
+
+  const boxKernelSize = Math.trunc(Math.sqrt(ballonArea) / 30);
+  if (boxKernelSize > 1) {
+    const boxKernel = cv.Mat.ones(boxKernelSize, boxKernelSize, cv.CV_8UC1);
+    cv.dilate(ballonMask, ballonMask, boxKernel, new cv.Point(-1, -1), 1);
+    cv.erode(ballonMask, ballonMask, boxKernel, new cv.Point(-1, -1), 1);
+    boxKernel.delete();
+  }
+
+  if (scaleR !== 1) {
+    const resizedMask = new cv.Mat();
+    cv.resize(ballonMask, resizedMask, new cv.Size(oriW, oriH), 0, 0, cv.INTER_NEAREST);
+    ballonMask = resizedMask;
+  }
+
+  const outData = new Uint8Array(ballonMask.data);
+
+  // Cleanup OpenCV WASM memory
+  mat.delete();
+  if (srcMat !== mat) srcMat.delete();
+  cpimg.delete();
+  detectedEdges.delete();
+  contours.delete();
+  hierarchy.delete();
+  kernel.delete();
+
+  return {
+    mask: { data: outData, width: oriW, height: oriH },
+    xyxy: [x1, y1, x2, y2]
+  };
+}
+
