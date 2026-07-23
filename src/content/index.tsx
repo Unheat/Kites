@@ -91,7 +91,7 @@ function TranslateButton({ srcUrl, anchorName }: { srcUrl: string, anchorName: s
       }}
       // We use 'fixed' instead of 'absolute' so the viewport is the containing block.
       // This is required for CSS Anchors to target elements outside the React root.
-      className={`fixed z-[999999] w-8 h-8 flex items-center justify-center rounded-full bg-transparent hover:bg-black/5 transition-colors cursor-pointer border-none text-black ${isTranslating ? 'animate-spin' : ''}`}
+      className={`fixed z-[999999] w-8 h-8 flex items-center justify-center rounded-full bg-transparent hover:bg-black/5 transition-colors cursor-pointer border-none text-black ${isTranslating ? 'kites-anim-spin' : ''}`}
       style={{ 
         marginTop: '8px',
         marginLeft: '8px',
