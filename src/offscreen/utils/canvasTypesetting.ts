@@ -136,6 +136,9 @@ function wrapText(
 /**
  * Calculates optimal font size fitting text into width/height box (1:1 Cotrans Width-First Auto-Downscaler).
  */
+/**
+ * Calculates optimal font size fitting text into width/height box (1:1 Cotrans Width-First Auto-Downscaler).
+ */
 export function calculateOptimalFontSize(
   ctx: OffscreenCanvasRenderingContext2D,
   text: string,
@@ -146,13 +149,12 @@ export function calculateOptimalFontSize(
 ): { fontSize: number; lines: string[]; lineHeight: number } {
   const words = isWestern ? segEng(text) : text.split('');
 
-  // 1:1 Cotrans merge_seg_eng max_width formula: max(bbox_width, text_max_width) * size_ratio
   ctx.font = `bold 14px ${fontFamily}`;
-  const maxWordWidthAt14 = Math.max(...words.map(w => ctx.measureText(w).width));
+  const maxWordWidthAt14 = Math.max(...words.map(w => ctx.measureText(w).width), 10);
 
-  // 1:1 Cotrans Single-Axis Horizontal Box Expansion for Western target text (English/Vietnamese/Spanish/etc):
+  // 1:1 Cotrans Single-Axis Horizontal Box Expansion for Western target text:
   // When rendering horizontal Western text into narrow vertical CJK speech bubbles (height > width * 1.2),
-  // expand targetWidth horizontally so text wraps naturally at 14-18px instead of collapsing to 8px single-word columns.
+  // expand targetWidth horizontally so text wraps naturally in 2-4 lines instead of collapsing to 1-word columns.
   let targetWidth = Math.max(10, width * 0.85);
   let targetHeight = Math.max(10, height * 0.85);
 
@@ -160,19 +162,30 @@ export function calculateOptimalFontSize(
     if (height > width * 1.2) {
       const fullTextWidth = ctx.measureText(text).width;
       const approxNeededRows = Math.ceil(fullTextWidth / Math.max(30, width * 0.85));
-      const scaleX = Math.max(1.8, Math.min(3.5, approxNeededRows));
-      targetWidth = Math.max(width * scaleX, maxWordWidthAt14 * 1.25);
+      const scaleX = Math.max(1.4, Math.min(2.5, approxNeededRows));
+      targetWidth = Math.max(width * scaleX, maxWordWidthAt14 * 1.15);
       targetHeight = Math.max(height * 0.9, 40);
     } else {
-      targetWidth = Math.max(width * 1.1, maxWordWidthAt14 * 1.15);
+      targetWidth = Math.max(width * 1.1, maxWordWidthAt14 * 1.1);
     }
   }
 
-  let minSize = 10;
-  // 1:1 Cotrans font size cap: Manga speech bubble font sizes anchor between 13px and 22px, never inflating to 36px
-  let maxSize = isWestern 
-    ? Math.min(22, Math.max(13, Math.floor(height * 0.35)))
-    : Math.min(48, Math.floor(height * 0.7));
+  // Cotrans font size clamping logic:
+  // Long sentences (> 35 chars or > 6 words) in manga speech bubbles anchor between 10px and 13px font.
+  let minSize = 9;
+  let maxSize = 18;
+  if (isWestern) {
+    if (text.length > 35 || words.length > 6) {
+      maxSize = 13;
+    } else if (text.length > 18 || words.length > 3) {
+      maxSize = 15;
+    } else {
+      maxSize = 18;
+    }
+  } else {
+    maxSize = Math.min(36, Math.floor(height * 0.6));
+  }
+
   let bestSize = minSize;
   let bestLines: string[] = [text];
 
@@ -180,19 +193,17 @@ export function calculateOptimalFontSize(
     const midSize = Math.floor((minSize + maxSize) / 2);
     ctx.font = `bold ${midSize}px ${fontFamily}`;
 
-    // Test line wrapping without hyphenation
     const lines = wrapText(ctx, text, targetWidth, isWestern);
     const lineHeight = midSize * 1.15;
     const totalHeight = lines.length * lineHeight;
-
     const maxWordWidth = Math.max(...words.map(w => ctx.measureText(w).width));
 
     if (totalHeight <= targetHeight && maxWordWidth <= targetWidth) {
       bestSize = midSize;
       bestLines = lines;
-      minSize = midSize + 1; // Try larger font
+      minSize = midSize + 1;
     } else {
-      maxSize = midSize - 1; // Font too big, shrink font size to fit words
+      maxSize = midSize - 1;
     }
   }
 
@@ -208,10 +219,6 @@ export function calculateOptimalFontSize(
 
 /**
  * 1:1 Cotrans & LanguageRegistry LANGUAGE_ORIENTATION_PRESETS map determining render direction.
- * Covers all 58 supported languages from LanguageRegistry.ts:
- * - 'auto': CJK target languages (Japanese, Chinese) preserving vertical/horizontal source orientation.
- * - 'hr': RTL target languages (Arabic, Hebrew, Persian, Urdu).
- * - 'h': All Western, Latin, Cyrillic, Indic, and South-East Asian target languages (English, Vietnamese, Korean, Spanish, French, etc.).
  */
 export const LANGUAGE_ORIENTATION_PRESETS: Record<string, 'h' | 'v' | 'hr' | 'auto'> = {
   // CJK Auto Orientation
@@ -223,20 +230,10 @@ export const LANGUAGE_ORIENTATION_PRESETS: Record<string, 'h' | 'v' | 'hr' | 'au
   'he': 'hr', 'heb': 'hr',
   'fa': 'hr', 'pes': 'hr',
   'ur': 'hr', 'urd': 'hr',
-
-  // Default Horizontal for all 58 LanguageRegistry targets:
-  // English, Vietnamese, Korean, French, German, Spanish, Portuguese, Italian, Russian, Ukrainian,
-  // Hindi, Bengali, Gujarati, Kannada, Khmer, Malayalam, Marathi, Nepali, Punjabi, Tamil, Telugu, Thai,
-  // Dutch, Polish, Romanian, Turkish, Afrikaans, Albanian, Armenian, Bulgarian, Catalan, Croatian, Czech,
-  // Danish, Estonian, Filipino, Finnish, Greek, Hungarian, Icelandic, Indonesian, Latvian, Lithuanian,
-  // Malay, Norwegian, Serbian, Slovak, Slovenian, Swahili, Swedish, Welsh.
 };
 
 /**
- * Draws translated text into the 4-point OCR polygon, supporting target-language flexible rendering:
- * - Western target (English/Vietnamese/Spanish/French/etc): Horizontal centered rendering at Image Moments centroid.
- * - CJK target (Japanese/Chinese): Direction-aware vertical/horizontal layout with CJK_H2V punctuation.
- * - RTL target (Arabic): Right-to-left rendering.
+ * Single polygon renderer.
  */
 export function drawTextInPolygon(
   ctx: OffscreenCanvasRenderingContext2D,
@@ -247,63 +244,144 @@ export function drawTextInPolygon(
   targetLang: string = 'en',
   sourceDirection: 'h' | 'v' = 'h'
 ) {
-  if (!text || text.trim().length === 0) return;
-
-  const box = calculateBoundingBox(polygon);
-  const centroid = calculatePolygonCentroid(polygon);
-  const angle = calculateRotationAngle(polygon);
-
-  const langKey = targetLang.toLowerCase().trim();
-  const orientation = LANGUAGE_ORIENTATION_PRESETS[langKey] || 'h';
-  const isCjkTarget = orientation === 'auto';
-  const isRtl = orientation === 'hr';
-  const isWestern = orientation === 'h';
-  const isVertical = isCjkTarget && sourceDirection === 'v';
-
-  let finalText = text;
-  if (isVertical) {
-    finalText = convertCjkPunctuation(text);
-  } else if (isRtl) {
-    finalText = text.split('').reverse().join('');
-  }
-
-  ctx.save();
-
-  // Move origin to visual centroid (Image Moments)
-  ctx.translate(centroid.x, centroid.y);
-  ctx.rotate((angle * Math.PI) / 180);
-
-  const { fontSize, lines, lineHeight } = calculateOptimalFontSize(
+  renderTextBlocksBatch(
     ctx,
-    finalText,
-    box.width,
-    box.height,
-    isWestern
+    [{ text, polygon, direction: sourceDirection, textColor, strokeColor }],
+    targetLang
   );
+}
 
-  ctx.font = `bold ${fontSize}px sans-serif`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillStyle = textColor;
-  ctx.strokeStyle = strokeColor;
-  ctx.lineWidth = Math.max(2, Math.floor(fontSize * 0.15));
+export interface TextBlockItem {
+  text: string;
+  polygon: Point2D[];
+  direction?: 'h' | 'v';
+  textColor?: string;
+  strokeColor?: string;
+}
 
-  const totalHeight = lines.length * lineHeight;
-  let startY = -totalHeight / 2 + lineHeight / 2;
+/**
+ * Renders multiple translated text blocks onto the canvas at once, applying 1:1 Cotrans font scaling,
+ * balloon region box expansion, and spiral collision resolution (`solveCollisionsSpiralXYXY`) across all blocks.
+ */
+export function renderTextBlocksBatch(
+  ctx: OffscreenCanvasRenderingContext2D,
+  blocks: TextBlockItem[],
+  targetLang: string = 'en',
+  imageBounds?: { width: number; height: number }
+) {
+  if (!blocks || blocks.length === 0) return;
 
-  console.log(
-    `[drawTextInPolygon] text="${text.substring(0, 15)}...", box=${box.width}x${box.height}, centroid=(${Math.round(centroid.x)},${Math.round(centroid.y)}), angle=${angle.toFixed(2)}, fontSize=${fontSize}, targetLang=${targetLang}`
-  );
+  const bounds = imageBounds || (ctx?.canvas ? { width: ctx.canvas.width, height: ctx.canvas.height } : { width: 2000, height: 2000 });
 
-  for (const line of lines) {
-    if (strokeColor && strokeColor !== 'transparent') {
-      ctx.strokeText(line, 0, startY);
+  // Phase 1: Compute font size, wrapped lines, and initial bounding box for every block
+  const blockMeta = blocks.map(b => {
+    const text = b.text || '';
+    if (!text.trim()) return null;
+
+    const poly = b.polygon;
+    const box = calculateBoundingBox(poly);
+    const centroid = calculatePolygonCentroid(poly);
+    const angle = calculateRotationAngle(poly);
+    const dir = b.direction || 'h';
+
+    const langKey = targetLang.toLowerCase().trim();
+    const orientation = LANGUAGE_ORIENTATION_PRESETS[langKey] || 'h';
+    const isWestern = orientation === 'h';
+    const isRtl = orientation === 'hr';
+    const isVertical = orientation === 'auto' && dir === 'v';
+
+    let finalText = text;
+    if (isVertical) {
+      finalText = convertCjkPunctuation(text);
+    } else if (isRtl) {
+      finalText = text.split('').reverse().join('');
     }
-    ctx.fillText(line, 0, startY);
-    startY += lineHeight;
-  }
 
-  ctx.restore();
+    const { fontSize, lines, lineHeight } = calculateOptimalFontSize(
+      ctx,
+      finalText,
+      box.width,
+      box.height,
+      isWestern
+    );
+
+    ctx.font = `bold ${fontSize}px sans-serif`;
+    let maxLineWidth = 0;
+    for (const line of lines) {
+      const w = ctx.measureText(line).width;
+      if (w > maxLineWidth) maxLineWidth = w;
+    }
+
+    const totalHeight = lines.length * lineHeight;
+    const pad = fontSize * 0.3;
+
+    const w = maxLineWidth + pad * 2;
+    const h = totalHeight + pad * 2;
+
+    const initialRect: RectXYXY = {
+      x1: centroid.x - w / 2,
+      y1: centroid.y - h / 2,
+      x2: centroid.x + w / 2,
+      y2: centroid.y + h / 2
+    };
+
+    return {
+      block: b,
+      finalText,
+      fontSize,
+      lines,
+      lineHeight,
+      totalHeight,
+      centroid,
+      angle,
+      boxWidth: w,
+      boxHeight: h,
+      initialRect
+    };
+  });
+
+  const validMeta = blockMeta.filter((m): m is NonNullable<typeof m> => m !== null);
+  if (validMeta.length === 0) return;
+
+  // Phase 2: Cotrans 1:1 Spiral Collision Resolution across all blocks
+  const initialBboxes = validMeta.map(m => m.initialRect);
+  const solvedBboxes = solveCollisionsSpiralXYXY(bounds, initialBboxes, 15, 3);
+
+  // Phase 3: Render each block at its collision-adjusted centroid
+  for (let i = 0; i < validMeta.length; i++) {
+    const meta = validMeta[i];
+    const solved = solvedBboxes[i];
+
+    const newCenterX = (solved.x1 + solved.x2) / 2;
+    const newCenterY = (solved.y1 + solved.y2) / 2;
+
+    ctx.save();
+    ctx.translate(newCenterX, newCenterY);
+    ctx.rotate((meta.angle * Math.PI) / 180);
+
+    ctx.font = `bold ${meta.fontSize}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    const textColor = meta.block.textColor || '#000000';
+    const strokeColor = meta.block.strokeColor || '#FFFFFF';
+
+    ctx.fillStyle = textColor;
+    ctx.strokeStyle = strokeColor;
+    ctx.lineWidth = Math.max(2, Math.floor(meta.fontSize * 0.15));
+
+    let startY = -meta.totalHeight / 2 + meta.lineHeight / 2;
+
+    for (const line of meta.lines) {
+      if (strokeColor && strokeColor !== 'transparent') {
+        ctx.strokeText(line, 0, startY);
+      }
+      ctx.fillText(line, 0, startY);
+      startY += meta.lineHeight;
+    }
+
+    ctx.restore();
+  }
 }
 
 export interface RectXYXY {

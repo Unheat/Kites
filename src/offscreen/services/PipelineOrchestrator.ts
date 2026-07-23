@@ -5,7 +5,7 @@ import { translationManager } from './TranslationManager';
 import { InpaintManager } from './InpaintManager';
 import type { InpaintTier } from './InpaintManager';
 import type { Point2D } from '../engines/inpaint/BaseInpaintEngine';
-import { drawTextInPolygon, calculateOptimalFontSize } from '../utils/canvasTypesetting';
+import { drawTextInPolygon, renderTextBlocksBatch, type TextBlockItem, calculateOptimalFontSize } from '../utils/canvasTypesetting';
 
 export class PipelineOrchestrator {
   private ocrManager: OcrManager;
@@ -121,16 +121,17 @@ export class PipelineOrchestrator {
       // Draw the clean inpainted image
       ctx.drawImage(bitmap, 0, 0);
       
-      // Draw each translated text block on top
+      // Draw all translated text blocks using Cotrans batch typesetting & spiral collision resolution
+      const textBlockItems: TextBlockItem[] = [];
       for (let i = 0; i < translatedTexts.length; i++) {
         const text = translatedTexts[i];
         const poly = ocrResult.polygons ? ocrResult.polygons[i] : null;
         const dir = (ocrResult.directions && ocrResult.directions[i]) ? ocrResult.directions[i] : 'h';
         if (text && poly) {
-          // White stroke, Black text is standard for manga
-          drawTextInPolygon(ctx, text, poly as any, '#000000', '#FFFFFF', targetLang, dir);
+          textBlockItems.push({ text, polygon: poly as any, direction: dir, textColor: '#000000', strokeColor: '#FFFFFF' });
         }
       }
+      renderTextBlocksBatch(ctx, textBlockItems, targetLang, { width: bitmap.width, height: bitmap.height });
       
       const bakedBlob = await canvas.convertToBlob({ type: 'image/png' });
       
