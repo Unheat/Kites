@@ -145,7 +145,8 @@ export function calculateOptimalFontSize(
   width: number,
   height: number,
   isWestern: boolean = true,
-  fontFamily: string = 'sans-serif'
+  fontFamily: string = 'sans-serif',
+  bubbleWidth?: number
 ): { fontSize: number; lines: string[]; lineHeight: number } {
   const words = isWestern ? segEng(text) : text.split('');
 
@@ -160,13 +161,12 @@ export function calculateOptimalFontSize(
 
   if (isWestern) {
     if (height > width * 1.2) {
-      const fullTextWidth = ctx.measureText(text).width;
-      const approxNeededRows = Math.ceil(fullTextWidth / Math.max(30, width * 0.85));
-      const scaleX = Math.max(1.4, Math.min(2.5, approxNeededRows));
-      targetWidth = Math.max(width * scaleX, maxWordWidthAt14 * 1.15);
+      // Dynamic Bubble Width Detection
+      const actualBubbleWidth = bubbleWidth ? Math.max(bubbleWidth, width * 1.5) : Math.max(width * 2.5, Math.min(height * 0.75, 220));
+      targetWidth = Math.max(actualBubbleWidth * 0.9, maxWordWidthAt14 * 1.25);
       targetHeight = Math.max(height * 0.9, 40);
     } else {
-      targetWidth = Math.max(width * 1.1, maxWordWidthAt14 * 1.1);
+      targetWidth = Math.max(width * 1.1, maxWordWidthAt14 * 1.15);
     }
   }
 
@@ -251,6 +251,37 @@ export function drawTextInPolygon(
   );
 }
 
+function findDynamicBubbleWidth(ctx: OffscreenCanvasRenderingContext2D, cx: number, cy: number, maxWidth = 400): { left: number; right: number; width: number; centerX: number } {
+  try {
+    const w = ctx.canvas.width;
+    const h = ctx.canvas.height;
+    if (cx < 0 || cx >= w || cy < 0 || cy >= h) return { left: cx, right: cx, width: 30, centerX: cx };
+
+    const imgData = ctx.getImageData(0, Math.floor(cy), w, 1).data;
+    let left = Math.floor(cx);
+    let right = Math.floor(cx);
+
+    while (left > 0 && (cx - left) < maxWidth / 2) {
+      const idx = (left - 1) * 4;
+      const lum = 0.299 * imgData[idx] + 0.587 * imgData[idx + 1] + 0.114 * imgData[idx + 2];
+      if (lum < 100) break;
+      left--;
+    }
+
+    while (right < w - 1 && (right - cx) < maxWidth / 2) {
+      const idx = (right + 1) * 4;
+      const lum = 0.299 * imgData[idx] + 0.587 * imgData[idx + 1] + 0.114 * imgData[idx + 2];
+      if (lum < 100) break;
+      right++;
+    }
+
+    const foundWidth = right - left;
+    return { left, right, width: foundWidth, centerX: left + foundWidth / 2 };
+  } catch (e) {
+    return { left: cx, right: cx, width: 30, centerX: cx };
+  }
+}
+
 export interface TextBlockItem {
   text: string;
   polygon: Point2D[];
@@ -280,7 +311,7 @@ export function renderTextBlocksBatch(
 
     const poly = b.polygon;
     const box = calculateBoundingBox(poly);
-    const centroid = calculatePolygonCentroid(poly);
+    let centroid = calculatePolygonCentroid(poly);
     const angle = calculateRotationAngle(poly);
     const dir = b.direction || 'h';
 
@@ -297,12 +328,24 @@ export function renderTextBlocksBatch(
       finalText = text.split('').reverse().join('');
     }
 
+    // Dynamic bubble extraction for Western text inside vertical CJK bubbles
+    let bubbleWidth: number | undefined;
+    if (isWestern && box.height > box.width * 1.2 && Math.abs(angle) < 15) {
+      const bubble = findDynamicBubbleWidth(ctx, centroid.x, centroid.y);
+      if (bubble.width > box.width * 1.5) {
+        bubbleWidth = bubble.width;
+        centroid.x = bubble.centerX; // Re-center dynamically!
+      }
+    }
+
     const { fontSize, lines, lineHeight } = calculateOptimalFontSize(
       ctx,
       finalText,
       box.width,
       box.height,
-      isWestern
+      isWestern,
+      'sans-serif',
+      bubbleWidth
     );
 
     ctx.font = `bold ${fontSize}px sans-serif`;
