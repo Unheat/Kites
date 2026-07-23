@@ -130,11 +130,15 @@ Due to browser security, `your-website.com` and `chrome-extension://...` cannot 
 
 ### E. The "Out of Bounds" Translation Problem (Auto-Scaling Font Size)
 *The Problem:* As you noted by looking at the PP-OCRv6 JSON, the OCR only gives us the bounding box coordinates (`rec_boxes` / `dt_polys`) of the *original* Japanese text. English translations are usually much longer and will overflow the original box. The OCR does not tell us what font size to use for the new text.
-*The Solution (The Dual-Architecture Typesetting Engine):* 
+*The Solution (The Dual-Architecture Typesetting Engine & 1:1 Cotrans Math Alignment):* 
 Because our architecture serves two different contexts—Live Web Translation vs. the Interactive Dashboard—we must use a dual-render approach to solve the problem of CSS layout interference (z-index clipping, sticky headers):
 1. **For the Live Web (Content Script):** We do **not** use HTML DOM Overlays because floating text nodes over the page will clip on top of sticky website navigation bars (e.g., Facebook, Twitter) and break CSS flexbox layouts. Instead, we use Canvas `context.measureText()` and `fillText()` inside the Offscreen Document to burn the English text directly into the inpainted image pixels. We then replace the website's original `<img>` `src` with the new Base64 image. This guarantees **0% chance of breaking host website layouts** while obeying all native scroll and z-index bounds.
 2. **For the Canvas Dashboard (React-Konva/DOM):** When a user opens their Dashboard to manually edit an image, they do not want baked-in pixels. The Database saves both the *clean inpainted image* and the *raw JSON text blocks*. The Dashboard uses React-Konva or DOM overlays so the user can interactively click, resize, and rewrite the text boxes over the clean image.
-3. **Centering & Rotation:** We calculate the true width, height, and angle of the speech bubble by extracting geometry from the 4-point OCR polygons (`dt_polys`). We use binary search to shrink the `font-size` until the total wrapped height fits perfectly inside the bounding box, centered horizontally and vertically.
+3. **Centering, Rotation & 1:1 Cotrans Math Alignment:**
+   - **No Word Hyphenation (`merge_seg_eng`):** Words are never sliced across lines with hyphens (e.g. `hat-ful`). English sentences are split into whole words using `segEng`.
+   - **Dynamic Width Expansion:** Matching Cotrans `text_render_pillow_eng.py`, target width expands for Western text: `targetWidth = Math.max(width * 0.85, maxWordWidth * 1.15)`, allowing English sentences to render cleanly without being squished into 8px single-word vertical columns.
+   - **Kruskal MST Region Splitting:** Speech bubble merging uses Cotrans 1:1 Kruskal Minimum Spanning Tree splitting (`splitTextRegion` with `gamma = 0.5`, `sigma = 2.0`, and `getCotransDistance` top/bottom alignment distance), preventing separate adjacent speech bubbles from over-merging into double bubbles.
+   - **PaddleOCR Tensor Padding Unscaling:** `extractPolygons.ts` and `extractRawMaskCanvas` unscale probability maps using exact PaddleOCR `1 / resizeRatio`, cropping out 32px tensor padding to ensure text bounding boxes and overlays align 1:1 with source pixels.
 *Result:* The text will perfectly wrap and scale to fit inside speech bubbles. The live web remains 100% stable without DOM clipping bugs, and the Dashboard remains fully editable.
 
 ### F. Removing the Original Text Cleanly (Inpainting)
@@ -142,7 +146,11 @@ Because our architecture serves two different contexts—Live Web Translation vs
 *The Problem:* Before we can overlay the translated English text, we must cleanly erase the original text from the image so it doesn't bleed through. We need a solution that works for any image (manga, photos, diagrams) and runs fast locally. We must also prevent erasing speech bubble outlines, panel borders, and background line drawings.
 
 *The Solution (6-Tier Extensible Architecture & Stroke Masking):*
-To solve this, we implement a **6-Tier Hybrid Inpainting Pipeline** wrapped in a Strategy Pattern (`IInpaintEngine`), which selects the active eraser mode based on settings:
+To solve this, we implement a **6-Tier Hybrid Inpainting Pipeline** wrapped in a Strategy Pattern (`IInpaintEngine`), which selects the active eraser mode based on settings.
+
+> [!NOTE]
+> **Architectural Note (Deliberate Exception to Cotrans Alignment):**
+> Inpainting is the **explicit architectural exception** where Kites does NOT strictly follow Cotrans Python. While Cotrans hardcodes a single heavy Python inpainting model, Kites provides a flexible 6-Tier hybrid engine where **Tier 1 (Direct 4-Point Polygon Patching & Dominant Edge Color Fill)** is used by default for 0MB download footprint and instant microsecond execution. Users can optionally select Tier 2 (Telea Math) or Tiers 3–4 (AOT-GAN / LaMa ONNX) depending on their device capabilities, balancing speed vs visual hallucination quality.
 
 ```mermaid
 graph TD

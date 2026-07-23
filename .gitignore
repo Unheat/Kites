@@ -24,7 +24,8 @@ dist-ssr
 *.sw?
 
 .agents
-docs
+docs/*
+!docs/fullplan.md
 .env
 PaddleOCR/
 test/
