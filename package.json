@@ -9,7 +9,7 @@
     "build": "npm run copy-wasm && tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "test": "vitest run",
+    "test": "vitest run src/",
     "test:e2e": "node scripts/test-extension.js"
   },
   "dependencies": {
