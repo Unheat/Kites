@@ -36,6 +36,7 @@ export interface TextBlock {
   fontSize: number;
   fontFamily: string;
   color: string;
+  direction?: 'h' | 'v';
 }
 
 const db = new Dexie('KitesDatabase') as Dexie & {

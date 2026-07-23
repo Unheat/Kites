@@ -5,7 +5,7 @@ import { translationManager } from './TranslationManager';
 import { InpaintManager } from './InpaintManager';
 import type { InpaintTier } from './InpaintManager';
 import type { Point2D } from '../engines/inpaint/BaseInpaintEngine';
-import { drawTextInPolygon } from '../utils/canvasTypesetting';
+import { drawTextInPolygon, calculateOptimalFontSize } from '../utils/canvasTypesetting';
 
 export class PipelineOrchestrator {
   private ocrManager: OcrManager;
@@ -143,7 +143,6 @@ export class PipelineOrchestrator {
 
       // 7. Save back to DB (Dashboard gets the RAW clean image, NOT the baked one!)
       console.log(`[PipelineOrchestrator] Saving raw clean results to database...`);
-      console.log(`[PipelineOrchestrator] Saving raw clean results to database...`);
       await db.images.update(imageRecord.id!, {
         translatedImageBlob: cleanedBlob
       });
@@ -151,17 +150,30 @@ export class PipelineOrchestrator {
       // Map OCR results back to DB text blocks
       const textBlocksToSave = ocrResult.texts.map((text, i) => {
         const box = ocrResult.boxes[i];
+        const translatedText = translatedTexts[i] || 'Error';
+        const dir = (ocrResult.directions && ocrResult.directions[i]) ? ocrResult.directions[i] : 'h';
+
+        // Calculate dynamic font size matching canvas typesetting
+        const { fontSize } = calculateOptimalFontSize(
+          ctx,
+          translatedText,
+          box.w,
+          box.h,
+          !['ja', 'zh', 'zh-cn', 'zh-tw', 'ko'].includes(targetLang.toLowerCase())
+        );
+
         return {
           imageId: imageRecord.id!,
           originalText: text,
-          translatedText: translatedTexts[i] || 'Error',
+          translatedText,
           posX: box.x,
           posY: box.y,
           width: box.w,
           height: box.h,
-          fontSize: 24, // Placeholder for now until font sizing logic is built
+          fontSize,
           fontFamily: 'sans-serif',
-          color: '#000000'
+          color: '#000000',
+          direction: dir
         };
       });
 
