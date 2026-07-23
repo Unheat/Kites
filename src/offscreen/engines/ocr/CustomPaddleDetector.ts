@@ -73,7 +73,8 @@ export class CustomPaddleDetector {
       input.height,
       input.originalWidth,
       input.originalHeight,
-      thresh
+      thresh,
+      input.resizeRatio
     );
 
     console.log(`[CustomPaddleDetector] Found ${polygons.length} text polygons and extracted maskRawCanvas.`);

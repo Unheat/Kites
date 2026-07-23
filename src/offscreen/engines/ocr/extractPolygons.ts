@@ -38,7 +38,8 @@ export function extractRawMaskCanvas(
   modelH: number,
   origW: number,
   origH: number,
-  threshold: number = 0.3
+  threshold: number = 0.3,
+  resizeRatio?: number
 ): any {
   const modelCanvas = platform.createCanvas(modelW, modelH);
   const modelCtx = modelCanvas.getContext('2d');
@@ -74,10 +75,14 @@ export function extractRawMaskCanvas(
     }
   }
 
+  const ratio = resizeRatio ?? (modelW / origW);
+  const resizeW = Math.min(modelW, Math.round(origW * ratio));
+  const resizeH = Math.min(modelH, Math.round(origH * ratio));
+
   const origCanvas = platform.createCanvas(origW, origH);
   const origCtx = origCanvas.getContext('2d');
   origCtx.imageSmoothingEnabled = false;
-  origCtx.drawImage(dilatedCanvas, 0, 0, modelW, modelH, 0, 0, origW, origH);
+  origCtx.drawImage(dilatedCanvas, 0, 0, resizeW, resizeH, 0, 0, origW, origH);
 
   return origCanvas;
 }
