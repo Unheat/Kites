@@ -149,11 +149,29 @@ function calculateOptimalFontSize(
   // 1:1 Cotrans merge_seg_eng max_width formula: max(bbox_width, text_max_width) * size_ratio
   ctx.font = `bold 14px ${fontFamily}`;
   const maxWordWidthAt14 = Math.max(...words.map(w => ctx.measureText(w).width));
-  const targetWidth = isWestern ? Math.max(width * 0.85, maxWordWidthAt14 * 1.15) : Math.max(10, width * 0.85);
-  const targetHeight = Math.max(10, height * 0.85);
+
+  // 1:1 Cotrans Single-Axis Horizontal Box Expansion for Western target text (English/Vietnamese/Spanish/etc):
+  // When rendering horizontal Western text into narrow vertical CJK speech bubbles (height > width * 1.2),
+  // expand targetWidth horizontally so text wraps naturally at 14-18px instead of collapsing to 8px single-word columns.
+  let targetWidth = Math.max(10, width * 0.85);
+  let targetHeight = Math.max(10, height * 0.85);
+
+  if (isWestern) {
+    if (height > width * 1.2) {
+      const fullTextWidth = ctx.measureText(text).width;
+      const approxNeededRows = Math.ceil(fullTextWidth / Math.max(30, width * 0.85));
+      const scaleX = Math.max(1.8, Math.min(3.5, approxNeededRows));
+      targetWidth = Math.max(width * scaleX, maxWordWidthAt14 * 1.25);
+      targetHeight = Math.max(height * 0.9, 40);
+    } else {
+      targetWidth = Math.max(width * 1.1, maxWordWidthAt14 * 1.15);
+    }
+  }
 
   let minSize = 10;
-  let maxSize = Math.min(60, Math.floor(height * 0.7)); // Cotrans max_font_size constraint
+  let maxSize = isWestern 
+    ? Math.min(36, Math.max(14, Math.floor(targetWidth * 0.35)))
+    : Math.min(60, Math.floor(height * 0.7));
   let bestSize = minSize;
   let bestLines: string[] = [text];
 

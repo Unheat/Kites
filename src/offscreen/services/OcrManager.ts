@@ -116,6 +116,34 @@ export class OcrManager {
       const area = polygonArea(poly);
       if (area < 16) continue; // Cotrans area filter (area > 16)
 
+      // 1:1 Cotrans Furigana filter: filter out tiny reading-aid lines running parallel to main kanji lines (fs < 0.45 * main_fs)
+      const b1 = calculateBoundingBox(poly);
+      const fs1 = Math.min(b1.width, b1.height);
+      let isFurigana = false;
+
+      for (let j = 0; j < rawTexts.length; j++) {
+        if (i === j) continue;
+        const poly2 = rawPolygons[j];
+        if (!poly2 || poly2.length < 3) continue;
+        const b2 = calculateBoundingBox(poly2);
+        const fs2 = Math.min(b2.width, b2.height);
+
+        // If main line j is significantly larger than line i (fs1 < 0.45 * fs2) and runs parallel nearby
+        if (fs1 < 0.45 * fs2) {
+          const isBothV = b1.height > b1.width * 1.2 && b2.height > b2.width * 1.2;
+          const isBothH = b1.width > b1.height * 1.2 && b2.width > b2.height * 1.2;
+          const isNearby = Math.abs(b1.x - b2.x) < b2.width * 2.5 && Math.abs(b1.y - b2.y) < b2.height * 1.5;
+
+          if ((isBothV || isBothH) && isNearby) {
+            isFurigana = true;
+            console.log(`[OcrManager] Filtered out Furigana line "${txt}" (fs=${fs1} vs main fs=${fs2})`);
+            break;
+          }
+        }
+      }
+
+      if (isFurigana) continue;
+
       validIndices.push(i);
     }
 
