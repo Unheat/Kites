@@ -305,3 +305,114 @@ export function drawTextInPolygon(
 
   ctx.restore();
 }
+
+export interface RectXYXY {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
+function checkBboxCollision(b1: RectXYXY, b2: RectXYXY): boolean {
+  return !(b1.x2 <= b2.x1 || b1.x1 >= b2.x2 || b1.y2 <= b2.y1 || b1.y1 >= b2.y2);
+}
+
+function* spiralPointsGenerator(anchorX: number, anchorY: number, limit: number = 10000) {
+  yield { x: anchorX, y: anchorY };
+  const maxRadius = Math.floor(Math.sqrt(limit));
+  for (let radius = 1; radius <= maxRadius; radius++) {
+    // Top and bottom edges
+    for (let dx = -radius; dx <= radius; dx++) {
+      yield { x: anchorX + dx, y: anchorY - radius };
+      yield { x: anchorX + dx, y: anchorY + radius };
+    }
+    // Left and right edges (excluding corners)
+    for (let dy = -radius + 1; dy < radius; dy++) {
+      yield { x: anchorX - radius, y: anchorY + dy };
+      yield { x: anchorX + radius, y: anchorY + dy };
+    }
+  }
+}
+
+function findCollisionFreePosition(
+  bboxIdx: number,
+  bboxes: RectXYXY[],
+  anchors: { x: number; y: number }[],
+  imageBounds: { width: number; height: number },
+  spiralLimit: number = 10000
+): RectXYXY | null {
+  const w = bboxes[bboxIdx].x2 - bboxes[bboxIdx].x1;
+  const h = bboxes[bboxIdx].y2 - bboxes[bboxIdx].y1;
+  const anchor = anchors[bboxIdx];
+
+  for (const { x, y } of spiralPointsGenerator(anchor.x, anchor.y, spiralLimit)) {
+    const candidate: RectXYXY = { x1: x, y1: y, x2: x + w, y2: y + h };
+
+    if (x < 0 || y < 0 || candidate.x2 > imageBounds.width || candidate.y2 > imageBounds.height) {
+      continue;
+    }
+
+    let hasCollision = false;
+    for (let k = 0; k < bboxes.length; k++) {
+      if (k !== bboxIdx && checkBboxCollision(candidate, bboxes[k])) {
+        hasCollision = true;
+        break;
+      }
+    }
+
+    if (!hasCollision) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * 1:1 Cotrans solve_collisions_spiral_xyxy solver.
+ * Adjusts bounding boxes of text regions iteratively using a spiral search to resolve visual overlaps.
+ */
+export function solveCollisionsSpiralXYXY(
+  imageBounds: { width: number; height: number },
+  initialBboxes: RectXYXY[],
+  maxIterations: number = 10,
+  padding: number = 2
+): RectXYXY[] {
+  const bboxes: RectXYXY[] = initialBboxes.map(b => ({
+    x1: b.x1 - padding,
+    y1: b.y1 - padding,
+    x2: b.x2 + padding,
+    y2: b.y2 + padding
+  }));
+
+  if (bboxes.length <= 1) return initialBboxes;
+
+  const anchors = bboxes.map(b => ({ x: b.x1, y: b.y1 }));
+
+  for (let iter = 0; iter < maxIterations; iter++) {
+    let collisionFound = false;
+
+    for (let i = 0; i < bboxes.length; i++) {
+      for (let j = i + 1; j < bboxes.length; j++) {
+        if (checkBboxCollision(bboxes[i], bboxes[j])) {
+          collisionFound = true;
+          const newPos = findCollisionFreePosition(j, bboxes, anchors, imageBounds);
+          if (newPos) {
+            bboxes[j] = newPos;
+          }
+          break;
+        }
+      }
+    }
+
+    if (!collisionFound) break;
+  }
+
+  return bboxes.map((b, idx) => ({
+    x1: b.x1 + padding,
+    y1: b.y1 + padding,
+    x2: b.x2 - padding,
+    y2: b.y2 - padding
+  }));
+}
+

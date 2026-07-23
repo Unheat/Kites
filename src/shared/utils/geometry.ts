@@ -191,6 +191,7 @@ export function getQuadrilateralFontSize(pts: Point2D[]): number {
 
 /**
  * Cotrans Quadrilateral data structure wrapper.
+ * 1:1 aligned with Cotrans generic.py Quadrilateral implementation.
  */
 export class Quadrilateral {
   pts: Point2D[];
@@ -201,10 +202,20 @@ export class Quadrilateral {
 
   constructor(pts: Point2D[]) {
     this.pts = pts;
-    this.font_size = getQuadrilateralFontSize(pts);
+    const struct = getQuadrilateralStructure(pts);
+    if (struct.length === 4) {
+      const [l1a, l1b, l2a, l2b] = struct;
+      const normV1 = Math.hypot(l1b.x - l1a.x, l1b.y - l1a.y);
+      const normV2 = Math.hypot(l2b.x - l2a.x, l2b.y - l2a.y);
+      this.aspect_ratio = normV1 > 0 ? normV2 / normV1 : 1.0;
+      this.font_size = Math.min(normV1, normV2);
+    } else {
+      const box = calculateBoundingBox(pts);
+      this.aspect_ratio = box.height > 0 ? box.width / box.height : 1.0;
+      this.font_size = Math.min(box.width, box.height);
+    }
     const box = calculateBoundingBox(pts);
     this.centroid = { x: box.centerX, y: box.centerY };
-    this.aspect_ratio = box.height > 0 ? box.width / box.height : 1.0;
     this.direction = this.aspect_ratio < 0.95 ? 'v' : 'h';
   }
 }

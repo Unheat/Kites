@@ -2,6 +2,30 @@ import type { IOcrEngine, OcrResult } from '../engines/ocr/BaseOcrEngine';
 import { PaddleOcrEngine } from '../engines/ocr/PaddleOcrEngine';
 import { type Point2D, type BoundingBox, Quadrilateral, calculateBoundingBox, computeMinAreaRect, polygonDistance, polygonArea, calculateRotationAngle, splitTextRegion } from '../../shared/utils/geometry';
 
+/**
+ * 1:1 Cotrans is_valuable_char check (generic2.py).
+ * Checks if a character is not punctuation, whitespace, digit, or control character.
+ */
+export function isValuableChar(ch: string): boolean {
+  if (!ch) return false;
+  if (/[\s\d]/.test(ch)) return false;
+  if (/[\u0000-\u001F\u007F-\u009F]/.test(ch)) return false;
+  if (/\p{P}/u.test(ch) || /[!"#$%&'()*+,-./:;<=>?@[\]^_`{|}~]/.test(ch)) return false;
+  return true;
+}
+
+/**
+ * 1:1 Cotrans is_valuable_text check (generic2.py).
+ * Returns true if text contains at least one valuable character.
+ */
+export function isValuableText(text: string): boolean {
+  if (!text) return false;
+  for (const ch of text) {
+    if (isValuableChar(ch)) return true;
+  }
+  return false;
+}
+
 export class OcrManager {
   private engine: IOcrEngine | null = null;
   // Stores the in-flight initialization promise so that concurrent callers
@@ -62,7 +86,8 @@ export class OcrManager {
       const centerDiff = Math.abs(x1 + w1 / 2 - (x2 + w2 / 2));
       
       let res = false;
-      if (centerDiff < char_gap_tolerance2 * charSize) {
+      // 1:1 Cotrans fix: centerDiff is in absolute pixels (char_gap_tolerance2), NOT char_gap_tolerance2 * charSize
+      if (centerDiff < char_gap_tolerance2) {
         res = true;
       } else if (w1 > h1 * ratio && h2 > w2 * ratio) {
         res = false;
@@ -105,13 +130,18 @@ export class OcrManager {
     const { texts: rawTexts, polygons: rawPolygons = [], scores: rawScores = [] } = result;
     if (rawTexts.length <= 1 || rawPolygons.length === 0) return result;
 
-    // Stage 1: Cotrans Noise Filtering (area > 16 and non-empty text - manga_translator.py line 764)
+    // Stage 1: Cotrans Noise Filtering (area > 16, non-empty text, and isValuableText - manga_translator.py)
     const validIndices: number[] = [];
     for (let i = 0; i < rawTexts.length; i++) {
       const poly = rawPolygons[i];
       const txt = rawTexts[i];
       if (!poly || poly.length < 3) continue;
       if (!txt || !txt.trim()) continue;
+
+      if (!isValuableText(txt)) {
+        console.log(`[OcrManager] Filtered out non-valuable noise line "${txt}"`);
+        continue;
+      }
 
       const area = polygonArea(poly);
       if (area < 16) continue; // Cotrans area filter (area > 16)
