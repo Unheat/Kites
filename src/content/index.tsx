@@ -38,46 +38,13 @@ function TranslateButton({ srcUrl, anchorName }: { srcUrl: string, anchorName: s
     }
     setIsTranslating(true);
     console.log('[Content Script] Sending TRANSLATE_IMAGE to background:', srcUrl);
-    
-    try {
-      if (!chrome.runtime?.id) {
-        setIsTranslating(false);
-        console.warn('[Content Script] Extension context invalidated. Please refresh the page.');
-        return;
-      }
-      chrome.runtime.sendMessage({ type: 'TRANSLATE_IMAGE', url: srcUrl }, (response) => {
-        if (chrome.runtime.lastError || response?.status === 'error') {
-          setIsTranslating(false);
-          console.error('[Content Script] Message failed:', chrome.runtime.lastError?.message || response?.error);
-        }
-      });
-    } catch (err) {
+    chrome.runtime.sendMessage({ type: 'TRANSLATE_IMAGE', url: srcUrl }, () => {
       setIsTranslating(false);
-      console.warn('[Content Script] Chrome runtime call failed (extension reloaded/invalidated):', err);
-    }
+      if (chrome.runtime.lastError) {
+        console.error('[Content Script] Message failed:', chrome.runtime.lastError.message);
+      }
+    });
   };
-
-  useEffect(() => {
-    const handleMessage = (message: any) => {
-      if ((message.type === 'IMAGE_TRANSLATED' || message.type === 'TRANSLATION_ERROR') && message.payload) {
-        if (message.payload.originalUrl === srcUrl) {
-          setIsTranslating(false);
-        }
-      }
-    };
-    try {
-      if (chrome.runtime?.id) {
-        chrome.runtime.onMessage.addListener(handleMessage);
-        return () => {
-          try {
-            if (chrome.runtime?.id) {
-              chrome.runtime.onMessage.removeListener(handleMessage);
-            }
-          } catch (e) {}
-        };
-      }
-    } catch (e) {}
-  }, [srcUrl]);
 
   return (
     <button 
@@ -90,7 +57,7 @@ function TranslateButton({ srcUrl, anchorName }: { srcUrl: string, anchorName: s
       }}
       // We use 'fixed' instead of 'absolute' so the viewport is the containing block.
       // This is required for CSS Anchors to target elements outside the React root.
-      className={isTranslating ? 'kites-anim-spin' : ''}
+      className={`fixed z-[999999] w-8 h-8 flex items-center justify-center rounded-full bg-transparent hover:bg-black/5 transition-colors cursor-pointer border-none text-black ${isTranslating ? 'animate-spin' : ''}`}
       style={{ 
         marginTop: '8px',
         marginLeft: '8px',
@@ -126,36 +93,20 @@ function GlobalOverlay() {
   // 1. Fetch User Settings
   useEffect(() => {
     const loadSettings = () => {
-      try {
-        if (!chrome.runtime?.id) return;
-        chrome.storage.local.get('popupState', (data) => {
-          if (chrome.runtime.lastError) return;
-          const state = data?.popupState as PopupState | undefined;
-          if (state) {
-            setMode(state.manualMode || 'hover');
-            setAutoTranslate(state.isAuto || false);
-          }
-        });
-      } catch (e) {}
+      chrome.storage.local.get('popupState', (data) => {
+        const state = data.popupState as PopupState | undefined;
+        if (state) {
+          setMode(state.manualMode || 'hover');
+          setAutoTranslate(state.isAuto || false);
+        }
+      });
     };
     loadSettings();
-    const handleStorageChange = (changes: any, area: string) => {
+    chrome.storage.onChanged.addListener((changes, area) => {
       if (area === 'local' && changes.popupState) {
         loadSettings();
       }
-    };
-    try {
-      if (chrome.runtime?.id) {
-        chrome.storage.onChanged.addListener(handleStorageChange);
-        return () => {
-          try {
-            if (chrome.runtime?.id) {
-              chrome.storage.onChanged.removeListener(handleStorageChange);
-            }
-          } catch (e) {}
-        };
-      }
-    } catch (e) {}
+    });
   }, []);
 
   // 2. Listen for the pub/sub IMAGE_TRANSLATED broadcast from Background Worker
@@ -170,8 +121,14 @@ function GlobalOverlay() {
         const targetImg = imgs.find(img => img.src === originalUrl);
         
         if (targetImg) {
-          // Instant native swap!
-          targetImg.src = bakedBase64;
+          // Swap the image natively!
+          // We apply a smooth transition for a premium feel
+          targetImg.style.transition = 'opacity 0.3s ease-in-out';
+          targetImg.style.opacity = '0';
+          setTimeout(() => {
+            targetImg.src = bakedBase64;
+            targetImg.style.opacity = '1';
+          }, 300);
         }
       }
     };
@@ -181,7 +138,7 @@ function GlobalOverlay() {
   }, []);
 
   useEffect(() => {
-    if (mode === 'persistent') { // Persistent Mode
+    if (mode === 'persistent') { // Consistent Mode
       const updateImages = () => {
         const imgs = Array.from(document.querySelectorAll('img'));
         const validImgs = imgs.filter(img => {
@@ -216,12 +173,7 @@ function GlobalOverlay() {
           return { srcUrl: img.src, anchorName };
         });
 
-        setConsistentImages(prev => {
-          const isSame = 
-            prev.length === newConsistentImages.length &&
-            prev.every((item, idx) => item.srcUrl === newConsistentImages[idx].srcUrl && item.anchorName === newConsistentImages[idx].anchorName);
-          return isSame ? prev : newConsistentImages;
-        });
+        setConsistentImages(newConsistentImages);
       };
 
       updateImages();
@@ -292,31 +244,12 @@ function GlobalOverlay() {
 
       const handleMouseMove = (e: MouseEvent) => {
         if (!activeImgRef.current) return;
-        
-        const img = activeImgRef.current.imgElement;
-        if (!img || !document.body.contains(img)) {
-          setActiveImg(null);
-          return;
-        }
-
         const target = e.target as HTMLElement;
-        if (target === img || (target.closest && target.closest('#kites-translate-btn'))) {
-          return;
-        }
-
-        // Bounding box tolerance check (16px buffer) so moving cursor from image to button never flickers/disappears
-        const rect = img.getBoundingClientRect();
-        const buffer = 16;
-        const mouseX = e.clientX;
-        const mouseY = e.clientY;
-
-        const isNear = 
-          mouseX >= rect.left - buffer &&
-          mouseX <= rect.right + buffer &&
-          mouseY >= rect.top - buffer &&
-          mouseY <= rect.bottom + buffer;
-
-        if (!isNear) {
+        
+        const isOverImg = target === activeImgRef.current.imgElement;
+        const isOverButton = target.closest('#kites-translate-btn');
+        
+        if (!isOverImg && !isOverButton) {
           setActiveImg(null);
         }
       };
