@@ -3,27 +3,30 @@ import { getBcp47Code } from '../../../shared/utils/LanguageRegistry';
 
 /**
  * Resolves the active native Chrome Translator API instance across standard spec evolutions:
- * - self.translator (Chrome 138+ Stable API)
- * - self.translation (W3C Translation API Spec)
+ * - Translator global class (Chrome 138+ Stable API: Translator.availability / Translator.create)
+ * - self.translation (W3C Translation API Spec: self.translation.createTranslator / self.translation.create)
+ * - self.translator (Chrome API)
  * - self.ai.translator (Early Origin Trial API)
  */
-function getNativeTranslatorApi(): any {
+function getNativeTranslatorScope(): any {
   if (typeof self !== 'undefined') {
-    if ('translator' in self && (self as any).translator) return (self as any).translator;
-    if ('translation' in self && (self as any).translation) return (self as any).translation;
-    if ((self as any).ai?.translator) return (self as any).ai.translator;
+    if ('Translator' in self && (self as any).Translator) return { type: 'global', obj: (self as any).Translator };
+    if ('translation' in self && (self as any).translation) return { type: 'translation', obj: (self as any).translation };
+    if ('translator' in self && (self as any).translator) return { type: 'translator', obj: (self as any).translator };
+    if ((self as any).ai?.translator) return { type: 'ai', obj: (self as any).ai.translator };
   }
   if (typeof window !== 'undefined') {
-    if ('translator' in window && (window as any).translator) return (window as any).translator;
-    if ('translation' in window && (window as any).translation) return (window as any).translation;
-    if ((window as any).ai?.translator) return (window as any).ai.translator;
+    if ('Translator' in window && (window as any).Translator) return { type: 'global', obj: (window as any).Translator };
+    if ('translation' in window && (window as any).translation) return { type: 'translation', obj: (window as any).translation };
+    if ('translator' in window && (window as any).translator) return { type: 'translator', obj: (window as any).translator };
+    if ((window as any).ai?.translator) return { type: 'ai', obj: (window as any).ai.translator };
   }
   return null;
 }
 
 /**
  * Native Chrome Built-in AI Translator Engine.
- * Uses Chrome's native translation APIs directly (self.translator / self.translation / self.ai.translator).
+ * Uses Chrome's native translation APIs directly (Translator / self.translation / self.ai.translator).
  */
 export class ChromeTranslatorEngine implements ITranslationEngine {
   private isInitializing: boolean = false;
@@ -38,12 +41,19 @@ export class ChromeTranslatorEngine implements ITranslationEngine {
 
     this.isInitializing = true;
     try {
-      const api = getNativeTranslatorApi();
-      if (!api) {
-        throw new Error("Chrome native translation API (self.translator / self.translation / self.ai.translator) is unavailable on this browser.");
+      const scope = getNativeTranslatorScope();
+      if (!scope) {
+        throw new Error("Chrome native translation API (Translator / self.translation / self.ai.translator) is unavailable on this browser.");
       }
 
-      if (typeof api.canTranslate === 'function') {
+      const api = scope.obj;
+
+      if (scope.type === 'global' && typeof api.availability === 'function') {
+        const status = await api.availability({ sourceLanguage: 'en', targetLanguage: 'es' });
+        if (status === 'no' || status === 'unavailable') {
+          throw new Error("[ChromeTranslatorEngine] Chrome translation capability is unavailable on this device.");
+        }
+      } else if (typeof api.canTranslate === 'function') {
         const status = await api.canTranslate({ sourceLanguage: 'en', targetLanguage: 'es' });
         if (status === 'no') {
           throw new Error("[ChromeTranslatorEngine] Chrome translation capability is unavailable on this device.");
@@ -72,11 +82,12 @@ export class ChromeTranslatorEngine implements ITranslationEngine {
   async translate(texts: string[], sourceLangId: string = 'ja', targetLangId: string = 'en'): Promise<string[]> {
     if (!texts || texts.length === 0) return [];
 
-    const api = getNativeTranslatorApi();
-    if (!api) {
+    const scope = getNativeTranslatorScope();
+    if (!scope) {
       throw new Error('[ChromeTranslatorEngine] Chrome native translation API is not available on this browser.');
     }
 
+    const api = scope.obj;
     const sourceLang = getBcp47Code(sourceLangId);
     const targetLang = getBcp47Code(targetLangId);
 
@@ -90,7 +101,14 @@ export class ChromeTranslatorEngine implements ITranslationEngine {
         source: sourceLang === 'auto' ? undefined : sourceLang,
         target: targetLang
       };
-      translator = await api.create(options);
+      
+      if (typeof api.create === 'function') {
+        translator = await api.create(options);
+      } else if (typeof api.createTranslator === 'function') {
+        translator = await api.createTranslator(options);
+      } else {
+        throw new Error("No create method found on Chrome Translator API object.");
+      }
     } catch (err) {
       console.error('[ChromeTranslatorEngine] Failed to create native translator instance:', err);
       throw new Error(`Failed to create Chrome native translator: ${err instanceof Error ? err.message : String(err)}`);
