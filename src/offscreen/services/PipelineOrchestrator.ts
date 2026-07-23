@@ -5,7 +5,7 @@ import { translationManager } from './TranslationManager';
 import { InpaintManager } from './InpaintManager';
 import type { InpaintTier } from './InpaintManager';
 import type { Point2D } from '../engines/inpaint/BaseInpaintEngine';
-import { drawTextInPolygon, renderTextBlocksBatch, type TextBlockItem, calculateOptimalFontSize } from '../utils/canvasTypesetting';
+import { renderTextBlocksBatch, type TextBlockItem, type RenderedBlockInfo } from '../utils/canvasTypesetting';
 
 export class PipelineOrchestrator {
   private ocrManager: OcrManager;
@@ -121,17 +121,36 @@ export class PipelineOrchestrator {
       // Draw the clean inpainted image
       ctx.drawImage(bitmap, 0, 0);
       
-      // Draw all translated text blocks using Cotrans batch typesetting & spiral collision resolution
+      // Draw all translated text blocks using the 1:1 Cotrans manga2eng batch renderer
+      // (balloon extraction + layout_lines_aligncenter). Track the original OCR index of
+      // every item so render results can be mapped back for DB persistence.
       const textBlockItems: TextBlockItem[] = [];
+      const itemOcrIndices: number[] = [];
       for (let i = 0; i < translatedTexts.length; i++) {
         const text = translatedTexts[i];
         const poly = ocrResult.polygons ? ocrResult.polygons[i] : null;
         const dir = (ocrResult.directions && ocrResult.directions[i]) ? ocrResult.directions[i] : 'h';
         if (text && poly) {
-          textBlockItems.push({ text, polygon: poly as any, direction: dir, textColor: '#000000', strokeColor: '#FFFFFF' });
+          textBlockItems.push({
+            text,
+            polygon: poly as any,
+            direction: dir,
+            textColor: '#000000',
+            strokeColor: '#FFFFFF',
+            fontSize: ocrResult.fontSizes ? ocrResult.fontSizes[i] : undefined,
+            angle: ocrResult.angles ? ocrResult.angles[i] : undefined
+          });
+          itemOcrIndices.push(i);
         }
       }
-      renderTextBlocksBatch(ctx, textBlockItems, targetLang, { width: bitmap.width, height: bitmap.height });
+      const renderInfos = renderTextBlocksBatch(ctx, textBlockItems, targetLang, { width: bitmap.width, height: bitmap.height });
+
+      // Map render results (final font size actually drawn) back to OCR indices
+      const renderInfoByOcrIndex = new Map<number, RenderedBlockInfo>();
+      for (let k = 0; k < renderInfos.length; k++) {
+        const info = renderInfos[k];
+        if (info) renderInfoByOcrIndex.set(itemOcrIndices[k], info);
+      }
       
       const bakedBlob = await canvas.convertToBlob({ type: 'image/png' });
       
@@ -154,14 +173,11 @@ export class PipelineOrchestrator {
         const translatedText = translatedTexts[i] || 'Error';
         const dir = (ocrResult.directions && ocrResult.directions[i]) ? ocrResult.directions[i] : 'h';
 
-        // Calculate dynamic font size matching canvas typesetting
-        const { fontSize } = calculateOptimalFontSize(
-          ctx,
-          translatedText,
-          box.w,
-          box.h,
-          !['ja', 'zh', 'zh-cn', 'zh-tw', 'ko'].includes(targetLang.toLowerCase())
-        );
+        // Persist the font size the renderer actually used (Cotrans block font size after
+        // downscaling); fall back to the OCR-detected block font size if the block was skipped.
+        const fontSize = renderInfoByOcrIndex.get(i)?.fontSize
+          ?? (ocrResult.fontSizes ? ocrResult.fontSizes[i] : undefined)
+          ?? Math.max(9, Math.floor(Math.min(box.w, box.h)));
 
         return {
           imageId: imageRecord.id!,

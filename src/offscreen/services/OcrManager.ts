@@ -1,6 +1,6 @@
 import type { IOcrEngine, OcrResult } from '../engines/ocr/BaseOcrEngine';
 import { PaddleOcrEngine } from '../engines/ocr/PaddleOcrEngine';
-import { type Point2D, type BoundingBox, Quadrilateral, calculateBoundingBox, computeMinAreaRect, polygonDistance, polygonArea, calculateRotationAngle, splitTextRegion } from '../../shared/utils/geometry';
+import { Quadrilateral, Graph, calculateBoundingBox, computeMinAreaRect, polygonArea, quadrilateralCanMergeRegion, splitTextRegion } from '../../shared/utils/geometry';
 
 /**
  * 1:1 Cotrans is_valuable_char check (generic2.py).
@@ -56,66 +56,86 @@ export class OcrManager {
   }
 
   /**
-   * 👱‍♀️ ponytail: Ported 1:1 from Cotrans quadrilateral_can_merge_region.
+   * 1:1 port of Cotrans ocr/common.py `_generate_text_direction`.
+   * Groups text lines into coarse components (quadrilateral_can_merge_region with
+   * aspect_ratio_tol=1) and assigns every line the component's majority reading
+   * direction. This assignedDirection drives Quadrilateral.distance() during the
+   * MST split, exactly like Cotrans sets assigned_direction during the OCR stage.
+   *
+   * @param quads - All valid text line quadrilaterals (mutated in place).
    */
-  private canMergeQuadrilaterals(
-    p1: Point2D[], p2: Point2D[], b1: BoundingBox, b2: BoundingBox,
-    ratio = 1.9, discard_connection_gap = 2, 
-    char_gap_tolerance = 1.0, char_gap_tolerance2 = 3.0, 
-    font_size_ratio_tol = 2.0, aspect_ratio_tol = 1.3
-  ): boolean {
-    const fs1 = Math.min(b1.width, b1.height);
-    const fs2 = Math.min(b2.width, b2.height);
-    const charSize = Math.min(fs1, fs2);
-    
-    const x1 = b1.x, y1 = b1.y, w1 = b1.width, h1 = b1.height;
-    const x2 = b2.x, y2 = b2.y, w2 = b2.width, h2 = b2.height;
-
-    const dist = polygonDistance(p1, p2);
-    
-    if (dist > discard_connection_gap * charSize) return false;
-    if (Math.max(fs1, fs2) / charSize > font_size_ratio_tol) return false;
-    
-    const ar1 = w1 / h1;
-    const ar2 = w2 / h2;
-    if (ar1 > aspect_ratio_tol && ar2 < 1 / aspect_ratio_tol) return false;
-    if (ar2 > aspect_ratio_tol && ar1 < 1 / aspect_ratio_tol) return false;
-
-    // Both are Axis-Aligned (since paddle OCR boxes are almost always axis-aligned)
-    if (dist < charSize * char_gap_tolerance) {
-      const centerDiff = Math.abs(x1 + w1 / 2 - (x2 + w2 / 2));
-      
-      let res = false;
-      // 1:1 Cotrans fix: centerDiff is in absolute pixels (char_gap_tolerance2), NOT char_gap_tolerance2 * charSize
-      if (centerDiff < char_gap_tolerance2) {
-        res = true;
-      } else if (w1 > h1 * ratio && h2 > w2 * ratio) {
-        res = false;
-      } else if (w2 > h2 * ratio && h1 > w1 * ratio) {
-        res = false;
-      } else if (w1 > h1 * ratio || w2 > h2 * ratio) { // horizontal
-        res = Math.abs(x1 - x2) < charSize * char_gap_tolerance2 || Math.abs(x1 + w1 - (x2 + w2)) < charSize * char_gap_tolerance2;
-      } else if (h1 > w1 * ratio || h2 > w2 * ratio) { // vertical
-        res = Math.abs(y1 - y2) < charSize * char_gap_tolerance2 || Math.abs(y1 + h1 - (y2 + h2)) < charSize * char_gap_tolerance2;
-      } else {
-        res = false;
+  private assignTextDirections(quads: Quadrilateral[]): void {
+    const graph = new Graph();
+    for (let i = 0; i < quads.length; i++) graph.addNode(i);
+    for (let i = 0; i < quads.length; i++) {
+      for (let j = i + 1; j < quads.length; j++) {
+        // Cotrans call: quadrilateral_can_merge_region(ubox, vbox, aspect_ratio_tol=1)
+        if (quadrilateralCanMergeRegion(quads[i], quads[j], 1.9, 2, 0.6, 1.5, 1.5, 1)) {
+          graph.addEdge(i, j);
+        }
       }
+    }
 
-      return res;
-    } else {
-      return false;
+    for (const component of graph.connectedComponents()) {
+      const nodes = Array.from(component);
+      // Majority vote (Counter.most_common(1): highest count, first-seen wins ties)
+      const counts = new Map<'h' | 'v', number>();
+      for (const n of nodes) {
+        const dir = quads[n].direction;
+        counts.set(dir, (counts.get(dir) || 0) + 1);
+      }
+      let majorityDir: 'h' | 'v' = quads[nodes[0]].direction;
+      let bestCount = -1;
+      for (const n of nodes) {
+        const dir = quads[n].direction;
+        const c = counts.get(dir)!;
+        if (c > bestCount) {
+          bestCount = c;
+          majorityDir = dir;
+        }
+      }
+      for (const n of nodes) {
+        quads[n].assignedDirection = majorityDir;
+      }
     }
-    
-    // Fallback for non-axis-aligned rotated boxes
-    const angle1 = calculateRotationAngle(p1);
-    const angle2 = calculateRotationAngle(p2);
-    if (Math.abs(angle1 - angle2) < 15 * Math.PI / 180) {
-      if (dist > charSize * char_gap_tolerance2) return false;
-      if (Math.abs(fs1 - fs2) / charSize > 0.25) return false;
-      return true;
+  }
+
+  /**
+   * 1:1 port of the Cotrans textline_merge majority direction vote, including the
+   * top-2 tie-break that picks the direction of the most extreme aspect-ratio line.
+   *
+   * @param quads - The text lines of one merged region.
+   * @returns The region's majority reading direction.
+   */
+  private majorityDirection(quads: Quadrilateral[]): 'h' | 'v' {
+    const counts = new Map<'h' | 'v', number>();
+    for (const q of quads) {
+      counts.set(q.direction, (counts.get(q.direction) || 0) + 1);
     }
-    
-    return false;
+
+    if (counts.size === 1) {
+      return quads[0].direction;
+    }
+
+    const hCount = counts.get('h') || 0;
+    const vCount = counts.get('v') || 0;
+    if (hCount === vCount) {
+      // Tie: use the direction of the line with the most extreme aspect ratio
+      let maxAspectRatio = -100;
+      let majorityDir: 'h' | 'v' = quads[0].direction;
+      for (const q of quads) {
+        if (q.aspect_ratio > maxAspectRatio) {
+          maxAspectRatio = q.aspect_ratio;
+          majorityDir = q.direction;
+        }
+        if (1.0 / q.aspect_ratio > maxAspectRatio) {
+          maxAspectRatio = 1.0 / q.aspect_ratio;
+          majorityDir = q.direction;
+        }
+      }
+      return majorityDir;
+    }
+    return hCount > vCount ? 'h' : 'v';
   }
 
   /**
@@ -209,78 +229,53 @@ export class OcrManager {
     const mergedScores: number[] = [];
     const mergedBoxes: { x: number, y: number, w: number, h: number }[] = [];
     const mergedDirections: ('h' | 'v')[] = [];
+    const mergedFontSizes: number[] = [];
+    const mergedAngles: number[] = [];
 
-    // Pre-calculate bounding boxes for fast distance checks
-    const boxes = polygons.map(p => calculateBoundingBox(p));
-    
-    // Union-Find data structure
-    const parent = Array.from({ length: texts.length }, (_, i) => i);
-    const find = (i: number): number => {
-      if (parent[i] === i) return i;
-      return parent[i] = find(parent[i]);
-    };
-    const union = (i: number, j: number) => {
-      const rootI = find(i);
-      const rootJ = find(j);
-      if (rootI !== rootJ) {
-        parent[rootI] = rootJ;
-      }
-    };
+    // Build Cotrans Quadrilateral objects once (sorts points, derives direction/font_size)
+    const quads = polygons.map(p => new Quadrilateral(p));
 
-    // Pairwise distance checking
-    for (let i = 0; i < texts.length; i++) {
-      for (let j = i + 1; j < texts.length; j++) {
-        // Standard Cotrans parameters from generic.py quadrilateral_can_merge_region:
-        // ratio=1.9, discard_connection_gap=2, char_gap_tolerance=0.6, char_gap_tolerance2=1.5, font_size_ratio_tol=1.5, aspect_ratio_tol=2
-        const shouldMerge = this.canMergeQuadrilaterals(
-          polygons[i], polygons[j], boxes[i], boxes[j],
-          1.9, 2.0, 1.0, 3.0, 2.0, 1.3
-        );
+    // Stage 1.5: assign per-line reading direction (Cotrans _generate_text_direction)
+    this.assignTextDirections(quads);
 
-        if (shouldMerge) {
-          union(i, j);
+    // Step 1: divide into text region candidates (textline_merge/__init__.py merge graph).
+    // Cotrans call: quadrilateral_can_merge_region(ubox, vbox, aspect_ratio_tol=1.3,
+    // font_size_ratio_tol=2, char_gap_tolerance=1, char_gap_tolerance2=3)
+    const mergeGraph = new Graph();
+    for (let i = 0; i < quads.length; i++) mergeGraph.addNode(i);
+    for (let i = 0; i < quads.length; i++) {
+      for (let j = i + 1; j < quads.length; j++) {
+        if (quadrilateralCanMergeRegion(quads[i], quads[j], 1.9, 2, 1, 3, 2, 1.3)) {
+          mergeGraph.addEdge(i, j);
         }
       }
     }
 
-    // Group by connected components
-    const groups = new Map<number, number[]>();
-    for (let i = 0; i < texts.length; i++) {
-      const root = find(i);
-      if (!groups.has(root)) groups.set(root, []);
-      groups.get(root)!.push(i);
-    }
-
-    // Step 2: Postprocess - further split each region using Cotrans Kruskal MST math
+    // Step 2: postprocess - further split each region using Cotrans Kruskal MST statistics
     const finalGroups: number[][] = [];
-    for (const groupIndices of groups.values()) {
-      const quads = groupIndices.map(idx => new Quadrilateral(polygons[idx]));
-      const vCount = quads.filter(q => q.direction === 'v').length;
-      const hCount = quads.filter(q => q.direction === 'h').length;
-      const groupDir: 'h' | 'v' = vCount >= hCount ? 'v' : 'h';
-
-      const splitSets = splitTextRegion(polygons, boxes, new Set(groupIndices), groupDir);
+    for (const component of mergeGraph.connectedComponents()) {
+      const splitSets = splitTextRegion(quads, component);
       for (const set of splitSets) {
         finalGroups.push(Array.from(set));
       }
     }
 
-    // Process each split group
+    // Step 3: emit one merged region per final group
     for (const groupIndices of finalGroups) {
-      // Determine majority direction using Cotrans Quadrilateral objects
-      const quads = groupIndices.map(idx => new Quadrilateral(polygons[idx]));
-      const vCount = quads.filter(q => q.direction === 'v').length;
-      const hCount = quads.filter(q => q.direction === 'h').length;
-      const isVerticalGroup = vCount >= hCount;
+      const groupQuads = groupIndices.map(idx => quads[idx]);
 
-      if (isVerticalGroup) {
-        // Vertical manga: sort right-to-left (X descending)
-        groupIndices.sort((a, b) => quads[groupIndices.indexOf(b)].centroid.x - quads[groupIndices.indexOf(a)].centroid.x);
-      } else {
+      // Majority direction vote with Cotrans top-2 tie-break
+      const majorityDir = this.majorityDirection(groupQuads);
+
+      // Sort textlines in reading order (1:1 textline_merge/__init__.py)
+      if (majorityDir === 'h') {
         // Horizontal text: sort top-to-bottom (Y ascending)
-        groupIndices.sort((a, b) => quads[groupIndices.indexOf(a)].centroid.y - quads[groupIndices.indexOf(b)].centroid.y);
+        groupIndices.sort((a, b) => quads[a].centroid.y - quads[b].centroid.y);
+      } else {
+        // Vertical manga: sort right-to-left (X descending)
+        groupIndices.sort((a, b) => quads[b].centroid.x - quads[a].centroid.x);
       }
-      
+
       // 1:1 Cotrans CJK aware text concatenation (textblock.py)
       let groupText = '';
       if (groupIndices.length > 0) {
@@ -300,18 +295,22 @@ export class OcrManager {
         }
       }
 
-      console.log(`[OcrManager] Merged Speech Bubble: "${groupText}" (${isVerticalGroup ? 'v' : 'h'}) from ${groupIndices.length} lines`);
+      console.log(`[OcrManager] Merged Speech Bubble: "${groupText}" (${majorityDir}) from ${groupIndices.length} lines`);
       const groupScore = groupIndices.reduce((sum, idx) => sum + (scores[idx] || 1), 0) / groupIndices.length;
-      
-      // 1:1 Cotrans average angle calculation and threshold snapping (textline_merge/__init__.py)
-      const groupPolygons = groupIndices.map(idx => polygons[idx]);
-      const meanAngleRad = groupPolygons.reduce((sum, poly) => sum + calculateRotationAngle(poly), 0) / groupPolygons.length;
-      let angleDeg = (meanAngleRad * 180) / Math.PI;
+
+      // 1:1 Cotrans block font size: int(min(textline font sizes)) (textline_merge dispatch)
+      const groupFontSize = Math.floor(Math.min(...groupIndices.map(idx => quads[idx].font_size)));
+
+      // 1:1 Cotrans average angle calculation and threshold snapping (textline_merge/__init__.py):
+      // angle = rad2deg(mean(line angles)) - 90, snapped to 0 below 3 degrees
+      const meanAngleRad = groupIndices.reduce((sum, idx) => sum + quads[idx].angle, 0) / groupIndices.length;
+      let angleDeg = (meanAngleRad * 180) / Math.PI - 90;
       if (Math.abs(angleDeg) < 3) {
         angleDeg = 0;
       }
 
       // 1:1 Cotrans min_rect computation (textblock.py min_rect property - ALWAYS 4 points)
+      const groupPolygons = groupIndices.map(idx => quads[idx].pts);
       const minRect = computeMinAreaRect(groupPolygons, angleDeg);
       const minBox = calculateBoundingBox(minRect);
 
@@ -319,11 +318,23 @@ export class OcrManager {
       mergedScores.push(groupScore);
       mergedPolygons.push(minRect);
       mergedBoxes.push({ x: minBox.x, y: minBox.y, w: minBox.width, h: minBox.height });
-      mergedDirections.push(isVerticalGroup ? 'v' : 'h');
+      mergedDirections.push(majorityDir);
+      mergedFontSizes.push(groupFontSize);
+      mergedAngles.push(angleDeg);
     }
-    
+
     // rawPolygons retains the raw unmerged 4-point line quadrilaterals for inpainting
-    return { texts: mergedTexts, polygons: mergedPolygons, scores: mergedScores, boxes: mergedBoxes, directions: mergedDirections, rawPolygons: polygons, maskRawCanvas: result.maskRawCanvas };
+    return {
+      texts: mergedTexts,
+      polygons: mergedPolygons,
+      scores: mergedScores,
+      boxes: mergedBoxes,
+      directions: mergedDirections,
+      fontSizes: mergedFontSizes,
+      angles: mergedAngles,
+      rawPolygons: polygons,
+      maskRawCanvas: result.maskRawCanvas
+    };
   }
 
   /**

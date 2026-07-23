@@ -28,7 +28,8 @@ dist-ssr
 !docs/fullplan.md
 .env
 PaddleOCR/
-test/
+result/
+models/
 scratches/
 # Python & ML Models
 venv/

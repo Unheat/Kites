@@ -32,6 +32,12 @@ export interface OcrResult {
 
   /** Optional detected primary reading direction for each text region ('h' = horizontal, 'v' = vertical). */
   directions?: ('h' | 'v')[];
+
+  /** Optional Cotrans block font size per region: floor(min(textline font sizes)) in source pixels. */
+  fontSizes?: number[];
+
+  /** Optional Cotrans block rotation per region in degrees (mean textline angle - 90, snapped to 0 below 3deg). */
+  angles?: number[];
 }
 
 export interface IOcrEngine {

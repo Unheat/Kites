@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import type { Point2D, BoundingBox } from './geometry';
-import { calculateBoundingBox, calculateRotationAngle, splitTextRegion } from './geometry';
+import type { Point2D } from './geometry';
+import { calculateBoundingBox, calculateRotationAngle, splitTextRegion, Quadrilateral, polygonDistance } from './geometry';
 
 describe('Geometry Utilities', () => {
   describe('calculateBoundingBox', () => {
@@ -67,10 +67,10 @@ describe('Geometry Utilities', () => {
       const b3 = [{x: 200, y: 200}, {x: 220, y: 200}, {x: 220, y: 220}, {x: 200, y: 220}];
 
       const polygons = [b1, b2, b3];
-      const boxes: BoundingBox[] = polygons.map(p => calculateBoundingBox(p));
+      const quads = polygons.map(p => new Quadrilateral(p));
       const connectedIndices = new Set([0, 1, 2]);
 
-      const groups = splitTextRegion(polygons, boxes, connectedIndices);
+      const groups = splitTextRegion(quads, connectedIndices);
       
       // Expect it to split into two groups: [0, 1] and [2]
       expect(groups.length).toBe(2);
@@ -85,13 +85,55 @@ describe('Geometry Utilities', () => {
     
     it('keeps a single box as one region', () => {
       const b1 = [{x: 0, y: 0}, {x: 20, y: 0}, {x: 20, y: 20}, {x: 0, y: 20}];
-      const polygons = [b1];
-      const boxes = polygons.map(p => calculateBoundingBox(p));
+      const quads = [new Quadrilateral(b1)];
       const connectedIndices = new Set([0]);
-      
-      const groups = splitTextRegion(polygons, boxes, connectedIndices);
+
+      const groups = splitTextRegion(quads, connectedIndices);
       expect(groups.length).toBe(1);
       expect(Array.from(groups[0])).toEqual([0]);
+    });
+  });
+
+  describe('polygonDistance (shapely-equivalent)', () => {
+    it('returns 0 for overlapping polygons', () => {
+      const a: Point2D[] = [{x: 0, y: 0}, {x: 20, y: 0}, {x: 20, y: 20}, {x: 0, y: 20}];
+      const b: Point2D[] = [{x: 10, y: 10}, {x: 30, y: 10}, {x: 30, y: 30}, {x: 10, y: 30}];
+      expect(polygonDistance(a, b)).toBe(0);
+    });
+
+    it('returns 0 for a fully contained polygon', () => {
+      const outer: Point2D[] = [{x: 0, y: 0}, {x: 100, y: 0}, {x: 100, y: 100}, {x: 0, y: 100}];
+      const inner: Point2D[] = [{x: 40, y: 40}, {x: 60, y: 40}, {x: 60, y: 60}, {x: 40, y: 60}];
+      expect(polygonDistance(outer, inner)).toBe(0);
+    });
+
+    it('returns the gap for separated polygons', () => {
+      const a: Point2D[] = [{x: 0, y: 0}, {x: 20, y: 0}, {x: 20, y: 20}, {x: 0, y: 20}];
+      const b: Point2D[] = [{x: 30, y: 0}, {x: 50, y: 0}, {x: 50, y: 20}, {x: 30, y: 20}];
+      expect(polygonDistance(a, b)).toBeCloseTo(10, 5);
+    });
+  });
+
+  describe('Quadrilateral (Cotrans port)', () => {
+    it('detects vertical text line direction and computes font size from the short axis', () => {
+      // A tall narrow column: 20px wide, 100px tall (vertical CJK line)
+      const q = new Quadrilateral([{x: 0, y: 0}, {x: 20, y: 0}, {x: 20, y: 100}, {x: 0, y: 100}]);
+      expect(q.direction).toBe('v');
+      expect(q.font_size).toBeCloseTo(20, 5);
+    });
+
+    it('detects horizontal text line direction', () => {
+      const q = new Quadrilateral([{x: 0, y: 0}, {x: 100, y: 0}, {x: 100, y: 20}, {x: 0, y: 20}]);
+      expect(q.direction).toBe('h');
+      expect(q.font_size).toBeCloseTo(20, 5);
+    });
+
+    it('normalizes unsorted corner points to [tl, tr, br, bl]', () => {
+      const q = new Quadrilateral([{x: 100, y: 20}, {x: 0, y: 0}, {x: 0, y: 20}, {x: 100, y: 0}]);
+      expect(q.pts[0]).toEqual({x: 0, y: 0});
+      expect(q.pts[1]).toEqual({x: 100, y: 0});
+      expect(q.pts[2]).toEqual({x: 100, y: 20});
+      expect(q.pts[3]).toEqual({x: 0, y: 20});
     });
   });
 });
