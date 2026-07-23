@@ -206,9 +206,35 @@ function calculateOptimalFontSize(
 }
 
 /**
+ * 1:1 Cotrans LANGUAGE_ORIENTATION_PRESETS map determining render direction.
+ */
+export const LANGUAGE_ORIENTATION_PRESETS: Record<string, 'h' | 'v' | 'hr' | 'auto'> = {
+  'en': 'h', 'eng': 'h',
+  'vi': 'h', 'vin': 'h',
+  'fr': 'h', 'fra': 'h',
+  'de': 'h', 'deu': 'h',
+  'es': 'h', 'esp': 'h',
+  'pt': 'h', 'ptb': 'h',
+  'it': 'h', 'ita': 'h',
+  'ru': 'h', 'rus': 'h',
+  'pl': 'h', 'pol': 'h',
+  'tr': 'h', 'trk': 'h',
+  'uk': 'h', 'ukr': 'h',
+  'nl': 'h', 'nld': 'h',
+  'hu': 'h', 'hun': 'h',
+  'ro': 'h', 'rom': 'h',
+  'cs': 'h', 'csy': 'h',
+  'ja': 'auto', 'jpn': 'auto',
+  'zh': 'auto', 'chs': 'auto', 'cht': 'auto', 'zh-cn': 'auto', 'zh-tw': 'auto',
+  'ko': 'h', 'kor': 'h',
+  'ar': 'hr', 'ara': 'hr' // Horizontal reversed (Right-to-Left)
+};
+
+/**
  * Draws translated text into the 4-point OCR polygon, supporting target-language flexible rendering:
- * - Western target (English/Spanish): Horizontal centered rendering at Image Moments centroid.
+ * - Western target (English/Vietnamese/Spanish/French/etc): Horizontal centered rendering at Image Moments centroid.
  * - CJK target (Japanese/Chinese): Direction-aware vertical/horizontal layout with CJK_H2V punctuation.
+ * - RTL target (Arabic): Right-to-left rendering.
  */
 export function drawTextInPolygon(
   ctx: OffscreenCanvasRenderingContext2D,
@@ -225,12 +251,18 @@ export function drawTextInPolygon(
   const centroid = calculatePolygonCentroid(polygon);
   const angle = calculateRotationAngle(polygon);
 
-  const isCjkTarget = ['ja', 'zh', 'zh-cn', 'zh-tw', 'ko'].includes(targetLang.toLowerCase());
+  const langKey = targetLang.toLowerCase().trim();
+  const orientation = LANGUAGE_ORIENTATION_PRESETS[langKey] || 'h';
+  const isCjkTarget = orientation === 'auto';
+  const isRtl = orientation === 'hr';
+  const isWestern = orientation === 'h';
   const isVertical = isCjkTarget && sourceDirection === 'v';
 
   let finalText = text;
   if (isVertical) {
     finalText = convertCjkPunctuation(text);
+  } else if (isRtl) {
+    finalText = text.split('').reverse().join('');
   }
 
   ctx.save();
@@ -239,7 +271,6 @@ export function drawTextInPolygon(
   ctx.translate(centroid.x, centroid.y);
   ctx.rotate((angle * Math.PI) / 180);
 
-  const isWestern = !isCjkTarget;
   const { fontSize, lines, lineHeight } = calculateOptimalFontSize(
     ctx,
     finalText,
