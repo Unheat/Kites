@@ -94,7 +94,7 @@ export const DEFAULT_POPUP_STATE: PopupState = {
   isDark: true,
   sourceLang: 'auto',
   targetLang: 'en',
-  activeEngineId: 'chrome-translator',
+  activeEngineId: 'gg-translate',
   activeInpaintId: 'simple',
   fallbackChain: [],
   customApis: [],

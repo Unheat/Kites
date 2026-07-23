@@ -30,15 +30,22 @@ export class ModelRegistry {
   public static async getAvailableEngines(): Promise<Engine[]> {
     const staticModels = await this.fetchModels();
     
+    const googleOnlineEngine: Engine = {
+      id: 'gg-translate',
+      name: 'Google Translate',
+      type: 'api',
+      isDownloaded: true
+    };
+
     const nativeEngine: Engine = {
       id: 'chrome-translator',
-      name: 'Google Translate (Native)',
+      name: 'Gemini Nano',
       type: 'local',
       isDownloaded: true,
       hardware: 'CPU'
     };
 
-    const models = [nativeEngine, ...staticModels];
+    const models = [googleOnlineEngine, nativeEngine, ...staticModels];
 
     // Quick heuristic cache check across both Transformers and WebLLM
     try {
@@ -57,7 +64,7 @@ export class ModelRegistry {
       }
 
       for (const model of models) {
-        if (model.id === 'chrome-translator') continue;
+        if (model.id === 'chrome-translator' || model.id === 'gg-translate') continue;
         if (model.id.startsWith('Xenova/')) {
           model.isDownloaded = transformerKeys.some(url => url.includes(model.id));
         } else {
