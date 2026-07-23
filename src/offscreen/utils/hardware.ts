@@ -34,7 +34,7 @@ export async function checkWebGPUAvailability(): Promise<boolean> {
   }
 
   try {
-    const adapter = await navigator.gpu.requestAdapter();
+    const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
     webgpuSupported = !!adapter;
     await saveWebGPUState(webgpuSupported);
     return webgpuSupported;

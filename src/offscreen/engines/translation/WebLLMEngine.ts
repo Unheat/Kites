@@ -54,6 +54,14 @@ export class WebLLMEngine implements ITranslationEngine {
         }
       };
 
+      if (typeof navigator !== 'undefined' && navigator.gpu) {
+        try {
+          await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
+        } catch (e) {
+          console.warn('[WebLLMEngine] Failed to request high-performance adapter:', e);
+        }
+      }
+
       // CreateMLCEngine automatically loads the model into WebGPU
       this.engine = await CreateMLCEngine(this.modelId, {
         initProgressCallback: (progress) => {
