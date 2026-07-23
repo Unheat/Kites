@@ -1,14 +1,36 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { ChevronDown } from 'lucide-react';
 import type { PopupState } from '../../shared/types';
+import { ModelRegistry } from '../services/ModelRegistry';
+import type { Engine } from './EngineSelectionPanel';
 
 interface GpuAccelerationPanelProps {
   state: PopupState;
   updateState: (updates: Partial<PopupState>) => void;
 }
 
+const INPAINT_VRAM_MAP: Record<string, string> = {
+  none: 'None • 0 MB',
+  simple: 'Simple Fill • 0 MB',
+  telea: 'Telea Diffusion • 0 MB',
+  aotgan: 'AOT-GAN • ~50 MB',
+  'lama-base': 'LaMa Base • ~200 MB',
+  'lama-manga': 'LaMa Manga • ~200 MB',
+};
+
 export default function GpuAccelerationPanel({ state, updateState }: GpuAccelerationPanelProps) {
   const [showWebGpuConfig, setShowWebGpuConfig] = useState(false);
+  const [engines, setEngines] = useState<Engine[]>([]);
+
+  useEffect(() => {
+    ModelRegistry.getAvailableEngines().then(setEngines);
+  }, []);
+
+  const activeEngine = engines.find(e => e.id === state.activeEngineId);
+  const translationVramText = activeEngine 
+    ? `${activeEngine.name} • ${activeEngine.vramEstimate || '0 MB'}` 
+    : 'Google Translate • 0 MB';
+  const inpaintVramText = INPAINT_VRAM_MAP[state.activeInpaintId] || 'Inpaint Engine • ~50 MB';
 
   return (
     <div className="flex flex-col gap-1.5 mt-2">
@@ -98,7 +120,7 @@ export default function GpuAccelerationPanel({ state, updateState }: GpuAccelera
               <div className="flex flex-col text-left">
                 <span className="font-medium text-sm text-[var(--color-ink)]">Translation</span>
                 <span className="text-[10px] text-[var(--color-dust)] font-medium truncate max-w-[180px]">
-                  WebLLM / Transformers Engine
+                  {translationVramText}
                 </span>
               </div>
               <button 
@@ -114,7 +136,7 @@ export default function GpuAccelerationPanel({ state, updateState }: GpuAccelera
               <div className="flex flex-col text-left">
                 <span className="font-medium text-sm text-[var(--color-ink)]">Image Cleaning</span>
                 <span className="text-[10px] text-[var(--color-dust)] font-medium truncate max-w-[180px]">
-                  Inpaint Engine
+                  {inpaintVramText}
                 </span>
               </div>
               <button 
@@ -130,7 +152,7 @@ export default function GpuAccelerationPanel({ state, updateState }: GpuAccelera
               <div className="flex flex-col text-left">
                 <span className="font-medium text-sm text-[var(--color-ink)]">Text Detection</span>
                 <span className="text-[10px] text-[var(--color-dust)] font-medium truncate max-w-[180px]">
-                  PaddleOCR
+                  PaddleOCR • ~30 MB
                 </span>
               </div>
               <button 
