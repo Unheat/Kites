@@ -181,7 +181,7 @@ function GlobalOverlay() {
   }, []);
 
   useEffect(() => {
-    if (mode === 'persistent') { // Consistent Mode
+    if (mode === 'persistent') { // Persistent Mode
       const updateImages = () => {
         const imgs = Array.from(document.querySelectorAll('img'));
         const validImgs = imgs.filter(img => {
@@ -216,7 +216,12 @@ function GlobalOverlay() {
           return { srcUrl: img.src, anchorName };
         });
 
-        setConsistentImages(newConsistentImages);
+        setConsistentImages(prev => {
+          const isSame = 
+            prev.length === newConsistentImages.length &&
+            prev.every((item, idx) => item.srcUrl === newConsistentImages[idx].srcUrl && item.anchorName === newConsistentImages[idx].anchorName);
+          return isSame ? prev : newConsistentImages;
+        });
       };
 
       updateImages();
@@ -287,12 +292,31 @@ function GlobalOverlay() {
 
       const handleMouseMove = (e: MouseEvent) => {
         if (!activeImgRef.current) return;
+        
+        const img = activeImgRef.current.imgElement;
+        if (!img || !document.body.contains(img)) {
+          setActiveImg(null);
+          return;
+        }
+
         const target = e.target as HTMLElement;
-        
-        const isOverImg = target === activeImgRef.current.imgElement;
-        const isOverButton = target.closest('#kites-translate-btn');
-        
-        if (!isOverImg && !isOverButton) {
+        if (target === img || (target.closest && target.closest('#kites-translate-btn'))) {
+          return;
+        }
+
+        // Bounding box tolerance check (16px buffer) so moving cursor from image to button never flickers/disappears
+        const rect = img.getBoundingClientRect();
+        const buffer = 16;
+        const mouseX = e.clientX;
+        const mouseY = e.clientY;
+
+        const isNear = 
+          mouseX >= rect.left - buffer &&
+          mouseX <= rect.right + buffer &&
+          mouseY >= rect.top - buffer &&
+          mouseY <= rect.bottom + buffer;
+
+        if (!isNear) {
           setActiveImg(null);
         }
       };
