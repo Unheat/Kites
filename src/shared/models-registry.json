@@ -1,0 +1,1646 @@
+[
+  {
+    "id": "Llama-3.2-1B-Instruct-q4f32_1-MLC",
+    "name": "Llama-3.2-1B-Instruct-q4f32_1-MLC",
+    "vramEstimate": "~1128.82 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Llama-3.2-1B-Instruct-q4f16_1-MLC",
+    "name": "Llama-3.2-1B-Instruct-q4f16_1-MLC",
+    "vramEstimate": "~879.04 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Llama-3.2-1B-Instruct-q0f32-MLC",
+    "name": "Llama-3.2-1B-Instruct-q0f32-MLC",
+    "vramEstimate": "~5106.26 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Llama-3.2-1B-Instruct-q0f16-MLC",
+    "name": "Llama-3.2-1B-Instruct-q0f16-MLC",
+    "vramEstimate": "~2573.13 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Llama-3.2-3B-Instruct-q4f32_1-MLC",
+    "name": "Llama-3.2-3B-Instruct-q4f32_1-MLC",
+    "vramEstimate": "~2951.51 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Llama-3.2-3B-Instruct-q4f16_1-MLC",
+    "name": "Llama-3.2-3B-Instruct-q4f16_1-MLC",
+    "vramEstimate": "~2263.69 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Llama-3.1-8B-Instruct-q4f32_1-MLC-1k",
+    "name": "Llama-3.1-8B-Instruct-q4f32_1-MLC-1k",
+    "vramEstimate": "~5295.7 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Llama-3.1-8B-Instruct-q4f16_1-MLC-1k",
+    "name": "Llama-3.1-8B-Instruct-q4f16_1-MLC-1k",
+    "vramEstimate": "~4598.34 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Llama-3.1-8B-Instruct-q4f32_1-MLC",
+    "name": "Llama-3.1-8B-Instruct-q4f32_1-MLC",
+    "vramEstimate": "~6101.01 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Llama-3.1-8B-Instruct-q4f16_1-MLC",
+    "name": "Llama-3.1-8B-Instruct-q4f16_1-MLC",
+    "vramEstimate": "~5001 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "DeepSeek-R1-Distill-Qwen-7B-q4f16_1-MLC",
+    "name": "DeepSeek-R1-Distill-Qwen-7B-q4f16_1-MLC",
+    "vramEstimate": "~5106.67 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "DeepSeek-R1-Distill-Qwen-7B-q4f32_1-MLC",
+    "name": "DeepSeek-R1-Distill-Qwen-7B-q4f32_1-MLC",
+    "vramEstimate": "~5900.09 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "DeepSeek-R1-Distill-Llama-8B-q4f32_1-MLC",
+    "name": "DeepSeek-R1-Distill-Llama-8B-q4f32_1-MLC",
+    "vramEstimate": "~6101.01 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "DeepSeek-R1-Distill-Llama-8B-q4f16_1-MLC",
+    "name": "DeepSeek-R1-Distill-Llama-8B-q4f16_1-MLC",
+    "vramEstimate": "~5001 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Hermes-2-Theta-Llama-3-8B-q4f16_1-MLC",
+    "name": "Hermes-2-Theta-Llama-3-8B-q4f16_1-MLC",
+    "vramEstimate": "~4976.13 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Hermes-2-Theta-Llama-3-8B-q4f32_1-MLC",
+    "name": "Hermes-2-Theta-Llama-3-8B-q4f32_1-MLC",
+    "vramEstimate": "~6051.27 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Hermes-2-Pro-Llama-3-8B-q4f16_1-MLC",
+    "name": "Hermes-2-Pro-Llama-3-8B-q4f16_1-MLC",
+    "vramEstimate": "~4976.13 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Hermes-2-Pro-Llama-3-8B-q4f32_1-MLC",
+    "name": "Hermes-2-Pro-Llama-3-8B-q4f32_1-MLC",
+    "vramEstimate": "~6051.27 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Hermes-3-Llama-3.2-3B-q4f32_1-MLC",
+    "name": "Hermes-3-Llama-3.2-3B-q4f32_1-MLC",
+    "vramEstimate": "~2951.51 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Hermes-3-Llama-3.2-3B-q4f16_1-MLC",
+    "name": "Hermes-3-Llama-3.2-3B-q4f16_1-MLC",
+    "vramEstimate": "~2263.69 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Hermes-3-Llama-3.1-8B-q4f32_1-MLC",
+    "name": "Hermes-3-Llama-3.1-8B-q4f32_1-MLC",
+    "vramEstimate": "~5779.27 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Hermes-3-Llama-3.1-8B-q4f16_1-MLC",
+    "name": "Hermes-3-Llama-3.1-8B-q4f16_1-MLC",
+    "vramEstimate": "~4876.13 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Hermes-2-Pro-Mistral-7B-q4f16_1-MLC",
+    "name": "Hermes-2-Pro-Mistral-7B-q4f16_1-MLC",
+    "vramEstimate": "~4033.28 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Phi-3.5-mini-instruct-q4f16_1-MLC",
+    "name": "Phi-3.5-mini-instruct-q4f16_1-MLC",
+    "vramEstimate": "~3672.07 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Phi-3.5-mini-instruct-q4f32_1-MLC",
+    "name": "Phi-3.5-mini-instruct-q4f32_1-MLC",
+    "vramEstimate": "~5483.12 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Phi-3.5-mini-instruct-q4f16_1-MLC-1k",
+    "name": "Phi-3.5-mini-instruct-q4f16_1-MLC-1k",
+    "vramEstimate": "~2520.07 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Phi-3.5-mini-instruct-q4f32_1-MLC-1k",
+    "name": "Phi-3.5-mini-instruct-q4f32_1-MLC-1k",
+    "vramEstimate": "~3179.12 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Phi-3.5-vision-instruct-q4f16_1-MLC",
+    "name": "Phi-3.5-vision-instruct-q4f16_1-MLC",
+    "vramEstimate": "~3952.18 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Phi-3.5-vision-instruct-q4f32_1-MLC",
+    "name": "Phi-3.5-vision-instruct-q4f32_1-MLC",
+    "vramEstimate": "~5879.84 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Phi-4-mini-instruct-q4f16_1-MLC",
+    "name": "Phi-4-mini-instruct-q4f16_1-MLC",
+    "vramEstimate": "~3437.58 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Phi-4-mini-instruct-q4f32_1-MLC",
+    "name": "Phi-4-mini-instruct-q4f32_1-MLC",
+    "vramEstimate": "~4220.59 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Mistral-7B-Instruct-v0.3-q4f16_1-MLC",
+    "name": "Mistral-7B-Instruct-v0.3-q4f16_1-MLC",
+    "vramEstimate": "~4573.39 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Mistral-7B-Instruct-v0.3-q4f32_1-MLC",
+    "name": "Mistral-7B-Instruct-v0.3-q4f32_1-MLC",
+    "vramEstimate": "~5619.27 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Mistral-7B-Instruct-v0.2-q4f16_1-MLC",
+    "name": "Mistral-7B-Instruct-v0.2-q4f16_1-MLC",
+    "vramEstimate": "~4573.39 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "OpenHermes-2.5-Mistral-7B-q4f16_1-MLC",
+    "name": "OpenHermes-2.5-Mistral-7B-q4f16_1-MLC",
+    "vramEstimate": "~4573.39 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "NeuralHermes-2.5-Mistral-7B-q4f16_1-MLC",
+    "name": "NeuralHermes-2.5-Mistral-7B-q4f16_1-MLC",
+    "vramEstimate": "~4573.39 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "WizardMath-7B-V1.1-q4f16_1-MLC",
+    "name": "WizardMath-7B-V1.1-q4f16_1-MLC",
+    "vramEstimate": "~4573.39 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "SmolLM2-1.7B-Instruct-q4f16_1-MLC",
+    "name": "SmolLM2-1.7B-Instruct-q4f16_1-MLC",
+    "vramEstimate": "~1774.19 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "SmolLM2-1.7B-Instruct-q4f32_1-MLC",
+    "name": "SmolLM2-1.7B-Instruct-q4f32_1-MLC",
+    "vramEstimate": "~2692.38 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "SmolLM2-360M-Instruct-q0f16-MLC",
+    "name": "SmolLM2-360M-Instruct-q0f16-MLC",
+    "vramEstimate": "~871.99 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "SmolLM2-360M-Instruct-q0f32-MLC",
+    "name": "SmolLM2-360M-Instruct-q0f32-MLC",
+    "vramEstimate": "~1743.99 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "SmolLM2-360M-Instruct-q4f16_1-MLC",
+    "name": "SmolLM2-360M-Instruct-q4f16_1-MLC",
+    "vramEstimate": "~376.06 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "SmolLM2-360M-Instruct-q4f32_1-MLC",
+    "name": "SmolLM2-360M-Instruct-q4f32_1-MLC",
+    "vramEstimate": "~579.61 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "SmolLM2-135M-Instruct-q0f16-MLC",
+    "name": "SmolLM2-135M-Instruct-q0f16-MLC",
+    "vramEstimate": "~359.69 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "SmolLM2-135M-Instruct-q0f32-MLC",
+    "name": "SmolLM2-135M-Instruct-q0f32-MLC",
+    "vramEstimate": "~719.38 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "gemma-2-2b-it-q4f16_1-MLC",
+    "name": "gemma-2-2b-it-q4f16_1-MLC",
+    "vramEstimate": "~1895.3 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "gemma-2-2b-it-q4f32_1-MLC",
+    "name": "gemma-2-2b-it-q4f32_1-MLC",
+    "vramEstimate": "~2508.75 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "gemma-2-2b-it-q4f16_1-MLC-1k",
+    "name": "gemma-2-2b-it-q4f16_1-MLC-1k",
+    "vramEstimate": "~1583.3 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "gemma-2-2b-it-q4f32_1-MLC-1k",
+    "name": "gemma-2-2b-it-q4f32_1-MLC-1k",
+    "vramEstimate": "~1884.75 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "gemma-2-9b-it-q4f16_1-MLC",
+    "name": "gemma-2-9b-it-q4f16_1-MLC",
+    "vramEstimate": "~6422.01 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "gemma-2-9b-it-q4f32_1-MLC",
+    "name": "gemma-2-9b-it-q4f32_1-MLC",
+    "vramEstimate": "~8383.33 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "gemma-2-2b-jpn-it-q4f16_1-MLC",
+    "name": "gemma-2-2b-jpn-it-q4f16_1-MLC",
+    "vramEstimate": "~1895.3 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "gemma-2-2b-jpn-it-q4f32_1-MLC",
+    "name": "gemma-2-2b-jpn-it-q4f32_1-MLC",
+    "vramEstimate": "~2508.75 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "gemma3-1b-it-q4f16_1-MLC",
+    "name": "gemma3-1b-it-q4f16_1-MLC",
+    "vramEstimate": "~711.07 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "OLMo-2-1124-7B-Instruct-q4f16_1-MLC",
+    "name": "OLMo-2-1124-7B-Instruct-q4f16_1-MLC",
+    "vramEstimate": "~6479.01 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "OLMo-2-1124-7B-Instruct-q4f32_1-MLC",
+    "name": "OLMo-2-1124-7B-Instruct-q4f32_1-MLC",
+    "vramEstimate": "~9086.02 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "OLMo-2-0425-1B-Instruct-q4f16_1-MLC",
+    "name": "OLMo-2-0425-1B-Instruct-q4f16_1-MLC",
+    "vramEstimate": "~1776.75 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "OLMo-2-0425-1B-Instruct-q4f32_1-MLC",
+    "name": "OLMo-2-0425-1B-Instruct-q4f32_1-MLC",
+    "vramEstimate": "~2453.51 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen3-0.6B-q4f16_1-MLC",
+    "name": "Qwen3-0.6B-q4f16_1-MLC",
+    "vramEstimate": "~1403.34 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen3-0.6B-q4f32_1-MLC",
+    "name": "Qwen3-0.6B-q4f32_1-MLC",
+    "vramEstimate": "~1924.98 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen3-0.6B-q0f16-MLC",
+    "name": "Qwen3-0.6B-q0f16-MLC",
+    "vramEstimate": "~2220.38 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen3-0.6B-q0f32-MLC",
+    "name": "Qwen3-0.6B-q0f32-MLC",
+    "vramEstimate": "~3843.25 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen3-1.7B-q4f16_1-MLC",
+    "name": "Qwen3-1.7B-q4f16_1-MLC",
+    "vramEstimate": "~2036.66 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen3-1.7B-q4f32_1-MLC",
+    "name": "Qwen3-1.7B-q4f32_1-MLC",
+    "vramEstimate": "~2635.44 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen3-4B-q4f16_1-MLC",
+    "name": "Qwen3-4B-q4f16_1-MLC",
+    "vramEstimate": "~3431.59 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen3-4B-q4f32_1-MLC",
+    "name": "Qwen3-4B-q4f32_1-MLC",
+    "vramEstimate": "~4327.71 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen3-8B-q4f16_1-MLC",
+    "name": "Qwen3-8B-q4f16_1-MLC",
+    "vramEstimate": "~5695.78 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen3-8B-q4f32_1-MLC",
+    "name": "Qwen3-8B-q4f32_1-MLC",
+    "vramEstimate": "~6852.55 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen3.5-0.8B-q4f16_1-MLC",
+    "name": "Qwen3.5-0.8B-q4f16_1-MLC",
+    "vramEstimate": "~1629.49 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen3.5-0.8B-q4f32_1-MLC",
+    "name": "Qwen3.5-0.8B-q4f32_1-MLC",
+    "vramEstimate": "~1894.19 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen3.5-0.8B-q0f16-MLC",
+    "name": "Qwen3.5-0.8B-q0f16-MLC",
+    "vramEstimate": "~2660.27 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen3.5-2B-q4f16_1-MLC",
+    "name": "Qwen3.5-2B-q4f16_1-MLC",
+    "vramEstimate": "~2245.44 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen3.5-2B-q4f32_1-MLC",
+    "name": "Qwen3.5-2B-q4f32_1-MLC",
+    "vramEstimate": "~2591.55 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen3.5-4B-q4f16_1-MLC",
+    "name": "Qwen3.5-4B-q4f16_1-MLC",
+    "vramEstimate": "~3867.82 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen3.5-4B-q4f32_1-MLC",
+    "name": "Qwen3.5-4B-q4f32_1-MLC",
+    "vramEstimate": "~4680.36 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen3.5-9B-q4f16_1-MLC",
+    "name": "Qwen3.5-9B-q4f16_1-MLC",
+    "vramEstimate": "~6433.01 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen3.5-9B-q4f32_1-MLC",
+    "name": "Qwen3.5-9B-q4f32_1-MLC",
+    "vramEstimate": "~7544.74 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen2.5-0.5B-Instruct-q4f16_1-MLC",
+    "name": "Qwen2.5-0.5B-Instruct-q4f16_1-MLC",
+    "vramEstimate": "~944.62 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen2.5-0.5B-Instruct-q4f32_1-MLC",
+    "name": "Qwen2.5-0.5B-Instruct-q4f32_1-MLC",
+    "vramEstimate": "~1060.2 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen2.5-0.5B-Instruct-q0f16-MLC",
+    "name": "Qwen2.5-0.5B-Instruct-q0f16-MLC",
+    "vramEstimate": "~1624.12 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen2.5-0.5B-Instruct-q0f32-MLC",
+    "name": "Qwen2.5-0.5B-Instruct-q0f32-MLC",
+    "vramEstimate": "~2654.75 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen2.5-1.5B-Instruct-q4f16_1-MLC",
+    "name": "Qwen2.5-1.5B-Instruct-q4f16_1-MLC",
+    "vramEstimate": "~1629.75 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen2.5-1.5B-Instruct-q4f32_1-MLC",
+    "name": "Qwen2.5-1.5B-Instruct-q4f32_1-MLC",
+    "vramEstimate": "~1888.97 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen2.5-3B-Instruct-q4f16_1-MLC",
+    "name": "Qwen2.5-3B-Instruct-q4f16_1-MLC",
+    "vramEstimate": "~2504.76 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen2.5-3B-Instruct-q4f32_1-MLC",
+    "name": "Qwen2.5-3B-Instruct-q4f32_1-MLC",
+    "vramEstimate": "~2893.64 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen2.5-7B-Instruct-q4f16_1-MLC",
+    "name": "Qwen2.5-7B-Instruct-q4f16_1-MLC",
+    "vramEstimate": "~5106.67 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen2.5-7B-Instruct-q4f32_1-MLC",
+    "name": "Qwen2.5-7B-Instruct-q4f32_1-MLC",
+    "vramEstimate": "~5900.09 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen2.5-Coder-0.5B-Instruct-q4f16_1-MLC",
+    "name": "Qwen2.5-Coder-0.5B-Instruct-q4f16_1-MLC",
+    "vramEstimate": "~944.62 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen2.5-Coder-0.5B-Instruct-q4f32_1-MLC",
+    "name": "Qwen2.5-Coder-0.5B-Instruct-q4f32_1-MLC",
+    "vramEstimate": "~1060.2 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen2.5-Coder-0.5B-Instruct-q0f16-MLC",
+    "name": "Qwen2.5-Coder-0.5B-Instruct-q0f16-MLC",
+    "vramEstimate": "~1624.12 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen2.5-Coder-0.5B-Instruct-q0f32-MLC",
+    "name": "Qwen2.5-Coder-0.5B-Instruct-q0f32-MLC",
+    "vramEstimate": "~2654.75 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen2.5-Coder-1.5B-Instruct-q4f16_1-MLC",
+    "name": "Qwen2.5-Coder-1.5B-Instruct-q4f16_1-MLC",
+    "vramEstimate": "~1629.75 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen2.5-Coder-1.5B-Instruct-q4f32_1-MLC",
+    "name": "Qwen2.5-Coder-1.5B-Instruct-q4f32_1-MLC",
+    "vramEstimate": "~1888.97 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen2.5-Coder-3B-Instruct-q4f16_1-MLC",
+    "name": "Qwen2.5-Coder-3B-Instruct-q4f16_1-MLC",
+    "vramEstimate": "~2504.76 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen2.5-Coder-3B-Instruct-q4f32_1-MLC",
+    "name": "Qwen2.5-Coder-3B-Instruct-q4f32_1-MLC",
+    "vramEstimate": "~2893.64 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen2.5-Coder-7B-Instruct-q4f16_1-MLC",
+    "name": "Qwen2.5-Coder-7B-Instruct-q4f16_1-MLC",
+    "vramEstimate": "~5106.67 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen2.5-Coder-7B-Instruct-q4f32_1-MLC",
+    "name": "Qwen2.5-Coder-7B-Instruct-q4f32_1-MLC",
+    "vramEstimate": "~5900.09 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen2.5-Math-1.5B-Instruct-q4f16_1-MLC",
+    "name": "Qwen2.5-Math-1.5B-Instruct-q4f16_1-MLC",
+    "vramEstimate": "~1629.75 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen2.5-Math-1.5B-Instruct-q4f32_1-MLC",
+    "name": "Qwen2.5-Math-1.5B-Instruct-q4f32_1-MLC",
+    "vramEstimate": "~1888.97 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "stablelm-2-zephyr-1_6b-q4f16_1-MLC",
+    "name": "stablelm-2-zephyr-1_6b-q4f16_1-MLC",
+    "vramEstimate": "~2087.66 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "stablelm-2-zephyr-1_6b-q4f32_1-MLC",
+    "name": "stablelm-2-zephyr-1_6b-q4f32_1-MLC",
+    "vramEstimate": "~2999.33 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "stablelm-2-zephyr-1_6b-q4f16_1-MLC-1k",
+    "name": "stablelm-2-zephyr-1_6b-q4f16_1-MLC-1k",
+    "vramEstimate": "~1511.66 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "stablelm-2-zephyr-1_6b-q4f32_1-MLC-1k",
+    "name": "stablelm-2-zephyr-1_6b-q4f32_1-MLC-1k",
+    "vramEstimate": "~1847.33 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "RedPajama-INCITE-Chat-3B-v1-q4f16_1-MLC",
+    "name": "RedPajama-INCITE-Chat-3B-v1-q4f16_1-MLC",
+    "vramEstimate": "~2972.09 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "RedPajama-INCITE-Chat-3B-v1-q4f32_1-MLC",
+    "name": "RedPajama-INCITE-Chat-3B-v1-q4f32_1-MLC",
+    "vramEstimate": "~3928.09 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "RedPajama-INCITE-Chat-3B-v1-q4f16_1-MLC-1k",
+    "name": "RedPajama-INCITE-Chat-3B-v1-q4f16_1-MLC-1k",
+    "vramEstimate": "~2041.09 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "RedPajama-INCITE-Chat-3B-v1-q4f32_1-MLC-1k",
+    "name": "RedPajama-INCITE-Chat-3B-v1-q4f32_1-MLC-1k",
+    "vramEstimate": "~2558.09 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "TinyLlama-1.1B-Chat-v1.0-q4f16_1-MLC",
+    "name": "TinyLlama-1.1B-Chat-v1.0-q4f16_1-MLC",
+    "vramEstimate": "~697.24 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "TinyLlama-1.1B-Chat-v1.0-q4f32_1-MLC",
+    "name": "TinyLlama-1.1B-Chat-v1.0-q4f32_1-MLC",
+    "vramEstimate": "~839.98 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "TinyLlama-1.1B-Chat-v1.0-q4f16_1-MLC-1k",
+    "name": "TinyLlama-1.1B-Chat-v1.0-q4f16_1-MLC-1k",
+    "vramEstimate": "~675.24 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "TinyLlama-1.1B-Chat-v1.0-q4f32_1-MLC-1k",
+    "name": "TinyLlama-1.1B-Chat-v1.0-q4f32_1-MLC-1k",
+    "vramEstimate": "~795.98 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Ministral-3-3B-Base-2512-q4f16_1-MLC",
+    "name": "Ministral-3-3B-Base-2512-q4f16_1-MLC",
+    "vramEstimate": "~2863.69 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Ministral-3-3B-Base-2512-q4f32_1-MLC",
+    "name": "Ministral-3-3B-Base-2512-q4f32_1-MLC",
+    "vramEstimate": "~3532.37 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Ministral-3-3B-Reasoning-2512-q4f16_1-MLC",
+    "name": "Ministral-3-3B-Reasoning-2512-q4f16_1-MLC",
+    "vramEstimate": "~2863.69 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Ministral-3-3B-Reasoning-2512-q4f32_1-MLC",
+    "name": "Ministral-3-3B-Reasoning-2512-q4f32_1-MLC",
+    "vramEstimate": "~3532.37 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Ministral-3-3B-Instruct-2512-BF16-q4f16_1-MLC",
+    "name": "Ministral-3-3B-Instruct-2512-BF16-q4f16_1-MLC",
+    "vramEstimate": "~2863.69 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Ministral-3-3B-Instruct-2512-BF16-q4f32_1-MLC",
+    "name": "Ministral-3-3B-Instruct-2512-BF16-q4f32_1-MLC",
+    "vramEstimate": "~3532.37 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Llama-3.1-70B-Instruct-q3f16_1-MLC",
+    "name": "Llama-3.1-70B-Instruct-q3f16_1-MLC",
+    "vramEstimate": "~31153.13 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen2-0.5B-Instruct-q4f16_1-MLC",
+    "name": "Qwen2-0.5B-Instruct-q4f16_1-MLC",
+    "vramEstimate": "~944.62 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen2-0.5B-Instruct-q0f16-MLC",
+    "name": "Qwen2-0.5B-Instruct-q0f16-MLC",
+    "vramEstimate": "~1624.12 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen2-0.5B-Instruct-q0f32-MLC",
+    "name": "Qwen2-0.5B-Instruct-q0f32-MLC",
+    "vramEstimate": "~2654.75 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen2-1.5B-Instruct-q4f16_1-MLC",
+    "name": "Qwen2-1.5B-Instruct-q4f16_1-MLC",
+    "vramEstimate": "~1629.75 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen2-1.5B-Instruct-q4f32_1-MLC",
+    "name": "Qwen2-1.5B-Instruct-q4f32_1-MLC",
+    "vramEstimate": "~1888.97 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen2-7B-Instruct-q4f16_1-MLC",
+    "name": "Qwen2-7B-Instruct-q4f16_1-MLC",
+    "vramEstimate": "~5106.67 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen2-7B-Instruct-q4f32_1-MLC",
+    "name": "Qwen2-7B-Instruct-q4f32_1-MLC",
+    "vramEstimate": "~5900.09 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen2-Math-1.5B-Instruct-q4f16_1-MLC",
+    "name": "Qwen2-Math-1.5B-Instruct-q4f16_1-MLC",
+    "vramEstimate": "~1629.75 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen2-Math-1.5B-Instruct-q4f32_1-MLC",
+    "name": "Qwen2-Math-1.5B-Instruct-q4f32_1-MLC",
+    "vramEstimate": "~1888.97 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen2-Math-7B-Instruct-q4f16_1-MLC",
+    "name": "Qwen2-Math-7B-Instruct-q4f16_1-MLC",
+    "vramEstimate": "~5106.67 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen2-Math-7B-Instruct-q4f32_1-MLC",
+    "name": "Qwen2-Math-7B-Instruct-q4f32_1-MLC",
+    "vramEstimate": "~5900.09 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Llama-3-8B-Instruct-q4f32_1-MLC-1k",
+    "name": "Llama-3-8B-Instruct-q4f32_1-MLC-1k",
+    "vramEstimate": "~5295.7 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Llama-3-8B-Instruct-q4f16_1-MLC-1k",
+    "name": "Llama-3-8B-Instruct-q4f16_1-MLC-1k",
+    "vramEstimate": "~4598.34 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Llama-3-8B-Instruct-q4f32_1-MLC",
+    "name": "Llama-3-8B-Instruct-q4f32_1-MLC",
+    "vramEstimate": "~6101.01 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Llama-3-8B-Instruct-q4f16_1-MLC",
+    "name": "Llama-3-8B-Instruct-q4f16_1-MLC",
+    "vramEstimate": "~5001 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Llama-3-70B-Instruct-q3f16_1-MLC",
+    "name": "Llama-3-70B-Instruct-q3f16_1-MLC",
+    "vramEstimate": "~31153.13 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Phi-3-mini-4k-instruct-q4f16_1-MLC",
+    "name": "Phi-3-mini-4k-instruct-q4f16_1-MLC",
+    "vramEstimate": "~3672.07 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Phi-3-mini-4k-instruct-q4f32_1-MLC",
+    "name": "Phi-3-mini-4k-instruct-q4f32_1-MLC",
+    "vramEstimate": "~5483.12 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Phi-3-mini-4k-instruct-q4f16_1-MLC-1k",
+    "name": "Phi-3-mini-4k-instruct-q4f16_1-MLC-1k",
+    "vramEstimate": "~2520.07 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Phi-3-mini-4k-instruct-q4f32_1-MLC-1k",
+    "name": "Phi-3-mini-4k-instruct-q4f32_1-MLC-1k",
+    "vramEstimate": "~3179.12 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Llama-2-7b-chat-hf-q4f32_1-MLC-1k",
+    "name": "Llama-2-7b-chat-hf-q4f32_1-MLC-1k",
+    "vramEstimate": "~5284.01 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Llama-2-7b-chat-hf-q4f16_1-MLC-1k",
+    "name": "Llama-2-7b-chat-hf-q4f16_1-MLC-1k",
+    "vramEstimate": "~4618.52 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Llama-2-7b-chat-hf-q4f32_1-MLC",
+    "name": "Llama-2-7b-chat-hf-q4f32_1-MLC",
+    "vramEstimate": "~9109.03 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Llama-2-7b-chat-hf-q4f16_1-MLC",
+    "name": "Llama-2-7b-chat-hf-q4f16_1-MLC",
+    "vramEstimate": "~6749.02 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Llama-2-13b-chat-hf-q4f16_1-MLC",
+    "name": "Llama-2-13b-chat-hf-q4f16_1-MLC",
+    "vramEstimate": "~11814.09 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "gemma-2b-it-q4f16_1-MLC",
+    "name": "gemma-2b-it-q4f16_1-MLC",
+    "vramEstimate": "~1476.52 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "gemma-2b-it-q4f32_1-MLC",
+    "name": "gemma-2b-it-q4f32_1-MLC",
+    "vramEstimate": "~1750.66 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "gemma-2b-it-q4f16_1-MLC-1k",
+    "name": "gemma-2b-it-q4f16_1-MLC-1k",
+    "vramEstimate": "~1476.52 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "gemma-2b-it-q4f32_1-MLC-1k",
+    "name": "gemma-2b-it-q4f32_1-MLC-1k",
+    "vramEstimate": "~1750.66 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "phi-2-q4f16_1-MLC",
+    "name": "phi-2-q4f16_1-MLC",
+    "vramEstimate": "~3053.97 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "phi-2-q4f32_1-MLC",
+    "name": "phi-2-q4f32_1-MLC",
+    "vramEstimate": "~4032.48 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "phi-2-q4f16_1-MLC-1k",
+    "name": "phi-2-q4f16_1-MLC-1k",
+    "vramEstimate": "~2131.97 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "phi-2-q4f32_1-MLC-1k",
+    "name": "phi-2-q4f32_1-MLC-1k",
+    "vramEstimate": "~2740.48 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "phi-1_5-q4f16_1-MLC",
+    "name": "phi-1_5-q4f16_1-MLC",
+    "vramEstimate": "~1210.09 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "phi-1_5-q4f32_1-MLC",
+    "name": "phi-1_5-q4f32_1-MLC",
+    "vramEstimate": "~1682.09 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "phi-1_5-q4f16_1-MLC-1k",
+    "name": "phi-1_5-q4f16_1-MLC-1k",
+    "vramEstimate": "~1210.09 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "phi-1_5-q4f32_1-MLC-1k",
+    "name": "phi-1_5-q4f32_1-MLC-1k",
+    "vramEstimate": "~1682.09 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "TinyLlama-1.1B-Chat-v0.4-q4f16_1-MLC",
+    "name": "TinyLlama-1.1B-Chat-v0.4-q4f16_1-MLC",
+    "vramEstimate": "~697.24 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "TinyLlama-1.1B-Chat-v0.4-q4f32_1-MLC",
+    "name": "TinyLlama-1.1B-Chat-v0.4-q4f32_1-MLC",
+    "vramEstimate": "~839.98 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "TinyLlama-1.1B-Chat-v0.4-q4f16_1-MLC-1k",
+    "name": "TinyLlama-1.1B-Chat-v0.4-q4f16_1-MLC-1k",
+    "vramEstimate": "~675.24 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "TinyLlama-1.1B-Chat-v0.4-q4f32_1-MLC-1k",
+    "name": "TinyLlama-1.1B-Chat-v0.4-q4f32_1-MLC-1k",
+    "vramEstimate": "~795.98 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "snowflake-arctic-embed-m-q0f32-MLC-b32",
+    "name": "snowflake-arctic-embed-m-q0f32-MLC-b32",
+    "vramEstimate": "~1407.51 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "snowflake-arctic-embed-m-q0f32-MLC-b4",
+    "name": "snowflake-arctic-embed-m-q0f32-MLC-b4",
+    "vramEstimate": "~539.4 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "snowflake-arctic-embed-s-q0f32-MLC-b32",
+    "name": "snowflake-arctic-embed-s-q0f32-MLC-b32",
+    "vramEstimate": "~1022.82 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "snowflake-arctic-embed-s-q0f32-MLC-b4",
+    "name": "snowflake-arctic-embed-s-q0f32-MLC-b4",
+    "vramEstimate": "~238.71 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Xenova/nllb-200-distilled-600M",
+    "name": "NLLB-200 (nllb-200-distilled-600M)",
+    "vramEstimate": "~600 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-en-zh",
+    "name": "Marian-MT (EN to ZH)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-fr-en",
+    "name": "Marian-MT (FR to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-es-en",
+    "name": "Marian-MT (ES to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-zh-en",
+    "name": "Marian-MT (ZH to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-de-en",
+    "name": "Marian-MT (DE to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-ru-en",
+    "name": "Marian-MT (RU to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-ar-en",
+    "name": "Marian-MT (AR to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-ko-en",
+    "name": "Marian-MT (KO to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-en-de",
+    "name": "Marian-MT (EN to DE)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-mul-en",
+    "name": "Marian-MT (MUL to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-nl-en",
+    "name": "Marian-MT (NL to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-it-en",
+    "name": "Marian-MT (IT to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-pl-en",
+    "name": "Marian-MT (PL to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-en-fr",
+    "name": "Marian-MT (EN to FR)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-en-es",
+    "name": "Marian-MT (EN to ES)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-cs-en",
+    "name": "Marian-MT (CS to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-en-it",
+    "name": "Marian-MT (EN to IT)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-fi-en",
+    "name": "Marian-MT (FI to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-en-ru",
+    "name": "Marian-MT (EN to RU)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-en-ROMANCE",
+    "name": "Marian-MT (EN to ROMANCE)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-tc-big-tr-en",
+    "name": "Marian-MT (TC to BIG)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-sv-en",
+    "name": "Marian-MT (SV to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-gem-gem",
+    "name": "Marian-MT (GEM to GEM)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-it-fr",
+    "name": "Marian-MT (IT to FR)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-da-en",
+    "name": "Marian-MT (DA to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-tr-en",
+    "name": "Marian-MT (TR to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-id-en",
+    "name": "Marian-MT (ID to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-bat-en",
+    "name": "Marian-MT (BAT to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-ja-en",
+    "name": "Marian-MT (JA to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-fr-de",
+    "name": "Marian-MT (FR to DE)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-da-de",
+    "name": "Marian-MT (DA to DE)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-no-de",
+    "name": "Marian-MT (NO to DE)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-ROMANCE-en",
+    "name": "Marian-MT (ROMANCE to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-gmw-gmw",
+    "name": "Marian-MT (GMW to GMW)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-fi-de",
+    "name": "Marian-MT (FI to DE)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-hi-en",
+    "name": "Marian-MT (HI to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-en-nl",
+    "name": "Marian-MT (EN to NL)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-et-en",
+    "name": "Marian-MT (ET to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-en-ar",
+    "name": "Marian-MT (EN to AR)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-th-en",
+    "name": "Marian-MT (TH to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-vi-en",
+    "name": "Marian-MT (VI to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-en-da",
+    "name": "Marian-MT (EN to DA)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-nl-fr",
+    "name": "Marian-MT (NL to FR)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-en-fi",
+    "name": "Marian-MT (EN to FI)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/m2m100_418M",
+    "name": "Xenova/m2m100_418M",
+    "vramEstimate": "~200 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-en-vi",
+    "name": "Marian-MT (EN to VI)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-it-es",
+    "name": "Marian-MT (IT to ES)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-jap-en",
+    "name": "Marian-MT (JAP to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-ro-fr",
+    "name": "Marian-MT (RO to FR)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-ru-es",
+    "name": "Marian-MT (RU to ES)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-ru-fr",
+    "name": "Marian-MT (RU to FR)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-ru-uk",
+    "name": "Marian-MT (RU to UK)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-uk-en",
+    "name": "Marian-MT (UK to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-uk-ru",
+    "name": "Marian-MT (UK to RU)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-xh-en",
+    "name": "Marian-MT (XH to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-en-ro",
+    "name": "Marian-MT (EN to RO)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-en-sv",
+    "name": "Marian-MT (EN to SV)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-en-uk",
+    "name": "Marian-MT (EN to UK)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-en-xh",
+    "name": "Marian-MT (EN to XH)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-es-de",
+    "name": "Marian-MT (ES to DE)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-es-fr",
+    "name": "Marian-MT (ES to FR)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-es-it",
+    "name": "Marian-MT (ES to IT)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-es-ru",
+    "name": "Marian-MT (ES to RU)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-fr-es",
+    "name": "Marian-MT (FR to ES)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-fr-ro",
+    "name": "Marian-MT (FR to RO)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-fr-ru",
+    "name": "Marian-MT (FR to RU)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-hu-en",
+    "name": "Marian-MT (HU to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-af-en",
+    "name": "Marian-MT (AF to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-de-es",
+    "name": "Marian-MT (DE to ES)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-de-fr",
+    "name": "Marian-MT (DE to FR)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-en-af",
+    "name": "Marian-MT (EN to AF)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-en-hi",
+    "name": "Marian-MT (EN to HI)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-en-hu",
+    "name": "Marian-MT (EN to HU)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-en-id",
+    "name": "Marian-MT (EN to ID)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-en-jap",
+    "name": "Marian-MT (EN to JAP)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-en-mul",
+    "name": "Marian-MT (EN to MUL)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-en-cs",
+    "name": "Marian-MT (EN to CS)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/mbart-large-50-many-to-many-mmt",
+    "name": "Xenova/mbart-large-50-many-to-many-mmt",
+    "vramEstimate": "~200 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/mbart-large-50-many-to-one-mmt",
+    "name": "Xenova/mbart-large-50-many-to-one-mmt",
+    "vramEstimate": "~200 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/mbart-large-50",
+    "name": "Xenova/mbart-large-50",
+    "vramEstimate": "~200 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/tiny-random-MarianMTModel",
+    "name": "onnx-community/tiny-random-MarianMTModel",
+    "vramEstimate": "~200 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/opus-mt-zh-en",
+    "name": "Marian-MT (ZH to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/opus-mt-es-en",
+    "name": "Marian-MT (ES to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/opus-mt-de-en",
+    "name": "Marian-MT (DE to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/opus-mt-mul-en",
+    "name": "Marian-MT (MUL to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/opus-mt-it-en",
+    "name": "Marian-MT (IT to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/opus-mt-fr-en",
+    "name": "Marian-MT (FR to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/opus-mt-en-es",
+    "name": "Marian-MT (EN to ES)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/opus-mt-vi-en",
+    "name": "Marian-MT (VI to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/opus-mt-nl-en",
+    "name": "Marian-MT (NL to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/opus-mt-da-en",
+    "name": "Marian-MT (DA to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/opus-mt-en-fr",
+    "name": "Marian-MT (EN to FR)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/opus-mt-en-de",
+    "name": "Marian-MT (EN to DE)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/opus-mt-ar-en",
+    "name": "Marian-MT (AR to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/opus-mt-sv-en",
+    "name": "Marian-MT (SV to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/opus-mt-en-zh",
+    "name": "Marian-MT (EN to ZH)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/opus-mt-tc-big-tr-en",
+    "name": "Marian-MT (TC to BIG)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/opus-mt-en-ru",
+    "name": "Marian-MT (EN to RU)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/opus-mt-en-nl",
+    "name": "Marian-MT (EN to NL)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/opus-mt-fi-en",
+    "name": "Marian-MT (FI to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/opus-mt-ru-en",
+    "name": "Marian-MT (RU to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/opus-mt-tc-big-en-tr",
+    "name": "Marian-MT (TC to BIG)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/opus-mt-pl-en",
+    "name": "Marian-MT (PL to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/opus-mt-ROMANCE-en",
+    "name": "Marian-MT (ROMANCE to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/opus-mt-ja-en",
+    "name": "Marian-MT (JA to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/opus-mt-en-ar",
+    "name": "Marian-MT (EN to AR)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/sarvam-translate-onnx",
+    "name": "onnx-community/sarvam-translate-onnx",
+    "vramEstimate": "~200 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/LFM2-350M-ENJP-MT-ONNX",
+    "name": "onnx-community/LFM2-350M-ENJP-MT-ONNX",
+    "vramEstimate": "~200 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/HY-MT1.5-1.8B-ONNX",
+    "name": "onnx-community/HY-MT1.5-1.8B-ONNX",
+    "vramEstimate": "~200 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/english-guyarati-ONNX",
+    "name": "onnx-community/english-guyarati-ONNX",
+    "vramEstimate": "~200 MB",
+    "engine": "transformers"
+  }
+]

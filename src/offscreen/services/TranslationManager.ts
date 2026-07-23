@@ -5,6 +5,7 @@ import { ChromeTranslatorEngine } from '../engines/translation/ChromeTranslatorE
 import { TransformersEngine } from '../engines/translation/TransformersEngine';
 import { GoogleTranslateEngine } from '../engines/translation/GoogleTranslateEngine';
 import type { PopupState } from '../../shared/types';
+import modelsRegistryData from '../../shared/models-registry.json';
 
 // Fix CDN fetching for Manifest V3
 env.backends.onnx.wasm!.wasmPaths = chrome.runtime.getURL('/ort-wasm/');
@@ -116,14 +117,15 @@ export class TranslationManager {
 
     console.log(`[TranslationManager] Factory creating engine for ID: ${engineId}`);
     
-    // For now, assume all local WebLLM models can just be passed to WebLLMEngine.
-    // In the future, we will check if it's ONNX, Cloud, or UserAPI based on the registry.
+    // Look up the engine type in our static registry
+    const registryEntry = modelsRegistryData.find(m => m.id === engineId);
+
     let engine: ITranslationEngine;
     if (engineId === 'chrome-translator') {
       engine = new ChromeTranslatorEngine();
     } else if (engineId === 'gg-translate') {
       engine = new GoogleTranslateEngine();
-    } else if (engineId.startsWith('Xenova/')) {
+    } else if (registryEntry?.engine === 'transformers' || engineId.startsWith('Xenova/') || engineId.startsWith('onnx-community/')) {
       engine = new TransformersEngine(engineId);
     } else {
       engine = new WebLLMEngine(engineId);

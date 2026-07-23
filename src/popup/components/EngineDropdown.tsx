@@ -17,6 +17,7 @@ export interface Engine {
   type: 'local' | 'api' | 'custom';
   isDownloaded?: boolean;
   hardware?: 'CPU' | 'WebGPU';
+  vramEstimate?: string;
 }
 
 export default function EngineDropdown({ state, updateState }: EngineDropdownProps) {
@@ -518,7 +519,9 @@ export default function EngineDropdown({ state, updateState }: EngineDropdownPro
               <div className="flex items-center justify-between p-2.5 rounded-md hover:bg-[var(--color-paper)] transition-colors">
                 <div className="flex flex-col text-left">
                   <span className="font-medium text-sm text-[var(--color-ink)]">Translation</span>
-                  <span className="text-[10px] text-[var(--color-dust)] font-medium">High VRAM (3-4GB)</span>
+                  <span className="text-[10px] text-[var(--color-dust)] font-medium truncate max-w-[180px]">
+                    {allEngines.find(e => e.id === state.activeEngineId)?.name || 'Unknown'} • {allEngines.find(e => e.id === state.activeEngineId)?.vramEstimate || '0 MB'}
+                  </span>
                 </div>
                 <button 
                   onClick={() => updateState({ webgpuOverrides: { ...state.webgpuOverrides, llm: !state.webgpuOverrides.llm }})}
@@ -532,7 +535,9 @@ export default function EngineDropdown({ state, updateState }: EngineDropdownPro
               <div className="flex items-center justify-between p-2.5 rounded-md hover:bg-[var(--color-paper)] transition-colors">
                 <div className="flex flex-col text-left">
                   <span className="font-medium text-sm text-[var(--color-ink)]">Image Cleaning</span>
-                  <span className="text-[10px] text-[var(--color-dust)] font-medium">Low VRAM (~200MB)</span>
+                  <span className="text-[10px] text-[var(--color-dust)] font-medium truncate max-w-[180px]">
+                    Inpaint Engine • {state.activeInpaintId === 'telea' ? '0 MB' : '~50 MB'}
+                  </span>
                 </div>
                 <button 
                   onClick={() => updateState({ webgpuOverrides: { ...state.webgpuOverrides, inpaint: !state.webgpuOverrides.inpaint }})}
@@ -546,7 +551,9 @@ export default function EngineDropdown({ state, updateState }: EngineDropdownPro
               <div className="flex items-center justify-between p-2.5 rounded-md hover:bg-[var(--color-paper)] transition-colors">
                 <div className="flex flex-col text-left">
                   <span className="font-medium text-sm text-[var(--color-ink)]">Text Detection</span>
-                  <span className="text-[10px] text-[var(--color-dust)] font-medium">Tiny VRAM (~100MB)</span>
+                  <span className="text-[10px] text-[var(--color-dust)] font-medium truncate max-w-[180px]">
+                    PaddleOCR • ~30 MB
+                  </span>
                 </div>
                 <button 
                   onClick={() => updateState({ webgpuOverrides: { ...state.webgpuOverrides, ocr: !state.webgpuOverrides.ocr }})}

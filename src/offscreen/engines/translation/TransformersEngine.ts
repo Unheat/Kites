@@ -33,6 +33,28 @@ export class TransformersEngine implements ITranslationEngine {
       // We disable local model check to fetch from HF CDN
       env.allowLocalModels = false;
 
+      // Prevent WebGPU out-of-memory stalls by requesting absolute hardware limits instead of Chrome's 256MB default
+      if (device === 'webgpu' && navigator.gpu) {
+        try {
+          const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
+          if (adapter) {
+            const requiredLimits = {
+              maxBufferSize: adapter.limits.maxBufferSize,
+              maxStorageBufferBindingSize: adapter.limits.maxStorageBufferBindingSize,
+              maxComputeWorkgroupStorageSize: adapter.limits.maxComputeWorkgroupStorageSize
+            };
+            const customDevice = await adapter.requestDevice({ requiredLimits });
+            if (!(env.backends.onnx as any).webgpu) {
+              (env.backends.onnx as any).webgpu = {};
+            }
+            (env.backends.onnx as any).webgpu.device = customDevice;
+            console.log(`[TransformersEngine] Bypassing WebGPU default limits with hardware max:`, requiredLimits);
+          }
+        } catch (gpuError) {
+          console.warn('[TransformersEngine] Failed to request custom GPUDevice limits, falling back to defaults:', gpuError);
+        }
+      }
+
       this.translatorPipeline = await pipeline('translation', this.modelId, {
         device: device,
         dtype: 'q8',

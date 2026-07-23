@@ -1,49 +1,34 @@
-import { prebuiltAppConfig } from '@mlc-ai/web-llm';
 import type { Engine } from '../components/EngineDropdown';
-import onnxRegistryData from '../../../onnx-registry.json';
+import modelsRegistryData from '../../shared/models-registry.json';
 
-// We will fetch ONNX models from the user's Github repo. 
-// If the fetch fails (or the repo doesn't have the file yet), we fallback to these verified models.
-const FALLBACK_ONNX_MODELS: Engine[] = [
-  { id: 'Xenova/nllb-200-distilled-600M', name: 'NLLB-200 Distilled (~600MB)', type: 'local', isDownloaded: false, hardware: 'CPU' },
-  { id: 'Xenova/opus-mt-ja-en', name: 'Marian-MT (Dynamic Pairs)', type: 'local', isDownloaded: false, hardware: 'CPU' },
+// We will fetch models from the unified static registry. 
+// If the fetch fails, we fallback to these verified models.
+const FALLBACK_MODELS: Engine[] = [
+  { id: 'Xenova/nllb-200-distilled-600M', name: 'NLLB-200 Distilled (~600MB)', type: 'local', isDownloaded: false, hardware: 'CPU', vramEstimate: '~600 MB' },
+  { id: 'Xenova/opus-mt-ja-en', name: 'Marian-MT (Dynamic Pairs)', type: 'local', isDownloaded: false, hardware: 'CPU', vramEstimate: '~70 MB' },
 ];
 
 export class ModelRegistry {
   /**
-   * Fetches the dynamic list of ONNX models from the Static Registry.
+   * Fetches the unified list of models (Transformers.js and WebLLM) from the Static Registry.
    */
-  private static async fetchOnnxModels(): Promise<Engine[]> {
+  private static async fetchModels(): Promise<Engine[]> {
     try {
-      return onnxRegistryData.map((m: any) => ({
+      return modelsRegistryData.map((m: any) => ({
         id: m.id,
         name: m.name,
         type: 'local',
         isDownloaded: false,
-        hardware: 'CPU'
+        hardware: m.engine === 'webllm' ? 'WebGPU' : 'CPU',
+        vramEstimate: m.vramEstimate
       }));
     } catch (error) {
-      console.warn('Using fallback ONNX models:', error);
-      return FALLBACK_ONNX_MODELS;
+      console.warn('Using fallback models:', error);
+      return FALLBACK_MODELS;
     }
   }
-
-  /**
-   * Parses the bundled WebLLM prebuilt config.
-   */
-  private static getWebLlmModels(): Engine[] {
-    return prebuiltAppConfig.model_list.map((model) => ({
-      id: model.model_id,
-      name: model.model_id,
-      type: 'local',
-      isDownloaded: false,
-      hardware: 'WebGPU'
-    }));
-  }
-
   public static async getAvailableEngines(): Promise<Engine[]> {
-    const webLlmModels = this.getWebLlmModels();
-    const onnxModels = await this.fetchOnnxModels();
+    const staticModels = await this.fetchModels();
     
     const nativeEngine: Engine = {
       id: 'chrome-translator',
@@ -53,7 +38,7 @@ export class ModelRegistry {
       hardware: 'CPU'
     };
 
-    const models = [nativeEngine, ...onnxModels, ...webLlmModels];
+    const models = [nativeEngine, ...staticModels];
 
     // Quick heuristic cache check across both Transformers and WebLLM
     try {
