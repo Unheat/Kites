@@ -144,6 +144,13 @@ async function setupOffscreenDocument(path: string) {
  * @returns {Promise<void>}
  */
 async function queueTranslation(srcUrl: string, tabId?: number) {
+  // Deduplicate: prevent queuing the same URL if it's already queued, downloading, or processing
+  const existingJob = srcUrl ? await db.translationJobs.where('srcUrl').equals(srcUrl).first() : null;
+  if (existingJob && ['queued', 'downloading', 'processing'].includes(existingJob.status as string)) {
+    console.log('[Background] URL already in queue or processing. Skipping duplicate:', srcUrl);
+    return;
+  }
+
   console.log('[Background] Queuing image URL:', srcUrl);
   await db.translationJobs.add({
     timestamp: Date.now(),

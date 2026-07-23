@@ -4,12 +4,18 @@ import { CustomPaddleDetector } from './CustomPaddleDetector';
 import * as ort from 'onnxruntime-web';
 
 /**
- * Lightweight Mutex queue to serialize ONNX Runtime WebGPU session.run calls
+ * Lightweight Semaphore queue to serialize or limit concurrency of ONNX Runtime calls
  * while allowing image cropping, warping, and preprocessing to run 100% in parallel.
  */
-class SessionMutex {
+class Semaphore {
   private queue: (() => Promise<any>)[] = [];
-  private locked = false;
+  private activeCount = 0;
+
+  private maxConcurrent: number;
+
+  constructor(maxConcurrent: number) {
+    this.maxConcurrent = maxConcurrent;
+  }
 
   async run<T>(fn: () => Promise<T>): Promise<T> {
     return new Promise((resolve, reject) => {
@@ -26,13 +32,13 @@ class SessionMutex {
   }
 
   private async dequeue() {
-    if (this.locked || this.queue.length === 0) return;
-    this.locked = true;
+    if (this.activeCount >= this.maxConcurrent || this.queue.length === 0) return;
+    this.activeCount++;
     const fn = this.queue.shift()!;
     try {
       await fn();
     } finally {
-      this.locked = false;
+      this.activeCount--;
       this.dequeue();
     }
   }
@@ -42,8 +48,7 @@ export class PaddleOcrEngine implements IOcrEngine {
   private service: any = null;
   private customDetector: CustomPaddleDetector | null = null;
   private isInitialized = false;
-  private isWebGpu = false;
-  private sessionMutex = new SessionMutex();
+  private semaphore: Semaphore | null = null;
 
   /**
    * Initializes the PaddleOCR Engine, loading either Node or Browser native dependencies
@@ -96,6 +101,11 @@ export class PaddleOcrEngine implements IOcrEngine {
         }
       }
       
+      // Initialize Semaphore based on hardware
+      // WebGPU strictly requires 1 to prevent "Session already started" crash
+      // WASM can safely handle 4 to prevent CPU thread explosion
+      this.semaphore = new Semaphore(useWebGpu ? 1 : 4);
+      
       const startTime = performance.now();
       
       // Explicitly demand high-performance hardware GPU to bypass Chrome background throttling
@@ -103,7 +113,6 @@ export class PaddleOcrEngine implements IOcrEngine {
         (ort as any).env.webgpu.powerPreference = 'high-performance';
       }
 
-      this.isWebGpu = useWebGpu;
       console.log(`[PaddleOcrEngine] WebGPU Available: ${useWebGpu}. Initializing service...`);
 
       // Explicitly declare execution providers with high-performance power preference
@@ -173,11 +182,11 @@ export class PaddleOcrEngine implements IOcrEngine {
       const ctx = recognitor.buildContext();
       const dictionary = this.service.options.recognition?.charactersDictionary;
 
-      // Wrap ONNX Runtime WebGPU session.run via SessionMutex to prevent Session already started errors
-      // while allowing 100% parallel crop, warp, and tensor preprocessing.
-      if (this.isWebGpu) {
+      // Wrap ONNX Runtime session.run via Semaphore to prevent Session already started errors (WebGPU)
+      // or to prevent CPU thread explosion (WASM) while allowing 100% parallel image preprocessing.
+      if (this.semaphore) {
         const origRunInference = ctx.runInference.bind(recognitor);
-        ctx.runInference = (tensor: any) => this.sessionMutex.run(() => origRunInference(tensor));
+        ctx.runInference = (tensor: any) => this.semaphore!.run(() => origRunInference(tensor));
       }
 
       // 3. Crop, warp, and recognize each text polygon in parallel
