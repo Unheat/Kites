@@ -157,6 +157,7 @@ export class OcrManager {
     const mergedTexts: string[] = [];
     const mergedScores: number[] = [];
     const mergedBoxes: { x: number, y: number, w: number, h: number }[] = [];
+    const mergedDirections: ('h' | 'v')[] = [];
 
     // Pre-calculate bounding boxes for fast distance checks
     const boxes = polygons.map(p => calculateBoundingBox(p));
@@ -267,10 +268,11 @@ export class OcrManager {
       mergedScores.push(groupScore);
       mergedPolygons.push(minRect);
       mergedBoxes.push({ x: minBox.x, y: minBox.y, w: minBox.width, h: minBox.height });
+      mergedDirections.push(isVerticalGroup ? 'v' : 'h');
     }
     
     // rawPolygons retains the raw unmerged 4-point line quadrilaterals for inpainting
-    return { texts: mergedTexts, polygons: mergedPolygons, scores: mergedScores, boxes: mergedBoxes, rawPolygons: polygons, maskRawCanvas: result.maskRawCanvas };
+    return { texts: mergedTexts, polygons: mergedPolygons, scores: mergedScores, boxes: mergedBoxes, directions: mergedDirections, rawPolygons: polygons, maskRawCanvas: result.maskRawCanvas };
   }
 
   /**

@@ -29,6 +29,9 @@ export interface OcrResult {
 
   /** Optional raw DBNet probability heat map canvas (Cotrans mask_raw). */
   maskRawCanvas?: any;
+
+  /** Optional detected primary reading direction for each text region ('h' = horizontal, 'v' = vertical). */
+  directions?: ('h' | 'v')[];
 }
 
 export interface IOcrEngine {

@@ -125,9 +125,10 @@ export class PipelineOrchestrator {
       for (let i = 0; i < translatedTexts.length; i++) {
         const text = translatedTexts[i];
         const poly = ocrResult.polygons ? ocrResult.polygons[i] : null;
+        const dir = (ocrResult.directions && ocrResult.directions[i]) ? ocrResult.directions[i] : 'h';
         if (text && poly) {
           // White stroke, Black text is standard for manga
-          drawTextInPolygon(ctx, text, poly as any, '#000000', '#FFFFFF', targetLang);
+          drawTextInPolygon(ctx, text, poly as any, '#000000', '#FFFFFF', targetLang, dir);
         }
       }
       
