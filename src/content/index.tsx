@@ -31,6 +31,29 @@ function TranslateButton({ srcUrl, anchorName }: { srcUrl: string, anchorName: s
     }
   }, [anchorName]);
 
+  useEffect(() => {
+    const handleMessage = (message: any) => {
+      if ((message.type === 'IMAGE_TRANSLATED' || message.type === 'TRANSLATION_ERROR') && message.payload) {
+        if (message.payload.originalUrl === srcUrl) {
+          setIsTranslating(false);
+        }
+      }
+    };
+
+    try {
+      if (chrome.runtime?.id) {
+        chrome.runtime.onMessage.addListener(handleMessage);
+        return () => {
+          try {
+            if (chrome.runtime?.id) {
+              chrome.runtime.onMessage.removeListener(handleMessage);
+            }
+          } catch (e) {}
+        };
+      }
+    } catch (e) {}
+  }, [srcUrl]);
+
   const handleTranslate = () => {
     if (!srcUrl) {
       console.error('[Content Script] Cannot translate: No image URL provided.');
@@ -38,12 +61,23 @@ function TranslateButton({ srcUrl, anchorName }: { srcUrl: string, anchorName: s
     }
     setIsTranslating(true);
     console.log('[Content Script] Sending TRANSLATE_IMAGE to background:', srcUrl);
-    chrome.runtime.sendMessage({ type: 'TRANSLATE_IMAGE', url: srcUrl }, () => {
-      setIsTranslating(false);
-      if (chrome.runtime.lastError) {
-        console.error('[Content Script] Message failed:', chrome.runtime.lastError.message);
+    
+    try {
+      if (!chrome.runtime?.id) {
+        setIsTranslating(false);
+        console.warn('[Content Script] Extension context invalidated. Please refresh the page.');
+        return;
       }
-    });
+      chrome.runtime.sendMessage({ type: 'TRANSLATE_IMAGE', url: srcUrl }, (response) => {
+        if (chrome.runtime.lastError || response?.status === 'error') {
+          setIsTranslating(false);
+          console.error('[Content Script] Message failed:', chrome.runtime.lastError?.message || response?.error);
+        }
+      });
+    } catch (err) {
+      setIsTranslating(false);
+      console.warn('[Content Script] Chrome runtime call failed (extension reloaded/invalidated):', err);
+    }
   };
 
   return (
