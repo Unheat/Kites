@@ -45,8 +45,8 @@ const db = new Dexie('KitesDatabase') as Dexie & {
   textBlocks: EntityTable<TextBlock, 'id'>;
 };
 
-db.version(3).stores({
-  translationJobs: '++id, timestamp, status, folderId',
+db.version(4).stores({
+  translationJobs: '++id, timestamp, status, folderId, srcUrl',
   projectFolders: '++id, title, timestamp, isFavorite',
   images: '++id, jobId',
   textBlocks: '++id, imageId'

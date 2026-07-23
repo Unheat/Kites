@@ -46,12 +46,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true; // Keep channel open
   }
 
-  if (message.type === 'TRANSLATE_IMAGE' && message.url) {
-    console.log('[Background] Received TRANSLATE_IMAGE from content script. URL:', message.url);
-    queueTranslation(message.url, _sender.tab?.id)
-      .then(() => sendResponse({ status: 'queued' }))
-      .catch((err) => sendResponse({ status: 'error', error: err instanceof Error ? err.message : String(err) }));
-    return true; // Keep message channel open for async response
+  if (message.type === 'TRANSLATE_IMAGE') {
+    const srcUrl = message.payload?.srcUrl || message.url || message.srcUrl;
+    if (srcUrl) {
+      console.log('[Background] Received TRANSLATE_IMAGE from content script. URL:', srcUrl);
+      queueTranslation(srcUrl, _sender.tab?.id)
+        .then(() => sendResponse({ status: 'queued' }))
+        .catch((err) => sendResponse({ status: 'error', error: err instanceof Error ? err.message : String(err) }));
+      return true; // Keep message channel open for async response
+    }
   }
   
   if (message.type === 'START_MODEL_DOWNLOAD' || message.type === 'CHECK_MODEL_STATUS' || message.type === 'PRELOAD_ACTIVE_ENGINE') {
@@ -144,11 +147,16 @@ async function setupOffscreenDocument(path: string) {
  * @returns {Promise<void>}
  */
 async function queueTranslation(srcUrl: string, tabId?: number) {
-  // Deduplicate: prevent queuing the same URL if it's already queued, downloading, or processing
   const existingJob = srcUrl ? await db.translationJobs.where('srcUrl').equals(srcUrl).first() : null;
-  if (existingJob && ['queued', 'downloading', 'processing'].includes(existingJob.status as string)) {
-    console.log('[Background] URL already in queue or processing. Skipping duplicate:', srcUrl);
+  const isStale = existingJob && (Date.now() - existingJob.timestamp > 5000);
+
+  if (existingJob && !isStale && ['queued', 'downloading', 'processing'].includes(existingJob.status as string)) {
+    console.log('[Background] URL already in active processing. Skipping duplicate:', srcUrl);
     return;
+  }
+
+  if (existingJob) {
+    await db.translationJobs.delete(existingJob.id!);
   }
 
   console.log('[Background] Queuing image URL:', srcUrl);
