@@ -135,8 +135,9 @@ export class PaddleOcrEngine implements IOcrEngine {
       const ctx = recognitor.buildContext();
       const dictionary = this.service.options.recognition?.charactersDictionary;
 
-      // 3. Crop, warp, and recognize each text polygon in parallel
-      const promises = polygons.map(async (poly) => {
+      // 3. Crop, warp, and recognize each text polygon sequentially (prevents ONNX Session already started error on WebGPU)
+      const results = [];
+      for (const poly of polygons) {
         // Perspective crop/rotate to straighten text and handle vertical manga layout
         const finalCropCanvas = cropAndWarp(this.service.platform, sourceCanvas, poly);
 
@@ -158,10 +159,8 @@ export class PaddleOcrEngine implements IOcrEngine {
           h: Math.max(1, Math.round(maxY - minY))
         };
 
-        return { text, confidence, box };
-      });
-
-      const results = await Promise.all(promises);
+        results.push({ text, confidence, box });
+      }
 
       const texts = results.map(r => r.text);
       const scores = results.map(r => r.confidence);
