@@ -3,10 +3,47 @@ import { checkWebGPUAvailability } from '../../utils/hardware';
 import { CustomPaddleDetector } from './CustomPaddleDetector';
 import * as ort from 'onnxruntime-web';
 
+/**
+ * Lightweight Mutex queue to serialize ONNX Runtime WebGPU session.run calls
+ * while allowing image cropping, warping, and preprocessing to run 100% in parallel.
+ */
+class SessionMutex {
+  private queue: (() => Promise<any>)[] = [];
+  private locked = false;
+
+  async run<T>(fn: () => Promise<T>): Promise<T> {
+    return new Promise((resolve, reject) => {
+      this.queue.push(async () => {
+        try {
+          const res = await fn();
+          resolve(res);
+        } catch (e) {
+          reject(e);
+        }
+      });
+      this.dequeue();
+    });
+  }
+
+  private async dequeue() {
+    if (this.locked || this.queue.length === 0) return;
+    this.locked = true;
+    const fn = this.queue.shift()!;
+    try {
+      await fn();
+    } finally {
+      this.locked = false;
+      this.dequeue();
+    }
+  }
+}
+
 export class PaddleOcrEngine implements IOcrEngine {
   private service: any = null;
   private customDetector: CustomPaddleDetector | null = null;
   private isInitialized = false;
+  private isWebGpu = false;
+  private sessionMutex = new SessionMutex();
 
   /**
    * Initializes the PaddleOCR Engine, loading either Node or Browser native dependencies
@@ -66,6 +103,7 @@ export class PaddleOcrEngine implements IOcrEngine {
         (ort as any).env.webgpu.powerPreference = 'high-performance';
       }
 
+      this.isWebGpu = useWebGpu;
       console.log(`[PaddleOcrEngine] WebGPU Available: ${useWebGpu}. Initializing service...`);
 
       // Explicitly declare execution providers with high-performance power preference
@@ -135,13 +173,16 @@ export class PaddleOcrEngine implements IOcrEngine {
       const ctx = recognitor.buildContext();
       const dictionary = this.service.options.recognition?.charactersDictionary;
 
-      // 3. Crop, warp, and recognize each text polygon sequentially (prevents ONNX Session already started error on WebGPU)
-      const results = [];
-      for (const poly of polygons) {
-        // Perspective crop/rotate to straighten text and handle vertical manga layout
-        const finalCropCanvas = cropAndWarp(this.service.platform, sourceCanvas, poly);
+      // Wrap ONNX Runtime WebGPU session.run via SessionMutex to prevent Session already started errors
+      // while allowing 100% parallel crop, warp, and tensor preprocessing.
+      if (this.isWebGpu) {
+        const origRunInference = ctx.runInference.bind(recognitor);
+        ctx.runInference = (tensor: any) => this.sessionMutex.run(() => origRunInference(tensor));
+      }
 
-        // Execute CRNN text recognition on the straightened crop
+      // 3. Crop, warp, and recognize each text polygon in parallel
+      const results = await Promise.all(polygons.map(async (poly: any) => {
+        const finalCropCanvas = cropAndWarp(this.service.platform, sourceCanvas, poly);
         const { text, confidence } = await recognitor.recognizeTextViaContext(finalCropCanvas, ctx, dictionary);
 
         let minX = Infinity, minY = Infinity;
@@ -158,13 +199,12 @@ export class PaddleOcrEngine implements IOcrEngine {
           w: Math.max(1, Math.round(maxX - minX)),
           h: Math.max(1, Math.round(maxY - minY))
         };
+        return { text, confidence, box };
+      }));
 
-        results.push({ text, confidence, box });
-      }
-
-      const texts = results.map(r => r.text);
-      const scores = results.map(r => r.confidence);
-      const boxes = results.map(r => r.box);
+      const texts = results.map((r: any) => r.text);
+      const scores = results.map((r: any) => r.confidence);
+      const boxes = results.map((r: any) => r.box);
 
       const totalDuration = (performance.now() - startTime).toFixed(2);
       console.log(`[PaddleOcrEngine] Tensor Batch Recognition complete in ${totalDuration}ms. Found ${texts.length} text blocks.`);

@@ -7,7 +7,7 @@ import { LamaMangaInpaintEngine } from '../engines/inpaint/LamaMangaInpaintEngin
 import { NoneInpaintEngine } from '../engines/inpaint/NoneInpaintEngine';
 import { OriginalInpaintEngine } from '../engines/inpaint/OriginalInpaintEngine';
 
-export type InpaintTier = 'simple' | 'telea' | 'aot' | 'lama-base' | 'lama-manga' | 'none' | 'original';
+export type InpaintTier = 'simple' | 'telea' | 'aot' | 'aotgan' | 'lama-base' | 'lama-manga' | 'none' | 'original';
 
 /**
  * Orchestrator and single entry-point for the image inpainting / background erasing pipeline.
@@ -63,6 +63,7 @@ export class InpaintManager {
         engine = new TeleaInpaintEngine(this.platform);
         break;
       case 'aot':
+      case 'aotgan':
         engine = new AotInpaintEngine(this.platform);
         break;
       case 'lama-base':
