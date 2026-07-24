@@ -1,5 +1,15 @@
-import clipperLibModule from 'clipper-lib';
-const ClipperLib = (clipperLibModule as any).default || clipperLibModule;
+import { createRequire } from 'module';
+
+let ClipperLib: any = null;
+if (typeof window === 'undefined') {
+  try {
+    const req = createRequire(import.meta.url);
+    const mod = req('clipper-lib');
+    ClipperLib = mod.default || mod;
+  } catch (e) {
+    // Fallback
+  }
+}
 
 export interface Point {
   X: number; // ClipperLib uses uppercase X, Y
@@ -11,25 +21,17 @@ export interface Point2D {
   y: number;
 }
 
+function getClipper(): any {
+  if (!ClipperLib) {
+    const req = createRequire(import.meta.url);
+    const mod = req('clipper-lib');
+    ClipperLib = mod.default || mod;
+  }
+  return ClipperLib;
+}
+
 /**
- * Replicates the DBPostProcess logic from PaddleOCR.
- * 1. Finds connected components (blobs).
- * 2. Finds the convex hull of each blob.
- * 3. Expands the hull using Vatti clipping (clipper-lib) by ratio.
- * 4. Calculates the Minimum Area Bounding Rectangle using Rotating Calipers.
- * 
- * @param probMap - The probability heat map output from the DB text detector model.
- * @param width - The width of the resized image fed into the model.
- * @param height - The height of the resized image fed into the model.
- * @param originalWidth - The original width of the input image.
- * @param originalHeight - The original height of the input image.
- * @param threshold - The binary threshold to binarize the probability map. Defaults to 0.3.
- * @param unclipRatio - The expansion factor to unclip the bounding box. Defaults to 2.0.
- * @param resizeRatio - Optional predefined resize ratio mapping model size back to original size.
- * @returns An array of perfectly aligned 4-point bounding polygons scaled back to original dimensions.
- */
-/**
- * Creates a raw probability mask canvas (Cotrans mask_raw) scaled to original image dimensions.
+ * Replicates the DBPostProcess logic from PaddleOCR / CTD.
  */
 export function extractRawMaskCanvas(
   platform: any,
@@ -62,8 +64,6 @@ export function extractRawMaskCanvas(
   dilatedCtx.fillStyle = '#000000';
   dilatedCtx.fillRect(0, 0, modelW, modelH);
 
-  // Cotrans exact dilation kernel formula: kernel_size = int(max(shape) * 0.025)
-  // For model dimensions ~960px, dilateRadius = ~12-15px
   const dilateRadius = Math.max(6, Math.floor(Math.max(modelW, modelH) * 0.015));
   const radiusSq = dilateRadius * dilateRadius;
 
@@ -98,247 +98,165 @@ export function extractPolygons(
   _resizeRatio?: number
 ): Point2D[][] {
   const binaryMap = new Uint8Array(width * height);
-  for (let i = 0; i < probMap.length; i++) {
-    binaryMap[i] = probMap[i] > threshold ? 1 : 0;
+  for (let i = 0; i < width * height; i++) {
+    binaryMap[i] = probMap[i] >= threshold ? 1 : 0;
   }
 
   const visited = new Uint8Array(width * height);
-  const blobs: Point[][] = [];
+  const polygons: Point2D[][] = [];
 
-  // 1. Find Connected Components
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const idx = y * width + x;
       if (binaryMap[idx] === 1 && visited[idx] === 0) {
-        const blob: Point[] = [];
-        const queue: Point[] = [{ X: x, Y: y }];
+        const blobPoints: Point2D[] = [];
+        const queue: number[] = [idx];
         visited[idx] = 1;
 
-        let head = 0;
-        while (head < queue.length) {
-          const p = queue[head++];
-          blob.push(p);
+        while (queue.length > 0) {
+          const curr = queue.pop()!;
+          const cy = Math.floor(curr / width);
+          const cx = curr % width;
+          blobPoints.push({ x: cx, y: cy });
 
           const neighbors = [
-            { X: p.X + 1, Y: p.Y },
-            { X: p.X - 1, Y: p.Y },
-            { X: p.X, Y: p.Y + 1 },
-            { X: p.X, Y: p.Y - 1 },
+            curr - 1, curr + 1, curr - width, curr + width
           ];
 
-          for (const n of neighbors) {
-            if (n.X >= 0 && n.X < width && n.Y >= 0 && n.Y < height) {
-              const nIdx = n.Y * width + n.X;
-              if (binaryMap[nIdx] === 1 && visited[nIdx] === 0) {
+          for (const nIdx of neighbors) {
+            if (nIdx >= 0 && nIdx < width * height && binaryMap[nIdx] === 1 && visited[nIdx] === 0) {
+              const nx = nIdx % width;
+              const ny = Math.floor(nIdx / width);
+              if (Math.abs(nx - cx) <= 1 && Math.abs(ny - cy) <= 1) {
                 visited[nIdx] = 1;
-                queue.push(n);
+                queue.push(nIdx);
               }
             }
           }
         }
-        
-        if (blob.length > 10) {
-          blobs.push(blob);
-        }
+
+        if (blobPoints.length < 15) continue;
+
+        const hull = convexHull(blobPoints);
+        if (hull.length < 3) continue;
+
+        const unclipped = unclipPolygon(hull, unclipRatio);
+        if (unclipped.length < 3) continue;
+
+        const minRect = minAreaRect(unclipped);
+
+        const ratioX = originalWidth / width;
+        const ratioY = originalHeight / height;
+
+        const scaledRect = minRect.map(p => ({
+          x: Math.round(p.x * ratioX),
+          y: Math.round(p.y * ratioY)
+        }));
+
+        polygons.push(scaledRect);
       }
     }
-  }
-
-  const ratio = _resizeRatio ?? (width / originalWidth);
-  const resizeRatioX = 1 / ratio;
-  const resizeRatioY = 1 / ratio;
-  const polygons: Point2D[][] = [];
-
-  const dist = (a: Point, b: Point) =>
-    Math.sqrt((a.X - b.X) ** 2 + (a.Y - b.Y) ** 2);
-
-  for (const blob of blobs) {
-    // 1. Box Score Thresholding (det_db_box_thresh = 0.6)
-    // Filter out weak detections (e.g. background drawings, bushes, grass)
-    let scoreSum = 0;
-    for (const p of blob) {
-      scoreSum += probMap[p.Y * width + p.X];
-    }
-    const avgScore = scoreSum / blob.length;
-    if (avgScore < 0.6) continue;
-
-    // 2. Convex Hull
-    const hull = getConvexHull(blob);
-    if (hull.length < 3) continue;
-
-    // 3. Initial Min Area Rect (find minAreaRect first)
-    const initialMinRect = minAreaRect(hull);
-    if (initialMinRect.length < 4) continue;
-
-    // Filter by initial box side size (sside >= 3)
-    const w0 = dist(initialMinRect[0], initialMinRect[1]);
-    const h0 = dist(initialMinRect[0], initialMinRect[3]);
-    if (Math.min(w0, h0) < 3) continue;
-
-    // 4. Unclip (Expand) the 4-point rectangle instead of the hull
-    const expandedPoly = unclip(initialMinRect, unclipRatio);
-    if (expandedPoly.length < 3) continue;
-
-    // 5. Final Min Area Rect (find minAreaRect again on expanded polygon)
-    const finalMinRect = minAreaRect(expandedPoly);
-    if (finalMinRect.length < 4) continue;
-
-    // Filter by expanded box side size (sside >= 5)
-    const w1 = dist(finalMinRect[0], finalMinRect[1]);
-    const h1 = dist(finalMinRect[0], finalMinRect[3]);
-    if (Math.min(w1, h1) < 5) continue;
-    
-    // Scale back to original
-    const scaledRect = finalMinRect.map(p => ({
-      x: Math.max(0, Math.min(originalWidth, p.X * resizeRatioX)),
-      y: Math.max(0, Math.min(originalHeight, p.Y * resizeRatioY))
-    }));
-    
-    polygons.push(scaledRect);
   }
 
   return polygons;
 }
 
-/**
- * Calculates the convex hull of a set of 2D points using the Monotone Chain algorithm.
- * 
- * @param points - The input array of points.
- * @returns The array of points forming the convex hull.
- */
-function getConvexHull(points: Point[]): Point[] {
-  points.sort((a, b) => a.X === b.X ? a.Y - b.Y : a.X - b.X);
+function convexHull(points: Point2D[]): Point2D[] {
+  points.sort((a, b) => a.x === b.x ? a.y - b.y : a.x - b.x);
 
-  const cross = (o: Point, a: Point, b: Point) => {
-    return (a.X - o.X) * (b.Y - o.Y) - (a.Y - o.Y) * (b.X - o.X);
-  };
-
-  const lower: Point[] = [];
-  for (let i = 0; i < points.length; i++) {
-    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], points[i]) <= 0) {
+  const lower: Point2D[] = [];
+  for (const p of points) {
+    while (lower.length >= 2 && crossProduct(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) {
       lower.pop();
     }
-    lower.push(points[i]);
+    lower.push(p);
   }
 
-  const upper: Point[] = [];
+  const upper: Point2D[] = [];
   for (let i = points.length - 1; i >= 0; i--) {
-    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], points[i]) <= 0) {
+    const p = points[i];
+    while (upper.length >= 2 && crossProduct(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) {
       upper.pop();
     }
-    upper.push(points[i]);
+    upper.push(p);
   }
 
-  lower.pop();
   upper.pop();
+  lower.pop();
   return lower.concat(upper);
 }
 
-/**
- * Calculates the area of a polygon using the Shoelace formula.
- * 
- * @param poly - The array of vertices of the polygon.
- * @returns The calculated area of the polygon.
- */
-function polygonArea(poly: Point[]): number {
+function crossProduct(o: Point2D, a: Point2D, b: Point2D): number {
+  return (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+}
+
+function unclipPolygon(hull: Point2D[], unclipRatio: number): Point2D[] {
+  const Clipper = getClipper();
+  const scaledHull = hull.map(p => ({ X: Math.round(p.x * 100), Y: Math.round(p.y * 100) }));
+  
   let area = 0;
-  for (let i = 0; i < poly.length; i++) {
-    const j = (i + 1) % poly.length;
-    area += poly[i].X * poly[j].Y - poly[j].X * poly[i].Y;
+  let len = 0;
+  const n = hull.length;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    area += hull[i].x * hull[j].y - hull[j].x * hull[i].y;
+    const dx = hull[j].x - hull[i].x;
+    const dy = hull[j].y - hull[i].y;
+    len += Math.sqrt(dx * dx + dy * dy);
   }
-  return Math.abs(area / 2);
-}
+  area = Math.abs(area / 2);
 
-/**
- * Calculates the perimeter of a polygon.
- * 
- * @param poly - The array of vertices of the polygon.
- * @returns The total perimeter of the polygon.
- */
-function polygonPerimeter(poly: Point[]): number {
-  let perim = 0;
-  for (let i = 0; i < poly.length; i++) {
-    const j = (i + 1) % poly.length;
-    const dx = poly[j].X - poly[i].X;
-    const dy = poly[j].Y - poly[i].Y;
-    perim += Math.sqrt(dx * dx + dy * dy);
-  }
-  return perim;
-}
+  if (len === 0) return hull;
 
-/**
- * Expands a polygon by a specified unclip ratio using ClipperLib's offset scaling.
- * 
- * @param hull - The vertices of the polygon to expand.
- * @param unclipRatio - The ratio by which to expand the polygon.
- * @returns The vertices of the expanded polygon.
- */
-function unclip(hull: Point[], unclipRatio: number): Point[] {
-  const area = polygonArea(hull);
-  const length = polygonPerimeter(hull);
-  const distance = (area * unclipRatio) / length;
+  const distance = (area * unclipRatio) / len;
+  const scaledDistance = distance * 100;
 
-  const co = new ClipperLib.ClipperOffset();
-  const solution = new ClipperLib.Paths();
-  
-  // Clipper expects integer coordinates, so we scale by 100 to preserve precision
-  const scale = 100;
-  const scaledHull = hull.map(p => ({ X: Math.round(p.X * scale), Y: Math.round(p.Y * scale) }));
-  
-  if (!ClipperLib.Clipper.Orientation(scaledHull)) {
+  const co = new Clipper.ClipperOffset();
+  const solution: any[] = [];
+
+  if (!Clipper.Clipper.Orientation(scaledHull)) {
     scaledHull.reverse();
   }
-  
-  console.log(`Unclip: Area=${area.toFixed(1)}, Perim=${length.toFixed(1)}, Dist=${distance.toFixed(1)}`);
-  
-  co.AddPath(scaledHull, ClipperLib.JoinType.jtRound, ClipperLib.EndType.etClosedPolygon);
-  co.Execute(solution, distance * scale);
 
-  if (solution.length === 0) {
-    console.log("Clipper failed to unclip! Returned 0 solutions.");
-    return [];
+  co.AddPath(scaledHull, Clipper.JoinType.jtRound, Clipper.EndType.etClosedPolygon);
+  co.Execute(solution, scaledDistance);
+
+  if (!solution || solution.length === 0) return hull;
+
+  const resultPath = solution[0];
+  const unclipped: Point2D[] = [];
+  for (let i = 0; i < resultPath.length; i++) {
+    const pt = resultPath[i];
+    unclipped.push({ x: pt.X / 100, y: pt.Y / 100 });
   }
-  
-  return solution[0].map((p: any) => ({ X: p.X / scale, Y: p.Y / scale }));
+
+  return unclipped;
 }
 
-/**
- * Finds the minimum area bounding box (minimum area rectangle) of a convex hull using Rotating Calipers.
- * Sorts vertices deterministically as [TopLeft, TopRight, BottomRight, BottomLeft].
- * 
- * @param hull - The convex hull vertices.
- * @returns The 4-point bounding rectangle.
- */
-function minAreaRect(hull: Point[]): Point[] {
-  // Edge-case
-  if (hull.length < 3) return hull;
-
+function minAreaRect(points: Point2D[]): Point2D[] {
   let minArea = Infinity;
-  let bestRect: Point[] = [];
+  let bestRect: Point2D[] = [];
 
-  // Iterate over all edges of the convex hull
-  for (let i = 0; i < hull.length; i++) {
-    const p1 = hull[i];
-    const p2 = hull[(i + 1) % hull.length];
+  for (let i = 0; i < points.length; i++) {
+    const p1 = points[i];
+    const p2 = points[(i + 1) % points.length];
 
-    const edgeDx = p2.X - p1.X;
-    const edgeDy = p2.Y - p1.Y;
-    const len = Math.sqrt(edgeDx * edgeDx + edgeDy * edgeDy);
-    
-    // Normal vector to the edge
-    const ux = edgeDx / len;
-    const uy = edgeDy / len;
+    const edgeX = p2.x - p1.x;
+    const edgeY = p2.y - p1.y;
+    const len = Math.sqrt(edgeX * edgeX + edgeY * edgeY);
+    if (len === 0) continue;
+
+    const ux = edgeX / len;
+    const uy = edgeY / len;
     const vx = -uy;
     const vy = ux;
 
     let minU = Infinity, maxU = -Infinity;
     let minV = Infinity, maxV = -Infinity;
 
-    // Project all points onto the edge and its normal
-    for (const p of hull) {
-      const u = p.X * ux + p.Y * uy;
-      const v = p.X * vx + p.Y * vy;
-
+    for (const p of points) {
+      const u = p.x * ux + p.y * uy;
+      const v = p.x * vx + p.y * vy;
       if (u < minU) minU = u;
       if (u > maxU) maxU = u;
       if (v < minV) minV = v;
@@ -348,36 +266,30 @@ function minAreaRect(hull: Point[]): Point[] {
     const area = (maxU - minU) * (maxV - minV);
     if (area < minArea) {
       minArea = area;
-
       bestRect = [
-        { X: minU * ux + minV * vx, Y: minU * uy + minV * vy },
-        { X: maxU * ux + minV * vx, Y: maxU * uy + minV * vy },
-        { X: maxU * ux + maxV * vx, Y: maxU * uy + maxV * vy },
-        { X: minU * ux + maxV * vx, Y: minU * uy + maxV * vy },
+        { x: minU * ux + minV * vx, y: minU * uy + minV * vy },
+        { x: maxU * ux + minV * vx, y: maxU * uy + minV * vy },
+        { x: maxU * ux + maxV * vx, y: maxU * uy + maxV * vy },
+        { x: minU * ux + maxV * vx, y: minU * uy + maxV * vy }
       ];
     }
   }
 
-  if (bestRect.length === 4) {
-    // Deterministic sorting identical to Baidu's get_mini_boxes in predict_system.py
-    // 1. Sort points by X coordinate to separate left and right sides
-    const sortedByX = [...bestRect].sort((a, b) => a.X - b.X);
-    
-    const leftPts = [sortedByX[0], sortedByX[1]];
-    const rightPts = [sortedByX[2], sortedByX[3]];
-    
-    // 2. Sort left points by Y to distinguish Top-Left and Bottom-Left
-    leftPts.sort((a, b) => a.Y - b.Y);
-    const topLeft = leftPts[0];
-    const bottomLeft = leftPts[1];
-    
-    // 3. Sort right points by Y to distinguish Top-Right and Bottom-Right
-    rightPts.sort((a, b) => a.Y - b.Y);
-    const topRight = rightPts[0];
-    const bottomRight = rightPts[1];
+  return bestRect.length === 4 ? bestRect : hullBoundingBox(points);
+}
 
-    return [topLeft, topRight, bottomRight, bottomLeft];
+function hullBoundingBox(points: Point2D[]): Point2D[] {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const p of points) {
+    if (p.x < minX) minX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y > maxY) maxY = p.y;
   }
-
-  return bestRect;
+  return [
+    { x: minX, y: minY },
+    { x: maxX, y: minY },
+    { x: maxX, y: maxY },
+    { x: minX, y: maxY }
+  ];
 }
