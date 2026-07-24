@@ -695,11 +695,11 @@ function calculateFontValues(
   const sw = Math.trunc(fontSize * STROKE_WIDTH_RATIO);
   const lineHeight = Math.trunc(fontSize * LINE_HEIGHT_RATIO);
   ctx.font = `bold ${fontSize}px ${RENDER_FONT_FAMILY}`;
-  const delimiterLen = Math.trunc(ctx.measureText(' ').width);
+  const delimiterLen = Math.ceil(ctx.measureText(' ').width * 1.08);
   let baseLength = -1;
   const wordLengths: number[] = [];
   for (const word of words) {
-    const wordLength = Math.trunc(ctx.measureText(word).width);
+    const wordLength = Math.ceil(ctx.measureText(word).width * 1.08);
     wordLengths.push(wordLength);
     if (wordLength > baseLength) baseLength = wordLength;
   }
@@ -981,35 +981,44 @@ function renderTextblockListEng(
       const curLines = layoutLinesAligncenter(mask, words, curFontValues.wordLengths, curFontValues.delimiterLen, curFontValues.lineHeight);
       
       let fits = true;
+      const { sw, lineHeight } = curFontValues;
+
       for (const l of curLines) {
-         const minX = Math.floor(l.pos_x);
-         const maxX = Math.ceil(l.pos_x + l.length);
-         const minY = Math.floor(l.pos_y);
-         const maxY = Math.ceil(l.pos_y + curFontValues.lineHeight);
+         const x1 = Math.floor(l.pos_x - sw);
+         const x2 = Math.ceil(l.pos_x + l.length + sw);
+         const y1 = Math.floor(l.pos_y);
+         const y2 = Math.ceil(l.pos_y + lineHeight);
          
          // Check if line extends outside mask image boundaries
-         if (minX < 0 || maxX >= mask.width || minY < 0 || maxY >= mask.height) {
+         if (x1 < 0 || x2 >= mask.width || y1 < 0 || y2 >= mask.height) {
            fits = false;
            break;
          }
          
-         // Check 4 corners of line against speech balloon mask data
-         const topLeft = mask.data[minY * mask.width + minX];
-         const topRight = mask.data[minY * mask.width + maxX];
-         const bottomLeft = mask.data[maxY * mask.width + minX];
-         const bottomRight = mask.data[maxY * mask.width + maxX];
-         
-         if (topLeft === 0 || topRight === 0 || bottomLeft === 0 || bottomRight === 0) {
-           fits = false;
-           break;
+         // Sample line area against balloon mask data (255 = inside, 0 = outside)
+         const yStep = Math.max(1, Math.floor(lineHeight / 3));
+         const xStep = Math.max(1, Math.floor((x2 - x1) / 8));
+
+         for (let y = y1; y <= y2; y += yStep) {
+           const clampedY = Math.min(y, mask.height - 1);
+           const rowOffset = clampedY * mask.width;
+           for (let x = x1; x <= x2; x += xStep) {
+             const clampedX = Math.min(x, mask.width - 1);
+             if (mask.data[rowOffset + clampedX] === 0) {
+               fits = false;
+               break;
+             }
+           }
+           if (!fits) break;
          }
+         if (!fits) break;
       }
       
       if (fits) {
          bestLines = curLines;
          bestFs = fs;
          fontValues = curFontValues;
-         console.log(`[Typesetting] Strict boundary fit! regionW=${regionW} originalFs=${region.fontSize} finalFs=${bestFs} lines=${bestLines.length}`);
+         console.log(`[Typesetting] Strict area boundary fit! regionW=${regionW} originalFs=${region.fontSize} finalFs=${bestFs} lines=${bestLines.length}`);
          break;
       }
       fs -= 1;
