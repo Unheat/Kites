@@ -957,29 +957,86 @@ function renderTextblockListEng(
     }
     const baseLengthWord = words[maxIdx];
     if (baseLengthWord.length === 0) continue;
-    const linesNeeded = region.translation.length / baseLengthWord.length;
-    const linesAvailable = Math.trunc(Math.abs(xyxy[3] - xyxy[1]) / fontValues.lineHeight) + 1;
-    const fontSizeMultiplier = Math.max(
-      Math.min(regionW / (fontValues.baseLength + 2 * fontValues.sw), linesAvailable / linesNeeded),
-      DOWNSCALE_CONSTRAINT
-    );
-    // Cotrans font_size_minimum keeps shrunk text readable on any page size
+
     const fontSizeMinimum = Math.max(1, Math.round((pageWidth + pageHeight) / FONT_SIZE_MINIMUM_DIVISOR));
     let fontSize = fontValues.fontSize;
-    if (fontSizeMultiplier < 1) {
-      console.log(`[Trace] ENTERED IF! fontSizeBefore=${fontSize} mult=${fontSizeMultiplier} mult*fs=${fontSize * fontSizeMultiplier} min=${fontSizeMinimum}`);
-      fontSize = Math.max(Math.trunc(fontSize * fontSizeMultiplier), fontSizeMinimum);
-      console.log(`[Trace] new fontSize=${fontSize}`);
-      fontValues = calculateFontValues(ctx, fontSize, words);
-      fontSize = fontValues.fontSize;
+    let textlines: Textline[] = [];
+
+    if (!region.isTightBoundingBox) {
+      // -------------------------------------------------------------
+      // PADDLE OCR BINARY SEARCH FALLBACK
+      // -------------------------------------------------------------
+      // Since PaddleOCR polygons are irregular and we cannot reliably use 
+      // resize_regions_to_font_size to dynamically expand them, the one-shot
+      // mathematical estimation will overflow elliptical bubbles. 
+      // We fall back to a binary search loop that shrinks the font until 
+      // the laid-out text strictly fits within the mask's bounding box.
+      
+      let fs = fontValues.fontSize; 
+      let bestLines: Textline[] = [];
+      let bestFs = fs;
+
+      while (fs >= Math.max(fontSizeMinimum, 8)) {
+        const curFontValues = calculateFontValues(ctx, fs, words);
+        const curLines = layoutLinesAligncenter(mask, words, curFontValues.wordLengths, curFontValues.delimiterLen, curFontValues.lineHeight);
+        
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        for (const l of curLines) {
+           minX = Math.min(minX, l.pos_x);
+           maxX = Math.max(maxX, l.pos_x + l.length);
+           minY = Math.min(minY, l.pos_y);
+           maxY = Math.max(maxY, l.pos_y + curFontValues.lineHeight);
+        }
+        
+        // Add a tiny tolerance padding so we don't reject perfectly flush text
+        const padding = 2;
+        if (
+          minX >= regionRect.x - padding && 
+          maxX <= regionRect.x + regionRect.w + padding && 
+          minY >= regionRect.y - padding && 
+          maxY <= regionRect.y + regionRect.h + padding
+        ) {
+           bestLines = curLines;
+           bestFs = fs;
+           fontValues = curFontValues;
+           break;
+        }
+        fs -= 1;
+      }
+
+      if (bestLines.length === 0) {
+        // If it never fits perfectly (e.g. extremely long word in a tiny box), fallback to minimum
+        fontValues = calculateFontValues(ctx, Math.max(fontSizeMinimum, 8), words);
+        bestLines = layoutLinesAligncenter(mask, words, fontValues.wordLengths, fontValues.delimiterLen, fontValues.lineHeight);
+        bestFs = fontValues.fontSize;
+      }
+
+      textlines = bestLines;
+      fontSize = bestFs;
+
+    } else {
+      // -------------------------------------------------------------
+      // COTRANS 1:1 ONE-SHOT MATH (For ComicTextDetector)
+      // -------------------------------------------------------------
+      const linesNeeded = region.translation.length / baseLengthWord.length;
+      const linesAvailable = Math.trunc(Math.abs(xyxy[3] - xyxy[1]) / fontValues.lineHeight) + 1;
+      const fontSizeMultiplier = Math.max(
+        Math.min(regionW / (fontValues.baseLength + 2 * fontValues.sw), linesAvailable / linesNeeded),
+        DOWNSCALE_CONSTRAINT
+      );
+      
+      if (fontSizeMultiplier < 1) {
+        fontSize = Math.max(Math.trunc(fontSize * fontSizeMultiplier), fontSizeMinimum);
+        fontValues = calculateFontValues(ctx, fontSize, words);
+        fontSize = fontValues.fontSize;
+      }
+      
+      textlines = layoutLinesAligncenter(mask, words, fontValues.wordLengths, fontValues.delimiterLen, fontValues.lineHeight);
     }
 
-    console.log(`[Typesetting] block="${words.join(' ')}" initialFs=${fontValues.fontSize} regionW=${regionW} xyxyH=${Math.abs(xyxy[3] - xyxy[1])} linesAvail=${linesAvailable} linesNeed=${linesNeeded} fsMult=${fontSizeMultiplier} finalFs=${fontSize} fsMin=${fontSizeMinimum}`);
-
-    const { sw, lineHeight, delimiterLen, wordLengths } = fontValues;
-
-    const textlines = layoutLinesAligncenter(mask, words, wordLengths, delimiterLen, lineHeight);
     if (textlines.length === 0) continue;
+
+    const { sw, lineHeight } = fontValues;
 
     // Vertical centering nudge toward the balloon bbox center (1:1 Cotrans)
     const lineCy = textlines.reduce((s, l) => s + l.pos_y, 0) / textlines.length + lineHeight / 2;
