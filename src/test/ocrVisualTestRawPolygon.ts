@@ -18,7 +18,7 @@ async function runVisualTest() {
   console.log('--- Starting OCR Visual Integration Test ---');
   
   const testImgDir = path.join(__dirname, 'test-img');
-  const resultDir = path.join(__dirname, 'result', 'ocr');
+  const resultDir = path.join(__dirname, 'result', 'ocr-raw');
   
   if (!fs.existsSync(resultDir)) {
     fs.mkdirSync(resultDir, { recursive: true });
@@ -60,8 +60,8 @@ async function runVisualTest() {
     // Run OCR Detection and Recognition
     const result = await manager.processImage(arrayBuffer);
     
-    console.log(`OCR took ${Date.now() - startTime}ms. Found ${result.boxes.length} text regions.`);
-    console.log('Recognized texts:', result.texts);
+    const rawPolygons = result.rawPolygons || result.polygons || [];
+    console.log(`OCR took ${Date.now() - startTime}ms. Found ${rawPolygons.length} RAW text regions.`);
 
     // Load image into Canvas to draw boxes
     const image = await loadImage(buffer);
@@ -73,16 +73,10 @@ async function runVisualTest() {
 
     // Draw bounding boxes and text
     ctx.lineWidth = 3;
-    ctx.font = '20px Arial';
 
-    result.boxes.forEach((box, index) => {
-      // Draw standard upright red box
-      ctx.strokeStyle = 'red';
-      ctx.strokeRect(box.x, box.y, box.w, box.h);
-      
-      // Draw pure JS perfectly rotated polygons in Blue
-      if (result.polygons && result.polygons[index]) {
-        const poly = result.polygons[index];
+    rawPolygons.forEach((poly, index) => {
+      // Draw pure JS perfectly rotated polygons in Cyan
+      if (poly && poly.length >= 4) {
         ctx.strokeStyle = 'cyan';
         ctx.beginPath();
         ctx.moveTo(poly[0].x, poly[0].y);
@@ -92,22 +86,6 @@ async function runVisualTest() {
         ctx.closePath();
         ctx.stroke();
       }
-
-      // Draw translucent background for text
-      const text = result.texts[index];
-      
-      const dir = result.directions ? result.directions[index] : '?';
-      const fs = result.fontSizes ? Math.round(result.fontSizes[index]) : 0;
-      const displayStr = `[${dir}|fs:${fs}] ${text}`;
-      
-      const textWidth = ctx.measureText(displayStr).width;
-      
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-      ctx.fillRect(box.x, Math.max(0, box.y - 25), textWidth + 10, 25);
-      
-      // Draw text
-      ctx.fillStyle = 'lime';
-      ctx.fillText(displayStr, box.x + 5, Math.max(20, box.y - 5));
     });
 
     // Save result image

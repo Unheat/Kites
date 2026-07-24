@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeAll } from 'vitest';
 import type { Point2D } from '../../shared/utils/geometry';
 import {
   drawTextInPolygon,
@@ -7,7 +7,42 @@ import {
   calculatePolygonCentroid,
   layoutLinesAligncenter
 } from './canvasTypesetting';
-import type { GrayImage } from './ballonExtractor';
+import type { GrayImage, BallonRegionResult } from './ballonExtractor';
+
+// Mock ballonExtractor to bypass OpenCV WASM load issues in Vitest
+vi.mock('./ballonExtractor', () => ({
+  maskBoundingRect: vi.fn((mask) => {
+    if (!mask) return { x: 0, y: 0, w: 100, h: 100 };
+    let minX = mask.width, minY = mask.height, maxX = 0, maxY = 0;
+    let found = false;
+    for (let y = 0; y < mask.height; y++) {
+      for (let x = 0; x < mask.width; x++) {
+        if (mask.data[y * mask.width + x] > 0) {
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+          found = true;
+        }
+      }
+    }
+    if (!found) return { x: 0, y: 0, w: 100, h: 100 };
+    return { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 };
+  }),
+  maskCentroid: vi.fn((mask) => {
+    if (!mask) return { x: 50, y: 50 };
+    let sumX = 0, sumY = 0, count = 0;
+    for (let y = 0; y < mask.height; y++) {
+      for (let x = 0; x < mask.width; x++) {
+        if (mask.data[y * mask.width + x] > 0) {
+          sumX += x; sumY += y; count++;
+        }
+      }
+    }
+    if (count === 0) return { x: 50, y: 50 };
+    return { x: sumX / count, y: sumY / count };
+  })
+}));
 
 /**
  * Builds a minimal mocked canvas context: measureText returns 10px per character,

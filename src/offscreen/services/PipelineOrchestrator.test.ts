@@ -25,6 +25,24 @@ vi.mock('../../popup/index', () => ({
   // Mock PopupState types if needed
 }));
 
+// Mock opencv to bypass WASM load issues
+vi.mock('../utils/opencv', () => ({
+  initOpenCV: vi.fn().mockResolvedValue({})
+}));
+
+// Mock ballonExtractor to bypass OpenCV WASM load issues in Vitest
+vi.mock('../utils/ballonExtractor', () => ({
+  extractBallonRegion: vi.fn(() => ({
+    mask: null,
+    boundingRect: [0, 0, 100, 100],
+    center: [50, 50],
+    area: 10000,
+    hasSpeechBubble: false
+  })),
+  maskBoundingRect: vi.fn(() => ({ x: 0, y: 0, w: 100, h: 100 })),
+  maskCentroid: vi.fn(() => ({ x: 50, y: 50 }))
+}));
+
 vi.mock('./OcrManager', () => {
   return {
     OcrManager: class {

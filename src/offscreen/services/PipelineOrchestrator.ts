@@ -6,6 +6,7 @@ import { InpaintManager } from './InpaintManager';
 import type { InpaintTier } from './InpaintManager';
 import type { Point2D } from '../engines/inpaint/BaseInpaintEngine';
 import { renderTextBlocksBatch, type TextBlockItem, type RenderedBlockInfo } from '../utils/canvasTypesetting';
+import { initOpenCV } from '../utils/opencv';
 
 export class PipelineOrchestrator {
   private ocrManager: OcrManager;
@@ -37,6 +38,7 @@ export class PipelineOrchestrator {
     try {
       console.log(`[PipelineOrchestrator] Starting pipeline for Job ID: ${jobId}`);
       await db.translationJobs.update(jobId, { status: 'processing' });
+      await initOpenCV(); // Ensure OpenCV is loaded
 
       const totalPipelineStart = performance.now();
 

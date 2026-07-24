@@ -49,3 +49,9 @@ The developer of this project is a beginner learning full-stack, web extension, 
 
 *   Always active /caveman and /ponytail
 *   activate /frontend-design when implement/change/fixing front-end/UI code
+
+## 8. Cotrans Porting Strategy
+When adapting code or logic from Cotrans (Python) to this project (TypeScript), you MUST ALWAYS look at the actual Cotrans codebase located at `scratches/reference/cotrans` before making any changes or proposing solutions. Do not invent your own math or logic if Cotrans already solves it. Follow these mapping rules strictly:
+*   **Pure Math -> Pure Math:** If Cotrans uses pure math (e.g., geometry, vector logic, polygon scaling), translate it into pure TypeScript math.
+*   **Library -> Library:** If Cotrans uses a library (e.g., OpenCV, Shapely) and an equivalent/lightweight alternative exists in our stack (e.g., `opencv-js`, `clipper-lib`), use our library.
+*   **Library -> Custom JS:** If Cotrans uses a heavy library function that is either missing in our WASM builds (e.g., `cv2.findNonZero`) or too bloated to import, and it is easy to implement efficiently in JavaScript, write the custom JS logic from scratch.

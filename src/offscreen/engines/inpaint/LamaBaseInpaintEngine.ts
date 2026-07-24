@@ -145,6 +145,10 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
     }
   }
 
+  // NOTE TO FUTURE AI AGENTS: DO NOT TOUCH or port Cotrans logic for INPAINTING.
+  // We intentionally skip Cotrans's complex mask expansion/inpainting logic and
+  // strictly use the raw polygon patches directly. Do not attempt to synchronize
+  // this engine with Cotrans.
   async inpaint(
     imageBuffer: ArrayBuffer,
     polygons: Point2D[][],

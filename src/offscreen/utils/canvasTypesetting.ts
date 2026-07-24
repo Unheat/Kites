@@ -650,6 +650,7 @@ interface EngRegion {
   angle: number;
   enlargeRatio: number;
   enlargedXyxy: [number, number, number, number];
+  direction: 'h' | 'v';
 }
 
 /**
@@ -760,7 +761,8 @@ function renderTextblockListEng(
       fontSize,
       angle,
       enlargeRatio: 1,
-      enlargedXyxy: [x1, y1, x2, y2]
+      enlargedXyxy: [x1, y1, x2, y2],
+      direction: b.direction || (y2 - y1 > (x2 - x1) * 1.5 ? 'v' : 'h')
     };
     regions.push(region);
   }
@@ -862,8 +864,17 @@ function renderTextblockListEng(
 
     // New region bbox from the balloon mask
     const regionRect = maskBoundingRect(mask);
-    const regionW = regionRect.w;
-    const regionH = regionRect.h;
+
+    // Custom PaddleOCR DBNet Tweak: 
+    // Because PaddleOCR polygons are spiky, maskBoundingRect.w will return an inflated width.
+    // We estimate the true average width by dividing the mask area by the mask height.
+    let maskArea = 0;
+    for (let j = 0; j < mask.data.length; j++) {
+      if (mask.data[j] === 0) maskArea++; // inside bubble is 0, background is 255
+    }
+    const regionH = Math.max(1, regionRect.h);
+    // Use the area-based average width, capped at the actual bounding box width
+    const regionW = Math.min(regionRect.w, Math.ceil(maskArea / regionH));
     const regionY = regionRect.y;
 
     // Cotrans font downscaling: fit the longest word to the balloon width and the
@@ -884,10 +895,14 @@ function renderTextblockListEng(
     const fontSizeMinimum = Math.max(1, Math.round((pageWidth + pageHeight) / FONT_SIZE_MINIMUM_DIVISOR));
     let fontSize = fontValues.fontSize;
     if (fontSizeMultiplier < 1) {
+      console.log(`[Trace] ENTERED IF! fontSizeBefore=${fontSize} mult=${fontSizeMultiplier} mult*fs=${fontSize * fontSizeMultiplier} min=${fontSizeMinimum}`);
       fontSize = Math.max(Math.trunc(fontSize * fontSizeMultiplier), fontSizeMinimum);
+      console.log(`[Trace] new fontSize=${fontSize}`);
       fontValues = calculateFontValues(ctx, fontSize, words);
       fontSize = fontValues.fontSize;
     }
+
+    console.log(`[Typesetting] block="${words.join(' ')}" initialFs=${fontValues.fontSize} regionW=${regionW} xyxyH=${Math.abs(xyxy[3] - xyxy[1])} linesAvail=${linesAvailable} linesNeed=${linesNeeded} fsMult=${fontSizeMultiplier} finalFs=${fontSize} fsMin=${fontSizeMinimum}`);
 
     const { sw, lineHeight, delimiterLen, wordLengths } = fontValues;
 

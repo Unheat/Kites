@@ -194,9 +194,6 @@ graph TD
 #### The Binarizer (Handling the Border-Erase Problem)
 Instead of masking the entire blocky bounding box, we extract a **pixel-perfect mask of the exact text strokes**.
 * **Grayscale + Otsu's Adaptive Thresholding:** Runs on each cropped text box canvas to separate high-contrast text strokes from the bubble background.
-* **Polygon Masking:** Zeroes out any threshed pixels falling outside the text bounding polygons.
-* **Usage:** **Tier 2 (Telea)**, **Tier 3 (AOT-GAN)**, and **Tier 4 (LaMa)** all consume this refined stroke-level mask. They only erase the text strokes, keeping bubble borders and background illustrations 100% untouched.
-
 #### The 6 Inpainting Tiers:
 1. **Tier 1: Simple Inpaint (Dominant Color Fill):** Samples pixel colors along the bounding box outer edges, determines the dominant color, and fills the bounding rectangle. Runs in microseconds (`0MB`).
 2. **Tier 2: Telea Math Inpaint (FMM Diffusion):** Applies Alexandru Telea's Fast Marching Method FMM algorithm on the stroke mask, propagating surrounding background colors inward to erase characters. Extremely fast (`0MB`), preserves outlines.
@@ -222,6 +219,9 @@ Because adding a completely new inpainting model architecture requires specific 
 - **Phase 2 (Canvas Editor):** React-Konva Canvas Dashboard implementation (draggable text boxes, editable text, rendering from IndexedDB).
 - **Phase 3 (Local AI Engine):** Offscreen document running PaddleOCR ONNX / MarianMT with Hugging Face CDN download progress bars.
 - **Phase 4 (Cloud Premium Compute):** Server-Hosted Compute API with JWT authentication middleware + Web App Stripe checkout, communicating Auth tokens back to the extension.
+- **Phase 5 (Future Improvements):** 
+  - *OCR Migration*: Migrate from PaddleOCR DBNet to `ComicTextDetector` (YOLOv5 ONNX ~90MB) on WebGPU. This will generate non-spiky, tight bounding boxes and allow us to use Cotrans's raw 1:1 typesetting math without any area-mask tweaks.
+  - *Layout Math*: Until Phase 5 is active, the typesetting math in `canvasTypesetting.ts` must use custom tweaks (like `maskArea / xyxyH` to estimate true speech bubble width) to prevent PaddleOCR's spiky boxes from causing text to spill out.
 ## 3. Important References & Tool Links
 
 The following tools and libraries are critical references for the development of this project:

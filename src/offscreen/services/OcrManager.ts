@@ -145,10 +145,15 @@ export class OcrManager {
    * Uses convex hull to generate accurate bounding polygons for merged blocks,
    * and concatenates text right-to-left.
    */
-  private mergeTextBlocks(result: OcrResult): OcrResult {
+  private mergeTextBlocks(result: OcrResult): OcrResult & {
+    directions?: ('h'|'v')[];
+    fontSizes?: number[];
+    angles?: number[];
+    rawPolygons?: Point2D[][];
+  } {
     // Merge algorithm entry point
     const { texts: rawTexts, polygons: rawPolygons = [], scores: rawScores = [] } = result;
-    if (rawTexts.length <= 1 || rawPolygons.length === 0) return result;
+    if (rawTexts.length <= 1 || rawPolygons.length === 0) return { ...result, rawPolygons };
 
     // Stage 1: Cotrans Noise Filtering (area > 16, non-empty text, and isValuableText - manga_translator.py)
     const validIndices: number[] = [];
@@ -332,7 +337,7 @@ export class OcrManager {
       directions: mergedDirections,
       fontSizes: mergedFontSizes,
       angles: mergedAngles,
-      rawPolygons: polygons,
+      rawPolygons: rawPolygons,
       maskRawCanvas: result.maskRawCanvas
     };
   }
@@ -343,7 +348,12 @@ export class OcrManager {
    * @param imageBuffer - The raw ArrayBuffer of the image.
    * @returns A promise that resolves to the standardized OCR result.
    */
-  async processImage(imageBuffer: ArrayBuffer): Promise<OcrResult> {
+  async processImage(imageBuffer: ArrayBuffer): Promise<OcrResult & {
+    directions?: ('h'|'v')[];
+    fontSizes?: number[];
+    angles?: number[];
+    rawPolygons?: Point2D[][];
+  }> {
     const engine = await this.getOrLoadEngine();
     const rawResult = await engine.recognize(imageBuffer);
     return this.mergeTextBlocks(rawResult);
