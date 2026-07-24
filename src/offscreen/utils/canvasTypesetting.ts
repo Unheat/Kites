@@ -33,7 +33,7 @@ const LINE_SPACING_RATIO = 0.01;
  * (balloon width / longest word, available/needed lines) fully govern instead and clamp
  * the result with Cotrans's own font_size_minimum formula below.
  */
-const DOWNSCALE_CONSTRAINT = 0;
+
 
 /**
  * Cotrans font_size_minimum formula (rendering/__init__.py resize_regions_to_font_size):
@@ -611,6 +611,7 @@ export interface TextBlockItem {
   fontSize?: number;
   /** Cotrans block rotation in degrees (0 for upright text). */
   angle?: number;
+  isTightBoundingBox?: boolean;
 }
 
 /** Per-block render outcome, aligned with the input blocks array. */
@@ -891,6 +892,7 @@ function renderTextblockListEng(
     const w = Math.max(1, cx2 - cx1);
     const h = Math.max(1, cy2 - cy1);
     return {
+      xyxy: [cx1, cy1, cx2, cy2],
       mask: { data: new Uint8Array(w * h).fill(255), width: w, height: h },
     };
   });
@@ -965,89 +967,63 @@ function renderTextblockListEng(
     let fontSize = fontValues.fontSize;
     let textlines: Textline[] = [];
 
-    if (!region.isTightBoundingBox) {
-      // -------------------------------------------------------------
-      // PADDLE OCR BINARY SEARCH FALLBACK
-      // -------------------------------------------------------------
-      // Since PaddleOCR polygons are irregular and we cannot reliably use 
-      // resize_regions_to_font_size to dynamically expand them, the one-shot
-      // mathematical estimation will overflow elliptical bubbles. 
-      // We fall back to a binary search loop that shrinks the font until 
-      // the laid-out text strictly fits within the mask's bounding box.
-      
-      let fs = fontValues.fontSize; 
-      let bestLines: Textline[] = [];
-      let bestFs = fs;
+    // -------------------------------------------------------------
+    // STRICT BINARY SEARCH BOUNDARY FITTING LOOP FOR ALL ENGINES
+    // -------------------------------------------------------------
+    // Shrinks font size until EVERY text line fits 100% inside the speech balloon mask pixels.
+    // Background is 0, inside bubble is > 0.
+    let fs = fontValues.fontSize; 
+    let bestLines: Textline[] = [];
+    let bestFs = fs;
 
-      while (fs >= Math.max(fontSizeMinimum, 8)) {
-        const curFontValues = calculateFontValues(ctx, fs, words);
-        const curLines = layoutLinesAligncenter(mask, words, curFontValues.wordLengths, curFontValues.delimiterLen, curFontValues.lineHeight);
-        
-        let fits = true;
-        for (const l of curLines) {
-           const minX = Math.floor(l.pos_x);
-           const maxX = Math.ceil(l.pos_x + l.length);
-           const minY = Math.floor(l.pos_y);
-           const maxY = Math.ceil(l.pos_y + curFontValues.lineHeight);
-           
-           // Check if it spills outside the image entirely
-           if (minX < 0 || maxX >= mask.w || minY < 0 || maxY >= mask.h) {
-             fits = false;
-             break;
-           }
-           
-           // Check the 4 corners of the line's bounding box against the actual mask pixels.
-           // Background is 0, inside bubble is > 0.
-           const topLeft = mask.data[minY * mask.w + minX];
-           const topRight = mask.data[minY * mask.w + maxX];
-           const bottomLeft = mask.data[maxY * mask.w + minX];
-           const bottomRight = mask.data[maxY * mask.w + maxX];
-           
-           if (topLeft === 0 || topRight === 0 || bottomLeft === 0 || bottomRight === 0) {
-             fits = false;
-             break;
-           }
-        }
-        
-        if (fits) {
-           bestLines = curLines;
-           bestFs = fs;
-           fontValues = curFontValues;
-           console.log(`[Typesetting] PaddleOCR binary search fit! regionW=${regionW} originalFs=${fontValues.fontSize} finalFs=${bestFs} lines=${bestLines.length}`);
+    while (fs >= Math.max(fontSizeMinimum, 6)) {
+      const curFontValues = calculateFontValues(ctx, fs, words);
+      const curLines = layoutLinesAligncenter(mask, words, curFontValues.wordLengths, curFontValues.delimiterLen, curFontValues.lineHeight);
+      
+      let fits = true;
+      for (const l of curLines) {
+         const minX = Math.floor(l.pos_x);
+         const maxX = Math.ceil(l.pos_x + l.length);
+         const minY = Math.floor(l.pos_y);
+         const maxY = Math.ceil(l.pos_y + curFontValues.lineHeight);
+         
+         // Check if line extends outside mask image boundaries
+         if (minX < 0 || maxX >= mask.width || minY < 0 || maxY >= mask.height) {
+           fits = false;
            break;
-        }
-        fs -= 1;
-      }
-
-      if (bestLines.length === 0) {
-        // If it never fits perfectly (e.g. extremely long word in a tiny box), fallback to minimum
-        fontValues = calculateFontValues(ctx, Math.max(fontSizeMinimum, 8), words);
-        bestLines = layoutLinesAligncenter(mask, words, fontValues.wordLengths, fontValues.delimiterLen, fontValues.lineHeight);
-        bestFs = fontValues.fontSize;
-      }
-
-      textlines = bestLines;
-      fontSize = bestFs;
-
-    } else {
-      // -------------------------------------------------------------
-      // COTRANS 1:1 ONE-SHOT MATH (For ComicTextDetector)
-      // -------------------------------------------------------------
-      const linesNeeded = region.translation.length / baseLengthWord.length;
-      const linesAvailable = Math.trunc(Math.abs(xyxy[3] - xyxy[1]) / fontValues.lineHeight) + 1;
-      const fontSizeMultiplier = Math.max(
-        Math.min(regionW / (fontValues.baseLength + 2 * fontValues.sw), linesAvailable / linesNeeded),
-        DOWNSCALE_CONSTRAINT
-      );
-      
-      if (fontSizeMultiplier < 1) {
-        fontSize = Math.max(Math.trunc(fontSize * fontSizeMultiplier), fontSizeMinimum);
-        fontValues = calculateFontValues(ctx, fontSize, words);
-        fontSize = fontValues.fontSize;
+         }
+         
+         // Check 4 corners of line against speech balloon mask data
+         const topLeft = mask.data[minY * mask.width + minX];
+         const topRight = mask.data[minY * mask.width + maxX];
+         const bottomLeft = mask.data[maxY * mask.width + minX];
+         const bottomRight = mask.data[maxY * mask.width + maxX];
+         
+         if (topLeft === 0 || topRight === 0 || bottomLeft === 0 || bottomRight === 0) {
+           fits = false;
+           break;
+         }
       }
       
-      textlines = layoutLinesAligncenter(mask, words, fontValues.wordLengths, fontValues.delimiterLen, fontValues.lineHeight);
+      if (fits) {
+         bestLines = curLines;
+         bestFs = fs;
+         fontValues = curFontValues;
+         console.log(`[Typesetting] Strict boundary fit! regionW=${regionW} originalFs=${fontValues.fontSize} finalFs=${bestFs} lines=${bestLines.length}`);
+         break;
+      }
+      fs -= 1;
     }
+
+    if (bestLines.length === 0) {
+      // Fallback if font cannot shrink further
+      fontValues = calculateFontValues(ctx, Math.max(fontSizeMinimum, 6), words);
+      bestLines = layoutLinesAligncenter(mask, words, fontValues.wordLengths, fontValues.delimiterLen, fontValues.lineHeight);
+      bestFs = fontValues.fontSize;
+    }
+
+    textlines = bestLines;
+    fontSize = bestFs;
 
     if (textlines.length === 0) continue;
 
@@ -1076,8 +1052,10 @@ function renderTextblockListEng(
       relCx = rcx;
       relCy = rcy;
     }
-    let absCx = relCx + xyxy[0];
-    let absCy = relCy + xyxy[1];
+    const boxX1 = xyxy ? xyxy[0] : region.xywh[0];
+    const boxY1 = xyxy ? xyxy[1] : region.xywh[1];
+    let absCx = relCx + boxX1;
+    let absCy = relCy + boxY1;
 
     // Draw the block: lines stacked at font_size + spacing pitch, centered at (absCx, absCy)
     // (equivalent to Cotrans render_lines + centered paste)
