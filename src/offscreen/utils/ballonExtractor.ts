@@ -1,5 +1,13 @@
 import { getCv } from './opencv';
 
+function getCvInstance(): any {
+  const cv = getCv();
+  if (!cv) return null;
+  if (typeof cv.Mat === 'function') return cv;
+  if (cv.cv && typeof cv.cv.Mat === 'function') return cv.cv;
+  return cv;
+}
+
 export interface GrayImage {
   data: Uint8Array;
   width: number;
@@ -60,7 +68,7 @@ export function extractBallonRegion(
   ballonRect: [number, number, number, number],
   enlargeRatio = 1
 ): BallonRegionResult {
-  const cv = getCv();
+  const cv = getCvInstance();
 
   let x1 = ballonRect[0];
   let y1 = ballonRect[1];
@@ -84,7 +92,8 @@ export function extractBallonRegion(
   const oriW = x2 - x1;
   const oriH = y2 - y1;
 
-  let pageMat = cv.matFromArray(pageHeight, pageWidth, cv.CV_8UC4, pageData);
+  let pageMat = new cv.Mat(pageHeight, pageWidth, cv.CV_8UC4);
+  pageMat.data.set(pageData);
   let rect = new cv.Rect(x1, y1, oriW, oriH);
   let img = pageMat.roi(rect);
   
@@ -220,8 +229,9 @@ export function extractBallonRegion(
 }
 
 export function maskCentroid(img: GrayImage): { x: number; y: number } {
-  const cv = getCv();
-  let mat = cv.matFromArray(img.height, img.width, cv.CV_8UC1, img.data);
+  const cv = getCvInstance();
+  let mat = new cv.Mat(img.height, img.width, cv.CV_8UC1);
+  mat.data.set(img.data);
   let moments = cv.moments(mat);
   mat.delete();
   if (moments.m00 === 0) return { x: Math.floor(img.width / 2), y: Math.floor(img.height / 2) };
@@ -249,8 +259,9 @@ export function maskBoundingRect(img: GrayImage): { x: number; y: number; w: num
 }
 
 export function rotateMaskExpand(img: GrayImage, angleDeg: number): GrayImage {
-  const cv = getCv();
-  let mat = cv.matFromArray(img.height, img.width, cv.CV_8UC1, img.data);
+  const cv = getCvInstance();
+  let mat = new cv.Mat(img.height, img.width, cv.CV_8UC1);
+  mat.data.set(img.data);
   
   let center = new cv.Point(img.width / 2, img.height / 2);
   let M = cv.getRotationMatrix2D(center, angleDeg, 1.0);

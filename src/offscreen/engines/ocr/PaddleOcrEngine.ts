@@ -24,7 +24,6 @@ export class PaddleOcrEngine implements IOcrEngine {
       let MODEL_PRESETS: any;
 
       if (isNode) {
-        // Node environment (Visual Unit Tests)
         console.log('[PaddleOcrEngine] Detected Node.js environment. Loading native backend...');
         // @ts-ignore - The module exists at runtime for Node
         const moduleName = 'ppu-paddle-ocr';
@@ -32,10 +31,7 @@ export class PaddleOcrEngine implements IOcrEngine {
         PaddleOcrService = pkg.PaddleOcrService;
         MODEL_PRESETS = pkg.MODEL_PRESETS;
       } else {
-        // Browser environment (Chrome Extension)
         console.log('[PaddleOcrEngine] Detected Browser environment. Loading web backend...');
-        
-        // Ensure ORT does not fallback to CDN under Manifest V3
         const ort = await import('onnxruntime-web');
         ort.env.wasm.wasmPaths = chrome.runtime.getURL('/ort-wasm/');
 
@@ -61,14 +57,12 @@ export class PaddleOcrEngine implements IOcrEngine {
       
       const startTime = performance.now();
       
-      // Explicitly demand high-performance hardware GPU to bypass Chrome background throttling
       if ((ort as any).env?.webgpu) {
         (ort as any).env.webgpu.powerPreference = 'high-performance';
       }
 
       console.log(`[PaddleOcrEngine] WebGPU Available: ${useWebGpu}. Initializing service...`);
 
-      // Explicitly declare execution providers with high-performance power preference
       const executionProviders = useWebGpu 
         ? [
             {
@@ -80,7 +74,6 @@ export class PaddleOcrEngine implements IOcrEngine {
           ] 
         : ['wasm'];
 
-      // In Node.js, ppu-paddle-ocr natively uses CPU (wasm/cpu providers)
       this.service = new PaddleOcrService({
         model: MODEL_PRESETS['v6-small'], 
         detection: {
@@ -91,7 +84,6 @@ export class PaddleOcrEngine implements IOcrEngine {
           graphOptimizationLevel: 'basic'
         },
         recognition: {
-          // Bin-pack crops into a single tensor batch to eliminate transfer overhead
           strategy: 'cross-line' 
         }
       });
@@ -99,8 +91,7 @@ export class PaddleOcrEngine implements IOcrEngine {
       await this.service.initialize();
       this.customDetector = new CustomPaddleDetector(this.service);
       this.isInitialized = true;
-      const initDuration = (performance.now() - startTime).toFixed(2);
-      console.log(`[PaddleOcrEngine] Initialization complete in ${initDuration}ms.`);
+      console.log(`[PaddleOcrEngine] Initialization complete in ${(performance.now() - startTime).toFixed(2)}ms.`);
     } catch (e) {
       console.error('[PaddleOcrEngine] Failed to initialize:', e);
       throw e;
@@ -108,74 +99,80 @@ export class PaddleOcrEngine implements IOcrEngine {
   }
 
   /**
-   * Executes the full OCR pipeline: runs detection to get rotated bounding boxes,
-   * crops and warps each region, and executes CRNN character recognition.
+   * Executes full OCR pipeline (detection + CRNN recognition).
    * 
-   * @param imageBuffer - The raw ArrayBuffer of the image.
-   * @returns A promise that resolves to the OCR result containing texts, boxes, and polygons.
+   * @param imageBuffer - Raw image ArrayBuffer.
+   * @returns OCR result with texts, boxes, and polygons.
    */
   async recognize(imageBuffer: ArrayBuffer): Promise<OcrResult> {
     if (!this.isInitialized || !this.service || !this.customDetector) {
-      throw new Error('PaddleOcrEngine is not initialized.');
+      await this.init();
     }
 
     try {
       const startTime = performance.now();
       console.log('[PaddleOcrEngine] Starting recognition...');
       
-      // 1. Get perfect rotated bounding boxes and Cotrans mask_raw via pure JS detector
-      const { polygons, maskRawCanvas } = await this.customDetector.detectPolygons(imageBuffer);
+      const { polygons, maskRawCanvas } = await this.customDetector!.detectPolygons(imageBuffer);
       
       console.log(`[PaddleOcrEngine] Extracted ${polygons.length} text polygons. Running custom rotated recognition...`);
 
-      // 2. Prepare source image canvas
-      const sourceCanvas = await this.service.platform.canvas.prepareCanvas(imageBuffer);
-      
-      const recognitor = this.service.recognitor;
-      const ctx = recognitor.buildContext();
-      const dictionary = this.service.options.recognition?.charactersDictionary;
+      const { texts, scores } = await this.recognizeCrops(imageBuffer, polygons);
 
-      // 3. Crop, warp, and recognize each text polygon in parallel
-      const promises = polygons.map(async (poly) => {
-        // Perspective crop/rotate to straighten text and handle vertical manga layout
-        const finalCropCanvas = cropAndWarp(this.service.platform, sourceCanvas, poly);
-
-        // Execute CRNN text recognition on the straightened crop
-        const { text, confidence } = await recognitor.recognizeTextViaContext(finalCropCanvas, ctx, dictionary);
-
-        let minX = Infinity, minY = Infinity;
-        let maxX = -Infinity, maxY = -Infinity;
+      const boxes = polygons.map(poly => {
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
         for (const p of poly) {
           if (p.x < minX) minX = p.x;
           if (p.x > maxX) maxX = p.x;
           if (p.y < minY) minY = p.y;
           if (p.y > maxY) maxY = p.y;
         }
-        const box = {
+        return {
           x: Math.max(0, Math.round(minX)),
           y: Math.max(0, Math.round(minY)),
           w: Math.max(1, Math.round(maxX - minX)),
           h: Math.max(1, Math.round(maxY - minY))
         };
-
-        return { text, confidence, box };
       });
-
-      const results = await Promise.all(promises);
-
-      const texts = results.map(r => r.text);
-      const scores = results.map(r => r.confidence);
-      const boxes = results.map(r => r.box);
 
       const totalDuration = (performance.now() - startTime).toFixed(2);
       console.log(`[PaddleOcrEngine] Tensor Batch Recognition complete in ${totalDuration}ms. Found ${texts.length} text blocks.`);
       
-      // Return texts, boxes, scores, polygons, and maskRawCanvas (perfectly aligned by index)
-      return { texts, boxes, scores, polygons, maskRawCanvas };
+      return { texts, boxes, scores, polygons, maskRawCanvas, isTightBoundingBox: false };
     } catch (e) {
       console.error('[PaddleOcrEngine] Recognition failed:', e);
       throw e;
     }
+  }
+
+  /**
+   * Recognizes text for arbitrary polygon crops using the CRNN model.
+   * 
+   * @param imageBuffer - Raw image ArrayBuffer.
+   * @param polygons - Array of 4-point quadrilaterals.
+   * @returns Object containing recognized texts array and confidence scores array.
+   */
+  async recognizeCrops(imageBuffer: ArrayBuffer, polygons: { x: number; y: number }[][]): Promise<{ texts: string[]; scores: number[] }> {
+    if (!this.isInitialized || !this.service) {
+      await this.init();
+    }
+
+    const sourceCanvas = await this.service.platform.canvas.prepareCanvas(imageBuffer);
+    const recognitor = this.service.recognitor;
+    const ctx = recognitor.buildContext();
+    const dictionary = this.service.options.recognition?.charactersDictionary;
+
+    const promises = polygons.map(async (poly) => {
+      const finalCropCanvas = cropAndWarp(this.service.platform, sourceCanvas, poly);
+      const { text, confidence } = await recognitor.recognizeTextViaContext(finalCropCanvas, ctx, dictionary);
+      return { text, confidence };
+    });
+
+    const results = await Promise.all(promises);
+    return {
+      texts: results.map(r => r.text),
+      scores: results.map(r => r.confidence)
+    };
   }
 
   /**
@@ -222,34 +219,28 @@ function cropAndWarp(
   const cropW = Math.max(1, Math.round(width));
   const cropH = Math.max(1, Math.round(height));
 
-  // Create intermediate canvas to hold the straightened crop
   const destCanvas = platform.createCanvas(cropW, cropH);
   const destCtx = destCanvas.getContext('2d');
   if (!destCtx) return destCanvas;
 
-  // Calculate the angle of rotation of the text block
   const theta = Math.atan2(p1.y - p0.y, p1.x - p0.x);
 
-  // Apply the transformation to draw the tilted region flat
   destCtx.save();
   destCtx.translate(0, 0);
   destCtx.rotate(-theta);
-  destCtx.translate(-p0.x, -p0.y);
-  destCtx.drawImage(sourceCanvas, 0, 0);
+  destCtx.drawImage(sourceCanvas, -p0.x, -p0.y);
   destCtx.restore();
 
-  // If the text line is vertical (typical vertical speech bubble in manga),
-  // rotate it 90 degrees counter-clockwise so that the CRNN recognizer can read it horizontally.
-  if (cropH / cropW >= 1.5) {
-    const rotatedCanvas = platform.createCanvas(cropH, cropW);
-    const rCtx = rotatedCanvas.getContext('2d');
-    if (rCtx) {
-      rCtx.save();
-      rCtx.translate(0, cropW);
-      rCtx.rotate(-Math.PI / 2); // 90 degrees counter-clockwise
-      rCtx.drawImage(destCanvas, 0, 0);
-      rCtx.restore();
-      return rotatedCanvas;
+  if (cropH > cropW * 1.2) {
+    const rotCanvas = platform.createCanvas(cropH, cropW);
+    const rotCtx = rotCanvas.getContext('2d');
+    if (rotCtx) {
+      rotCtx.save();
+      rotCtx.translate(0, cropW);
+      rotCtx.rotate(-Math.PI / 2);
+      rotCtx.drawImage(destCanvas, 0, 0);
+      rotCtx.restore();
+      return rotCanvas;
     }
   }
 

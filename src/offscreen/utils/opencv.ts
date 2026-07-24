@@ -7,7 +7,7 @@ let cv: any = null;
  * Must be called and awaited before any synchronous OpenCV functions are used.
  */
 export async function initOpenCV(): Promise<any> {
-  if (cv) return cv;
+  if (cv && typeof cv.Mat === 'function') return cv;
 
   const isNode = typeof window === 'undefined';
   let cvModule: any;
@@ -22,21 +22,20 @@ export async function initOpenCV(): Promise<any> {
   const cvFactory = cvModule.default || cvModule;
 
   if (typeof cvFactory === 'function') {
-    const instance = await new Promise<any>((resolve, reject) => {
-      try {
-        const res = cvFactory();
-        if (res && typeof res.then === 'function') {
-          res.then(resolve).catch(reject);
-        } else {
-          resolve(res);
-        }
-      } catch (err) {
-        reject(err);
-      }
-    });
-    cv = instance;
+    try {
+      const resolved = await cvFactory();
+      cv = (globalThis as any).cv || resolved || cvFactory;
+    } catch (e) {
+      cv = (globalThis as any).cv || cvFactory;
+    }
   } else {
-    cv = cvFactory;
+    cv = (globalThis as any).cv || cvFactory;
+  }
+
+  if (!cv || typeof cv.Mat !== 'function') {
+    if (typeof (globalThis as any).cv !== 'undefined' && typeof (globalThis as any).cv.Mat === 'function') {
+      cv = (globalThis as any).cv;
+    }
   }
 
   // Remove or override .then property if present so async functions never treat cv as a Thenable
@@ -57,8 +56,10 @@ export async function initOpenCV(): Promise<any> {
  * Throws an error if initOpenCV() hasn't completed yet.
  */
 export function getCv(): any {
-  if (!cv) {
-    throw new Error('OpenCV has not been initialized. Call initOpenCV() first.');
+  if (!cv || typeof cv.Mat !== 'function') {
+    if (typeof (globalThis as any).cv !== 'undefined' && typeof (globalThis as any).cv.Mat === 'function') {
+      cv = (globalThis as any).cv;
+    }
   }
   return cv;
 }
