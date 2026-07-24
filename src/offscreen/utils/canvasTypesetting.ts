@@ -651,6 +651,7 @@ interface EngRegion {
   enlargeRatio: number;
   enlargedXyxy: [number, number, number, number];
   direction: 'h' | 'v';
+  isTightBoundingBox?: boolean;
 }
 
 /**
@@ -762,11 +763,78 @@ function renderTextblockListEng(
       angle,
       enlargeRatio: 1,
       enlargedXyxy: [x1, y1, x2, y2],
-      direction: b.direction || (y2 - y1 > (x2 - x1) * 1.5 ? 'v' : 'h')
+      direction: b.direction || (y2 - y1 > (x2 - x1) * 1.5 ? 'v' : 'h'),
+      isTightBoundingBox: b.isTightBoundingBox
     };
     regions.push(region);
   }
   if (regions.length === 0) return results;
+
+  // Port of Cotrans resize_regions_to_font_size:
+  // Dynamically expand the bounding box if the translation needs more rows/cols 
+  // than the original text used.
+  // ONLY APPLIES TO TIGHT BOUNDING BOXES (e.g. ComicTextDetector), because spiky boxes (PaddleOCR)
+  // are already too wide/tall and expanding them causes catastrophic page flooding.
+  for (const region of regions) {
+    if (!region.isTightBoundingBox) continue;
+
+    const w = region.xywh[2];
+    const h = region.xywh[3];
+    const words = segEng(region.translation);
+    if (!words.length) continue;
+
+    // Simulate lines needed at initial font size
+    let neededLines = 1;
+    let currentLen = 0;
+    const delimiterLen = Math.trunc(ctx.measureText(' ').width);
+    
+    ctx.font = `bold ${region.fontSize}px ${RENDER_FONT_FAMILY}`;
+    const wordLengths = words.map(word => Math.trunc(ctx.measureText(word).width));
+
+    if (region.direction === 'v') {
+      const maxColHeight = Math.max(h, region.fontSize * 2);
+      for (const wl of wordLengths) {
+        if (currentLen + wl > maxColHeight) {
+          neededLines++;
+          currentLen = wl + delimiterLen;
+        } else {
+          currentLen += wl + delimiterLen;
+        }
+      }
+      
+      const usedCols = 1;
+      if (neededLines > usedCols) {
+        const scaleX = ((neededLines - usedCols) / usedCols) * 1 + 1;
+        const cx = (region.xyxy[0] + region.xyxy[2]) / 2;
+        const newW = w * scaleX;
+        region.xyxy[0] = Math.round(cx - newW / 2);
+        region.xyxy[2] = Math.round(cx + newW / 2);
+        region.xywh[0] = region.xyxy[0];
+        region.xywh[2] = Math.round(newW);
+      }
+    } else {
+      const maxRowWidth = Math.max(w, region.fontSize * 2);
+      for (const wl of wordLengths) {
+        if (currentLen + wl > maxRowWidth) {
+          neededLines++;
+          currentLen = wl + delimiterLen;
+        } else {
+          currentLen += wl + delimiterLen;
+        }
+      }
+      
+      const usedRows = 1;
+      if (neededLines > usedRows) {
+        const scaleY = ((neededLines - usedRows) / usedRows) * 1 + 1;
+        const cy = (region.xyxy[1] + region.xyxy[3]) / 2;
+        const newH = h * scaleY;
+        region.xyxy[1] = Math.round(cy - newH / 2);
+        region.xyxy[3] = Math.round(cy + newH / 2);
+        region.xywh[1] = region.xyxy[1];
+        region.xywh[3] = Math.round(newH);
+      }
+    }
+  }
 
   // Adjust enlarge ratios relative to each other to reduce intersections (1:1 Cotrans)
   for (const region of regions) {
@@ -865,16 +933,20 @@ function renderTextblockListEng(
     // New region bbox from the balloon mask
     const regionRect = maskBoundingRect(mask);
 
-    // Custom PaddleOCR DBNet Tweak: 
-    // Because PaddleOCR polygons are spiky, maskBoundingRect.w will return an inflated width.
-    // We estimate the true average width by dividing the mask area by the mask height.
-    let maskArea = 0;
-    for (let j = 0; j < mask.data.length; j++) {
-      if (mask.data[j] === 0) maskArea++; // inside bubble is 0, background is 255
-    }
+    let regionW = regionRect.w;
     const regionH = Math.max(1, regionRect.h);
-    // Use the area-based average width, capped at the actual bounding box width
-    const regionW = Math.min(regionRect.w, Math.ceil(maskArea / regionH));
+
+    if (!region.isTightBoundingBox) {
+      // Custom PaddleOCR DBNet Tweak: 
+      // Because PaddleOCR polygons are spiky, maskBoundingRect.w will return an inflated width.
+      // We estimate the true average width by dividing the mask area by the mask height.
+      let maskArea = 0;
+      for (let j = 0; j < mask.data.length; j++) {
+        if (mask.data[j] > 0) maskArea++; // inside bubble is 255, background is 0
+      }
+      // Use the area-based average width, capped at the actual bounding box width
+      regionW = Math.min(regionRect.w, Math.ceil(maskArea / regionH));
+    }
     const regionY = regionRect.y;
 
     // Cotrans font downscaling: fit the longest word to the balloon width and the

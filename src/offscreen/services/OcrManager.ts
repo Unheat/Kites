@@ -26,11 +26,13 @@ export function isValuableText(text: string): boolean {
   return false;
 }
 
+export type OcrTier = 'paddle-dbnet' | 'comic-text-detector' | 'none';
+
 export class OcrManager {
-  private engine: IOcrEngine | null = null;
+  private engines: Map<OcrTier, IOcrEngine> = new Map();
   // Stores the in-flight initialization promise so that concurrent callers
   // all await the same work rather than spinning in a polling loop.
-  private initPromise: Promise<IOcrEngine> | null = null;
+  private initPromises: Map<OcrTier, Promise<IOcrEngine>> = new Map();
 
   /**
    * Returns the initialized OCR engine, creating and initializing it on first call.
@@ -39,20 +41,32 @@ export class OcrManager {
    *
    * @returns A promise that resolves to the loaded OCR engine instance.
    */
-  async getOrLoadEngine(): Promise<IOcrEngine> {
-    if (this.engine) return this.engine;
+  async getOrLoadEngine(tier: OcrTier = 'paddle-dbnet'): Promise<IOcrEngine> {
+    if (this.engines.has(tier)) return this.engines.get(tier)!;
 
-    if (!this.initPromise) {
-      this.initPromise = (async () => {
-        console.log('[OcrManager] Instantiating PaddleOcrEngine...');
-        const engine = new PaddleOcrEngine();
+    if (!this.initPromises.has(tier)) {
+      const promise = (async () => {
+        console.log(`[OcrManager] Instantiating OCR Engine for tier: ${tier}...`);
+        let engine: IOcrEngine;
+        switch (tier) {
+          case 'paddle-dbnet':
+            engine = new PaddleOcrEngine();
+            break;
+          case 'comic-text-detector':
+            throw new Error('[OcrManager] ComicTextDetector is not yet implemented. Please fallback to paddle-dbnet.');
+          case 'none':
+            throw new Error('[OcrManager] None OCR engine is not yet implemented.');
+          default:
+            throw new Error(`[OcrManager] Unknown OCR tier: ${tier}`);
+        }
         await engine.init();
-        this.engine = engine;
+        this.engines.set(tier, engine);
         return engine;
       })();
+      this.initPromises.set(tier, promise);
     }
 
-    return this.initPromise;
+    return this.initPromises.get(tier)!;
   }
 
   /**
@@ -354,7 +368,10 @@ export class OcrManager {
     angles?: number[];
     rawPolygons?: Point2D[][];
   }> {
-    const engine = await this.getOrLoadEngine();
+    // In the future, this tier should be retrieved dynamically (e.g., from chrome.storage.local)
+    // similar to how InpaintManager routes based on user configuration.
+    const engineTier: OcrTier = 'paddle-dbnet';
+    const engine = await this.getOrLoadEngine(engineTier);
     const rawResult = await engine.recognize(imageBuffer);
     return this.mergeTextBlocks(rawResult);
   }
