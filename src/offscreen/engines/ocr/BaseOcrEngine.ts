@@ -38,6 +38,9 @@ export interface OcrResult {
 
   /** Optional Cotrans block rotation per region in degrees (mean textline angle - 90, snapped to 0 below 3deg). */
   angles?: number[];
+
+  /** Indicates whether the returned bounding boxes/polygons are extremely tight (like CTD) or spiky/loose (like PaddleOCR). */
+  isTightBoundingBox?: boolean;
 }
 
 export interface IOcrEngine {

@@ -19,6 +19,8 @@
     "@techstark/opencv-js": "^5.0.0-release.1",
     "clipper-lib": "^6.4.2",
     "dexie": "^4.4.4",
+    "hyphenation.en-us": "^0.2.1",
+    "hypher": "^0.2.5",
     "lucide-react": "^1.24.0",
     "minisearch": "^7.2.0",
     "onnxruntime-web": "^1.27.0",

@@ -1,6 +1,7 @@
 import type { IOcrEngine, OcrResult } from '../engines/ocr/BaseOcrEngine';
 import { PaddleOcrEngine } from '../engines/ocr/PaddleOcrEngine';
-import { Quadrilateral, Graph, calculateBoundingBox, computeMinAreaRect, polygonArea, quadrilateralCanMergeRegion, splitTextRegion } from '../../shared/utils/geometry';
+import { CtdOcrEngine } from '../engines/ocr/CtdOcrEngine';
+import { Quadrilateral, Graph, calculateBoundingBox, computeMinAreaRect, polygonArea, quadrilateralCanMergeRegion, splitTextRegion, type Point2D } from '../../shared/utils/geometry';
 
 /**
  * 1:1 Cotrans is_valuable_char check (generic2.py).
@@ -53,7 +54,8 @@ export class OcrManager {
             engine = new PaddleOcrEngine();
             break;
           case 'comic-text-detector':
-            throw new Error('[OcrManager] ComicTextDetector is not yet implemented. Please fallback to paddle-dbnet.');
+            engine = new CtdOcrEngine();
+            break;
           case 'none':
             throw new Error('[OcrManager] None OCR engine is not yet implemented.');
           default:
@@ -163,6 +165,7 @@ export class OcrManager {
     directions?: ('h'|'v')[];
     fontSizes?: number[];
     angles?: number[];
+    lineCounts?: number[];
     rawPolygons?: Point2D[][];
   } {
     // Merge algorithm entry point
@@ -250,6 +253,7 @@ export class OcrManager {
     const mergedDirections: ('h' | 'v')[] = [];
     const mergedFontSizes: number[] = [];
     const mergedAngles: number[] = [];
+    const mergedLineCounts: number[] = [];
 
     // Build Cotrans Quadrilateral objects once (sorts points, derives direction/font_size)
     const quads = polygons.map(p => new Quadrilateral(p));
@@ -340,6 +344,8 @@ export class OcrManager {
       mergedDirections.push(majorityDir);
       mergedFontSizes.push(groupFontSize);
       mergedAngles.push(angleDeg);
+      // Cotrans used_rows: number of source OCR lines merged into this region.
+      mergedLineCounts.push(groupIndices.length);
     }
 
     // rawPolygons retains the raw unmerged 4-point line quadrilaterals for inpainting
@@ -351,8 +357,10 @@ export class OcrManager {
       directions: mergedDirections,
       fontSizes: mergedFontSizes,
       angles: mergedAngles,
+      lineCounts: mergedLineCounts,
       rawPolygons: rawPolygons,
-      maskRawCanvas: result.maskRawCanvas
+      maskRawCanvas: result.maskRawCanvas,
+      isTightBoundingBox: result.isTightBoundingBox
     };
   }
 
@@ -362,16 +370,15 @@ export class OcrManager {
    * @param imageBuffer - The raw ArrayBuffer of the image.
    * @returns A promise that resolves to the standardized OCR result.
    */
-  async processImage(imageBuffer: ArrayBuffer): Promise<OcrResult & {
+  async processImage(imageBuffer: ArrayBuffer, tier: OcrTier = 'paddle-dbnet'): Promise<OcrResult & {
     directions?: ('h'|'v')[];
     fontSizes?: number[];
     angles?: number[];
+    lineCounts?: number[];
     rawPolygons?: Point2D[][];
+    isTightBoundingBox?: boolean;
   }> {
-    // In the future, this tier should be retrieved dynamically (e.g., from chrome.storage.local)
-    // similar to how InpaintManager routes based on user configuration.
-    const engineTier: OcrTier = 'paddle-dbnet';
-    const engine = await this.getOrLoadEngine(engineTier);
+    const engine = await this.getOrLoadEngine(tier);
     const rawResult = await engine.recognize(imageBuffer);
     return this.mergeTextBlocks(rawResult);
   }
@@ -382,10 +389,10 @@ export class OcrManager {
    * @returns A promise that resolves when cleanup is complete.
    */
   async cleanup(): Promise<void> {
-    if (this.engine) {
-      await this.engine.destroy();
-      this.engine = null;
-      this.initPromise = null;
+    for (const engine of this.engines.values()) {
+      await engine.destroy();
     }
+    this.engines.clear();
+    this.initPromises.clear();
   }
 }

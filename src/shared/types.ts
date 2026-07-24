@@ -75,6 +75,7 @@ export interface PopupState {
   targetLang: string;
   activeEngineId: string;
   activeInpaintId: string;
+  activeOcrId: string;
   fallbackChain: string[];
   customApis: CustomApiConfig[];
   webgpuSupported: boolean | null;
@@ -96,6 +97,7 @@ export const DEFAULT_POPUP_STATE: PopupState = {
   targetLang: 'en',
   activeEngineId: 'gg-translate',
   activeInpaintId: 'simple',
+  activeOcrId: 'paddle-dbnet',
   fallbackChain: [],
   customApis: [],
   webgpuSupported: null,

@@ -66,7 +66,7 @@ async function runPipelineVisualTest() {
     const cleanedBuffer = await inpaintManager.eraseText(arrayBuffer, inpaintPolygons, 'simple');
 
     console.log(`[PipelineTest] Running Translation with GoogleTranslateEngine...`);
-    const translatedTexts = await translator.translate(texts, 'ja', 'en');
+    const translatedTexts = await translator.translate(texts, 'auto', 'en');
     console.log(`[PipelineTest] Baking translated text into Canvas...`);
     
     // Load the cleaned buffer into node-canvas
@@ -91,7 +91,10 @@ async function runPipelineVisualTest() {
           textColor: '#000000',
           strokeColor: '#FFFFFF',
           fontSize: ocrResult.fontSizes ? ocrResult.fontSizes[i] : undefined,
-          angle: ocrResult.angles ? ocrResult.angles[i] : undefined
+          angle: ocrResult.angles ? ocrResult.angles[i] : undefined,
+          isTightBoundingBox: ocrResult.isTightBoundingBox,
+          originalText: texts[i],
+          sourceLineCount: ocrResult.lineCounts ? ocrResult.lineCounts[i] : undefined
         });
       }
     }

@@ -85,7 +85,12 @@ async function runPipelineCtdVisualTest() {
             strokeColor: '#FFFFFF',
             fontSize: ocrResult.fontSizes ? ocrResult.fontSizes[i] : undefined,
             angle: ocrResult.angles ? ocrResult.angles[i] : undefined,
-            isTightBoundingBox: ocrResult.isTightBoundingBox
+            isTightBoundingBox: ocrResult.isTightBoundingBox,
+            // Required by the default renderer: without sourceLineCount the box-expansion
+            // treats every multi-line translation as needing far more rows than the source
+            // used and widens the box massively, overflowing the bubble.
+            originalText: texts[i],
+            sourceLineCount: ocrResult.lineCounts ? ocrResult.lineCounts[i] : undefined
           });
         }
       }

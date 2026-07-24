@@ -22,6 +22,7 @@ export interface Engine {
 export default function EngineSelectionPanel({ state, updateState }: EngineSelectionPanelProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [isOpenInpaint, setIsOpenInpaint] = useState(false);
+  const [isOpenOcr, setIsOpenOcr] = useState(false);
   const [showAddApi, setShowAddApi] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [downloads, setDownloads] = useState<Record<string, { progress: number; status: string }>>({});
@@ -40,6 +41,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
         if (message.payload.progress >= 1 || message.payload.status === 'ready') {
           setBaseEngines(prev => prev.map(e => e.id === message.payload.modelId ? { ...e, isDownloaded: true } : e));
           setInpaintBaseEngines(prev => prev.map(e => e.id === message.payload.modelId ? { ...e, isDownloaded: true } : e));
+          setOcrBaseEngines(prev => prev.map(e => e.id === message.payload.modelId ? { ...e, isDownloaded: true } : e));
         }
       }
     };
@@ -56,6 +58,11 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
     { id: 'lama-manga', name: 'LaMa Manga', type: 'local', isDownloaded: false },
   ]);
 
+  const [ocrBaseEngines, setOcrBaseEngines] = useState<Engine[]>([
+    { id: 'paddle-dbnet', name: 'PaddleOCR (Default)', type: 'local', isDownloaded: true },
+    { id: 'comic-text-detector', name: 'Comic Text Detector', type: 'local', isDownloaded: false, hardware: 'WebGPU' },
+  ]);
+
   useEffect(() => {
     (async () => {
       try {
@@ -68,6 +75,10 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
           if (e.id === 'aotgan') return { ...e, isDownloaded: urls.some(u => u.includes('aotgan')) };
           if (e.id === 'lama-base') return { ...e, isDownloaded: urls.some(u => u.includes('lama_fp32')) };
           if (e.id === 'lama-manga') return { ...e, isDownloaded: urls.some(u => u.includes('lama-manga')) };
+          return e;
+        }));
+        setOcrBaseEngines(prev => prev.map(e => {
+          if (e.id === 'comic-text-detector') return { ...e, isDownloaded: urls.some(u => u.includes('comic_text_detector')) };
           return e;
         }));
       } catch (e) {
@@ -345,7 +356,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                           <div 
                             onClick={(e) => {
                               e.stopPropagation();
-                              chrome.runtime.sendMessage({ type: 'START_MODEL_DOWNLOAD', payload: { modelId: engine.id, category: 'inpaint' } });
+                              chrome.runtime.sendMessage({ type: 'START_MODEL_DOWNLOAD', payload: { modelId: engine.id } });
                               updateState({ activeInpaintId: engine.id });
                               setIsOpenInpaint(false);
                             }}
@@ -364,6 +375,107 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
           )}
         </div>
       </div>
+
+      {/* OCR Engine Selector */}
+      <div className="flex flex-col gap-1.5 mt-4">
+        <div className="flex items-center gap-1.5 mb-1 relative">
+          <h2 className="text-sm font-medium">OCR Engine</h2>
+          <div className="peer w-4 h-4 rounded-full border border-[var(--color-dust)] flex items-center justify-center text-[10px] text-[var(--color-dust)] cursor-help hover:bg-[var(--color-dust)] hover:text-[var(--color-paper)] transition-colors">?</div>
+          
+          <div className="absolute left-0 top-full pt-1.5 w-[280px] max-w-[85vw] z-50 opacity-0 pointer-events-none peer-hover:opacity-100 peer-hover:pointer-events-auto hover:opacity-100 hover:pointer-events-auto transition-opacity">
+            <div className="p-2.5 bg-[var(--color-ink)] text-[var(--color-paper)] text-xs rounded-md shadow-xl">
+              Select text detection engine. PaddleOCR is fast and built-in. Comic Text Detector is a heavy, highly accurate model for manga.
+            </div>
+          </div>
+        </div>
+
+        <div className="relative flex flex-col">
+          <button 
+            onClick={() => setIsOpenOcr(!isOpenOcr)}
+            className="w-full flex items-center justify-between p-3 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md hover:border-[var(--color-ink)] transition-colors cursor-pointer"
+          >
+            <span className="font-medium truncate pr-2">
+              {ocrBaseEngines.find(e => e.id === (state.activeOcrId || 'paddle-dbnet'))?.name || 'Loading...'}
+            </span>
+            <ChevronDown size={16} className={`text-[var(--color-dust)] transition-transform ${isOpenOcr ? 'rotate-180' : ''}`} />
+          </button>
+
+          {downloads[state.activeOcrId || ''] && downloads[state.activeOcrId || ''].progress < 1 && (
+            <div className="mt-2 p-2 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md animate-in fade-in duration-200">
+              <div className="flex justify-between items-end mb-1.5">
+                <span className="text-[10px] font-medium text-[var(--color-dust)] uppercase tracking-wider truncate max-w-[80%]">
+                  {downloads[state.activeOcrId || ''].status}
+                </span>
+                <span className="text-xs font-bold text-[var(--color-ink)]">
+                  {Math.round(downloads[state.activeOcrId || ''].progress * 100)}%
+                </span>
+              </div>
+              <div className="h-1.5 w-full bg-[var(--color-paper)] rounded-full overflow-hidden">
+                <div 
+                  className="h-full bg-[var(--color-editorial)] transition-all duration-300 ease-out" 
+                  style={{ width: `${downloads[state.activeOcrId || ''].progress * 100}%` }}
+                />
+              </div>
+            </div>
+          )}
+
+          {isOpenOcr && (
+            <div className="mt-1 bg-[var(--color-paper)] border border-[var(--color-dust)] rounded-md shadow-sm overflow-hidden flex flex-col max-h-[350px] z-50">
+              <div className="overflow-y-auto flex-1 p-1 custom-scrollbar">
+                {ocrBaseEngines.map((engine) => {
+                  const isUninstalled = !engine.isDownloaded;
+                  const isActive = (state.activeOcrId || 'paddle-dbnet') === engine.id;
+                  return (
+                    <button
+                      key={engine.id}
+                      onClick={() => {
+                        if (isUninstalled) return;
+                        updateState({ activeOcrId: engine.id as any });
+                        setIsOpenOcr(false);
+                      }}
+                      className={`w-full flex items-center justify-between p-2 text-left rounded-sm transition-colors ${
+                        isActive 
+                          ? 'bg-[var(--color-vellum)] text-[var(--color-editorial)] font-semibold cursor-pointer' 
+                          : isUninstalled
+                            ? 'text-[var(--color-dust)] opacity-50 cursor-not-allowed'
+                            : 'hover:bg-[var(--color-vellum)] cursor-pointer'
+                      }`}
+                    >
+                      <div className="flex flex-col overflow-hidden">
+                        <span className="truncate pr-2 text-sm">{engine.name}</span>
+                        {engine.hardware && (
+                          <span className="text-[10px] font-bold uppercase tracking-wider">
+                            [{engine.hardware}] {engine.type === 'local' ? 'Local' : ''}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex-shrink-0 ml-2">
+                        {isActive ? (
+                          <Check size={14} className="text-[var(--color-editorial)]" />
+                        ) : isUninstalled ? (
+                          <div 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              chrome.runtime.sendMessage({ type: 'START_MODEL_DOWNLOAD', payload: { modelId: engine.id, category: 'ocr' } });
+                              updateState({ activeOcrId: engine.id as any });
+                              setIsOpenOcr(false);
+                            }}
+                            className="p-1 -mr-1 rounded hover:bg-[var(--color-vellum)] transition-colors cursor-pointer text-[var(--color-ink)] opacity-100"
+                            title="Download model"
+                          >
+                            <Download size={14} />
+                          </div>
+                        ) : null}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
+
   );
 }

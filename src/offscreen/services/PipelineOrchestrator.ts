@@ -140,7 +140,14 @@ export class PipelineOrchestrator {
             textColor: '#000000',
             strokeColor: '#FFFFFF',
             fontSize: ocrResult.fontSizes ? ocrResult.fontSizes[i] : undefined,
-            angle: ocrResult.angles ? ocrResult.angles[i] : undefined
+            angle: ocrResult.angles ? ocrResult.angles[i] : undefined,
+            // Propagate the detector's box tightness so the manga2eng renderer picks the correct
+            // font-sizing path: CTD (tight) -> Cotrans single-multiplier, PaddleOCR -> strict fit.
+            isTightBoundingBox: ocrResult.isTightBoundingBox,
+            // Default renderer inputs: original source text (length-ratio expansion) and merged
+            // source line count (Cotrans used_rows). ocrResult.texts holds the pre-translation text.
+            originalText: ocrResult.texts[i],
+            sourceLineCount: ocrResult.lineCounts ? ocrResult.lineCounts[i] : undefined
           });
           itemOcrIndices.push(i);
         }

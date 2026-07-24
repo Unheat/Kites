@@ -50,8 +50,11 @@ async function handlePreloadEngine() {
 const activeDownloads: Record<string, { [file: string]: { loaded: number, total: number } }> = {};
 
 async function handleStartDownload(modelId: string, category?: string) {
-  if (category === 'inpaint') {
-    const { inpaintRegistry } = await import('./engines/inpaint/inpaintRegistry');
+  if (category === 'inpaint' || category === 'ocr') {
+    const registry = category === 'inpaint' 
+      ? (await import('./engines/inpaint/inpaintRegistry')).inpaintRegistry
+      : (await import('./engines/ocr/ocrRegistry')).ocrRegistry;
+
     const { InpaintCacheManager } = await import('./services/InpaintCacheManager');
     
     activeDownloads[modelId] = {};
@@ -62,8 +65,8 @@ async function handleStartDownload(modelId: string, category?: string) {
       }).catch(() => {});
     };
     
-    const entry = inpaintRegistry[modelId];
-    if (!entry) throw new Error(`Unknown inpaint engine: ${modelId}`);
+    const entry = registry[modelId];
+    if (!entry) throw new Error(`Unknown ${category} engine: ${modelId}`);
     
     if (entry.dataUrl) {
       await InpaintCacheManager.downloadModelWithProgress(entry.onnxUrl, (p) => progressCallback(p * 0.5));

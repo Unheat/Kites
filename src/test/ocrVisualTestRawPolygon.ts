@@ -74,7 +74,7 @@ async function runVisualTest() {
     // Draw bounding boxes and text
     ctx.lineWidth = 3;
 
-    rawPolygons.forEach((poly, index) => {
+    rawPolygons.forEach((poly) => {
       // Draw pure JS perfectly rotated polygons in Cyan
       if (poly && poly.length >= 4) {
         ctx.strokeStyle = 'cyan';

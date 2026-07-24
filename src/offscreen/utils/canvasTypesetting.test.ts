@@ -1,13 +1,13 @@
-import { describe, it, expect, vi, beforeAll } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import type { Point2D } from '../../shared/utils/geometry';
 import {
-  drawTextInPolygon,
+  renderTextBlocksBatch,
   convertCjkPunctuation,
   segEng,
   calculatePolygonCentroid,
   layoutLinesAligncenter
 } from './canvasTypesetting';
-import type { GrayImage, BallonRegionResult } from './ballonExtractor';
+import type { GrayImage } from './ballonExtractor';
 
 // Mock ballonExtractor to bypass OpenCV WASM load issues in Vitest
 vi.mock('./ballonExtractor', () => ({
@@ -71,7 +71,7 @@ function createMockCtx() {
 }
 
 describe('Canvas Typesetting', () => {
-  it('renders text through the Cotrans eng renderer without a real canvas (fallback mask)', () => {
+  it('renders text through the Cotrans manga2eng renderer without a real canvas (fallback mask)', () => {
     const mockCtx = createMockCtx();
 
     const straightBox: Point2D[] = [
@@ -81,7 +81,15 @@ describe('Canvas Typesetting', () => {
       {x: 0, y: 100}
     ];
 
-    drawTextInPolygon(mockCtx, "This is a test text that is long", straightBox);
+    // The manga2eng renderer draws directly on the target ctx (no intermediate canvas),
+    // so it works with the mock; the default renderer needs a real canvas (covered by E2E).
+    renderTextBlocksBatch(
+      mockCtx,
+      [{ text: 'This is a test text that is long', polygon: straightBox }],
+      'en',
+      { width: 100, height: 100 },
+      'manga2eng'
+    );
 
     expect(mockCtx.save).toHaveBeenCalled();
     expect(mockCtx.restore).toHaveBeenCalled();

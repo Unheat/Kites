@@ -8,6 +8,18 @@ import {
   type BallonRegionResult,
   type GrayImage
 } from './ballonExtractor';
+import {
+  resizeRegionToFontSize,
+  renderRegionDefault,
+  type DefaultRenderRegion
+} from './cotransDefaultRenderer';
+
+/**
+ * TEST FLAG — which English renderer runs when `renderTextBlocksBatch` is called without an explicit
+ * `renderer` argument. 'default' matches cotrans.touhou.ai (put_text_horizontal + box warp);
+ * flip to 'manga2eng' to test the balloon-centroid renderer. Will later be driven by the popup UI.
+ */
+const DEFAULT_RENDER_MODE: RenderMode = 'default';
 
 /**
  * Cotrans uppercases all English text because its bundled comic font is caps-only
@@ -26,14 +38,27 @@ const LINE_HEIGHT_RATIO = 0.8;
 const LINE_SPACING_RATIO = 0.01;
 
 /**
- * Cotrans `downscale_constraint` parameter (call sites use 0.7 / 0.8 / 0.95).
- * It floors the balloon-fit font multiplier so glyph-tight DBNet boxes never shrink much.
- * Our PaddleOCR DBNet boxes are unclip-expanded (~1.7x the true glyph size), so flooring
- * at 0.8 leaves oversized words escaping the balloon; we let the Cotrans fit formula
- * (balloon width / longest word, available/needed lines) fully govern instead and clamp
- * the result with Cotrans's own font_size_minimum formula below.
+ * Cotrans `downscale_constraint` parameter. It floors the balloon-fit font multiplier so
+ * glyph-tight boxes never shrink much. Cotrans `dispatch_eng_render` passes 0.8 to the
+ * manga2eng renderer (rendering/__init__.py). We apply this floor on the CTD (tight box)
+ * path to reproduce Cotrans's single-multiplier font sizing 1:1. The PaddleOCR path keeps
+ * its own custom strict-fit logic because its DBNet boxes are unclip-expanded (~1.7x the
+ * true glyph size) and would let oversized words escape the balloon under this floor.
  */
+const DOWNSCALE_CONSTRAINT = 0.8;
 
+/**
+ * Kerning safety factor applied to canvas measureText widths on the PaddleOCR path so the
+ * estimated line width matches the actual bold canvas rendering (commit beb05ba).
+ */
+const MEASURE_KERNING_FACTOR = 1.08;
+
+/**
+ * Kerning factor for the CTD (tight box) path. Cotrans sums exact FreeType glyph advances,
+ * which canvas measureText reproduces closely for the same string, so no inflation is used
+ * here — this keeps the Cotrans font_size_multiplier geometry 1:1.
+ */
+const TIGHT_KERNING_FACTOR = 1.0;
 
 /**
  * Cotrans font_size_minimum formula (rendering/__init__.py resize_regions_to_font_size):
@@ -612,7 +637,17 @@ export interface TextBlockItem {
   /** Cotrans block rotation in degrees (0 for upright text). */
   angle?: number;
   isTightBoundingBox?: boolean;
+  /** Original (pre-translation) source text — used by the default renderer's length-ratio expansion. */
+  originalText?: string;
+  /** Number of source OCR lines merged into this block (Cotrans used_rows). */
+  sourceLineCount?: number;
+  /** Horizontal alignment override; defaults to 'center' for the default renderer. */
+  alignment?: 'left' | 'center' | 'right';
 }
+
+/** Which English renderer to use. 'default' = Cotrans default (put_text_horizontal + box warp,
+ *  what cotrans.touhou.ai uses); 'manga2eng' = Cotrans manga2eng (balloon-centroid layout). */
+export type RenderMode = 'default' | 'manga2eng';
 
 /** Per-block render outcome, aligned with the input blocks array. */
 export interface RenderedBlockInfo {
@@ -684,22 +719,26 @@ function pythonMod(a: number, n: number): number {
  * @param ctx - Canvas context used for measurement.
  * @param fontSize - Font size in pixels.
  * @param words - Word groups from segEng.
+ * @param kerningFactor - Multiplier applied to measured widths. PaddleOCR uses
+ *   MEASURE_KERNING_FACTOR (1.08) as a safety inflation; the CTD path uses
+ *   TIGHT_KERNING_FACTOR (1.0) to match Cotrans's exact FreeType advances.
  * @returns Font metrics for layout.
  */
 function calculateFontValues(
   ctx: OffscreenCanvasRenderingContext2D,
   fontSize: number,
-  words: string[]
+  words: string[],
+  kerningFactor: number = MEASURE_KERNING_FACTOR
 ): { fontSize: number; sw: number; lineHeight: number; delimiterLen: number; baseLength: number; wordLengths: number[] } {
   fontSize = Math.trunc(fontSize);
   const sw = Math.trunc(fontSize * STROKE_WIDTH_RATIO);
   const lineHeight = Math.trunc(fontSize * LINE_HEIGHT_RATIO);
   ctx.font = `bold ${fontSize}px ${RENDER_FONT_FAMILY}`;
-  const delimiterLen = Math.ceil(ctx.measureText(' ').width * 1.08);
+  const delimiterLen = Math.ceil(ctx.measureText(' ').width * kerningFactor);
   let baseLength = -1;
   const wordLengths: number[] = [];
   for (const word of words) {
-    const wordLength = Math.ceil(ctx.measureText(word).width * 1.08);
+    const wordLength = Math.ceil(ctx.measureText(word).width * kerningFactor);
     wordLengths.push(wordLength);
     if (wordLength > baseLength) baseLength = wordLength;
   }
@@ -771,71 +810,10 @@ function renderTextblockListEng(
   }
   if (regions.length === 0) return results;
 
-  // Port of Cotrans resize_regions_to_font_size:
-  // Dynamically expand the bounding box if the translation needs more rows/cols 
-  // than the original text used.
-  // ONLY APPLIES TO TIGHT BOUNDING BOXES (e.g. ComicTextDetector), because spiky boxes (PaddleOCR)
-  // are already too wide/tall and expanding them causes catastrophic page flooding.
-  for (const region of regions) {
-    if (!region.isTightBoundingBox) continue;
-
-    const w = region.xywh[2];
-    const h = region.xywh[3];
-    const words = segEng(region.translation);
-    if (!words.length) continue;
-
-    // Simulate lines needed at initial font size
-    let neededLines = 1;
-    let currentLen = 0;
-    const delimiterLen = Math.trunc(ctx.measureText(' ').width);
-    
-    ctx.font = `bold ${region.fontSize}px ${RENDER_FONT_FAMILY}`;
-    const wordLengths = words.map(word => Math.trunc(ctx.measureText(word).width));
-
-    if (region.direction === 'v') {
-      const maxColHeight = Math.max(h, region.fontSize * 2);
-      for (const wl of wordLengths) {
-        if (currentLen + wl > maxColHeight) {
-          neededLines++;
-          currentLen = wl + delimiterLen;
-        } else {
-          currentLen += wl + delimiterLen;
-        }
-      }
-      
-      const usedCols = 1;
-      if (neededLines > usedCols) {
-        const scaleX = ((neededLines - usedCols) / usedCols) * 1 + 1;
-        const cx = (region.xyxy[0] + region.xyxy[2]) / 2;
-        const newW = w * scaleX;
-        region.xyxy[0] = Math.round(cx - newW / 2);
-        region.xyxy[2] = Math.round(cx + newW / 2);
-        region.xywh[0] = region.xyxy[0];
-        region.xywh[2] = Math.round(newW);
-      }
-    } else {
-      const maxRowWidth = Math.max(w, region.fontSize * 2);
-      for (const wl of wordLengths) {
-        if (currentLen + wl > maxRowWidth) {
-          neededLines++;
-          currentLen = wl + delimiterLen;
-        } else {
-          currentLen += wl + delimiterLen;
-        }
-      }
-      
-      const usedRows = 1;
-      if (neededLines > usedRows) {
-        const scaleY = ((neededLines - usedRows) / usedRows) * 1 + 1;
-        const cy = (region.xyxy[1] + region.xyxy[3]) / 2;
-        const newH = h * scaleY;
-        region.xyxy[1] = Math.round(cy - newH / 2);
-        region.xyxy[3] = Math.round(cy + newH / 2);
-        region.xywh[1] = region.xyxy[1];
-        region.xywh[3] = Math.round(newH);
-      }
-    }
-  }
+  // NOTE: Cotrans's manga2eng render path (dispatch_eng_render -> render_textblock_list_eng)
+  // does NOT call resize_regions_to_font_size (that runs only on the non-eng dispatch path).
+  // We therefore do not pre-expand region boxes here; the balloon mask + Cotrans font_size_multiplier
+  // govern sizing directly. PaddleOCR keeps its own custom fit logic in the layout loop below.
 
   // Adjust enlarge ratios relative to each other to reduce intersections (1:1 Cotrans)
   for (const region of regions) {
@@ -954,8 +932,7 @@ function renderTextblockListEng(
     }
     const regionY = regionRect.y;
 
-    // Cotrans font downscaling: fit the longest word to the balloon width and the
-    // needed line count to the available height, but never below the constraint
+    // Longest word governs the balloon-width fit (Cotrans base_length_word).
     let maxIdx = 0;
     for (let i = 1; i < fontValues.wordLengths.length; i++) {
       if (fontValues.wordLengths[i] > fontValues.wordLengths[maxIdx]) maxIdx = i;
@@ -963,78 +940,106 @@ function renderTextblockListEng(
     const baseLengthWord = words[maxIdx];
     if (baseLengthWord.length === 0) continue;
 
-    const fontSizeMinimum = Math.max(1, Math.round((pageWidth + pageHeight) / FONT_SIZE_MINIMUM_DIVISOR));
     let fontSize = fontValues.fontSize;
     let textlines: Textline[] = [];
 
-    // -------------------------------------------------------------
-    // STRICT BINARY SEARCH BOUNDARY FITTING LOOP FOR ALL ENGINES
-    // -------------------------------------------------------------
-    // Shrinks font size until EVERY text line fits 100% inside the speech balloon mask pixels.
-    // Background is 0, inside bubble is > 0.
-    let fs = fontValues.fontSize; 
-    let bestLines: Textline[] = [];
-    let bestFs = fs;
+    if (region.isTightBoundingBox) {
+      // -------------------------------------------------------------
+      // 1:1 Cotrans render_textblock_list_eng font sizing (CTD path)
+      // -------------------------------------------------------------
+      // Single font_size_multiplier (text_render_eng.py): shrink so the longest word fits the
+      // balloon width and the needed line count fits the available height, floored at
+      // DOWNSCALE_CONSTRAINT. Word wrapping / staying inside the balloon is handled entirely by
+      // layoutLinesAligncenter. Measurement uses exact advances (TIGHT_KERNING_FACTOR) to match
+      // Cotrans's FreeType geometry.
+      fontValues = calculateFontValues(ctx, region.fontSize, words, TIGHT_KERNING_FACTOR);
+      const { sw, baseLength } = fontValues;
 
-    while (fs >= Math.max(fontSizeMinimum, 6)) {
-      const curFontValues = calculateFontValues(ctx, fs, words);
-      const curLines = layoutLinesAligncenter(mask, words, curFontValues.wordLengths, curFontValues.delimiterLen, curFontValues.lineHeight);
-      
-      let fits = true;
-      const { sw, lineHeight } = curFontValues;
+      const linesNeeded = region.translation.length / baseLengthWord.length;
+      const linesAvailable = Math.floor(Math.abs(xyxy[3] - xyxy[1]) / fontValues.lineHeight) + 1;
+      const fontSizeMultiplier = Math.max(
+        Math.min(regionW / (baseLength + 2 * sw), linesAvailable / linesNeeded),
+        DOWNSCALE_CONSTRAINT
+      );
+      if (fontSizeMultiplier < 1) {
+        const scaledFs = Math.trunc(fontValues.fontSize * fontSizeMultiplier);
+        fontValues = calculateFontValues(ctx, scaledFs, words, TIGHT_KERNING_FACTOR);
+      }
+      textlines = layoutLinesAligncenter(mask, words, fontValues.wordLengths, fontValues.delimiterLen, fontValues.lineHeight);
+      fontSize = fontValues.fontSize;
+      console.log(`[Typesetting] Cotrans CTD fit! regionW=${regionW} originalFs=${region.fontSize} finalFs=${fontSize} mult=${fontSizeMultiplier.toFixed(3)} lines=${textlines.length}`);
+    } else {
+      // -------------------------------------------------------------
+      // STRICT BINARY SEARCH BOUNDARY FITTING LOOP (PaddleOCR path)
+      // -------------------------------------------------------------
+      // PaddleOCR DBNet polygons are unclip-expanded (~1.7x true glyph size), so the Cotrans
+      // multiplier would let oversized words escape the balloon. Instead we shrink the font size
+      // until EVERY text line fits 100% inside the speech balloon mask pixels (0 = outside, >0 = inside).
+      const fontSizeMinimum = Math.max(1, Math.round((pageWidth + pageHeight) / FONT_SIZE_MINIMUM_DIVISOR));
+      let fs = fontValues.fontSize;
+      let bestLines: Textline[] = [];
+      let bestFs = fs;
 
-      for (const l of curLines) {
-         const x1 = Math.floor(l.pos_x - sw);
-         const x2 = Math.ceil(l.pos_x + l.length + sw);
-         const y1 = Math.floor(l.pos_y);
-         const y2 = Math.ceil(l.pos_y + lineHeight);
-         
-         // Check if line extends outside mask image boundaries
-         if (x1 < 0 || x2 >= mask.width || y1 < 0 || y2 >= mask.height) {
-           fits = false;
-           break;
-         }
-         
-         // Sample line area against balloon mask data (255 = inside, 0 = outside)
-         const yStep = Math.max(1, Math.floor(lineHeight / 3));
-         const xStep = Math.max(1, Math.floor((x2 - x1) / 8));
+      while (fs >= Math.max(fontSizeMinimum, 6)) {
+        const curFontValues = calculateFontValues(ctx, fs, words);
+        const curLines = layoutLinesAligncenter(mask, words, curFontValues.wordLengths, curFontValues.delimiterLen, curFontValues.lineHeight);
 
-         for (let y = y1; y <= y2; y += yStep) {
-           const clampedY = Math.min(y, mask.height - 1);
-           const rowOffset = clampedY * mask.width;
-           for (let x = x1; x <= x2; x += xStep) {
-             const clampedX = Math.min(x, mask.width - 1);
-             if (mask.data[rowOffset + clampedX] === 0) {
-               fits = false;
-               break;
+        let fits = true;
+        const { sw, lineHeight } = curFontValues;
+
+        for (const l of curLines) {
+           const x1 = Math.floor(l.pos_x - sw);
+           const x2 = Math.ceil(l.pos_x + l.length + sw);
+           const y1 = Math.floor(l.pos_y);
+           const y2 = Math.ceil(l.pos_y + lineHeight);
+
+           // Check if line extends outside mask image boundaries
+           if (x1 < 0 || x2 >= mask.width || y1 < 0 || y2 >= mask.height) {
+             fits = false;
+             break;
+           }
+
+           // Sample line area against balloon mask data (255 = inside, 0 = outside)
+           const yStep = Math.max(1, Math.floor(lineHeight / 3));
+           const xStep = Math.max(1, Math.floor((x2 - x1) / 8));
+
+           for (let y = y1; y <= y2; y += yStep) {
+             const clampedY = Math.min(y, mask.height - 1);
+             const rowOffset = clampedY * mask.width;
+             for (let x = x1; x <= x2; x += xStep) {
+               const clampedX = Math.min(x, mask.width - 1);
+               if (mask.data[rowOffset + clampedX] === 0) {
+                 fits = false;
+                 break;
+               }
              }
+             if (!fits) break;
            }
            if (!fits) break;
-         }
-         if (!fits) break;
-      }
-      
-      if (fits) {
-         bestLines = curLines;
-         bestFs = fs;
-         fontValues = curFontValues;
-         console.log(`[Typesetting] Strict area boundary fit! regionW=${regionW} originalFs=${region.fontSize} finalFs=${bestFs} lines=${bestLines.length}`);
-         break;
-      }
-      fs -= 1;
-    }
+        }
 
-    if (bestLines.length === 0) {
-      // Fallback if font cannot shrink further without touching borders: use smallest font size (min 6)
-      const fallbackFs = Math.max(fontSizeMinimum, 6);
-      fontValues = calculateFontValues(ctx, fallbackFs, words);
-      bestLines = layoutLinesAligncenter(mask, words, fontValues.wordLengths, fontValues.delimiterLen, fontValues.lineHeight);
-      bestFs = fallbackFs;
-      console.log(`[Typesetting] Fallback to min font size! regionW=${regionW} originalFs=${region.fontSize} fallbackFs=${fallbackFs} lines=${bestLines.length}`);
-    }
+        if (fits) {
+           bestLines = curLines;
+           bestFs = fs;
+           fontValues = curFontValues;
+           console.log(`[Typesetting] Strict area boundary fit! regionW=${regionW} originalFs=${region.fontSize} finalFs=${bestFs} lines=${bestLines.length}`);
+           break;
+        }
+        fs -= 1;
+      }
 
-    textlines = bestLines;
-    fontSize = bestFs;
+      if (bestLines.length === 0) {
+        // Fallback if font cannot shrink further without touching borders: use smallest font size (min 6)
+        const fallbackFs = Math.max(fontSizeMinimum, 6);
+        fontValues = calculateFontValues(ctx, fallbackFs, words);
+        bestLines = layoutLinesAligncenter(mask, words, fontValues.wordLengths, fontValues.delimiterLen, fontValues.lineHeight);
+        bestFs = fallbackFs;
+        console.log(`[Typesetting] Fallback to min font size! regionW=${regionW} originalFs=${region.fontSize} fallbackFs=${fallbackFs} lines=${bestLines.length}`);
+      }
+
+      textlines = bestLines;
+      fontSize = bestFs;
+    }
 
     if (textlines.length === 0) continue;
 
@@ -1269,7 +1274,8 @@ export function renderTextBlocksBatch(
   ctx: OffscreenCanvasRenderingContext2D,
   blocks: TextBlockItem[],
   targetLang: string = 'en',
-  imageBounds?: { width: number; height: number }
+  imageBounds?: { width: number; height: number },
+  renderer: RenderMode = DEFAULT_RENDER_MODE
 ): (RenderedBlockInfo | null)[] {
   if (!blocks || blocks.length === 0) return [];
 
@@ -1279,9 +1285,68 @@ export function renderTextBlocksBatch(
   const orientation = LANGUAGE_ORIENTATION_PRESETS[langKey] || 'h';
 
   if (orientation === 'h') {
+    if (renderer === 'default') {
+      return renderTextBlocksDefault(ctx, blocks, bounds.width, bounds.height);
+    }
     return renderTextblockListEng(ctx, blocks, bounds.width, bounds.height);
   }
   return renderTextBlocksLegacy(ctx, blocks, targetLang, bounds);
+}
+
+/**
+ * Cotrans DEFAULT renderer batch driver (the renderer cotrans.touhou.ai uses): for each block,
+ * expand the detection box to fit the translation, then render + affine-warp the text onto the page.
+ * Detector-agnostic — CTD and PaddleOCR share this path (no balloon extraction, no tight/spiky branch).
+ *
+ * @param ctx - Target canvas context (clean inpainted page already drawn).
+ * @param blocks - Translated text blocks.
+ * @param pageWidth - Page width.
+ * @param pageHeight - Page height.
+ * @returns Per-block render info aligned with `blocks` (null for skipped blocks).
+ */
+function renderTextBlocksDefault(
+  ctx: OffscreenCanvasRenderingContext2D,
+  blocks: TextBlockItem[],
+  pageWidth: number,
+  pageHeight: number
+): (RenderedBlockInfo | null)[] {
+  const results: (RenderedBlockInfo | null)[] = blocks.map(() => null);
+
+  for (let i = 0; i < blocks.length; i++) {
+    const b = blocks[i];
+    const translation = (b.text || '').trim();
+    if (!translation || !b.polygon || b.polygon.length < 3) continue;
+
+    // Ensure a 4-point quad (Cotrans min_rect is always 4 points).
+    const poly = b.polygon.slice(0, 4);
+    if (poly.length < 4) continue;
+
+    const angle = b.angle ?? (calculateRotationAngle(b.polygon) * 180) / Math.PI;
+    const aabb = calculateAabb(b.polygon);
+    const fallbackFs = Math.max(1, Math.floor(Math.min(aabb.width, aabb.height)));
+
+    const region: DefaultRenderRegion = {
+      translation,
+      originalText: b.originalText || '',
+      fontSize: b.fontSize && b.fontSize > 0 ? b.fontSize : fallbackFs,
+      angle,
+      sourceLineCount: b.sourceLineCount && b.sourceLineCount > 0 ? b.sourceLineCount : 1,
+      polygon: poly,
+      textColor: b.textColor || '#000000',
+      strokeColor: b.strokeColor || '#FFFFFF',
+      alignment: b.alignment || 'center',
+    };
+
+    try {
+      const { dstPoints, fontSize } = resizeRegionToFontSize(ctx, region, pageWidth, pageHeight);
+      const info = renderRegionDefault(ctx, region, dstPoints, fontSize);
+      if (info) results[i] = { fontSize: info.fontSize, lineCount: info.lineCount };
+    } catch (e) {
+      console.error('[canvasTypesetting] Default renderer failed for block', i, e);
+    }
+  }
+
+  return results;
 }
 
 export interface RectXYXY {
