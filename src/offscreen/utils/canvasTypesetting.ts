@@ -1009,17 +1009,19 @@ function renderTextblockListEng(
          bestLines = curLines;
          bestFs = fs;
          fontValues = curFontValues;
-         console.log(`[Typesetting] Strict boundary fit! regionW=${regionW} originalFs=${fontValues.fontSize} finalFs=${bestFs} lines=${bestLines.length}`);
+         console.log(`[Typesetting] Strict boundary fit! regionW=${regionW} originalFs=${region.fontSize} finalFs=${bestFs} lines=${bestLines.length}`);
          break;
       }
       fs -= 1;
     }
 
     if (bestLines.length === 0) {
-      // Fallback if font cannot shrink further
-      fontValues = calculateFontValues(ctx, Math.max(fontSizeMinimum, 6), words);
+      // Fallback if font cannot shrink further without touching borders: use smallest font size (min 6)
+      const fallbackFs = Math.max(fontSizeMinimum, 6);
+      fontValues = calculateFontValues(ctx, fallbackFs, words);
       bestLines = layoutLinesAligncenter(mask, words, fontValues.wordLengths, fontValues.delimiterLen, fontValues.lineHeight);
-      bestFs = fontValues.fontSize;
+      bestFs = fallbackFs;
+      console.log(`[Typesetting] Fallback to min font size! regionW=${regionW} originalFs=${region.fontSize} fallbackFs=${fallbackFs} lines=${bestLines.length}`);
     }
 
     textlines = bestLines;
