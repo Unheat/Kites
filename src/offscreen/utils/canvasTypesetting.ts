@@ -787,10 +787,15 @@ function renderTextblockListEng(
     const y2 = Math.round(aabb.y + aabb.height);
     if (x2 - x1 <= 0 || y2 - y1 <= 0) continue;
 
-    // Fallback font size approximates the Cotrans textline font size (character size)
+    const fontSizeMinimum = Math.max(1, Math.round((pageWidth + pageHeight) / FONT_SIZE_MINIMUM_DIVISOR));
+    const lineCount = b.sourceLineCount && b.sourceLineCount > 0
+      ? b.sourceLineCount
+      : Math.max(1, Math.round((y2 - y1) / Math.max(fontSizeMinimum, 15)));
     const fontSize = b.fontSize && b.fontSize > 0
       ? b.fontSize
-      : Math.max(1, Math.floor(Math.min(x2 - x1, y2 - y1)));
+      : (b.sourceLineCount && b.sourceLineCount > 0
+          ? Math.max(fontSizeMinimum, Math.floor((y2 - y1) / b.sourceLineCount))
+          : fontSizeMinimum);
     const angle = b.angle ?? (calculateRotationAngle(b.polygon) * 180) / Math.PI;
 
     const region: EngRegion = {
@@ -1323,14 +1328,22 @@ function renderTextBlocksDefault(
 
     const angle = b.angle ?? (calculateRotationAngle(b.polygon) * 180) / Math.PI;
     const aabb = calculateAabb(b.polygon);
-    const fallbackFs = Math.max(1, Math.floor(Math.min(aabb.width, aabb.height)));
+    const fontSizeMinimum = Math.max(1, Math.round((pageWidth + pageHeight) / FONT_SIZE_MINIMUM_DIVISOR));
+    const lineCount = b.sourceLineCount && b.sourceLineCount > 0
+      ? b.sourceLineCount
+      : (b.fontSize && b.fontSize > 0 ? Math.max(1, Math.round(aabb.height / b.fontSize)) : 1);
+    const fontSize = b.fontSize && b.fontSize > 0
+      ? b.fontSize
+      : (b.sourceLineCount && b.sourceLineCount > 0
+          ? Math.max(fontSizeMinimum, Math.floor(aabb.height / b.sourceLineCount))
+          : fontSizeMinimum);
 
     const region: DefaultRenderRegion = {
       translation,
       originalText: b.originalText || '',
-      fontSize: b.fontSize && b.fontSize > 0 ? b.fontSize : fallbackFs,
+      fontSize,
       angle,
-      sourceLineCount: b.sourceLineCount && b.sourceLineCount > 0 ? b.sourceLineCount : 1,
+      sourceLineCount: lineCount,
       polygon: poly,
       textColor: b.textColor || '#000000',
       strokeColor: b.strokeColor || '#FFFFFF',

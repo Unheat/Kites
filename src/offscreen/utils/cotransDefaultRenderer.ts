@@ -474,8 +474,8 @@ function rotatePoint(p: Point2D, center: Point2D, deg: number): Point2D {
   const dx = p.x - center.x;
   const dy = p.y - center.y;
   return {
-    x: center.x + dx * cos - dy * sin,
-    y: center.y + dx * sin + dy * cos,
+    x: center.x + dx * cos + dy * sin,
+    y: center.y - dx * sin + dy * cos,
   };
 }
 
@@ -532,7 +532,7 @@ export function resizeRegionToFontSize(
 
   // Single-axis width expansion: does the translation need more rows than the source used?
   const usedRows = Math.max(1, region.sourceLineCount);
-  const { lineTexts } = calcHorizontal(ctx, region.fontSize, region.translation, boxW, boxH, true);
+  const { lineTexts } = calcHorizontal(ctx, originalFontSize, region.translation, boxW, boxH, true);
   const neededRows = Math.max(1, lineTexts.length);
 
   let expanded = false;
