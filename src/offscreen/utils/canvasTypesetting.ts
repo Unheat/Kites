@@ -873,22 +873,25 @@ function renderTextblockListEng(
   const ballonResults: BallonRegionResult[] = regions.map(region => {
     if (pageSnapshot) {
       try {
-        return extractBallonRegion(pageSnapshot, pageWidth, pageHeight, region.xywh, region.enlargeRatio);
+        // For CTD (tight bounding box), it has an enlargeRatio calculated.
+        // For PaddleOCR, the polygon is already large enough, so we use ratio 1.0
+        const extractionRatio = region.isTightBoundingBox ? region.enlargeRatio : 1.0;
+        return extractBallonRegion(pageSnapshot, pageWidth, pageHeight, region.xywh, extractionRatio);
       } catch (e) {
         console.error('[canvasTypesetting] Balloon extraction failed, falling back to window mask:', e);
       }
     }
+
     // Defensive fallback: the whole enlarged window is treated as the balloon
     const [ex1, ey1, ex2, ey2] = region.enlargedXyxy;
     const cx1 = Math.max(0, Math.min(Math.round(ex1), pageWidth - 1));
     const cy1 = Math.max(0, Math.min(Math.round(ey1), pageHeight - 1));
     const cx2 = Math.max(cx1 + 1, Math.min(Math.round(ex2), pageWidth));
     const cy2 = Math.max(cy1 + 1, Math.min(Math.round(ey2), pageHeight));
-    const w = cx2 - cx1;
-    const h = cy2 - cy1;
+    const w = Math.max(1, cx2 - cx1);
+    const h = Math.max(1, cy2 - cy1);
     return {
       mask: { data: new Uint8Array(w * h).fill(255), width: w, height: h },
-      xyxy: [cx1, cy1, cx2, cy2]
     };
   });
 
@@ -980,25 +983,37 @@ function renderTextblockListEng(
         const curFontValues = calculateFontValues(ctx, fs, words);
         const curLines = layoutLinesAligncenter(mask, words, curFontValues.wordLengths, curFontValues.delimiterLen, curFontValues.lineHeight);
         
-        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        let fits = true;
         for (const l of curLines) {
-           minX = Math.min(minX, l.pos_x);
-           maxX = Math.max(maxX, l.pos_x + l.length);
-           minY = Math.min(minY, l.pos_y);
-           maxY = Math.max(maxY, l.pos_y + curFontValues.lineHeight);
+           const minX = Math.floor(l.pos_x);
+           const maxX = Math.ceil(l.pos_x + l.length);
+           const minY = Math.floor(l.pos_y);
+           const maxY = Math.ceil(l.pos_y + curFontValues.lineHeight);
+           
+           // Check if it spills outside the image entirely
+           if (minX < 0 || maxX >= mask.w || minY < 0 || maxY >= mask.h) {
+             fits = false;
+             break;
+           }
+           
+           // Check the 4 corners of the line's bounding box against the actual mask pixels.
+           // Background is 0, inside bubble is > 0.
+           const topLeft = mask.data[minY * mask.w + minX];
+           const topRight = mask.data[minY * mask.w + maxX];
+           const bottomLeft = mask.data[maxY * mask.w + minX];
+           const bottomRight = mask.data[maxY * mask.w + maxX];
+           
+           if (topLeft === 0 || topRight === 0 || bottomLeft === 0 || bottomRight === 0) {
+             fits = false;
+             break;
+           }
         }
         
-        // Add a tiny tolerance padding so we don't reject perfectly flush text
-        const padding = 2;
-        if (
-          minX >= regionRect.x - padding && 
-          maxX <= regionRect.x + regionRect.w + padding && 
-          minY >= regionRect.y - padding && 
-          maxY <= regionRect.y + regionRect.h + padding
-        ) {
+        if (fits) {
            bestLines = curLines;
            bestFs = fs;
            fontValues = curFontValues;
+           console.log(`[Typesetting] PaddleOCR binary search fit! regionW=${regionW} originalFs=${fontValues.fontSize} finalFs=${bestFs} lines=${bestLines.length}`);
            break;
         }
         fs -= 1;
