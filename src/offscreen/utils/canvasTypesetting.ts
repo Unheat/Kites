@@ -451,7 +451,7 @@ function renderTextBlocksDefault(
     };
 
     try {
-      const { dstPoints, fontSize: targetFontSize } = resizeRegionToFontSize(ctx, region, pageWidth, pageHeight);
+      const { dstPoints, fontSize: targetFontSize } = resizeRegionToFontSize(region, pageWidth, pageHeight);
       const info = renderRegionDefault(ctx, region, dstPoints, targetFontSize, 0);
       if (info) results[i] = { fontSize: info.fontSize, lineCount: info.lineCount };
     } catch (e) {

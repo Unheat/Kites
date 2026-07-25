@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { calcHorizontal, compactSpecialSymbols } from './cotransDefaultRenderer';
+import { calcHorizontal, compactSpecialSymbols, resizeRegionToFontSize } from './cotransDefaultRenderer';
 
 /** Minimal ctx: measureText returns 10px per character; font is a no-op setter. */
 function mockCtx() {
@@ -36,5 +36,75 @@ describe('compactSpecialSymbols', () => {
     expect(compactSpecialSymbols('wait...')).toBe('wait…');
     expect(compactSpecialSymbols('really..')).toBe('really…');
     expect(compactSpecialSymbols('Stop! Go')).toBe('Stop!Go');
+  });
+});
+
+/**
+ * Builds an upright rectangular region at the origin.
+ *
+ * @param w - Box width in pixels.
+ * @param h - Box height in pixels.
+ * @param fontSize - Detected source font size.
+ * @param originalText - Source text (character count drives the shrink loop).
+ * @param translation - Translated text (character count drives the shrink loop).
+ * @returns A region suitable for resizeRegionToFontSize.
+ */
+function region(w: number, h: number, fontSize: number, originalText: string, translation: string) {
+  return {
+    translation,
+    originalText,
+    fontSize,
+    angle: 0,
+    sourceLineCount: 1,
+    polygon: [{ x: 0, y: 0 }, { x: w, y: 0 }, { x: w, y: h }, { x: 0, y: h }],
+    textColor: '#000000',
+    strokeColor: '#FFFFFF',
+    alignment: 'center' as const,
+  };
+}
+
+describe('resizeRegionToFontSize (Cotrans 2023 semantics)', () => {
+  it('shrinks the font until the translation fits the existing box', () => {
+    // Real case: vertical bubble 33x128, 7 source chars -> 18 translated chars.
+    // Cotrans shrinks until floor(33/fs) * floor(128/fs) >= 18. At 14px that is
+    // 2 * 9 = 18, so the loop stops there — down from the detected 33px.
+    const r = region(33, 128, 33, '这样下去的话…', 'If this goes on...');
+    const { fontSize } = resizeRegionToFontSize(r, 888, 1214);
+    expect(fontSize).toBe(14);
+  });
+
+  it('never widens the box — the destination quad stays the detection min_rect', () => {
+    const r = region(33, 128, 33, '这样下去的话…', 'If this goes on...');
+    const { dstPoints } = resizeRegionToFontSize(r, 888, 1214);
+    expect(dstPoints).toEqual(r.polygon);
+  });
+
+  it('leaves the font untouched when the translation is not longer than the source', () => {
+    const r = region(120, 60, 24, 'aaaaaaaaaaaa', 'short');
+    const { fontSize, dstPoints } = resizeRegionToFontSize(r, 888, 1214);
+    expect(fontSize).toBe(24);
+    expect(dstPoints).toEqual(r.polygon);
+  });
+
+  it('raises a sub-minimum font to font_size_minimum and scales the box to match', () => {
+    // font_size_minimum = round((888 + 1214) / 200) = 11.
+    // A tiny box forces the shrink loop below 11, so the box is scaled back up.
+    const r = region(14, 14, 4, 'ab', 'a much longer translation than the source');
+    const { fontSize, dstPoints } = resizeRegionToFontSize(r, 888, 1214);
+    expect(fontSize).toBe(11);
+    const width = Math.max(...dstPoints.map(p => p.x)) - Math.min(...dstPoints.map(p => p.x));
+    expect(width).toBeGreaterThan(14);
+  });
+
+  it('clips the scaled destination quad to the page bounds', () => {
+    const r = region(14, 14, 4, 'ab', 'a much longer translation than the source');
+    // Page barely larger than the region: the upscaled quad must not escape it.
+    const { dstPoints } = resizeRegionToFontSize(r, 20, 20);
+    for (const p of dstPoints) {
+      expect(p.x).toBeGreaterThanOrEqual(0);
+      expect(p.y).toBeGreaterThanOrEqual(0);
+      expect(p.x).toBeLessThanOrEqual(20);
+      expect(p.y).toBeLessThanOrEqual(20);
+    }
   });
 });

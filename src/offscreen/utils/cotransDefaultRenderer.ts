@@ -28,8 +28,11 @@ const STROKE_WIDTH_RATIO = 0.07;
 /** Cotrans inter-line spacing relative to font size (put_text_horizontal spacing_y, line_spacing=0.01). */
 const LINE_SPACING_RATIO = 0.01;
 
-/** Cotrans half-width kana counted as 0.5 chars in count_text_length (rendering/__init__.py). */
-const HALF_WIDTH_CHARS = new Set(['っ', 'ッ', 'ぁ', 'ぃ', 'ぅ', 'ぇ', 'ぉ']);
+/**
+ * Cotrans font_size_minimum divisor (resize_regions_to_font_size):
+ * round((page_height + page_width) / 200), i.e. ~11px on a 900x1300 manga page.
+ */
+const FONT_SIZE_MINIMUM_DIVISOR = 200;
 
 /** Region metadata needed by the default renderer (subset of Cotrans TextBlock). */
 export interface DefaultRenderRegion {
@@ -81,17 +84,6 @@ export function compactSpecialSymbols(text: string): string {
   // Remove half/full-width spaces immediately after a punctuation mark.
   text = text.replace(/([^\w\s])[ 　]+/g, '$1');
   return text;
-}
-
-/**
- * 1:1 port of Cotrans `count_text_length` (rendering/__init__.py): kana in HALF_WIDTH_CHARS count 0.5.
- */
-function countTextLength(text: string): number {
-  let length = 0;
-  for (const ch of text.trim()) {
-    length += HALF_WIDTH_CHARS.has(ch) ? 0.5 : 1;
-  }
-  return length;
 }
 
 /** Sets the measurement font and returns a memo-free width measurer for the current font size. */
@@ -490,23 +482,34 @@ function polygonCenter(poly: Point2D[]): Point2D {
 }
 
 /**
- * 1:1 port of Cotrans `resize_regions_to_font_size` (rendering/__init__.py, horizontal branch):
- * expands the detection box so the (usually longer) translation fits, and returns the destination
- * quad plus the (possibly increased) font size. English is always treated as horizontal.
+ * 1:1 port of Cotrans `resize_regions_to_font_size` (rendering/__init__.py) as of the 2023
+ * revision that cotrans.touhou.ai runs — NOT current upstream master.
  *
- * @param ctx - Canvas context for measurement.
- * @param region - Region metadata.
- * @param pageWidth - Page width (for the auto font-size minimum).
- * @param pageHeight - Page height (for the auto font-size minimum).
- * @returns Destination quad (4 rotated points) and the target font size.
+ * Upstream rewrote this in June 2025 (commit fb7f457) to grow the detection box: a
+ * `single_axis_expanded` branch widens it by `(needed_rows - used_rows) / used_rows + 1`
+ * (frequently 4x), a `font_increase_ratio` scales the font up to 1.5x, and the page-bounds
+ * clamp was deliberately removed. That combination renders text far larger than the balloon
+ * and lets it run off the page, which is not what the reference site produces.
+ *
+ * The 2023 algorithm does the opposite and is what we reproduce here:
+ *   1. If the translation has more characters than the source, SHRINK the font one pixel at a
+ *      time until `rows * cols >= char_count_trans`, where rows/cols are how many glyph cells
+ *      of that size fit across the box. The box itself is never widened.
+ *   2. Only if the font had to be raised to `font_size_minimum` is the box scaled at all, and
+ *      then uniformly on both axes about its center.
+ *   3. Destination points are clipped to the page.
+ *
+ * @param region - Region metadata (polygon, source/translated text, detected font size, angle).
+ * @param pageWidth - Page width, for the auto font-size minimum and the bounds clip.
+ * @param pageHeight - Page height, for the auto font-size minimum and the bounds clip.
+ * @returns Destination quad (4 rotated points) and the font size to render at.
  */
 export function resizeRegionToFontSize(
-  ctx: any,
   region: DefaultRenderRegion,
   pageWidth: number,
   pageHeight: number
-): { dstPoints: Point2D[]; fontSize: number; unscaledBoxW: number; unscaledBoxH: number } {
-  const fontSizeMinimum = Math.max(1, Math.round((pageWidth + pageHeight) / 200));
+): { dstPoints: Point2D[]; fontSize: number } {
+  const fontSizeMinimum = Math.max(1, Math.round((pageWidth + pageHeight) / FONT_SIZE_MINIMUM_DIVISOR));
 
   const center = polygonCenter(region.polygon);
   // Unrotate the box to axis-aligned space to measure size and to scale on clean axes.
@@ -518,69 +521,60 @@ export function resizeRegionToFontSize(
   const boxW = maxX - minX;
   const boxH = maxY - minY;
 
-  let originalFontSize = region.fontSize;
-  if (originalFontSize <= 0) originalFontSize = fontSizeMinimum;
-  let targetFontSize = Math.max(originalFontSize, fontSizeMinimum, 1);
+  let fontSize = region.fontSize > 0 ? Math.trunc(region.fontSize) : fontSizeMinimum;
 
-  // Corners of the unrotated box in [tl, tr, br, bl] order.
-  let corners: Point2D[] = [
-    { x: minX, y: minY },
-    { x: maxX, y: minY },
-    { x: maxX, y: maxY },
-    { x: minX, y: maxY },
-  ];
+  // Step 1: more characters were added, so reduce the font size to fit the allotted area.
+  // Cotrans counts raw string length here (not count_text_length), and leaves font_size
+  // untouched if the loop bottoms out at zero without ever fitting.
+  const charCountOrig = (region.originalText || '').length;
+  const charCountTrans = region.translation.trim().length;
+  if (charCountTrans > charCountOrig) {
+    let rescaled = fontSize;
+    while (rescaled > 0) {
+      const rows = Math.floor(boxW / rescaled);
+      const cols = Math.floor(boxH / rescaled);
+      if (rows * cols >= charCountTrans) {
+        fontSize = rescaled;
+        break;
+      }
+      rescaled -= 1;
+    }
+  }
 
-  // Single-axis width expansion: does the translation need more rows than the source used?
-  const usedRows = Math.max(1, region.sourceLineCount);
-  const { lineTexts } = calcHorizontal(ctx, originalFontSize, region.translation, boxW, boxH, true);
-  const neededRows = Math.max(1, lineTexts.length);
+  // Step 2: infer the target font size (font_size_offset is 0 for us).
+  let targetFontSize = fontSize;
+  if (targetFontSize < fontSizeMinimum) {
+    targetFontSize = Math.max(fontSize, fontSizeMinimum);
+  }
 
-  let expanded = false;
-  if (neededRows > usedRows) {
-    const scaleX = ((neededRows - usedRows) / usedRows) + 1;
-    const newW = boxW * scaleX;
-    // Scale about the top-left origin (Cotrans origin=(minx, miny)).
+  // Step 3: rescale the destination quad only when the font actually changed.
+  let corners: Point2D[];
+  if (targetFontSize !== fontSize) {
+    const targetScale = targetFontSize / fontSize;
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
     corners = [
       { x: minX, y: minY },
-      { x: minX + newW, y: minY },
-      { x: minX + newW, y: maxY },
+      { x: maxX, y: minY },
+      { x: maxX, y: maxY },
       { x: minX, y: maxY },
-    ];
-    expanded = true;
+    ].map(p => ({
+      x: cx + (p.x - cx) * targetScale,
+      y: cy + (p.y - cy) * targetScale,
+    }));
+  } else {
+    // Unchanged font: use the detection min_rect exactly as-is.
+    return { dstPoints: region.polygon.slice(0, 4), fontSize: Math.trunc(targetFontSize) };
   }
 
-  if (!expanded) {
-    // General length-ratio scaling (Cotrans else-branch).
-    const charCountOrig = countTextLength(region.originalText || '');
-    const charCountTrans = countTextLength(region.translation.trim());
-    let targetScale = 1;
-    if (charCountOrig > 0 && charCountTrans > charCountOrig) {
-      const increase = (charCountTrans - charCountOrig) / charCountOrig;
-      let fontIncrease = 1 + increase * 0.3;
-      fontIncrease = Math.min(1.5, Math.max(1.0, fontIncrease));
-      targetFontSize = Math.trunc(targetFontSize * fontIncrease);
-      targetScale = Math.max(1, Math.min(1 + increase * 0.3, 2));
-    }
-    const fontSizeScale = originalFontSize > 0
-      ? ((targetFontSize - originalFontSize) / originalFontSize) * 0.4 + 1
-      : 1.0;
-    let finalScale = Math.max(fontSizeScale, targetScale);
-    finalScale = Math.max(1, Math.min(finalScale, 1.1));
-
-    if (finalScale > 1.001) {
-      // Scale about the box center.
-      const cx = (minX + maxX) / 2;
-      const cy = (minY + maxY) / 2;
-      corners = corners.map(p => ({
-        x: cx + (p.x - cx) * finalScale,
-        y: cy + (p.y - cy) * finalScale,
-      }));
-    }
-  }
-
-  // Rotate the (scaled) corners back into the image frame.
-  const dstPoints = corners.map(p => rotatePoint(p, center, -region.angle));
-  return { dstPoints, fontSize: Math.trunc(targetFontSize), unscaledBoxW: boxW, unscaledBoxH: boxH };
+  // Rotate the scaled corners back into the image frame, then clip to the page.
+  const dstPoints = corners
+    .map(p => rotatePoint(p, center, -region.angle))
+    .map(p => ({
+      x: Math.max(0, Math.min(p.x, pageWidth)),
+      y: Math.max(0, Math.min(p.y, pageHeight)),
+    }));
+  return { dstPoints, fontSize: Math.trunc(targetFontSize) };
 }
 
 /** Euclidean distance between two points. */
@@ -673,14 +667,13 @@ export function renderRegionDefault(
   region: DefaultRenderRegion,
   dstPoints: Point2D[],
   fontSize: number,
-  lineSpacing = 0,
-  unscaledBoxW?: number,
-  unscaledBoxH?: number
+  lineSpacing = 0
 ): DefaultRenderResult | null {
   const [tl, tr, br, bl] = dstPoints;
-  // Cotrans norm_h / norm_v from unscaled box dimensions if available, otherwise from opposite edges.
-  const normH = unscaledBoxW ?? dist({ x: (tl.x + bl.x) / 2, y: (tl.y + bl.y) / 2 }, { x: (tr.x + br.x) / 2, y: (tr.y + br.y) / 2 });
-  const normV = unscaledBoxH ?? dist({ x: (tl.x + tr.x) / 2, y: (tl.y + tr.y) / 2 }, { x: (bl.x + br.x) / 2, y: (bl.y + br.y) / 2 });
+  // Layout and aspect padding must use the resized destination dimensions. Using the
+  // pre-expansion dimensions here made the subsequent warp stretch glyphs by scaleX.
+  const normH = dist({ x: (tl.x + bl.x) / 2, y: (tl.y + bl.y) / 2 }, { x: (tr.x + br.x) / 2, y: (tr.y + br.y) / 2 });
+  const normV = dist({ x: (tl.x + tr.x) / 2, y: (tl.y + tr.y) / 2 }, { x: (bl.x + br.x) / 2, y: (bl.y + br.y) / 2 });
   if (normH < 1 || normV < 1) return null;
   const rOrig = normH / normV;
 
