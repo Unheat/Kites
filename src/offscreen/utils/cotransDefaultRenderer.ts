@@ -505,7 +505,7 @@ export function resizeRegionToFontSize(
   region: DefaultRenderRegion,
   pageWidth: number,
   pageHeight: number
-): { dstPoints: Point2D[]; fontSize: number } {
+): { dstPoints: Point2D[]; fontSize: number; unscaledBoxW: number; unscaledBoxH: number } {
   const fontSizeMinimum = Math.max(1, Math.round((pageWidth + pageHeight) / 200));
 
   const center = polygonCenter(region.polygon);
@@ -580,7 +580,7 @@ export function resizeRegionToFontSize(
 
   // Rotate the (scaled) corners back into the image frame.
   const dstPoints = corners.map(p => rotatePoint(p, center, -region.angle));
-  return { dstPoints, fontSize: Math.trunc(targetFontSize) };
+  return { dstPoints, fontSize: Math.trunc(targetFontSize), unscaledBoxW: boxW, unscaledBoxH: boxH };
 }
 
 /** Euclidean distance between two points. */
@@ -673,16 +673,14 @@ export function renderRegionDefault(
   region: DefaultRenderRegion,
   dstPoints: Point2D[],
   fontSize: number,
-  lineSpacing = 0
+  lineSpacing = 0,
+  unscaledBoxW?: number,
+  unscaledBoxH?: number
 ): DefaultRenderResult | null {
   const [tl, tr, br, bl] = dstPoints;
-  // Cotrans norm_h / norm_v from the midpoints of opposite edges.
-  const midTop = { x: (tl.x + tr.x) / 2, y: (tl.y + tr.y) / 2 };
-  const midBottom = { x: (bl.x + br.x) / 2, y: (bl.y + br.y) / 2 };
-  const midLeft = { x: (tl.x + bl.x) / 2, y: (tl.y + bl.y) / 2 };
-  const midRight = { x: (tr.x + br.x) / 2, y: (tr.y + br.y) / 2 };
-  const normH = dist(midLeft, midRight);
-  const normV = dist(midTop, midBottom);
+  // Cotrans norm_h / norm_v from unscaled box dimensions if available, otherwise from opposite edges.
+  const normH = unscaledBoxW ?? dist({ x: (tl.x + bl.x) / 2, y: (tl.y + bl.y) / 2 }, { x: (tr.x + br.x) / 2, y: (tr.y + br.y) / 2 });
+  const normV = unscaledBoxH ?? dist({ x: (tl.x + tr.x) / 2, y: (tl.y + tr.y) / 2 }, { x: (bl.x + br.x) / 2, y: (bl.y + br.y) / 2 });
   if (normH < 1 || normV < 1) return null;
   const rOrig = normH / normV;
 

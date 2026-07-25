@@ -788,9 +788,6 @@ function renderTextblockListEng(
     if (x2 - x1 <= 0 || y2 - y1 <= 0) continue;
 
     const fontSizeMinimum = Math.max(1, Math.round((pageWidth + pageHeight) / FONT_SIZE_MINIMUM_DIVISOR));
-    const lineCount = b.sourceLineCount && b.sourceLineCount > 0
-      ? b.sourceLineCount
-      : Math.max(1, Math.round((y2 - y1) / Math.max(fontSizeMinimum, 15)));
     const fontSize = b.fontSize && b.fontSize > 0
       ? b.fontSize
       : (b.sourceLineCount && b.sourceLineCount > 0
@@ -1351,8 +1348,8 @@ function renderTextBlocksDefault(
     };
 
     try {
-      const { dstPoints, fontSize } = resizeRegionToFontSize(ctx, region, pageWidth, pageHeight);
-      const info = renderRegionDefault(ctx, region, dstPoints, fontSize);
+      const { dstPoints, fontSize, unscaledBoxW, unscaledBoxH } = resizeRegionToFontSize(ctx, region, pageWidth, pageHeight);
+      const info = renderRegionDefault(ctx, region, dstPoints, fontSize, 0, unscaledBoxW, unscaledBoxH);
       if (info) results[i] = { fontSize: info.fontSize, lineCount: info.lineCount };
     } catch (e) {
       console.error('[canvasTypesetting] Default renderer failed for block', i, e);
