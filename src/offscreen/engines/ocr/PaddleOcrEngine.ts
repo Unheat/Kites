@@ -103,16 +103,18 @@ export class PaddleOcrEngine implements IOcrEngine {
         : ['wasm'];
 
       this.service = new PaddleOcrService({
-        model: MODEL_PRESETS['v6-small'], 
+        model: MODEL_PRESETS['v6-small'],
         detection: {
           maxSideLength: DETECTION_MAX_SIDE,
         },
+        // No graphOptimizationLevel override: ORT's default ('all') is used. A prior
+        // 'basic' override (arrived incidentally in commit 145bebb, a telemetry commit)
+        // was measured against this default with src/test/ocrAccuracyProbe.ts across 3
+        // runs each: recognised text was byte-identical (115/115 lines) and total
+        // recognition time was statistically indistinguishable (~3.2-3.4s either way,
+        // well within run-to-run noise). Re-measure before reintroducing a level override.
         session: {
-          executionProviders: isNode ? undefined : executionProviders,
-          graphOptimizationLevel: 'basic'
-        },
-        recognition: {
-          strategy: 'cross-line' 
+          executionProviders: isNode ? undefined : executionProviders
         }
       });
 
@@ -164,7 +166,7 @@ export class PaddleOcrEngine implements IOcrEngine {
       });
 
       const totalDuration = (performance.now() - startTime).toFixed(2);
-      console.log(`[PaddleOcrEngine] Tensor Batch Recognition complete in ${totalDuration}ms. Found ${texts.length} text blocks.`);
+      console.log(`[PaddleOcrEngine] Recognition complete in ${totalDuration}ms. Found ${texts.length} text blocks.`);
       
       return { texts, boxes, scores, detectionScores, polygons, maskRawCanvas };
     } catch (e) {
@@ -175,7 +177,24 @@ export class PaddleOcrEngine implements IOcrEngine {
 
   /**
    * Recognizes text for arbitrary polygon crops using the CRNN model.
-   * 
+   *
+   * Deliberately bypasses ppu-paddle-ocr's own `BaseRecognitionService.run()` and its
+   * `'cross-line'` / `'per-line'` batching strategies. Those strategies operate on
+   * axis-aligned boxes and crop internally from a single source canvas; feeding them our
+   * polygons would mean giving up `cropAndWarp`'s rotated-quad deskew and vertical-line
+   * rotation (VERTICAL_CROP_ASPECT) — the two things that make manga text recognizable to a
+   * model trained on horizontal Latin/CJK lines. Batching is a speed optimization; rotation
+   * handling is an accuracy one, and accuracy wins here.
+   *
+   * Instead we call the lower-level `buildContext()` / `recognizeTextViaContext()` once per
+   * pre-warped crop, dispatched concurrently via Promise.all below. This is effectively the
+   * library's own `'per-box'` strategy (n inferences, its docs call it "most accurate"),
+   * with our own preprocessing in front of it.
+   *
+   * `buildContext` and `recognizeTextViaContext` are typed `private` on the service — this is
+   * a deliberate internal-API dependency. Re-verify this path whenever `ppu-paddle-ocr` is
+   * upgraded.
+   *
    * @param imageBuffer - Raw image ArrayBuffer.
    * @param polygons - Array of 4-point quadrilaterals.
    * @returns Object containing recognized texts array and confidence scores array.
