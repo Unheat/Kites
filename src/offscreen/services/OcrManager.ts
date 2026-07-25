@@ -1,7 +1,6 @@
 import type { IOcrEngine, OcrResult } from '../engines/ocr/BaseOcrEngine';
 import { PaddleOcrEngine } from '../engines/ocr/PaddleOcrEngine';
-import { CtdOcrEngine } from '../engines/ocr/CtdOcrEngine';
-import { Quadrilateral, Graph, calculateBoundingBox, computeMinAreaRect, polygonArea, quadrilateralCanMergeRegion, splitTextRegion, type Point2D } from '../../shared/utils/geometry';
+import { Quadrilateral, Graph, calculateBoundingBox, computeMinAreaRect, polygonArea, quadrilateralCanMergeRegion, splitTextRegion } from '../../shared/utils/geometry';
 
 /**
  * 1:1 Cotrans is_valuable_char check (generic2.py).
@@ -27,7 +26,12 @@ export function isValuableText(text: string): boolean {
   return false;
 }
 
-export type OcrTier = 'paddle-dbnet' | 'comic-text-detector' | 'none';
+/**
+ * Available OCR tiers. Paddle is the sole detector + recognizer: `CustomPaddleDetector`
+ * runs DBNet detection and `PaddleOcrEngine.recognizeCrops` reads the resulting crops,
+ * mirroring Cotrans's `detector: paddle` flow (detection/paddle_rust.py).
+ */
+export type OcrTier = 'paddle-dbnet' | 'none';
 
 export class OcrManager {
   private engines: Map<OcrTier, IOcrEngine> = new Map();
@@ -52,9 +56,6 @@ export class OcrManager {
         switch (tier) {
           case 'paddle-dbnet':
             engine = new PaddleOcrEngine();
-            break;
-          case 'comic-text-detector':
-            engine = new CtdOcrEngine();
             break;
           case 'none':
             throw new Error('[OcrManager] None OCR engine is not yet implemented.');
@@ -161,16 +162,10 @@ export class OcrManager {
    * Uses convex hull to generate accurate bounding polygons for merged blocks,
    * and concatenates text right-to-left.
    */
-  private mergeTextBlocks(result: OcrResult): OcrResult & {
-    directions?: ('h'|'v')[];
-    fontSizes?: number[];
-    angles?: number[];
-    lineCounts?: number[];
-    rawPolygons?: Point2D[][];
-  } {
+  private mergeTextBlocks(result: OcrResult): OcrResult {
     // Merge algorithm entry point
     const { texts: rawTexts, polygons: rawPolygons = [], scores: rawScores = [] } = result;
-    if (rawTexts.length <= 1 || rawPolygons.length === 0) return { ...result, rawPolygons };
+    if (rawPolygons.length === 0) return { ...result, rawPolygons };
 
     // Stage 1: Cotrans Noise Filtering (area > 16, non-empty text, and isValuableText - manga_translator.py)
     const validIndices: number[] = [];
@@ -359,8 +354,7 @@ export class OcrManager {
       angles: mergedAngles,
       lineCounts: mergedLineCounts,
       rawPolygons: rawPolygons,
-      maskRawCanvas: result.maskRawCanvas,
-      isTightBoundingBox: result.isTightBoundingBox
+      maskRawCanvas: result.maskRawCanvas
     };
   }
 
@@ -370,14 +364,7 @@ export class OcrManager {
    * @param imageBuffer - The raw ArrayBuffer of the image.
    * @returns A promise that resolves to the standardized OCR result.
    */
-  async processImage(imageBuffer: ArrayBuffer, tier: OcrTier = 'paddle-dbnet'): Promise<OcrResult & {
-    directions?: ('h'|'v')[];
-    fontSizes?: number[];
-    angles?: number[];
-    lineCounts?: number[];
-    rawPolygons?: Point2D[][];
-    isTightBoundingBox?: boolean;
-  }> {
+  async processImage(imageBuffer: ArrayBuffer, tier: OcrTier = 'paddle-dbnet'): Promise<OcrResult> {
     const engine = await this.getOrLoadEngine(tier);
     const rawResult = await engine.recognize(imageBuffer);
     return this.mergeTextBlocks(rawResult);

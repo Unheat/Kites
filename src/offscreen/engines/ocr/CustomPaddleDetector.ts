@@ -1,7 +1,10 @@
 import { extractPolygons, extractRawMaskCanvas, type Point2D } from './extractPolygons';
 
 export interface DetectionOutput {
+  /** 4-point text quadrilaterals in original image coordinates. */
   polygons: Point2D[][];
+  /** DBNet confidence per polygon (Cotrans box_score_fast), index-aligned with `polygons`. */
+  scores: number[];
   maskRawCanvas?: any;
 }
 
@@ -47,14 +50,14 @@ export class CustomPaddleDetector {
 
     if (!probabilityMap) {
       console.warn('[CustomPaddleDetector] Probability map is null. No text found.');
-      return { polygons: [] };
+      return { polygons: [], scores: [] };
     }
 
     const thresh = this.service.options.detection?.probabilityThreshold ?? 0.3;
 
     // 3. Post-process the raw tensor map using our pure JS polygon extractor
     console.log('[CustomPaddleDetector] Extracting oriented polygons from probability map...');
-    const polygons = extractPolygons(
+    const detected = extractPolygons(
       probabilityMap,
       input.width,
       input.height,
@@ -77,7 +80,10 @@ export class CustomPaddleDetector {
       input.resizeRatio
     );
 
+    const polygons = detected.map(d => d.points);
+    const scores = detected.map(d => d.score);
+
     console.log(`[CustomPaddleDetector] Found ${polygons.length} text polygons and extracted maskRawCanvas.`);
-    return { polygons, maskRawCanvas };
+    return { polygons, scores, maskRawCanvas };
   }
 }

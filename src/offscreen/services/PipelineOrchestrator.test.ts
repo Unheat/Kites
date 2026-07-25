@@ -2,6 +2,23 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { pipelineOrchestrator } from './PipelineOrchestrator';
 import { db } from '../../db';
 
+// vi.hoisted lifts the mock above the module imports. PipelineOrchestrator.ts constructs an
+// OcrManager at module scope (`export const pipelineOrchestrator = ...`), so the mock class
+// body runs during import — before a plain `const` here would have been initialized.
+const { processImageMock } = vi.hoisted(() => ({
+  processImageMock: vi.fn().mockResolvedValue({
+    texts: ['こんにちは', '世界'],
+    boxes: [
+      { x: 10, y: 10, w: 100, h: 50 },
+      { x: 10, y: 70, w: 100, h: 50 }
+    ],
+    polygons: [
+      [{ x: 10, y: 10 }, { x: 110, y: 10 }, { x: 110, y: 60 }, { x: 10, y: 60 }],
+      [{ x: 10, y: 70 }, { x: 110, y: 70 }, { x: 110, y: 120 }, { x: 10, y: 120 }]
+    ]
+  })
+}));
+
 // Mock dependencies
 vi.mock('../../db', () => ({
   db: {
@@ -30,33 +47,10 @@ vi.mock('../utils/opencv', () => ({
   initOpenCV: vi.fn().mockResolvedValue({})
 }));
 
-// Mock ballonExtractor to bypass OpenCV WASM load issues in Vitest
-vi.mock('../utils/ballonExtractor', () => ({
-  extractBallonRegion: vi.fn(() => ({
-    mask: null,
-    boundingRect: [0, 0, 100, 100],
-    center: [50, 50],
-    area: 10000,
-    hasSpeechBubble: false
-  })),
-  maskBoundingRect: vi.fn(() => ({ x: 0, y: 0, w: 100, h: 100 })),
-  maskCentroid: vi.fn(() => ({ x: 50, y: 50 }))
-}));
-
 vi.mock('./OcrManager', () => {
   return {
     OcrManager: class {
-      processImage = vi.fn().mockResolvedValue({
-        texts: ['こんにちは', '世界'],
-        boxes: [
-          { x: 10, y: 10, w: 100, h: 50 },
-          { x: 10, y: 70, w: 100, h: 50 }
-        ],
-        polygons: [
-          [{x:10,y:10}, {x:110,y:10}, {x:110,y:60}, {x:10,y:60}],
-          [{x:10,y:70}, {x:110,y:70}, {x:110,y:120}, {x:10,y:120}]
-        ]
-      })
+      processImage = processImageMock
     }
   };
 });
@@ -70,8 +64,10 @@ vi.mock('./TranslationManager', () => ({
 vi.mock('./InpaintManager', () => {
   return {
     InpaintManager: class {
+      // Matches the real InpaintManager surface used by runPipeline.
+      eraseText = vi.fn().mockResolvedValue(new ArrayBuffer(123)) // cleaned buffer
       getEngine = vi.fn().mockResolvedValue({
-        inpaint: vi.fn().mockResolvedValue(new ArrayBuffer(123)) // cleaned buffer
+        inpaint: vi.fn().mockResolvedValue(new ArrayBuffer(123))
       })
     }
   };
@@ -107,6 +103,14 @@ global.FileReader = class {
 describe('PipelineOrchestrator', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    processImageMock.mockResolvedValue({
+      texts: ['こんにちは', '世界'],
+      boxes: [{ x: 10, y: 10, w: 100, h: 50 }, { x: 10, y: 70, w: 100, h: 50 }],
+      polygons: [
+        [{x:10,y:10}, {x:110,y:10}, {x:110,y:60}, {x:10,y:60}],
+        [{x:10,y:70}, {x:110,y:70}, {x:110,y:120}, {x:10,y:120}]
+      ]
+    });
     
     // Mock chrome storage using spy
     (vi.spyOn(chrome.storage.local, 'get') as any).mockResolvedValue({
@@ -153,6 +157,21 @@ describe('PipelineOrchestrator', () => {
 
     expect(db.translationJobs.update).toHaveBeenCalledWith(100, { status: 'completed' });
     
+    blobSpy.mockRestore();
+  });
+
+  it('always runs OCR on the paddle-dbnet tier, even if the stored config names a retired tier', async () => {
+    const mockImageRecord = { id: 1, jobId: 100, rawImageBlob: new Blob(['fake image data'], { type: 'image/png' }) };
+    ((db.images as any).first as any).mockResolvedValue(mockImageRecord);
+    // A user whose settings still hold the removed comic-text-detector tier must not break.
+    vi.spyOn(chrome.runtime, 'sendMessage').mockImplementation((_message: any, callback: any) => {
+      callback({ activeInpaintId: 'simple', activeOcrId: 'comic-text-detector', targetLang: 'en' });
+    });
+    const blobSpy = vi.spyOn(pipelineOrchestrator as any, 'blobToArrayBuffer').mockResolvedValue(new ArrayBuffer(8));
+
+    await pipelineOrchestrator.runPipeline(100);
+
+    expect(processImageMock).toHaveBeenCalledWith(expect.any(ArrayBuffer), 'paddle-dbnet');
     blobSpy.mockRestore();
   });
 

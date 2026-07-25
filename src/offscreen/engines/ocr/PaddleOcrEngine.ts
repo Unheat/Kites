@@ -3,6 +3,14 @@ import { checkWebGPUAvailability } from '../../utils/hardware';
 import { CustomPaddleDetector } from './CustomPaddleDetector';
 import * as ort from 'onnxruntime-web';
 
+/**
+ * Longest-side resize applied to the page before DBNet detection inference.
+ * Cotrans uses detection_size = 2048 (config.py DetectorConfig); 1536 trades a little
+ * small-text recall for browser WASM/WebGPU latency. Raise toward 2048 if furigana-scale
+ * text is being missed, lower toward 960 if detection is the pipeline bottleneck.
+ */
+const DETECTION_MAX_SIDE = 1536;
+
 export class PaddleOcrEngine implements IOcrEngine {
   private service: any = null;
   private customDetector: CustomPaddleDetector | null = null;
@@ -77,7 +85,7 @@ export class PaddleOcrEngine implements IOcrEngine {
       this.service = new PaddleOcrService({
         model: MODEL_PRESETS['v6-small'], 
         detection: {
-          maxSideLength: 960,
+          maxSideLength: DETECTION_MAX_SIDE,
         },
         session: {
           executionProviders: isNode ? undefined : executionProviders,
@@ -113,7 +121,7 @@ export class PaddleOcrEngine implements IOcrEngine {
       const startTime = performance.now();
       console.log('[PaddleOcrEngine] Starting recognition...');
       
-      const { polygons, maskRawCanvas } = await this.customDetector!.detectPolygons(imageBuffer);
+      const { polygons, scores: detectionScores, maskRawCanvas } = await this.customDetector!.detectPolygons(imageBuffer);
       
       console.log(`[PaddleOcrEngine] Extracted ${polygons.length} text polygons. Running custom rotated recognition...`);
 
@@ -138,7 +146,7 @@ export class PaddleOcrEngine implements IOcrEngine {
       const totalDuration = (performance.now() - startTime).toFixed(2);
       console.log(`[PaddleOcrEngine] Tensor Batch Recognition complete in ${totalDuration}ms. Found ${texts.length} text blocks.`);
       
-      return { texts, boxes, scores, polygons, maskRawCanvas, isTightBoundingBox: false };
+      return { texts, boxes, scores, detectionScores, polygons, maskRawCanvas };
     } catch (e) {
       console.error('[PaddleOcrEngine] Recognition failed:', e);
       throw e;

@@ -12,11 +12,5 @@ export const ocrRegistry: Record<string, OcrModelRegistryEntry> = {
     name: 'PaddleOCR (Default)',
     description: 'Fast, lightweight text detection using WebAssembly. Best for general use.',
     isAdvanced: false
-  },
-  'comic-text-detector': {
-    onnxUrl: 'https://github.com/zyddnys/manga-image-translator/releases/download/beta-0.3/comictextdetector.pt.onnx',
-    name: 'Comic Text Detector',
-    description: 'Heavy, highly accurate model specifically trained for manga. Supports WebGPU.',
-    isAdvanced: true
   }
 };

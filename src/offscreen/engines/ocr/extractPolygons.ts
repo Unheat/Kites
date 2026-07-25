@@ -21,6 +21,35 @@ export interface Point2D {
   y: number;
 }
 
+/**
+ * Cotrans/PaddleOCR DBPostProcess `min_size` (detection/default_utils/dbnet_utils.py:10).
+ * Minimum short side of a candidate's min-area-rect, in model-space pixels. Rejects
+ * hairline slivers that survive binarization along panel borders and speech-bubble edges.
+ */
+const MIN_BOX_SIDE = 3;
+
+/**
+ * Cotrans `box_threshold` (config.py DetectorConfig.box_threshold = 0.7). A candidate is
+ * dropped when the MEAN probability inside its blob falls below this. Distinct from the
+ * binarization `threshold` argument (0.3), which only decides which pixels join a blob:
+ * this second gate rejects large, uniformly low-confidence smears.
+ */
+const BOX_THRESHOLD = 0.7;
+
+/**
+ * Minimum number of binarized pixels for a blob to be considered at all. Cheap early-out
+ * that runs before the more expensive hull/min-rect math.
+ */
+const MIN_BLOB_PIXELS = 15;
+
+/** One detected text quadrilateral plus the DBNet confidence that produced it. */
+export interface DetectedPolygon {
+  /** 4-point min-area-rect in ORIGINAL image coordinates. */
+  points: Point2D[];
+  /** Cotrans box_score_fast: mean probability-map value inside the blob (0..1). */
+  score: number;
+}
+
 function getClipper(): any {
   if (!ClipperLib) {
     const req = createRequire(import.meta.url);
@@ -87,6 +116,62 @@ export function extractRawMaskCanvas(
   return origCanvas;
 }
 
+/**
+ * Short side of a 4-point min-area-rect. 1:1 with the `sside` returned by Cotrans
+ * `get_mini_boxes` (dbnet_utils.py), which is what `min_size` is compared against.
+ *
+ * @param rect - Min-area-rect corners in [tl, tr, br, bl] order.
+ * @returns The length of the rectangle's shorter side, in the rect's own coordinate units.
+ */
+function minRectShortSide(rect: Point2D[]): number {
+  if (rect.length < 4) return 0;
+  const w = Math.hypot(rect[1].x - rect[0].x, rect[1].y - rect[0].y);
+  const h = Math.hypot(rect[3].x - rect[0].x, rect[3].y - rect[0].y);
+  return Math.min(w, h);
+}
+
+/**
+ * 1:1 port of Cotrans `box_score_fast` (dbnet_utils.py:175): the mean probability-map value
+ * inside a candidate's region.
+ *
+ * Cotrans rasterizes the contour with `cv2.fillPoly` and averages `pred` under that mask.
+ * Our candidates come from a flood fill, so the blob's own pixel list IS the filled contour
+ * interior — we average over it directly. Per AGENTS.md §8 this is the "Library -> Custom JS"
+ * case: no fillPoly needed, and the result is exact rather than an approximation.
+ *
+ * @param probMap - The raw DBNet probability map (model resolution, row-major).
+ * @param width - Probability map width, used to index pixels.
+ * @param blobPoints - The connected-component pixels forming this candidate.
+ * @returns Mean probability over the blob, in 0..1.
+ */
+function boxScoreFast(probMap: Float32Array, width: number, blobPoints: Point2D[]): number {
+  if (blobPoints.length === 0) return 0;
+  let sum = 0;
+  for (const p of blobPoints) {
+    sum += probMap[p.y * width + p.x];
+  }
+  return sum / blobPoints.length;
+}
+
+/**
+ * Extracts oriented text quadrilaterals from a raw DBNet probability map.
+ *
+ * 1:1 port of Cotrans `SegDetectorRepresenter.boxes_from_bitmap` (dbnet_utils.py:97), which
+ * rejects a candidate at three separate gates, in this exact order:
+ *   1. min-area-rect short side < min_size, BEFORE unclip expansion;
+ *   2. box_score_fast (mean probability inside the blob) < box_thresh;
+ *   3. min-area-rect short side < min_size + 2, AFTER unclip expansion.
+ * Survivors are rescaled from model resolution back to original image coordinates.
+ *
+ * @param probMap - Raw DBNet probability map at model resolution, row-major.
+ * @param width - Probability map width.
+ * @param height - Probability map height.
+ * @param originalWidth - Original image width, for rescaling the output.
+ * @param originalHeight - Original image height, for rescaling the output.
+ * @param threshold - Binarization threshold deciding which pixels join a blob.
+ * @param unclipRatio - Polygon dilation factor (Clipper offset), matching DBPostProcess.
+ * @returns Accepted quadrilaterals in original image coordinates, each with its DBNet score.
+ */
 export function extractPolygons(
   probMap: Float32Array,
   width: number,
@@ -96,14 +181,17 @@ export function extractPolygons(
   threshold: number = 0.3,
   unclipRatio: number = 2.0,
   _resizeRatio?: number
-): Point2D[][] {
+): DetectedPolygon[] {
   const binaryMap = new Uint8Array(width * height);
   for (let i = 0; i < width * height; i++) {
     binaryMap[i] = probMap[i] >= threshold ? 1 : 0;
   }
 
   const visited = new Uint8Array(width * height);
-  const polygons: Point2D[][] = [];
+  const polygons: DetectedPolygon[] = [];
+  let rejectedSmallPre = 0;
+  let rejectedLowScore = 0;
+  let rejectedSmallPost = 0;
 
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
@@ -135,15 +223,35 @@ export function extractPolygons(
           }
         }
 
-        if (blobPoints.length < 15) continue;
+        if (blobPoints.length < MIN_BLOB_PIXELS) continue;
 
         const hull = convexHull(blobPoints);
         if (hull.length < 3) continue;
+
+        // Gate 1 (Cotrans: sside < min_size, before unclip) — drop hairline slivers.
+        if (minRectShortSide(minAreaRect(hull)) < MIN_BOX_SIDE) {
+          rejectedSmallPre++;
+          continue;
+        }
+
+        // Gate 2 (Cotrans: box_thresh > score) — drop low-confidence smears.
+        const score = boxScoreFast(probMap, width, blobPoints);
+        if (score < BOX_THRESHOLD) {
+          rejectedLowScore++;
+          continue;
+        }
 
         const unclipped = unclipPolygon(hull, unclipRatio);
         if (unclipped.length < 3) continue;
 
         const minRect = minAreaRect(unclipped);
+
+        // Gate 3 (Cotrans: sside < min_size + 2, after unclip) — the expansion must have
+        // produced a box with real area, otherwise the candidate was degenerate.
+        if (minRectShortSide(minRect) < MIN_BOX_SIDE + 2) {
+          rejectedSmallPost++;
+          continue;
+        }
 
         const ratioX = originalWidth / width;
         const ratioY = originalHeight / height;
@@ -153,10 +261,15 @@ export function extractPolygons(
           y: Math.round(p.y * ratioY)
         }));
 
-        polygons.push(scaledRect);
+        polygons.push({ points: scaledRect, score });
       }
     }
   }
+
+  console.log(
+    `[extractPolygons] Kept ${polygons.length} boxes. Rejected: ${rejectedSmallPre} tiny (pre-unclip), ` +
+    `${rejectedLowScore} below box_threshold ${BOX_THRESHOLD}, ${rejectedSmallPost} tiny (post-unclip).`
+  );
 
   return polygons;
 }

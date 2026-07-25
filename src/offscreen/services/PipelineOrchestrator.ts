@@ -1,6 +1,6 @@
 import { db } from '../../db';
 import type { PopupState } from '../../shared/types';
-import { OcrManager } from './OcrManager';
+import { OcrManager, type OcrTier } from './OcrManager';
 import { translationManager } from './TranslationManager';
 import { InpaintManager } from './InpaintManager';
 import type { InpaintTier } from './InpaintManager';
@@ -51,6 +51,9 @@ export class PipelineOrchestrator {
       const inpaintTier = popupState?.activeInpaintId || 'none';
       const sourceLang = popupState?.sourceLang || 'auto';
       const targetLang = popupState?.targetLang || 'en';
+      // Paddle is the only detector+recognizer tier (Cotrans `detector: paddle` flow).
+      // Kept as a variable so a future tier can be reintroduced without touching call sites.
+      const ocrTier: OcrTier = 'paddle-dbnet';
 
       // 2. Fetch image from DB
       const imageRecord = await db.images.where('jobId').equals(jobId).first();
@@ -63,8 +66,8 @@ export class PipelineOrchestrator {
 
       // 3. OCR Detection
       const ocrStart = performance.now();
-      console.log(`[PipelineOrchestrator] Running OCR...`);
-      const ocrResult = await this.ocrManager.processImage(imageBuffer);
+      console.log(`[PipelineOrchestrator] Running OCR with ${ocrTier}...`);
+      const ocrResult = await this.ocrManager.processImage(imageBuffer, ocrTier);
       const ocrDuration = (performance.now() - ocrStart).toFixed(2);
       console.log(`[PipelineOrchestrator] OCR stage complete in ${ocrDuration}ms.`);
       
@@ -119,13 +122,12 @@ export class PipelineOrchestrator {
       const bitmap = await createImageBitmap(cleanedBlob);
       const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
       const ctx = canvas.getContext('2d') as OffscreenCanvasRenderingContext2D;
-      
+
       // Draw the clean inpainted image
       ctx.drawImage(bitmap, 0, 0);
       
-      // Draw all translated text blocks using the 1:1 Cotrans manga2eng batch renderer
-      // (balloon extraction + layout_lines_aligncenter). Track the original OCR index of
-      // every item so render results can be mapped back for DB persistence.
+      // Draw all translated text blocks with the Cotrans default region renderer. Track the
+      // original OCR index of every item so render results can be mapped back for DB persistence.
       const textBlockItems: TextBlockItem[] = [];
       const itemOcrIndices: number[] = [];
       for (let i = 0; i < translatedTexts.length; i++) {
@@ -141,9 +143,6 @@ export class PipelineOrchestrator {
             strokeColor: '#FFFFFF',
             fontSize: ocrResult.fontSizes ? ocrResult.fontSizes[i] : undefined,
             angle: ocrResult.angles ? ocrResult.angles[i] : undefined,
-            // Propagate the detector's box tightness so the manga2eng renderer picks the correct
-            // font-sizing path: CTD (tight) -> Cotrans single-multiplier, PaddleOCR -> strict fit.
-            isTightBoundingBox: ocrResult.isTightBoundingBox,
             // Default renderer inputs: original source text (length-ratio expansion) and merged
             // source line count (Cotrans used_rows). ocrResult.texts holds the pre-translation text.
             originalText: ocrResult.texts[i],
@@ -152,7 +151,10 @@ export class PipelineOrchestrator {
           itemOcrIndices.push(i);
         }
       }
-      const renderInfos = renderTextBlocksBatch(ctx, textBlockItems, targetLang, { width: bitmap.width, height: bitmap.height });
+      const renderInfos = renderTextBlocksBatch(ctx, textBlockItems, targetLang, {
+        width: bitmap.width,
+        height: bitmap.height
+      });
 
       // Map render results (final font size actually drawn) back to OCR indices
       const renderInfoByOcrIndex = new Map<number, RenderedBlockInfo>();

@@ -18,8 +18,11 @@ export interface OcrResult {
   /** Standard axis-aligned bounding boxes for each text block. */
   boxes: OcrBox[];
   
-  /** Optional confidence scores (0.0 to 1.0) for each text block. Can be used for filtering out low-quality predictions. */
+  /** Optional text-recognition confidence scores (0.0 to 1.0) from the CRNN, for each text block. */
   scores?: number[];
+
+  /** Optional DBNet detection confidence (Cotrans box_score_fast) for each text block. */
+  detectionScores?: number[];
   
   /** Optional precise rotated quadrilaterals outlining the text. Array of 4-point corners [TopLeft, TopRight, BottomRight, BottomLeft]. */
   polygons?: {x: number, y: number}[][];
@@ -39,8 +42,8 @@ export interface OcrResult {
   /** Optional Cotrans block rotation per region in degrees (mean textline angle - 90, snapped to 0 below 3deg). */
   angles?: number[];
 
-  /** Indicates whether the returned bounding boxes/polygons are extremely tight (like CTD) or spiky/loose (like PaddleOCR). */
-  isTightBoundingBox?: boolean;
+  /** Number of source OCR lines merged into each renderable text region. */
+  lineCounts?: number[];
 }
 
 export interface IOcrEngine {
@@ -66,4 +69,3 @@ export interface IOcrEngine {
    */
   destroy(): Promise<void>;
 }
-

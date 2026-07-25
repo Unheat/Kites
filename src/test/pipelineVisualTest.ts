@@ -77,8 +77,7 @@ async function runPipelineVisualTest() {
     // Draw the clean inpainted image
     ctx.drawImage(img, 0, 0);
     
-    // Draw all translated text blocks in one batch (Cotrans manga2eng renderer needs the
-    // clean page snapshot and cross-block enlarge-ratio negotiation)
+    // Draw all translated text blocks in one batch through the Cotrans default renderer.
     const textBlockItems: TextBlockItem[] = [];
     for (let i = 0; i < translatedTexts.length; i++) {
       const text = translatedTexts[i];
@@ -92,7 +91,6 @@ async function runPipelineVisualTest() {
           strokeColor: '#FFFFFF',
           fontSize: ocrResult.fontSizes ? ocrResult.fontSizes[i] : undefined,
           angle: ocrResult.angles ? ocrResult.angles[i] : undefined,
-          isTightBoundingBox: ocrResult.isTightBoundingBox,
           originalText: texts[i],
           sourceLineCount: ocrResult.lineCounts ? ocrResult.lineCounts[i] : undefined
         });

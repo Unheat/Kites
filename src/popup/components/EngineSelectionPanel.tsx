@@ -60,7 +60,6 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
 
   const [ocrBaseEngines, setOcrBaseEngines] = useState<Engine[]>([
     { id: 'paddle-dbnet', name: 'PaddleOCR (Default)', type: 'local', isDownloaded: true },
-    { id: 'comic-text-detector', name: 'Comic Text Detector', type: 'local', isDownloaded: false, hardware: 'WebGPU' },
   ]);
 
   useEffect(() => {
@@ -77,10 +76,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
           if (e.id === 'lama-manga') return { ...e, isDownloaded: urls.some(u => u.includes('lama-manga')) };
           return e;
         }));
-        setOcrBaseEngines(prev => prev.map(e => {
-          if (e.id === 'comic-text-detector') return { ...e, isDownloaded: urls.some(u => u.includes('comic_text_detector')) };
-          return e;
-        }));
+        // OCR: PaddleOCR ships bundled in the extension, so there is nothing to cache-check.
       } catch (e) {
         console.warn('Inpaint cache check failed:', e);
       }
