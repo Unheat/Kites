@@ -29,12 +29,17 @@ export interface Point2D {
 const MIN_BOX_SIDE = 3;
 
 /**
- * Cotrans `box_threshold` (config.py DetectorConfig.box_threshold = 0.7). A candidate is
- * dropped when the MEAN probability inside its blob falls below this. Distinct from the
- * binarization `threshold` argument (0.3), which only decides which pixels join a blob:
- * this second gate rejects large, uniformly low-confidence smears.
+ * Minimum MEAN probability inside a blob for it to be kept. Distinct from the binarization
+ * `threshold` argument (0.3), which only decides which pixels join a blob: this second gate
+ * rejects large, uniformly low-confidence smears.
+ *
+ * Taken from PaddleOCR's `--det_db_box_thresh` CLI default, NOT from Cotrans. (PaddleOCR is
+ * inconsistent with itself: the DBPostProcess class default is 0.7, the CLI default is 0.6.
+ * 0.6 is the value validated against our test set.) Do not raise this to match Cotrans's
+ * config — its 0.7 was tuned against detect.ckpt's probability distribution, not PP-OCRv6's,
+ * and mean-probability-per-blob is model- and scale-dependent.
  */
-const BOX_THRESHOLD = 0.7;
+const BOX_THRESHOLD = 0.6;
 
 /**
  * Minimum number of binarized pixels for a blob to be considered at all. Cheap early-out
@@ -180,7 +185,7 @@ export function extractPolygons(
   originalHeight: number,
   threshold: number = 0.3,
   unclipRatio: number = 2.0,
-  _resizeRatio?: number
+  resizeRatio?: number
 ): DetectedPolygon[] {
   const binaryMap = new Uint8Array(width * height);
   for (let i = 0; i < width * height; i++) {
@@ -253,12 +258,19 @@ export function extractPolygons(
           continue;
         }
 
-        const ratioX = originalWidth / width;
-        const ratioY = originalHeight / height;
+        // Map model space back to original image space. preprocessDetection resizes the page
+        // isotropically by resizeRatio, then PADS up to a multiple of 32 with the image in the
+        // top-left corner — so `width`/`height` here are the padded tensor dimensions, not the
+        // resized image. Dividing by the padded dimensions (the old behaviour) both over-scales
+        // and, because the two axes are padded by different amounts, skews the box anisotropically.
+        // ppu-paddle-ocr's own convertToOriginalCoordinates uses `coord / resizeRatio`; match it.
+        const scale = resizeRatio && resizeRatio > 0
+          ? 1 / resizeRatio
+          : originalWidth / width;
 
         const scaledRect = minRect.map(p => ({
-          x: Math.round(p.x * ratioX),
-          y: Math.round(p.y * ratioY)
+          x: Math.max(0, Math.min(originalWidth, Math.round(p.x * scale))),
+          y: Math.max(0, Math.min(originalHeight, Math.round(p.y * scale)))
         }));
 
         polygons.push({ points: scaledRect, score });
@@ -346,6 +358,37 @@ function unclipPolygon(hull: Point2D[], unclipRatio: number): Point2D[] {
   return unclipped;
 }
 
+/**
+ * Orders 4 rectangle corners deterministically as [topLeft, topRight, bottomRight, bottomLeft],
+ * 1:1 with Baidu's `get_mini_boxes` (PaddleOCR predict_det.py).
+ *
+ * This matters far beyond tidiness. `PaddleOcrEngine.cropAndWarp` derives the crop's rotation
+ * from the first edge, `theta = atan2(p1.y - p0.y, p1.x - p0.x)`. Rotating-calipers output
+ * orders corners in the frame of whichever hull edge minimised the area, which may be the
+ * short side rather than the long one — so theta lands 90 degrees out on an arbitrary subset
+ * of boxes and the recogniser reads sideways text. Sorting into image space removes that
+ * ambiguity.
+ *
+ * @param rect - Exactly 4 rectangle corners in any order.
+ * @returns The same corners ordered [tl, tr, br, bl]; the input unchanged if not 4 points.
+ */
+function orderRectCorners(rect: Point2D[]): Point2D[] {
+  if (rect.length !== 4) return rect;
+
+  // 1. Sort by x to separate the left pair from the right pair.
+  const sortedByX = [...rect].sort((a, b) => a.x - b.x);
+  const leftPts = [sortedByX[0], sortedByX[1]];
+  const rightPts = [sortedByX[2], sortedByX[3]];
+
+  // 2. Within each pair, smaller y is the top corner.
+  leftPts.sort((a, b) => a.y - b.y);
+  rightPts.sort((a, b) => a.y - b.y);
+
+  const [topLeft, bottomLeft] = leftPts;
+  const [topRight, bottomRight] = rightPts;
+  return [topLeft, topRight, bottomRight, bottomLeft];
+}
+
 function minAreaRect(points: Point2D[]): Point2D[] {
   let minArea = Infinity;
   let bestRect: Point2D[] = [];
@@ -388,7 +431,7 @@ function minAreaRect(points: Point2D[]): Point2D[] {
     }
   }
 
-  return bestRect.length === 4 ? bestRect : hullBoundingBox(points);
+  return bestRect.length === 4 ? orderRectCorners(bestRect) : hullBoundingBox(points);
 }
 
 function hullBoundingBox(points: Point2D[]): Point2D[] {

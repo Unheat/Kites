@@ -5,11 +5,31 @@ import * as ort from 'onnxruntime-web';
 
 /**
  * Longest-side resize applied to the page before DBNet detection inference.
- * Cotrans uses detection_size = 2048 (config.py DetectorConfig); 1536 trades a little
- * small-text recall for browser WASM/WebGPU latency. Raise toward 2048 if furigana-scale
- * text is being missed, lower toward 960 if detection is the pipeline bottleneck.
+ *
+ * DO NOT copy this from Cotrans. Cotrans's detection_size = 2048 is tuned for its own
+ * detect.ckpt; this constant feeds PP-OCRv6 mobile, which is trained for a different
+ * text-size distribution.
+ *
+ * Note that ppu-paddle-ocr's `calculateResizeDimensions` only ever DOWNSCALES — it leaves
+ * ratio at 1 when the image already fits. Raising this past a page's long side therefore
+ * disables resizing entirely and runs inference at native resolution, which changes blob
+ * thickness and probability statistics and wrecks recognition accuracy. Measured: raising
+ * this to 1536 dropped recognised-string agreement with the known-good baseline to 29/115.
+ *
+ * 960 is the empirically validated value. Any change must be re-measured with
+ * src/test/ocrAccuracyProbe.ts against the baseline before being kept.
  */
-const DETECTION_MAX_SIDE = 1536;
+const DETECTION_MAX_SIDE = 960;
+
+/**
+ * Aspect ratio (crop height / crop width) at or above which a crop is treated as a vertical
+ * text line and rotated 90 degrees counter-clockwise before recognition.
+ *
+ * Loosening this to 1.2 (commit d06f54c, for the since-removed CTD detector) rotated
+ * near-square crops — short horizontal runs of two or three characters — that should have
+ * been left alone, feeding the recogniser sideways glyphs.
+ */
+const VERTICAL_CROP_ASPECT = 1.5;
 
 export class PaddleOcrEngine implements IOcrEngine {
   private service: any = null;
@@ -239,7 +259,7 @@ function cropAndWarp(
   destCtx.drawImage(sourceCanvas, -p0.x, -p0.y);
   destCtx.restore();
 
-  if (cropH > cropW * 1.2) {
+  if (cropH / cropW >= VERTICAL_CROP_ASPECT) {
     const rotCanvas = platform.createCanvas(cropH, cropW);
     const rotCtx = rotCanvas.getContext('2d');
     if (rotCtx) {

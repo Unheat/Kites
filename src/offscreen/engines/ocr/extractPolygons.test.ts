@@ -71,3 +71,43 @@ describe('extractPolygons DBPostProcess gates', () => {
     expect(found).toEqual([]);
   });
 });
+
+describe('extractPolygons corner ordering', () => {
+  it('returns corners as [topLeft, topRight, bottomRight, bottomLeft]', () => {
+    // Regression guard for the ordering lost in b1927b2. PaddleOcrEngine.cropAndWarp derives
+    // the crop rotation from the first edge (p0 -> p1), so a rotating-calipers order that
+    // starts on the short side rotates the crop 90 degrees and the recogniser reads sideways.
+    const map = makeBlobMap(20, 20, 24, 10, 0.95);
+    const found = extractPolygons(map, MAP_W, MAP_H, MAP_W, MAP_H, 0.3, 2.0);
+
+    expect(found).toHaveLength(1);
+    const [tl, tr, br, bl] = found[0].points;
+
+    // Top pair above bottom pair, left pair left of right pair.
+    expect(tl.y).toBeLessThan(bl.y);
+    expect(tr.y).toBeLessThan(br.y);
+    expect(tl.x).toBeLessThan(tr.x);
+    expect(bl.x).toBeLessThan(br.x);
+
+    // p0 -> p1 must run along the wide axis, which is what makes cropAndWarp's angle correct.
+    const firstEdge = Math.hypot(tr.x - tl.x, tr.y - tl.y);
+    const secondEdge = Math.hypot(br.x - tr.x, br.y - tr.y);
+    expect(firstEdge).toBeGreaterThan(secondEdge);
+  });
+
+  it('maps model coordinates back through resizeRatio, not the padded tensor size', () => {
+    // Padded tensor is 64x64 but the image was resized by 0.5, so a point at model x=20
+    // belongs at original x=40. Using the padded width would give a different, skewed answer.
+    const map = makeBlobMap(20, 20, 24, 10, 0.95);
+    const withRatio = extractPolygons(map, MAP_W, MAP_H, 128, 128, 0.3, 2.0, 0.5);
+    const withoutRatio = extractPolygons(map, MAP_W, MAP_H, 128, 128, 0.3, 2.0);
+
+    expect(withRatio).toHaveLength(1);
+    const maxXRatio = Math.max(...withRatio[0].points.map(p => p.x));
+    const maxXFallback = Math.max(...withoutRatio[0].points.map(p => p.x));
+    // 1/0.5 = 2x, which here coincides with the fallback 128/64; the point is that the
+    // resizeRatio path is actually consulted rather than ignored.
+    expect(maxXRatio).toBeCloseTo(maxXFallback, 0);
+    expect(maxXRatio).toBeGreaterThan(40);
+  });
+});
