@@ -1,7 +1,6 @@
 import type { IOcrEngine, OcrResult } from './BaseOcrEngine';
 import { checkWebGPUAvailability } from '../../utils/hardware';
 import { CustomPaddleDetector } from './CustomPaddleDetector';
-import * as ort from 'onnxruntime-web';
 
 /**
  * Longest-side resize applied to the page before DBNet detection inference.
@@ -52,6 +51,7 @@ export class PaddleOcrEngine implements IOcrEngine {
       let MODEL_PRESETS: any;
 
       if (isNode) {
+        // Node environment (Visual Unit Tests)
         console.log('[PaddleOcrEngine] Detected Node.js environment. Loading native backend...');
         // @ts-ignore - The module exists at runtime for Node
         const moduleName = 'ppu-paddle-ocr';
@@ -59,7 +59,17 @@ export class PaddleOcrEngine implements IOcrEngine {
         PaddleOcrService = pkg.PaddleOcrService;
         MODEL_PRESETS = pkg.MODEL_PRESETS;
       } else {
+        // Browser environment (Chrome Extension)
         console.log('[PaddleOcrEngine] Detected Browser environment. Loading web backend...');
+
+        // Ensure ORT does not fallback to CDN under Manifest V3. Keep this import scoped to
+        // the browser branch, dynamic and awaited here: a module-level `import * as ort from
+        // 'onnxruntime-web'` forces the entire ORT bundle to be evaluated eagerly and
+        // synchronously as part of the static import graph (OcrManager -> PaddleOcrEngine ->
+        // onnxruntime-web) the moment anything imports this file, instead of lazily on first
+        // init(). That eager evaluation is what broke translation in production: the offscreen
+        // document's stricter CSP hits ORT's bundle-internal eval before PipelineOrchestrator's
+        // own code ever runs, so nothing gets logged and the pipeline just stalls.
         const ort = await import('onnxruntime-web');
         ort.env.wasm.wasmPaths = chrome.runtime.getURL('/ort-wasm/');
 
@@ -84,14 +94,16 @@ export class PaddleOcrEngine implements IOcrEngine {
       }
       
       const startTime = performance.now();
-      
-      if ((ort as any).env?.webgpu) {
-        (ort as any).env.webgpu.powerPreference = 'high-performance';
-      }
 
       console.log(`[PaddleOcrEngine] WebGPU Available: ${useWebGpu}. Initializing service...`);
 
-      const executionProviders = useWebGpu 
+      // Explicitly declare execution providers. powerPreference is set per-provider here
+      // (not via a global `ort.env.webgpu.powerPreference`, which would require importing
+      // onnxruntime-web at module scope -- see the comment on the browser branch above for
+      // why that eager-evaluation path is dangerous under this extension's CSP), matching the
+      // pattern used by hardware.ts and WebLLMEngine.ts (navigator.gpu.requestAdapter({
+      // powerPreference: 'high-performance' })).
+      const executionProviders = useWebGpu
         ? [
             {
               name: 'webgpu',
@@ -99,7 +111,7 @@ export class PaddleOcrEngine implements IOcrEngine {
               powerPreference: 'high-performance'
             },
             'wasm'
-          ] 
+          ]
         : ['wasm'];
 
       this.service = new PaddleOcrService({
