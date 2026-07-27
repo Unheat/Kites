@@ -1,15 +1,12 @@
-import { createRequire } from 'module';
-
-let ClipperLib: any = null;
-if (typeof window === 'undefined') {
-  try {
-    const req = createRequire(import.meta.url);
-    const mod = req('clipper-lib');
-    ClipperLib = mod.default || mod;
-  } catch (e) {
-    // Fallback
-  }
-}
+// clipper-lib is plain CommonJS (single clipper.js, "main": "clipper"), so a static import
+// resolves in the browser via the bundler and in Node/tsx via the `.default ||` interop.
+//
+// Do NOT reach for node:module's createRequire here. Vite shims `module` to `{}` for browser
+// builds, so `createRequire` is undefined and calling it throws
+// `TypeError: (0, l.createRequire) is not a function` on the hot path
+// unclipPolygon -> extractPolygons -> detectPolygons, which breaks detection in the extension.
+import clipperLibModule from 'clipper-lib';
+const ClipperLib: any = (clipperLibModule as any).default || clipperLibModule;
 
 export interface Point {
   X: number; // ClipperLib uses uppercase X, Y
@@ -53,15 +50,6 @@ export interface DetectedPolygon {
   points: Point2D[];
   /** Cotrans box_score_fast: mean probability-map value inside the blob (0..1). */
   score: number;
-}
-
-function getClipper(): any {
-  if (!ClipperLib) {
-    const req = createRequire(import.meta.url);
-    const mod = req('clipper-lib');
-    ClipperLib = mod.default || mod;
-  }
-  return ClipperLib;
 }
 
 /**
@@ -316,7 +304,7 @@ function crossProduct(o: Point2D, a: Point2D, b: Point2D): number {
 }
 
 function unclipPolygon(hull: Point2D[], unclipRatio: number): Point2D[] {
-  const Clipper = getClipper();
+  const Clipper = ClipperLib;
   const scaledHull = hull.map(p => ({ X: Math.round(p.x * 100), Y: Math.round(p.y * 100) }));
   
   let area = 0;
