@@ -5,7 +5,6 @@ import { OcrManager } from '../offscreen/services/OcrManager';
 import { InpaintManager } from '../offscreen/services/InpaintManager';
 import { GoogleTranslateEngine } from '../offscreen/engines/translation/GoogleTranslateEngine';
 import { renderTextBlocksBatch, type TextBlockItem } from '../offscreen/utils/canvasTypesetting';
-import { initOpenCV } from '../offscreen/utils/opencv';
 import { createCanvas, loadImage } from 'canvas';
 import type { Point2D } from '../shared/utils/geometry';
 
@@ -15,8 +14,6 @@ const __dirname = path.dirname(__filename);
 async function runPipelineVisualTest() {
   console.log('--- Starting End-to-End Pipeline Visual Test ---');
 
-  await initOpenCV();
-  
   const testImgDir = path.join(__dirname, 'test-img');
   const resultBaseDir = path.join(__dirname, 'result', 'pipeline');
 

@@ -1,6 +1,5 @@
 import type { Point2D } from '../../shared/utils/geometry';
 import { syllables } from './hyphenation';
-import { getCv } from './opencv';
 
 /**
  * 1:1 port of Cotrans's DEFAULT renderer (the one cotrans.touhou.ai uses): rendering/__init__.py
@@ -586,60 +585,23 @@ function dist(a: Point2D, b: Point2D): number {
  * Draws `boxCanvas` (its source rect [0,0,boxW,boxH]) onto the destination quad `dst`
  * ([tl, tr, br, bl]) and alpha-composites it over whatever is already on `ctx`.
  *
- * 1:1 port of Cotrans `render`'s warp step (rendering/__init__.py): `cv2.findHomography` +
- * `cv2.warpPerspective` via our opencv-js build (AGENTS.md Library -> Library). Falls back to a
- * canvas affine transform if OpenCV isn't ready (the destination is always a rotated rectangle,
- * so the affine map is exact).
+ * Cotrans's `render` (rendering/__init__.py) does this with `cv2.findHomography` +
+ * `cv2.warpPerspective`. We use a plain canvas affine transform instead, which is EXACT here
+ * rather than an approximation: `dst` always originates from TextBlock.min_rect /
+ * unrotated_min_rect (utils/textblock.py), which builds an axis-aligned bbox, optionally
+ * scales it uniformly about its own center, then rigidly rotates it. That construction can
+ * only ever produce a rotated rectangle -- never a skewed quad with converging edges -- and
+ * for a rotated-rectangle destination a homography reduces to exactly this affine matrix.
+ *
+ * A homography would only be needed for a true perspective quad, which this pipeline cannot
+ * produce. Doing it this way also keeps opencv-js out of the bundle entirely: its WASM
+ * bootstrap evaluates JS from strings, which Manifest V3's CSP
+ * (`script-src 'self' 'wasm-unsafe-eval'`) permanently forbids -- 'wasm-unsafe-eval' allows
+ * WebAssembly compilation only, and Chrome rejects a manifest asking for 'unsafe-eval'.
  */
 function warpBoxOntoQuad(ctx: any, boxCanvas: AnyCanvas, boxW: number, boxH: number, dst: Point2D[]): void {
-  const [tl, tr, br, bl] = dst;
-  const pageW = ctx.canvas.width;
-  const pageH = ctx.canvas.height;
+  const [tl, tr, , bl] = dst;
 
-  let cv: any = null;
-  try {
-    cv = getCv();
-    if (!cv || typeof cv.Mat !== 'function') cv = null;
-  } catch {
-    cv = null;
-  }
-
-  if (cv) {
-    let srcMat: any, srcTri: any, dstTri: any, M: any, warped: any;
-    try {
-      const bctx = boxCanvas.getContext('2d');
-      const boxImageData = bctx.getImageData(0, 0, boxCanvas.width, boxCanvas.height);
-      srcMat = cv.matFromImageData(boxImageData); // CV_8UC4 RGBA
-      srcTri = cv.matFromArray(4, 1, cv.CV_32FC2, [0, 0, boxW, 0, boxW, boxH, 0, boxH]);
-      dstTri = cv.matFromArray(4, 1, cv.CV_32FC2, [tl.x, tl.y, tr.x, tr.y, br.x, br.y, bl.x, bl.y]);
-      M = cv.findHomography(srcTri, dstTri, cv.RANSAC, 5.0);
-      if (M.empty && M.empty()) throw new Error('findHomography returned empty matrix');
-
-      // Warp onto a full-page RGBA mat (transparent outside the quad), then composite once.
-      // We read the FULL contiguous mat (step = pageW*4) rather than a cropped ROI, because
-      // opencv-js Mat.roi().clone().data can carry row padding that misaligns small regions.
-      warped = new cv.Mat();
-      cv.warpPerspective(srcMat, warped, M, new cv.Size(pageW, pageH), cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar(0, 0, 0, 0));
-
-      const tmp = makeCanvas(ctx, pageW, pageH);
-      const tctx = tmp.getContext('2d');
-      const out = tctx.createImageData(pageW, pageH);
-      out.data.set(warped.data.subarray(0, pageW * pageH * 4));
-      tctx.putImageData(out, 0, 0);
-      ctx.drawImage(tmp as any, 0, 0); // drawImage alpha-composites the warped text over the page
-      return;
-    } catch (e) {
-      console.error('[cotransDefaultRenderer] OpenCV warp failed, falling back to canvas affine:', e);
-    } finally {
-      srcMat?.delete?.();
-      srcTri?.delete?.();
-      dstTri?.delete?.();
-      M?.delete?.();
-      warped?.delete?.();
-    }
-  }
-
-  // Fallback: canvas affine (dst is a rotated rectangle, so the affine map is exact).
   const a = (tr.x - tl.x) / boxW;
   const b = (tr.y - tl.y) / boxW;
   const c = (bl.x - tl.x) / boxH;

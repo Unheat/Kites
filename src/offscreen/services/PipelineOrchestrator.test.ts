@@ -42,11 +42,6 @@ vi.mock('../../popup/index', () => ({
   // Mock PopupState types if needed
 }));
 
-// Mock opencv to bypass WASM load issues
-vi.mock('../utils/opencv', () => ({
-  initOpenCV: vi.fn().mockResolvedValue({})
-}));
-
 vi.mock('./OcrManager', () => {
   return {
     OcrManager: class {
