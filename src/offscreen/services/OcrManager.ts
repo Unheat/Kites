@@ -165,7 +165,7 @@ export class OcrManager {
   private mergeTextBlocks(result: OcrResult): OcrResult {
     // Merge algorithm entry point
     const { texts: rawTexts, polygons: rawPolygons = [], scores: rawScores = [] } = result;
-    if (rawPolygons.length === 0) return { ...result, rawPolygons };
+    if (rawTexts.length <= 1 || rawPolygons.length === 0) return { ...result, rawPolygons };
 
     // Stage 1: Cotrans Noise Filtering (area > 16, non-empty text, and isValuableText - manga_translator.py)
     const validIndices: number[] = [];
