@@ -51,7 +51,16 @@ The developer of this project is a beginner learning full-stack, web extension, 
 *   activate /frontend-design when implement/change/fixing front-end/UI code
 
 ## 8. Cotrans Porting Strategy
-When adapting code or logic from Cotrans (Python) to this project (TypeScript), you MUST ALWAYS look at the actual Cotrans codebase located at `scratches/reference/cotrans` before making any changes or proposing solutions. Do not invent your own math or logic if Cotrans already solves it. Follow these mapping rules strictly:
+When adapting code or logic from Cotrans (Python) to this project (TypeScript), you MUST ALWAYS look at the actual Cotrans codebase before making any changes or proposing solutions. Do not invent your own math or logic if Cotrans already solves it.
+
+**Use `scratches/reference/cotrans-2023` as the primary reference, not `scratches/reference/cotrans`.** `cotrans-2023` is a permanent git worktree pinned to commit `39fb606` (2023-12-31, "gimp_render: lock bg layer") — the last commit before 2024. This is what cotrans.touhou.ai actually runs (confirmed via its worker revision, detector model tag, and site footer), not current upstream master. `scratches/reference/cotrans` tracks upstream `main` and has since diverged in ways that produce wrong output if copied — e.g. `rendering/__init__.py`'s `resize_regions_to_font_size` was rewritten in 2025 to grow text boxes and inflate font size with no page-bounds clamp, which is not what the reference site does and caused a real "exploded font size" bug when ported. Only fall back to `cotrans` (master) for logic that doesn't exist yet in the 2023 tree, and flag explicitly when doing so.
+
+If `cotrans-2023` is ever missing, recreate it with:
+```
+cd scratches/reference/cotrans && git worktree add ../cotrans-2023 39fb606
+```
+
+Follow these mapping rules strictly:
 *   **Pure Math -> Pure Math:** If Cotrans uses pure math (e.g., geometry, vector logic, polygon scaling), translate it into pure TypeScript math.
 *   **Library -> Library:** If Cotrans uses a library (e.g., OpenCV, Shapely) and an equivalent/lightweight alternative exists in our stack (e.g., `opencv-js`, `clipper-lib`), use our library.
 *   **Library -> Custom JS:** If Cotrans uses a heavy library function that is either missing in our WASM builds (e.g., `cv2.findNonZero`) or too bloated to import, and it is easy to implement efficiently in JavaScript, write the custom JS logic from scratch.

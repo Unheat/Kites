@@ -1,5 +1,18 @@
 import { extractPolygons, extractRawMaskCanvas, type Point2D } from './extractPolygons';
 
+/**
+ * DBNet polygon expansion factor (PaddleOCR `--det_db_unclip_ratio`). Controls how far the
+ * raw segmentation contour is pushed outward via a Clipper polygon offset before becoming
+ * the final box — lower values hug the text more tightly.
+ *
+ * PaddleOCR is inconsistent with itself: `DBPostProcess`'s class default is 2.0, but the
+ * CLI (`tools/infer/utility.py`, what stock `paddleocr` actually runs with) defaults to 1.5.
+ * Use the CLI value, same reasoning already applied to `BOX_THRESHOLD` in extractPolygons.ts.
+ * Tune this directly if boxes look too loose (raise) or start clipping glyph edges (lower,
+ * toward ~1.1).
+ */
+const UNCLIP_RATIO = 1.7;
+
 export interface DetectionOutput {
   /** 4-point text quadrilaterals in original image coordinates. */
   polygons: Point2D[][];
@@ -64,7 +77,7 @@ export class CustomPaddleDetector {
       input.originalWidth,
       input.originalHeight,
       thresh,
-      2.0, // unclip ratio (matches Baidu's DBPostProcess default 2.0)
+      UNCLIP_RATIO,
       input.resizeRatio
     );
 
