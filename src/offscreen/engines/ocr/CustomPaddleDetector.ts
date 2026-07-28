@@ -11,7 +11,7 @@ import { extractPolygons, extractRawMaskCanvas, type Point2D } from './extractPo
  * Tune this directly if boxes look too loose (raise) or start clipping glyph edges (lower,
  * toward ~1.1).
  */
-const UNCLIP_RATIO = 1.7;
+const UNCLIP_RATIO = 2.0;
 
 export interface DetectionOutput {
   /** 4-point text quadrilaterals in original image coordinates. */

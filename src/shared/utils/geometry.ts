@@ -728,7 +728,12 @@ export function computeMinAreaRect(polygons: Point2D[][], angleDegrees: number =
   const centerX = aabb.centerX;
   const centerY = aabb.centerY;
 
-  const rad = (angleDegrees * Math.PI) / 180;
+  // Cotrans's rotate_polygons(center, pts, rotation) swaps the sin terms relative to the
+  // standard rotation matrix, so it actually rotates by -rotation. unrotated_polygons calls
+  // it with +self.angle, i.e. its real effect is a standard rotation by -angleDegrees — negate
+  // here to match (a same-signed +angleDegrees over-rotates any non-near-zero angle, which is
+  // invisible for near-axis-aligned lines but visibly wrong for steep custom angles).
+  const rad = (-angleDegrees * Math.PI) / 180;
   const cos = Math.cos(rad);
   const sin = Math.sin(rad);
 
@@ -756,7 +761,7 @@ export function computeMinAreaRect(polygons: Point2D[][], angleDegrees: number =
     { x: minX, y: maxY }
   ];
 
-  const backRad = (-angleDegrees * Math.PI) / 180;
+  const backRad = (angleDegrees * Math.PI) / 180;
   const backCos = Math.cos(backRad);
   const backSin = Math.sin(backRad);
 

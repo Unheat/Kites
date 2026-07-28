@@ -448,6 +448,7 @@ function renderTextBlocksDefault(
       textColor: b.textColor || '#000000',
       strokeColor: b.strokeColor || '#FFFFFF',
       alignment: b.alignment || 'center',
+      sourceDirection: b.direction || 'h',
     };
 
     try {

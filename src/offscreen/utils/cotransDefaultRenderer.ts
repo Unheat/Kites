@@ -51,6 +51,8 @@ export interface DefaultRenderRegion {
   strokeColor: string;
   /** Horizontal text alignment (Cotrans TextBlock.alignment; 'center' for horizontal EN). */
   alignment: 'left' | 'center' | 'right';
+  /** Source reading direction from OCR merge ('v' for vertical manga columns). */
+  sourceDirection?: 'h' | 'v';
 }
 
 /** Result of the default render pass for one region. */
@@ -528,10 +530,14 @@ export function resizeRegionToFontSize(
   const charCountOrig = (region.originalText || '').length;
   const charCountTrans = region.translation.trim().length;
   if (charCountTrans > charCountOrig) {
+    // Use the longer side of the box for the primary layout dimension so that
+    // tall+narrow vertical merged polygons don't produce rows=0 and stall.
+    const layoutW = Math.max(boxW, boxH);
+    const layoutH = Math.min(boxW, boxH);
     let rescaled = fontSize;
     while (rescaled > 0) {
-      const rows = Math.floor(boxW / rescaled);
-      const cols = Math.floor(boxH / rescaled);
+      const rows = Math.floor(layoutW / rescaled);
+      const cols = Math.floor(layoutH / rescaled);
       if (rows * cols >= charCountTrans) {
         fontSize = rescaled;
         break;
