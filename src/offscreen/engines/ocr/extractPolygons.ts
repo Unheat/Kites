@@ -100,7 +100,10 @@ export function extractRawMaskCanvas(
   const resizeH = Math.min(modelH, Math.round(origH * ratio));
 
   const origCanvas = platform.createCanvas(origW, origH);
-  const origCtx = origCanvas.getContext('2d');
+  // This canvas is returned as `maskRawCanvas` and read back (getImageData) by the
+  // inpaint engines. getContext attributes are sticky on the first call, so set
+  // willReadFrequently here — otherwise the inpaint engines' own flag is a no-op.
+  const origCtx = origCanvas.getContext('2d', { willReadFrequently: true });
   origCtx.imageSmoothingEnabled = false;
   origCtx.drawImage(dilatedCanvas, 0, 0, resizeW, resizeH, 0, 0, origW, origH);
 

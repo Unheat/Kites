@@ -61,7 +61,7 @@ export interface DefaultRenderResult {
   lineCount: number;
 }
 
-type AnyCanvas = { getContext(type: '2d'): any; width: number; height: number };
+type AnyCanvas = { getContext(type: '2d', options?: { willReadFrequently?: boolean }): any; width: number; height: number };
 
 /**
  * Creates an intermediate canvas of the same class as the target context's canvas.
@@ -437,7 +437,7 @@ export function putTextHorizontal(
  * @returns The cropped canvas + size, or null if fully transparent.
  */
 function cropToContent(ctx: any, canvas: AnyCanvas): { canvas: AnyCanvas; width: number; height: number } | null {
-  const c = canvas.getContext('2d');
+  const c = canvas.getContext('2d', { willReadFrequently: true });
   const { width: w, height: h } = canvas;
   const data = c.getImageData(0, 0, w, h).data;
   let minX = w, minY = h, maxX = -1, maxY = -1;
@@ -530,10 +530,10 @@ export function resizeRegionToFontSize(
   const charCountOrig = (region.originalText || '').length;
   const charCountTrans = region.translation.trim().length;
   if (charCountTrans > charCountOrig) {
-    // Use the longer side of the box for the primary layout dimension so that
-    // tall+narrow vertical merged polygons don't produce rows=0 and stall.
-    const layoutW = Math.max(boxW, boxH);
-    const layoutH = Math.min(boxW, boxH);
+    // Use actual dimensions directly (YAGNI / Cotrans 2023 math).
+    // ponytail: no dimension swap. Swapping layoutW/H makes vertical block text sizes huge.
+    const layoutW = boxW;
+    const layoutH = boxH;
     let rescaled = fontSize;
     while (rescaled > 0) {
       const rows = Math.floor(layoutW / rescaled);
@@ -668,7 +668,7 @@ export function renderRegionDefault(
     const wExt = Math.floor((boxH * rOrig - boxW) / 2);
     if (wExt > 0) {
       const extended = makeCanvas(ctx, boxW + wExt * 2, boxH);
-      extended.getContext('2d').drawImage(boxCanvas as any, 0, 0); // left-aligned (Cotrans)
+      extended.getContext('2d').drawImage(boxCanvas as any, wExt, 0); // centered (Cotrans)
       boxCanvas = extended;
       boxW = boxW + wExt * 2;
     }

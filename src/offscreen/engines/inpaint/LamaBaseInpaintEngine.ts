@@ -160,14 +160,14 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
 
     // 1. Prepare image canvas
     const imgCanvas = await this.platform.canvas.prepareCanvas(imageBuffer);
-    const ctx = imgCanvas.getContext('2d');
+    const ctx = imgCanvas.getContext('2d', { willReadFrequently: true });
     const width = imgCanvas.width;
     const height = imgCanvas.height;
-    
+
     // 2. Prepare mask
     const maskCanvas = await this.createCanvas(width, height);
-    const maskCtx = maskCanvas.getContext('2d');
-    
+    const maskCtx = maskCanvas.getContext('2d', { willReadFrequently: true });
+
     if (strokeMaskCanvas) {
       try {
         maskCtx.drawImage(strokeMaskCanvas, 0, 0);
@@ -176,7 +176,7 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
         // or node-canvas rejects it, use ImageData instead.
         const w = strokeMaskCanvas.width || width;
         const h = strokeMaskCanvas.height || height;
-        const strokeCtx = strokeMaskCanvas.getContext('2d');
+        const strokeCtx = strokeMaskCanvas.getContext('2d', { willReadFrequently: true });
         const imgData = strokeCtx.getImageData(0, 0, w, h);
         
         // Ensure it's a native ImageData object to avoid TypeError in node-canvas
@@ -256,7 +256,7 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
     }
 
     const finalCanvas = await this.createCanvas(width, height);
-    const finalCtx = finalCanvas.getContext('2d');
+    const finalCtx = finalCanvas.getContext('2d', { willReadFrequently: true });
     const tempFinalData = finalCtx.createImageData(width, height);
     tempFinalData.data.set(ctx.getImageData(0, 0, width, height).data);
     finalCtx.putImageData(tempFinalData, 0, 0);
@@ -284,11 +284,11 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
 
       // Draw 512×512 patches directly from source canvases (no throwaway copies)
       const patchImgCanvas = await this.createCanvas(cropW, cropH);
-      const patchImgCtx = patchImgCanvas.getContext('2d');
+      const patchImgCtx = patchImgCanvas.getContext('2d', { willReadFrequently: true });
       patchImgCtx.drawImage(finalCanvas, sx, sy, size, size, 0, 0, cropW, cropH);
 
       const patchMaskCanvas = await this.createCanvas(cropW, cropH);
-      const patchMaskCtx = patchMaskCanvas.getContext('2d');
+      const patchMaskCtx = patchMaskCanvas.getContext('2d', { willReadFrequently: true });
       patchMaskCtx.drawImage(maskCanvas, sx, sy, size, size, 0, 0, cropW, cropH);
 
       const imgData = patchImgCtx.getImageData(0, 0, cropW, cropH).data;
@@ -336,7 +336,7 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
     // reads from pixels that an earlier patch may have modified.
     for (const { outData, sx, sy, size } of patchJobs) {
       const outCanvas = await this.createCanvas(cropW, cropH);
-      const outCtx = outCanvas.getContext('2d');
+      const outCtx = outCanvas.getContext('2d', { willReadFrequently: true });
       const outImgData = outCtx.createImageData(cropW, cropH);
 
       for (let y = 0; y < cropH; y++) {
@@ -355,7 +355,7 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
       outCtx.putImageData(outImgData, 0, 0);
 
       const scaledBackCanvas = await this.createCanvas(Math.ceil(size), Math.ceil(size));
-      const scaledBackCtx = scaledBackCanvas.getContext('2d');
+      const scaledBackCtx = scaledBackCanvas.getContext('2d', { willReadFrequently: true });
       scaledBackCtx.drawImage(outCanvas, 0, 0, cropW, cropH, 0, 0, Math.ceil(size), Math.ceil(size));
       const scaledBackData = scaledBackCtx.getImageData(0, 0, Math.ceil(size), Math.ceil(size));
 

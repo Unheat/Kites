@@ -299,8 +299,8 @@ function cropAndWarp(
   let destCanvas = platform.createCanvas(cropW, cropH);
 
   try {
-    const sourceCtx = sourceCanvas.getContext('2d');
-    const destCtx = destCanvas.getContext('2d');
+    const sourceCtx = sourceCanvas.getContext('2d', { willReadFrequently: true });
+    const destCtx = destCanvas.getContext('2d', { willReadFrequently: true });
     if (sourceCtx && destCtx) {
       // Perspective Warp calculation
       const x0 = p0.x, y0 = p0.y;
@@ -437,7 +437,7 @@ function cropAndWarp(
   // Fallback to affine rotation if perspective warp failed or was degenerate
   if (!warpSuccess) {
     destCanvas = platform.createCanvas(cropW, cropH);
-    const destCtx = destCanvas.getContext('2d');
+    const destCtx = destCanvas.getContext('2d', { willReadFrequently: true });
     if (destCtx) {
       const theta = Math.atan2(p1.y - p0.y, p1.x - p0.x);
       destCtx.save();
@@ -450,7 +450,7 @@ function cropAndWarp(
 
   if (cropH / cropW >= VERTICAL_CROP_ASPECT) {
     const rotCanvas = platform.createCanvas(cropH, cropW);
-    const rotCtx = rotCanvas.getContext('2d');
+    const rotCtx = rotCanvas.getContext('2d', { willReadFrequently: true });
     if (rotCtx) {
       rotCtx.save();
       rotCtx.translate(0, cropW);

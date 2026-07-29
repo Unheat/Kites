@@ -21,7 +21,7 @@ export class TeleaInpaintEngine implements IInpaintEngine {
   async inpaint(imageBuffer: ArrayBuffer, maskPolygons: Point2D[][], _strokeMaskCanvas?: any): Promise<ArrayBuffer> {
     // 1. Prepare canvases
     const sourceCanvas = await this.platform.canvas.prepareCanvas(imageBuffer);
-    const ctx = sourceCanvas.getContext('2d');
+    const ctx = sourceCanvas.getContext('2d', { willReadFrequently: true });
     const width = sourceCanvas.width;
     const height = sourceCanvas.height;
 
@@ -31,7 +31,7 @@ export class TeleaInpaintEngine implements IInpaintEngine {
 
     // 2. Generate an inflated solid mask canvas
     const maskCanvas = await this.platform.canvas.prepareCanvas(imageBuffer);
-    const maskCtx = maskCanvas.getContext('2d');
+    const maskCtx = maskCanvas.getContext('2d', { willReadFrequently: true });
     maskCtx.fillStyle = '#000000';
     maskCtx.fillRect(0, 0, width, height);
 

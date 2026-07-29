@@ -25,7 +25,7 @@ export class Binarizer {
     
     // Create the global black mask canvas
     const maskCanvas = platform.createCanvas(width, height);
-    const maskCtx = maskCanvas.getContext('2d');
+    const maskCtx = maskCanvas.getContext('2d', { willReadFrequently: true });
     maskCtx.fillStyle = '#000000';
     maskCtx.fillRect(0, 0, width, height);
 
@@ -34,7 +34,7 @@ export class Binarizer {
       return maskCanvas;
     }
 
-    const sourceCtx = sourceCanvas.getContext('2d');
+    const sourceCtx = sourceCanvas.getContext('2d', { willReadFrequently: true });
 
     // Process each text region separately
     for (const poly of polygons) {
@@ -117,7 +117,7 @@ export class Binarizer {
 
       // 5. Build localized stroke image data
       const tempCanvas = platform.createCanvas(w, h);
-      const tempCtx = tempCanvas.getContext('2d');
+      const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
       const tempImgData = tempCtx.createImageData(w, h);
       const tempImgBytes = tempImgData.data;
 
