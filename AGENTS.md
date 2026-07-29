@@ -1,3 +1,10 @@
+## Code Exploration Rules
+Always use `codebase-memory-mcp` tools over `grep` or reading whole files.
+
+1. **Indexing**: Call `index_repository` before big tasks to refresh the graph.
+2. **Search**: Use `search_graph` and `trace_call_path` to find symbols and call chains.
+3. **Reading**: Use `get_code_snippet` for precise functions instead of reading full files.
+
 # Workspace Instruction Profile: Antigravity Mentor Mode
 
 This file defines the behavior and guiding principles for Antigravity when collaborating on the **Spatial Image & Manga Translator (Kites)** project.
@@ -53,14 +60,13 @@ The developer of this project is a beginner learning full-stack, web extension, 
 ## 8. Cotrans Porting Strategy
 When adapting code or logic from Cotrans (Python) to this project (TypeScript), you MUST ALWAYS look at the actual Cotrans codebase before making any changes or proposing solutions. Do not invent your own math or logic if Cotrans already solves it.
 
-**Use `scratches/reference/cotrans-2023` as the primary reference, not `scratches/reference/cotrans`.** `cotrans-2023` is a permanent git worktree pinned to commit `39fb606` (2023-12-31, "gimp_render: lock bg layer") — the last commit before 2024. This is what cotrans.touhou.ai actually runs (confirmed via its worker revision, detector model tag, and site footer), not current upstream master. `scratches/reference/cotrans` tracks upstream `main` and has since diverged in ways that produce wrong output if copied — e.g. `rendering/__init__.py`'s `resize_regions_to_font_size` was rewritten in 2025 to grow text boxes and inflate font size with no page-bounds clamp, which is not what the reference site does and caused a real "exploded font size" bug when ported. Only fall back to `cotrans` (master) for logic that doesn't exist yet in the 2023 tree, and flag explicitly when doing so.
-
-If `cotrans-2023` is ever missing, recreate it with:
-```
+Always use scratches/reference/cotrans-2023 (pinned to commit 39fb606) as the primary ground truth to match cotrans.touhou.ai. Do not use scratches/reference/cotrans (upstream main), as its 2025 updates (e.g., resize_regions_to_font_size) cause font-size inflation bugs. Only fall back to cotrans for logic missing in the 2023 tree, and explicitly flag it when you do. If cotrans-2023 is missing, recreate it with:
 cd scratches/reference/cotrans && git worktree add ../cotrans-2023 39fb606
-```
 
-Follow these mapping rules strictly:
+Follow these mapping rules only when do porting ... if possible:
 *   **Pure Math -> Pure Math:** If Cotrans uses pure math (e.g., geometry, vector logic, polygon scaling), translate it into pure TypeScript math.
 *   **Library -> Library:** If Cotrans uses a library (e.g., OpenCV, Shapely) and an equivalent/lightweight alternative exists in our stack (e.g., `opencv-js`, `clipper-lib`), use our library.
+warning: because chrome cdn not allow to import code, library like opencv-js can not be use due to it internally import code 
 *   **Library -> Custom JS:** If Cotrans uses a heavy library function that is either missing in our WASM builds (e.g., `cv2.findNonZero`) or too bloated to import, and it is easy to implement efficiently in JavaScript, write the custom JS logic from scratch.
+
+

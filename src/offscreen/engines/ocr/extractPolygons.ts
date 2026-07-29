@@ -26,15 +26,13 @@ export interface Point2D {
 const MIN_BOX_SIDE = 3;
 
 /**
- * Minimum MEAN probability inside a blob for it to be kept. Distinct from the binarization
- * `threshold` argument (0.3), which only decides which pixels join a blob: this second gate
- * rejects large, uniformly low-confidence smears.
+ * Minimum MEAN probability inside a blob's min-area-rect for it to be kept. Distinct from the
+ * binarization `threshold` argument (0.3), which only decides which pixels join a blob: this
+ * second gate rejects large, uniformly low-confidence smears.
  *
- * Taken from PaddleOCR's `--det_db_box_thresh` CLI default, NOT from Cotrans. (PaddleOCR is
- * inconsistent with itself: the DBPostProcess class default is 0.7, the CLI default is 0.6.
- * 0.6 is the value validated against our test set.) Do not raise this to match Cotrans's
- * config — its 0.7 was tuned against detect.ckpt's probability distribution, not PP-OCRv6's,
- * and mean-probability-per-blob is model- and scale-dependent.
+ * Matches the PaddleOCR online API (PP-OCRv6) `text_det_params.box_thresh = 0.6`. Note the
+ * score region must also match Paddle's (filled min-rect, see boxScoreFast) — the threshold is
+ * only comparable to Paddle's when the underlying statistic matches.
  */
 const BOX_THRESHOLD = 0.6;
 
@@ -124,36 +122,88 @@ function minRectShortSide(rect: Point2D[]): number {
 }
 
 /**
- * 1:1 port of Cotrans `box_score_fast` (dbnet_utils.py:175): the mean probability-map value
- * inside a candidate's region.
+ * 1:1 port of PaddleOCR `DBPostProcess.box_score_fast` (db_postprocess.py:189-204): the mean
+ * probability-map value inside a candidate's min-area-rect.
  *
- * Cotrans rasterizes the contour with `cv2.fillPoly` and averages `pred` under that mask.
- * Our candidates come from a flood fill, so the blob's own pixel list IS the filled contour
- * interior — we average over it directly. Per AGENTS.md §8 this is the "Library -> Custom JS"
- * case: no fillPoly needed, and the result is exact rather than an approximation.
+ * PaddleOCR builds the AABB of the 4-point min-box, allocates a mask, fills the rotated rect
+ * via `cv2.fillPoly`, then takes `cv2.mean(bitmap[AABB], mask)`. Crucially the mask includes
+ * background pixels sitting between text strokes inside the rect — those sub-threshold pixels
+ * drag the mean DOWN, which is what makes `box_thresh=0.6` an effective noise filter. Our
+ * previous implementation averaged only flood-fill pixels (all `>= thresh`), biasing the mean
+ * UP and letting sparse-probability noise slip through the same threshold.
+ *
+ * Per AGENTS.md §8 this is the "Library -> Custom JS" case: `platform`/canvas isn't in scope
+ * here, so we rasterize the convex quad via a point-in-polygon test instead of `fillPoly`.
  *
  * @param probMap - The raw DBNet probability map (model resolution, row-major).
  * @param width - Probability map width, used to index pixels.
- * @param blobPoints - The connected-component pixels forming this candidate.
- * @returns Mean probability over the blob, in 0..1.
+ * @param minBox - The 4-point min-area-rect [tl, tr, br, bl] in model-space pixels.
+ * @returns Mean probability over the filled min-rect, in 0..1.
  */
-function boxScoreFast(probMap: Float32Array, width: number, blobPoints: Point2D[]): number {
-  if (blobPoints.length === 0) return 0;
-  let sum = 0;
-  for (const p of blobPoints) {
-    sum += probMap[p.y * width + p.x];
+function boxScoreFast(probMap: Float32Array, width: number, minBox: Point2D[]): number {
+  if (minBox.length < 3) return 0;
+
+  // AABB of the min-box, clipped to the prob map bounds. Matches Paddle's
+  // xmin/xmax/ymin/ymax with floor/ceil (db_postprocess.py:195-198).
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const p of minBox) {
+    if (p.x < minX) minX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y > maxY) maxY = p.y;
   }
-  return sum / blobPoints.length;
+  minX = Math.max(0, Math.floor(minX));
+  minY = Math.max(0, Math.floor(minY));
+  maxX = Math.max(0, Math.ceil(maxX));
+  maxY = Math.max(0, Math.ceil(maxY));
+
+  let sum = 0;
+  let count = 0;
+  for (let y = minY; y <= maxY; y++) {
+    for (let x = minX; x <= maxX; x++) {
+      // Sample at pixel center (+0.5) so the boundary test is symmetric.
+      if (pointInConvexQuad(x + 0.5, y + 0.5, minBox)) {
+        sum += probMap[y * width + x];
+        count++;
+      }
+    }
+  }
+  return count === 0 ? 0 : sum / count;
+}
+
+/**
+ * Point-in-convex-quad test via consistent cross-product sign. The quad must be in
+ * consecutive (either CW or CCW) vertex order — `minAreaRect` returns [tl, tr, br, bl] which
+ * is consecutive, so this works.
+ *
+ * @param px - Point x (pixel-center sampled, so +0.5).
+ * @param py - Point y.
+ * @param quad - Exactly 4 vertices in consecutive order.
+ * @returns True if the point lies inside or on the boundary of the quad.
+ */
+function pointInConvexQuad(px: number, py: number, quad: Point2D[]): boolean {
+  let prevSign = 0;
+  for (let i = 0; i < quad.length; i++) {
+    const a = quad[i];
+    const b = quad[(i + 1) % quad.length];
+    const cross = (b.x - a.x) * (py - a.y) - (b.y - a.y) * (px - a.x);
+    if (cross === 0) continue;
+    const sign = cross > 0 ? 1 : -1;
+    if (prevSign === 0) prevSign = sign;
+    else if (sign !== prevSign) return false;
+  }
+  return true;
 }
 
 /**
  * Extracts oriented text quadrilaterals from a raw DBNet probability map.
  *
- * 1:1 port of Cotrans `SegDetectorRepresenter.boxes_from_bitmap` (dbnet_utils.py:97), which
+ * Mirrors PaddleOCR `DBPostProcess.boxes_from_bitmap` (db_postprocess.py:109-158), which
  * rejects a candidate at three separate gates, in this exact order:
- *   1. min-area-rect short side < min_size, BEFORE unclip expansion;
- *   2. box_score_fast (mean probability inside the blob) < box_thresh;
- *   3. min-area-rect short side < min_size + 2, AFTER unclip expansion.
+ *   1. get_mini_boxes + min-area-rect short side < min_size, BEFORE unclip expansion;
+ *   2. box_score_fast (mean probability inside the FILLED min-rect) < box_thresh;
+ *   3. get_mini_boxes + min-area-rect short side < min_size + 2, AFTER unclip expansion.
+ * The unclip step expands the 4-point min-box (not the convex hull), matching Paddle exactly.
  * Survivors are rescaled from model resolution back to original image coordinates.
  *
  * @param probMap - Raw DBNet probability map at model resolution, row-major.
@@ -172,7 +222,7 @@ export function extractPolygons(
   originalWidth: number,
   originalHeight: number,
   threshold: number = 0.3,
-  unclipRatio: number = 2.0,
+  unclipRatio: number = 1.5,
   resizeRatio?: number
 ): DetectedPolygon[] {
   const binaryMap = new Uint8Array(width * height);
@@ -221,26 +271,36 @@ export function extractPolygons(
         const hull = convexHull(blobPoints);
         if (hull.length < 3) continue;
 
-        // Gate 1 (Cotrans: sside < min_size, before unclip) — drop hairline slivers.
-        if (minRectShortSide(minAreaRect(hull)) < MIN_BOX_SIDE) {
+        // Gate 1 (Paddle: get_mini_boxes + sside < min_size, before unclip) — drop hairline
+        // slivers. The min-box is reused below for scoring AND unclipping, exactly as Paddle's
+        // boxes_from_bitmap does (db_postprocess.py:132-143).
+        const minBox = minAreaRect(hull);
+        if (minRectShortSide(minBox) < MIN_BOX_SIDE) {
           rejectedSmallPre++;
           continue;
         }
 
-        // Gate 2 (Cotrans: box_thresh > score) — drop low-confidence smears.
-        const score = boxScoreFast(probMap, width, blobPoints);
+        // Gate 2 (Paddle: box_score_fast on the min-box + box_thresh) — drop low-confidence
+        // smears. Score is computed over the FILLED min-rect (includes background pixels between
+        // strokes), matching Paddle's cv2.fillPoly mask — see boxScoreFast.
+        const score = boxScoreFast(probMap, width, minBox);
         if (score < BOX_THRESHOLD) {
           rejectedLowScore++;
           continue;
         }
 
-        const unclipped = unclipPolygon(hull, unclipRatio);
+        // Unclip the 4-point min-box (NOT the convex hull), matching Paddle's
+        // unclip(points=min-box). The hull has many more vertices and a larger perimeter, which
+        // changes the offset distance (area*ratio/length) and produces a different expanded rect.
+        const unclipped = unclipPolygon(minBox, unclipRatio);
+        // Paddle rejects if pyclipper returned >1 path (db_postprocess.py:144-145); we treat the
+        // same case as degenerate.
         if (unclipped.length < 3) continue;
 
         const minRect = minAreaRect(unclipped);
 
-        // Gate 3 (Cotrans: sside < min_size + 2, after unclip) — the expansion must have
-        // produced a box with real area, otherwise the candidate was degenerate.
+        // Gate 3 (Paddle: get_mini_boxes + sside < min_size + 2, after unclip) — the expansion
+        // must have produced a box with real area, otherwise the candidate was degenerate.
         if (minRectShortSide(minRect) < MIN_BOX_SIDE + 2) {
           rejectedSmallPost++;
           continue;
@@ -260,6 +320,19 @@ export function extractPolygons(
           x: Math.max(0, Math.min(originalWidth, Math.round(p.x * scale))),
           y: Math.max(0, Math.min(originalHeight, Math.round(p.y * scale)))
         }));
+
+        if (scaledRect[0].x < 20 && scaledRect[0].y > 1000) {
+          // Dump stats of the empty bottom-left box
+          let maxVal = -1, minVal = 2;
+          for (const p of blobPoints) {
+            const val = probMap[p.y * width + p.x];
+            if (val > maxVal) maxVal = val;
+            if (val < minVal) minVal = val;
+          }
+          console.log(`[extractPolygons] DEBUG Empty box x0=${scaledRect[0].x}, y0=${scaledRect[0].y}: size=${blobPoints.length}, score=${score.toFixed(4)}, minProb=${minVal.toFixed(4)}, maxProb=${maxVal.toFixed(4)}`);
+        } else {
+          console.log(`[extractPolygons] Kept box at x0=${scaledRect[0].x}, y0=${scaledRect[0].y} score=${score.toFixed(4)}`);
+        }
 
         polygons.push({ points: scaledRect, score });
       }

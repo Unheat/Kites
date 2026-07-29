@@ -61,7 +61,7 @@ async function runVisualTest() {
     const result = await manager.processImage(arrayBuffer);
     
     const rawPolygons = result.rawPolygons || result.polygons || [];
-    console.log(`OCR took ${Date.now() - startTime}ms. Found ${rawPolygons.length} RAW text regions.`);
+    console.log(`OCR took ${Date.now() - startTime}ms. Found ${rawPolygons.length} RAW text regions. (polygons: ${result.polygons.length}, rawPolygons: ${result.rawPolygons?.length})`);
 
     // Load image into Canvas to draw boxes
     const image = await loadImage(buffer);

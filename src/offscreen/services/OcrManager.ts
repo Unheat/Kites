@@ -343,7 +343,9 @@ export class OcrManager {
       mergedLineCounts.push(groupIndices.length);
     }
 
-    // rawPolygons retains the raw unmerged 4-point line quadrilaterals for inpainting
+    // rawPolygons retains the raw unmerged 4-point line quadrilaterals for inpainting.
+    // We use the noise-filtered polygons here (from validIndices) so that empty boxes
+    // and non-text noise are not sent to inpainting.
     return {
       texts: mergedTexts,
       polygons: mergedPolygons,
@@ -353,7 +355,7 @@ export class OcrManager {
       fontSizes: mergedFontSizes,
       angles: mergedAngles,
       lineCounts: mergedLineCounts,
-      rawPolygons: rawPolygons,
+      rawPolygons: polygons,
       maskRawCanvas: result.maskRawCanvas
     };
   }

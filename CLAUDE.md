@@ -1,3 +1,10 @@
+## Code Exploration Rules
+Always use `codebase-memory-mcp` tools over `grep` or reading whole files.
+
+1. **Indexing**: Call `index_repository` before big tasks to refresh the graph.
+2. **Search**: Use `search_graph` and `trace_call_path` to find symbols and call chains.
+3. **Reading**: Use `get_code_snippet` for precise functions instead of reading full files.
+
 # Workspace Instruction Profile: Antigravity Mentor Mode
 
 This file defines the behavior and guiding principles for Antigravity when collaborating on the **Spatial Image & Manga Translator (Kites)** project.
@@ -56,8 +63,10 @@ When adapting code or logic from Cotrans (Python) to this project (TypeScript), 
 Always use scratches/reference/cotrans-2023 (pinned to commit 39fb606) as the primary ground truth to match cotrans.touhou.ai. Do not use scratches/reference/cotrans (upstream main), as its 2025 updates (e.g., resize_regions_to_font_size) cause font-size inflation bugs. Only fall back to cotrans for logic missing in the 2023 tree, and explicitly flag it when you do. If cotrans-2023 is missing, recreate it with:
 cd scratches/reference/cotrans && git worktree add ../cotrans-2023 39fb606
 
-Follow these mapping rules ... if possible:
+Follow these mapping rules only when do porting ... if possible:
 *   **Pure Math -> Pure Math:** If Cotrans uses pure math (e.g., geometry, vector logic, polygon scaling), translate it into pure TypeScript math.
 *   **Library -> Library:** If Cotrans uses a library (e.g., OpenCV, Shapely) and an equivalent/lightweight alternative exists in our stack (e.g., `opencv-js`, `clipper-lib`), use our library.
 warning: because chrome cdn not allow to import code, library like opencv-js can not be use due to it internally import code 
 *   **Library -> Custom JS:** If Cotrans uses a heavy library function that is either missing in our WASM builds (e.g., `cv2.findNonZero`) or too bloated to import, and it is easy to implement efficiently in JavaScript, write the custom JS logic from scratch.
+
+

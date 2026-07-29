@@ -5,13 +5,9 @@ import { extractPolygons, extractRawMaskCanvas, type Point2D } from './extractPo
  * raw segmentation contour is pushed outward via a Clipper polygon offset before becoming
  * the final box — lower values hug the text more tightly.
  *
- * PaddleOCR is inconsistent with itself: `DBPostProcess`'s class default is 2.0, but the
- * CLI (`tools/infer/utility.py`, what stock `paddleocr` actually runs with) defaults to 1.5.
- * Use the CLI value, same reasoning already applied to `BOX_THRESHOLD` in extractPolygons.ts.
- * Tune this directly if boxes look too loose (raise) or start clipping glyph edges (lower,
- * toward ~1.1).
+ * Matches the PaddleOCR online API (PP-OCRv6) `text_det_params.unclip_ratio = 1.5`.
  */
-const UNCLIP_RATIO = 2.0;
+const UNCLIP_RATIO = 1.5;
 
 export interface DetectionOutput {
   /** 4-point text quadrilaterals in original image coordinates. */
@@ -31,7 +27,7 @@ export class CustomPaddleDetector {
 
   /**
    * Constructs a new CustomPaddleDetector instance.
-   * 
+   *
    * @param service - An initialized PaddleOcrService instance.
    */
   constructor(service: any) {
@@ -40,7 +36,7 @@ export class CustomPaddleDetector {
 
   /**
    * Runs the underlying ONNX detection model on the image buffer and returns extracted text polygons and raw probability mask.
-   * 
+   *
    * @param imageBuffer - The raw ArrayBuffer of the image.
    * @returns A promise that resolves to an object containing polygons and optional maskRawCanvas.
    */
@@ -56,7 +52,7 @@ export class CustomPaddleDetector {
     console.log('[CustomPaddleDetector] Preprocessing image for WebGPU/WASM...');
     const canvas = await platform.canvas.prepareCanvas(imageBuffer);
     const input = await detector.preprocessDetection(canvas);
-    
+
     // 2. Run inference (this executes on WebGPU if available, or WASM fallback)
     console.log(`[CustomPaddleDetector] Running ONNX inference (${input.width}x${input.height})...`);
     const probabilityMap: Float32Array = await detector.runInference(input.tensor, input.width, input.height);

@@ -30,6 +30,12 @@ const DETECTION_MAX_SIDE = 960;
  */
 const VERTICAL_CROP_ASPECT = 1.5;
 
+/**
+ * Minimum determinant value below which a quadrilateral is considered degenerate.
+ * Prevents division by zero or numerical instability when solving the homography linear system.
+ */
+const HOMOGRAPHY_DET_EPSILON = 1e-7;
+
 export class PaddleOcrEngine implements IOcrEngine {
   private service: any = null;
   private customDetector: CustomPaddleDetector | null = null;
@@ -115,7 +121,7 @@ export class PaddleOcrEngine implements IOcrEngine {
         : ['wasm'];
 
       this.service = new PaddleOcrService({
-        model: MODEL_PRESETS['v6-small'],
+        model: MODEL_PRESETS['v6-medium'],
         detection: {
           maxSideLength: DETECTION_MAX_SIDE,
         },
@@ -259,6 +265,17 @@ export class PaddleOcrEngine implements IOcrEngine {
  * @param polygon - The coordinates of the quadrilateral bounding the text region.
  * @returns The cropped and straightened canvas containing the text line.
  */
+/**
+ * Custom canvas crop helper that deskews rotated quadrilateral text regions
+ * via 4-corner perspective homography with bilinear interpolation and border-replicate clamping.
+ * Automatically rotates vertical text lines by 90 degrees counter-clockwise
+ * to lay them flat horizontally before character recognition.
+ * 
+ * @param platform - The platform abstraction layer.
+ * @param sourceCanvas - The source canvas containing the full image.
+ * @param polygon - The coordinates of the quadrilateral bounding the text region.
+ * @returns The cropped and straightened canvas containing the text line.
+ */
 function cropAndWarp(
   platform: any,
   sourceCanvas: any,
@@ -278,17 +295,158 @@ function cropAndWarp(
   const cropW = Math.max(1, Math.round(width));
   const cropH = Math.max(1, Math.round(height));
 
-  const destCanvas = platform.createCanvas(cropW, cropH);
-  const destCtx = destCanvas.getContext('2d');
-  if (!destCtx) return destCanvas;
+  let warpSuccess = false;
+  let destCanvas = platform.createCanvas(cropW, cropH);
 
-  const theta = Math.atan2(p1.y - p0.y, p1.x - p0.x);
+  try {
+    const sourceCtx = sourceCanvas.getContext('2d');
+    const destCtx = destCanvas.getContext('2d');
+    if (sourceCtx && destCtx) {
+      // Perspective Warp calculation
+      const x0 = p0.x, y0 = p0.y;
+      const x1 = p1.x, y1 = p1.y;
+      const x2 = p2.x, y2 = p2.y;
+      const x3 = p3.x, y3 = p3.y;
 
-  destCtx.save();
-  destCtx.translate(0, 0);
-  destCtx.rotate(-theta);
-  destCtx.drawImage(sourceCanvas, -p0.x, -p0.y);
-  destCtx.restore();
+      const dx1 = x1 - x2;
+      const dx2 = x3 - x2;
+      const dy1 = y1 - y2;
+      const dy2 = y3 - y2;
+
+      const sx = x0 - x1 + x2 - x3;
+      const sy = y0 - y1 + y2 - y3;
+
+      const det = dx1 * dy2 - dx2 * dy1;
+
+      // Guard degenerate quads
+      if (Math.abs(det) >= HOMOGRAPHY_DET_EPSILON) {
+        const g = (sx * dy2 - sy * dx2) / det;
+        const h_coeff = (dx1 * sy - dy1 * sx) / det;
+
+        const G = g / cropW;
+        const H = h_coeff / cropH;
+
+        const A = (g * x1 + x1 - x0) / cropW;
+        const B = (h_coeff * x3 + x3 - x0) / cropH;
+        const D = (g * y1 + y1 - y0) / cropW;
+        const E = (h_coeff * y3 + y3 - y0) / cropH;
+        const C = x0;
+        const F = y0;
+
+        const srcW = sourceCanvas.width;
+        const srcH = sourceCanvas.height;
+        const srcImageData = sourceCtx.getImageData(0, 0, srcW, srcH);
+        const srcPixels = srcImageData.data;
+
+        const destImgData = destCtx.createImageData(cropW, cropH);
+        const destPixels = destImgData.data;
+
+        for (let v = 0; v < cropH; v++) {
+          for (let u = 0; u < cropW; u++) {
+            const u_c = u + 0.5;
+            const v_c = v + 0.5;
+            const denom = G * u_c + H * v_c + 1;
+            // Guard singular mappings
+            if (Math.abs(denom) < HOMOGRAPHY_DET_EPSILON) {
+              continue;
+            }
+            const x_c = (A * u_c + B * v_c + C) / denom;
+            const y_c = (D * u_c + E * v_c + F) / denom;
+
+            // Align continuous coordinate back to pixel index space
+            const x_idx = x_c - 0.5;
+            const y_idx = y_c - 0.5;
+
+            // Bicubic interpolation with BORDER_REPLICATE
+            const clampedX = Math.max(0, Math.min(srcW - 1, x_idx));
+            const clampedY = Math.max(0, Math.min(srcH - 1, y_idx));
+
+            const x0_f = Math.floor(clampedX);
+            const y0_f = Math.floor(clampedY);
+
+            const px = [x0_f - 1, x0_f, x0_f + 1, x0_f + 2];
+            const py = [y0_f - 1, y0_f, y0_f + 1, y0_f + 2];
+
+            const wx = [
+              cubicWeight(clampedX - px[0]),
+              cubicWeight(clampedX - px[1]),
+              cubicWeight(clampedX - px[2]),
+              cubicWeight(clampedX - px[3])
+            ];
+            const wy = [
+              cubicWeight(clampedY - py[0]),
+              cubicWeight(clampedY - py[1]),
+              cubicWeight(clampedY - py[2]),
+              cubicWeight(clampedY - py[3])
+            ];
+
+            const cx = [
+              Math.max(0, Math.min(srcW - 1, px[0])),
+              Math.max(0, Math.min(srcW - 1, px[1])),
+              Math.max(0, Math.min(srcW - 1, px[2])),
+              Math.max(0, Math.min(srcW - 1, px[3]))
+            ];
+            const cy = [
+              Math.max(0, Math.min(srcH - 1, py[0])),
+              Math.max(0, Math.min(srcH - 1, py[1])),
+              Math.max(0, Math.min(srcH - 1, py[2])),
+              Math.max(0, Math.min(srcH - 1, py[3]))
+            ];
+
+            let r = 0, g = 0, b = 0, a = 0;
+            let sumWeight = 0;
+
+            for (let j = 0; j < 4; j++) {
+              const wy_j = wy[j];
+              const cy_j = cy[j];
+              for (let i = 0; i < 4; i++) {
+                const w = wx[i] * wy_j;
+                const idx = (cy_j * srcW + cx[i]) * 4;
+                r += srcPixels[idx] * w;
+                g += srcPixels[idx + 1] * w;
+                b += srcPixels[idx + 2] * w;
+                a += srcPixels[idx + 3] * w;
+                sumWeight += w;
+              }
+            }
+
+            const destIdx = (v * cropW + u) * 4;
+            if (Math.abs(sumWeight) > 1e-5) {
+              destPixels[destIdx]     = Math.max(0, Math.min(255, Math.round(r / sumWeight)));
+              destPixels[destIdx + 1] = Math.max(0, Math.min(255, Math.round(g / sumWeight)));
+              destPixels[destIdx + 2] = Math.max(0, Math.min(255, Math.round(b / sumWeight)));
+              destPixels[destIdx + 3] = Math.max(0, Math.min(255, Math.round(a / sumWeight)));
+            } else {
+              const baseIdx = (y0_f * srcW + x0_f) * 4;
+              destPixels[destIdx]     = srcPixels[baseIdx];
+              destPixels[destIdx + 1] = srcPixels[baseIdx + 1];
+              destPixels[destIdx + 2] = srcPixels[baseIdx + 2];
+              destPixels[destIdx + 3] = srcPixels[baseIdx + 3];
+            }
+          }
+        }
+
+        destCtx.putImageData(destImgData, 0, 0);
+        warpSuccess = true;
+      }
+    }
+  } catch (err) {
+    console.error('[PaddleOcrEngine] Perspective warp failed, falling back to affine:', err);
+  }
+
+  // Fallback to affine rotation if perspective warp failed or was degenerate
+  if (!warpSuccess) {
+    destCanvas = platform.createCanvas(cropW, cropH);
+    const destCtx = destCanvas.getContext('2d');
+    if (destCtx) {
+      const theta = Math.atan2(p1.y - p0.y, p1.x - p0.x);
+      destCtx.save();
+      destCtx.translate(0, 0);
+      destCtx.rotate(-theta);
+      destCtx.drawImage(sourceCanvas, -p0.x, -p0.y);
+      destCtx.restore();
+    }
+  }
 
   if (cropH / cropW >= VERTICAL_CROP_ASPECT) {
     const rotCanvas = platform.createCanvas(cropH, cropW);
@@ -304,4 +462,21 @@ function cropAndWarp(
   }
 
   return destCanvas;
+}
+
+/**
+ * Catmull-Rom cubic spline interpolation weight function.
+ * Matches the OpenCV INTER_CUBIC convolution kernel (a = -0.5).
+ * 
+ * @param t - The distance from the interpolation center.
+ * @returns The weight coefficient.
+ */
+function cubicWeight(t: number): number {
+  const absT = Math.abs(t);
+  if (absT <= 1) {
+    return 1.5 * absT * absT * absT - 2.5 * absT * absT + 1;
+  } else if (absT < 2) {
+    return -0.5 * absT * absT * absT + 2.5 * absT * absT - 4 * absT + 2;
+  }
+  return 0;
 }
