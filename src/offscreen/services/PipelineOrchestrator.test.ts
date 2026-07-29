@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { pipelineOrchestrator } from './PipelineOrchestrator';
 import { db } from '../../db';
+import { createCanvas, Canvas } from 'canvas';
 
 // vi.hoisted lifts the mock above the module imports. PipelineOrchestrator.ts constructs an
 // OcrManager at module scope (`export const pipelineOrchestrator = ...`), so the mock class
@@ -69,17 +70,10 @@ vi.mock('./InpaintManager', () => {
 });
 
 // Mock browser globals for jsdom/node
-global.createImageBitmap = vi.fn().mockResolvedValue({ width: 100, height: 100 });
-global.OffscreenCanvas = class {
-  width: number;
-  height: number;
-  constructor(w: number, h: number) { this.width = w; this.height = h; }
-  getContext() {
-    return { 
-      drawImage: vi.fn(), fillText: vi.fn(), strokeText: vi.fn(), measureText: vi.fn().mockReturnValue({ width: 10 }),
-      save: vi.fn(), restore: vi.fn(), translate: vi.fn(), rotate: vi.fn(), clearRect: vi.fn(),
-      beginPath: vi.fn(), moveTo: vi.fn(), lineTo: vi.fn(), closePath: vi.fn(), stroke: vi.fn(), fill: vi.fn()
-    };
+global.createImageBitmap = vi.fn().mockImplementation(() => Promise.resolve(createCanvas(100, 100)));
+global.OffscreenCanvas = class extends Canvas {
+  constructor(w: number, h: number) {
+    super(w, h);
   }
   convertToBlob() {
     return Promise.resolve(new Blob(['fake'], { type: 'image/png' }));
