@@ -223,12 +223,17 @@ export class PaddleOcrEngine implements IOcrEngine {
     }
 
     const sourceCanvas = await this.service.platform.canvas.prepareCanvas(imageBuffer);
+    const srcW = sourceCanvas.width;
+    const srcH = sourceCanvas.height;
+    const sourceCtx = sourceCanvas.getContext('2d', { willReadFrequently: true });
+    const sourcePixels = sourceCtx ? sourceCtx.getImageData(0, 0, srcW, srcH).data : new Uint8ClampedArray(0);
+
     const recognitor = this.service.recognitor;
     const ctx = recognitor.buildContext();
     const dictionary = this.service.options.recognition?.charactersDictionary;
 
     const promises = polygons.map(async (poly) => {
-      const finalCropCanvas = cropAndWarp(this.service.platform, sourceCanvas, poly);
+      const finalCropCanvas = cropAndWarp(this.service.platform, sourceCanvas, sourcePixels, srcW, srcH, poly);
       const { text, confidence } = await recognitor.recognizeTextViaContext(finalCropCanvas, ctx, dictionary);
       return { text, confidence };
     });
@@ -279,6 +284,9 @@ export class PaddleOcrEngine implements IOcrEngine {
 function cropAndWarp(
   platform: any,
   sourceCanvas: any,
+  srcPixels: Uint8ClampedArray,
+  srcW: number,
+  srcH: number,
   polygon: { x: number; y: number }[]
 ): any {
   const p0 = polygon[0];
@@ -299,9 +307,8 @@ function cropAndWarp(
   let destCanvas = platform.createCanvas(cropW, cropH);
 
   try {
-    const sourceCtx = sourceCanvas.getContext('2d', { willReadFrequently: true });
     const destCtx = destCanvas.getContext('2d', { willReadFrequently: true });
-    if (sourceCtx && destCtx) {
+    if (destCtx) {
       // Perspective Warp calculation
       const x0 = p0.x, y0 = p0.y;
       const x1 = p1.x, y1 = p1.y;
@@ -332,11 +339,6 @@ function cropAndWarp(
         const E = (h_coeff * y3 + y3 - y0) / cropH;
         const C = x0;
         const F = y0;
-
-        const srcW = sourceCanvas.width;
-        const srcH = sourceCanvas.height;
-        const srcImageData = sourceCtx.getImageData(0, 0, srcW, srcH);
-        const srcPixels = srcImageData.data;
 
         const destImgData = destCtx.createImageData(cropW, cropH);
         const destPixels = destImgData.data;
