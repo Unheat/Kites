@@ -19,10 +19,14 @@ export class SimpleInpaintEngine implements IInpaintEngine {
 
   async inpaint(imageBuffer: ArrayBuffer, maskPolygons: Point2D[][], strokeMaskCanvas?: any): Promise<ArrayBuffer> {
     // 1. Prepare canvas containing the source image
-    const canvas = await this.platform.canvas.prepareCanvas(imageBuffer);
+    const rawCanvas = await this.platform.canvas.prepareCanvas(imageBuffer);
+    const width = rawCanvas.width;
+    const height = rawCanvas.height;
+
+    // Copy to a new canvas to bypass the sticky GPU context returned by prepareCanvas
+    const canvas = this.platform.createCanvas(width, height);
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    const width = canvas.width;
-    const height = canvas.height;
+    ctx.drawImage(rawCanvas, 0, 0);
 
     // If no text boxes, return original buffer
     if (!maskPolygons || maskPolygons.length === 0) {

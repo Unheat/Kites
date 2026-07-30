@@ -159,10 +159,14 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
     }
 
     // 1. Prepare image canvas
-    const imgCanvas = await this.platform.canvas.prepareCanvas(imageBuffer);
+    const rawCanvas = await this.platform.canvas.prepareCanvas(imageBuffer);
+    const width = rawCanvas.width;
+    const height = rawCanvas.height;
+
+    // Copy to CPU-backed canvas
+    const imgCanvas = await this.createCanvas(width, height);
     const ctx = imgCanvas.getContext('2d', { willReadFrequently: true });
-    const width = imgCanvas.width;
-    const height = imgCanvas.height;
+    ctx.drawImage(rawCanvas, 0, 0);
 
     // 2. Prepare mask
     const maskCanvas = await this.createCanvas(width, height);

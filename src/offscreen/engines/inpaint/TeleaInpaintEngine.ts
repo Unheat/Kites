@@ -20,17 +20,21 @@ export class TeleaInpaintEngine implements IInpaintEngine {
 
   async inpaint(imageBuffer: ArrayBuffer, maskPolygons: Point2D[][], _strokeMaskCanvas?: any): Promise<ArrayBuffer> {
     // 1. Prepare canvases
-    const sourceCanvas = await this.platform.canvas.prepareCanvas(imageBuffer);
+    const rawCanvas = await this.platform.canvas.prepareCanvas(imageBuffer);
+    const width = rawCanvas.width;
+    const height = rawCanvas.height;
+
+    // Copy to CPU-backed canvas
+    const sourceCanvas = this.platform.createCanvas(width, height);
     const ctx = sourceCanvas.getContext('2d', { willReadFrequently: true });
-    const width = sourceCanvas.width;
-    const height = sourceCanvas.height;
+    ctx.drawImage(rawCanvas, 0, 0);
 
     if (!maskPolygons || maskPolygons.length === 0) {
       return imageBuffer;
     }
 
-    // 2. Generate an inflated solid mask canvas
-    const maskCanvas = await this.platform.canvas.prepareCanvas(imageBuffer);
+    // 2. Generate an inflated solid mask canvas (on a fresh CPU canvas directly)
+    const maskCanvas = this.platform.createCanvas(width, height);
     const maskCtx = maskCanvas.getContext('2d', { willReadFrequently: true });
     maskCtx.fillStyle = '#000000';
     maskCtx.fillRect(0, 0, width, height);

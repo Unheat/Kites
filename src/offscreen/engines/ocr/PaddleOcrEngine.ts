@@ -222,10 +222,16 @@ export class PaddleOcrEngine implements IOcrEngine {
       await this.init();
     }
 
-    const sourceCanvas = await this.service.platform.canvas.prepareCanvas(imageBuffer);
-    const srcW = sourceCanvas.width;
-    const srcH = sourceCanvas.height;
+    const rawCanvas = await this.service.platform.canvas.prepareCanvas(imageBuffer);
+    const srcW = rawCanvas.width;
+    const srcH = rawCanvas.height;
+
+    // Copy to a new canvas to bypass the sticky GPU context returned by prepareCanvas
+    const sourceCanvas = this.service.platform.createCanvas(srcW, srcH);
     const sourceCtx = sourceCanvas.getContext('2d', { willReadFrequently: true });
+    if (sourceCtx) {
+      sourceCtx.drawImage(rawCanvas, 0, 0);
+    }
     const sourcePixels = sourceCtx ? sourceCtx.getImageData(0, 0, srcW, srcH).data : new Uint8ClampedArray(0);
 
     const recognitor = this.service.recognitor;
