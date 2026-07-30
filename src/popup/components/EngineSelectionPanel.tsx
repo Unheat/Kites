@@ -44,6 +44,19 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
           setOcrBaseEngines(prev => prev.map(e => e.id === message.payload.modelId ? { ...e, isDownloaded: true } : e));
         }
       }
+
+      if (message.type === 'MODEL_DOWNLOAD_ERROR') {
+        // Surface the failure in the inline progress bar, and make sure the model
+        // is never left looking downloaded/selectable just because a download was attempted.
+        console.error(`[EngineSelectionPanel] Download failed for ${message.payload.modelId}:`, message.payload.error);
+        setDownloads(prev => ({
+          ...prev,
+          [message.payload.modelId]: {
+            progress: 0,
+            status: `Failed: ${message.payload.error}`
+          }
+        }));
+      }
     };
     chrome.runtime.onMessage.addListener(listener);
     return () => chrome.runtime.onMessage.removeListener(listener);
@@ -72,7 +85,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
         const urls = keys.map(k => k.url);
         setInpaintBaseEngines(prev => prev.map(e => {
           if (e.id === 'aotgan') return { ...e, isDownloaded: urls.some(u => u.includes('aotgan')) };
-          if (e.id === 'lama-base') return { ...e, isDownloaded: urls.some(u => u.includes('lama_fp32')) };
+          if (e.id === 'lama-base') return { ...e, isDownloaded: urls.some(u => u.includes('lama-base')) };
           if (e.id === 'lama-manga') return { ...e, isDownloaded: urls.some(u => u.includes('lama-manga')) };
           return e;
         }));
@@ -225,9 +238,10 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                               <div 
                                 onClick={(e) => {
                                   e.stopPropagation();
+                                  // Only trigger the download here. The model becomes selectable
+                                  // once MODEL_DOWNLOAD_PROGRESS confirms it's actually ready —
+                                  // the user then clicks the row itself to select it.
                                   chrome.runtime.sendMessage({ type: 'START_MODEL_DOWNLOAD', payload: { modelId: engine.id } });
-                                  updateState({ activeEngineId: engine.id });
-                                  setIsOpen(false);
                                 }}
                                 className="p-1 -mr-1 rounded hover:bg-[var(--color-vellum)] transition-colors cursor-pointer text-[var(--color-ink)] opacity-100"
                                 title="Download model"
@@ -352,9 +366,10 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                           <div 
                             onClick={(e) => {
                               e.stopPropagation();
-                              chrome.runtime.sendMessage({ type: 'START_MODEL_DOWNLOAD', payload: { modelId: engine.id } });
-                              updateState({ activeInpaintId: engine.id });
-                              setIsOpenInpaint(false);
+                              // Only trigger the download here. The model becomes selectable
+                              // once MODEL_DOWNLOAD_PROGRESS confirms it's actually ready —
+                              // the user then clicks the row itself to select it.
+                              chrome.runtime.sendMessage({ type: 'START_MODEL_DOWNLOAD', payload: { modelId: engine.id, category: 'inpaint' } });
                             }}
                             className="p-1 -mr-1 rounded hover:bg-[var(--color-vellum)] transition-colors cursor-pointer text-[var(--color-ink)] opacity-100"
                             title="Download model"

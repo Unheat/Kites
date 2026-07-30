@@ -22,7 +22,16 @@ chrome.runtime.onMessage.addListener((message: ProcessJobMessage | any, _sender:
   if (message.type === 'START_MODEL_DOWNLOAD' && message.payload?.modelId) {
     handleStartDownload(message.payload.modelId, message.payload.category)
       .then(() => sendResponse({ status: 'success' }))
-      .catch((err) => sendResponse({ status: 'error', error: err.message }));
+      .catch((err) => {
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        console.error(`[Offscreen] Model download failed for ${message.payload.modelId}:`, err);
+        // Notify the popup so it can stop treating the model as downloading/selectable.
+        chrome.runtime.sendMessage({
+          type: 'MODEL_DOWNLOAD_ERROR',
+          payload: { modelId: message.payload.modelId, error: errorMessage }
+        }).catch(() => {}); // ignore if popup is closed
+        sendResponse({ status: 'error', error: errorMessage });
+      });
     return true;
   }
 

@@ -8,6 +8,7 @@ export type MessageType =
   | 'PROCESS_ERROR'      // Offscreen -> Background
   | 'START_MODEL_DOWNLOAD' // Popup -> Background -> Offscreen
   | 'MODEL_DOWNLOAD_PROGRESS' // Offscreen -> (Popup & Background)
+  | 'MODEL_DOWNLOAD_ERROR' // Offscreen -> (Popup & Background)
   | 'CHECK_MODEL_STATUS'   // Popup -> Background -> Offscreen
   | 'PRELOAD_ACTIVE_ENGINE'; // Background -> Offscreen
 
@@ -43,6 +44,14 @@ export interface ModelDownloadProgressMessage {
     modelId: string;
     progress: number; // 0 to 1
     status?: string; // Optional text like "Downloading weights..."
+  };
+}
+
+export interface ModelDownloadErrorMessage {
+  type: 'MODEL_DOWNLOAD_ERROR';
+  payload: {
+    modelId: string;
+    error: string;
   };
 }
 
