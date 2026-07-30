@@ -5,6 +5,10 @@ Always use `codebase-memory-mcp` tools over `grep` or reading whole files.
 2. **Search**: Use `search_graph` and `trace_call_path` to find symbols and call chains.
 3. **Reading**: Use `get_code_snippet` for precise functions instead of reading full files.
 
+## Fall back to `grep` ONLY for:
+   - Searching exact text strings, comments, configuration keys, or regex patterns.
+   - Unindexed temporary files or quick log outputs.
+
 # Workspace Instruction Profile: Antigravity Mentor Mode
 
 This file defines the behavior and guiding principles for Antigravity when collaborating on the **Spatial Image & Manga Translator (Kites)** project.

@@ -107,4 +107,18 @@ describe('resizeRegionToFontSize (Cotrans 2023 semantics)', () => {
       expect(p.y).toBeLessThanOrEqual(20);
     }
   });
+
+  it('does not swap layout dimensions for vertical regions', () => {
+    // Vertical region: 30x150. Detected font size 24.
+    // 7 characters translated.
+    // If layout dimensions are swapped (incorrectly using Math.max/min):
+    // rows = floor(150 / 21) = 7, cols = floor(30 / 21) = 1. rows * cols = 7 >= 7.
+    // Returns font size 21.
+    // If layout dimensions are not swapped (correctly using boxW / boxH):
+    // rows = floor(30 / 21) = 1, cols = floor(150 / 21) = 7. rows * cols = 7 >= 7.
+    // Returns font size 21.
+    const r = region(30, 150, 24, '先生', 'teacher');
+    const { fontSize } = resizeRegionToFontSize(r, 1000, 1500);
+    expect(fontSize).toBe(21);
+  });
 });
