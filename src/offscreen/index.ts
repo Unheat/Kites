@@ -20,19 +20,42 @@ chrome.runtime.onMessage.addListener((message: ProcessJobMessage | any, _sender:
   }
 
   if (message.type === 'START_MODEL_DOWNLOAD' && message.payload?.modelId) {
-    handleStartDownload(message.payload.modelId, message.payload.category)
-      .then(() => sendResponse({ status: 'success' }))
-      .catch((err) => {
-        const errorMessage = err instanceof Error ? err.message : String(err);
-        console.error(`[Offscreen] Model download failed for ${message.payload.modelId}:`, err);
-        // Notify the popup so it can stop treating the model as downloading/selectable.
-        chrome.runtime.sendMessage({
-          type: 'MODEL_DOWNLOAD_ERROR',
-          payload: { modelId: message.payload.modelId, error: errorMessage }
-        }).catch(() => {}); // ignore if popup is closed
-        sendResponse({ status: 'error', error: errorMessage });
-      });
-    return true;
+    const { modelId, category } = message.payload;
+    
+    // Avoid duplicating downloads in queue or currently running
+    const isAlreadyDownloading = activeDownloadModelId === modelId;
+    const isAlreadyQueued = downloadQueue.some(item => item.modelId === modelId);
+    
+    if (!isAlreadyDownloading && !isAlreadyQueued) {
+      downloadQueue.push({ modelId, category });
+      
+      // Initialize state to 'Queued'
+      activeDownloads[modelId] = {
+        files: {},
+        maxProgress: 0,
+        status: 'Queued'
+      };
+      
+      // Broadcast queued state
+      chrome.runtime.sendMessage({
+        type: 'MODEL_DOWNLOAD_PROGRESS',
+        payload: { modelId, progress: 0, status: 'Queued' }
+      }).catch(() => {});
+      
+      processQueue();
+    }
+    
+    sendResponse({ status: 'success', message: 'Download request registered' });
+    return false;
+  }
+
+  if (message.type === 'GET_ACTIVE_DOWNLOADS') {
+    const registry: Record<string, { progress: number; status: string }> = {};
+    for (const [modelId, dl] of Object.entries(activeDownloads)) {
+      registry[modelId] = { progress: dl.maxProgress, status: dl.status };
+    }
+    sendResponse({ status: 'success', downloads: registry });
+    return false;
   }
 
   if (message.type === 'CHECK_MODEL_STATUS' && message.payload?.modelId) {
@@ -56,9 +79,170 @@ async function handlePreloadEngine() {
   }
 }
 
-const activeDownloads: Record<string, { [file: string]: { loaded: number, total: number } }> = {};
+interface ActiveDownloadState {
+  files: Record<string, { loaded: number; total: number; done: boolean }>;
+  maxProgress: number;
+  status: string;
+}
+
+const activeDownloads: Record<string, ActiveDownloadState> = {};
+
+// Serial Queue state
+interface QueueItem {
+  modelId: string;
+  category?: string;
+}
+
+let activeDownloadModelId: string | null = null;
+const downloadQueue: QueueItem[] = [];
+
+/**
+ * Triggers the next download in the queue if none is running.
+ */
+function processQueue() {
+  if (activeDownloadModelId !== null) {
+    return; // Already downloading something
+  }
+
+  const next = downloadQueue.shift();
+  if (!next) {
+    return; // Queue empty
+  }
+
+  activeDownloadModelId = next.modelId;
+  console.log(`[Offscreen] Starting serial queue download: ${next.modelId} (${next.category || 'translation'})`);
+
+  executeDownload(next.modelId, next.category)
+    .then(() => {
+      console.log(`[Offscreen] Download completed from queue: ${next.modelId}`);
+    })
+    .catch((err) => {
+      console.error(`[Offscreen] Download failed from queue: ${next.modelId}`, err);
+    })
+    .finally(() => {
+      activeDownloadModelId = null;
+      // Process the next queued item
+      processQueue();
+    });
+}
+
+/**
+ * Executes a single model download, updating registry and broadcasting errors.
+ */
+async function executeDownload(modelId: string, category?: string) {
+  if (activeDownloads[modelId]) {
+    activeDownloads[modelId].status = 'Downloading...';
+  }
+
+  try {
+    await handleStartDownload(modelId, category);
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    if (activeDownloads[modelId]) {
+      activeDownloads[modelId].status = `Failed: ${errorMessage}`;
+      activeDownloads[modelId].maxProgress = 0;
+    }
+    chrome.runtime.sendMessage({
+      type: 'MODEL_DOWNLOAD_ERROR',
+      payload: { modelId, error: errorMessage }
+    }).catch(() => {});
+    throw err;
+  }
+}
+
+/**
+ * Factory to create a monotonic progress callback for a model download.
+ */
+function createProgressCallback(modelId: string) {
+  return (info: any) => {
+    if (!activeDownloads[modelId]) {
+      activeDownloads[modelId] = { files: {}, maxProgress: 0, status: 'Downloading...' };
+    }
+    const downloadState = activeDownloads[modelId];
+
+    // Check if info is a Transformers.js progress event
+    if (info && typeof info === 'object' && info.status) {
+      if (info.status === 'initiate' && info.file) {
+        if (!downloadState.files[info.file]) {
+          downloadState.files[info.file] = { loaded: 0, total: 0, done: false };
+        }
+        downloadState.status = `Initiating ${info.file}...`;
+      } 
+      else if (info.status === 'progress' && info.file) {
+        if (!downloadState.files[info.file]) {
+          downloadState.files[info.file] = { loaded: 0, total: 0, done: false };
+        }
+        downloadState.files[info.file].loaded = info.loaded || 0;
+        downloadState.files[info.file].total = info.total || 0;
+        downloadState.status = `Downloading files...`;
+      } 
+      else if (info.status === 'done' && info.file) {
+        if (downloadState.files[info.file]) {
+          downloadState.files[info.file].loaded = downloadState.files[info.file].total;
+          downloadState.files[info.file].done = true;
+        }
+        downloadState.status = `Finished downloading ${info.file}`;
+      }
+    }
+
+    // Calculate overall progress from Transformers.js file tracking
+    let totalLoaded = 0;
+    let totalSize = 0;
+    let hasValidSizes = false;
+
+    for (const fileData of Object.values(downloadState.files)) {
+      if (fileData.total > 0) {
+        totalLoaded += fileData.loaded;
+        totalSize += fileData.total;
+        hasValidSizes = true;
+      }
+    }
+
+    let progressValue = downloadState.maxProgress;
+
+    if (hasValidSizes && totalSize > 0) {
+      progressValue = Math.max(downloadState.maxProgress, totalLoaded / totalSize);
+      downloadState.maxProgress = progressValue;
+    }
+
+    // Handle direct progress number (like Inpaint) or WebLLM progress object
+    let directProgress: number | undefined = undefined;
+    let directStatus: string | undefined = undefined;
+
+    if (typeof info === 'number') {
+      directProgress = info;
+    } else if (info && typeof info.progress === 'number') {
+      directProgress = info.progress;
+      directStatus = info.text || info.status;
+    }
+
+    if (directProgress !== undefined) {
+      let val = directProgress;
+      if (val > 1) {
+        val = val / 100;
+      }
+      progressValue = Math.max(downloadState.maxProgress, val);
+      downloadState.maxProgress = progressValue;
+      if (directStatus) {
+        downloadState.status = directStatus;
+      }
+    }
+
+    // Broadcast the progress to the extension popup/background
+    chrome.runtime.sendMessage({
+      type: 'MODEL_DOWNLOAD_PROGRESS',
+      payload: {
+        modelId,
+        progress: progressValue,
+        status: downloadState.status
+      }
+    }).catch(() => {});
+  };
+}
 
 async function handleStartDownload(modelId: string, category?: string) {
+  const progressCallback = createProgressCallback(modelId);
+
   if (category === 'inpaint' || category === 'ocr') {
     const registry = category === 'inpaint' 
       ? (await import('./engines/inpaint/inpaintRegistry')).inpaintRegistry
@@ -66,12 +250,10 @@ async function handleStartDownload(modelId: string, category?: string) {
 
     const { InpaintCacheManager } = await import('./services/InpaintCacheManager');
     
-    activeDownloads[modelId] = {};
-    const progressCallback = (progress: number) => {
-      chrome.runtime.sendMessage({
-        type: 'MODEL_DOWNLOAD_PROGRESS',
-        payload: { modelId, progress, status: 'Downloading weights...' }
-      }).catch(() => {});
+    activeDownloads[modelId] = {
+      files: {},
+      maxProgress: 0,
+      status: 'Downloading weights...'
     };
     
     const entry = registry[modelId];
@@ -84,6 +266,11 @@ async function handleStartDownload(modelId: string, category?: string) {
       await InpaintCacheManager.downloadModelWithProgress(entry.onnxUrl, progressCallback);
     }
     
+    if (activeDownloads[modelId]) {
+      activeDownloads[modelId].maxProgress = 1;
+      activeDownloads[modelId].status = 'ready';
+    }
+
     chrome.runtime.sendMessage({
       type: 'MODEL_DOWNLOAD_PROGRESS',
       payload: { modelId, progress: 1, status: 'ready' }
@@ -94,46 +281,20 @@ async function handleStartDownload(modelId: string, category?: string) {
 
   const { translationManager } = await import('./services/TranslationManager');
   
-  activeDownloads[modelId] = {};
-
-  const progressCallback = (info: any) => {
-    let progressValue = info.progress || 0;
-    let statusText = info.status || info.text || 'Downloading...';
-    
-    // Transformers.js sends { status: 'progress', file: '...', loaded: ..., total: ... }
-    if (info.status === 'progress' && info.file) {
-      activeDownloads[modelId][info.file] = { loaded: info.loaded || 0, total: info.total || 0 };
-      
-      let totalLoaded = 0;
-      let totalSize = 0;
-      for (const fileData of Object.values(activeDownloads[modelId])) {
-        totalLoaded += fileData.loaded;
-        totalSize += fileData.total;
-      }
-      
-      if (totalSize > 0) {
-        progressValue = totalLoaded / totalSize;
-      }
-      statusText = `Downloading ${Object.keys(activeDownloads[modelId]).length} files...`;
-    } 
-    // WebLLM sends 0-1
-    else if (typeof progressValue === 'number' && progressValue > 1) {
-       progressValue = progressValue / 100;
-    }
-    
-    chrome.runtime.sendMessage({
-      type: 'MODEL_DOWNLOAD_PROGRESS',
-      payload: {
-        modelId,
-        progress: progressValue,
-        status: statusText
-      }
-    }).catch(() => {}); // ignore error if popup closed
+  activeDownloads[modelId] = {
+    files: {},
+    maxProgress: 0,
+    status: 'Downloading...'
   };
 
   try {
     await translationManager.downloadModel(modelId, progressCallback);
-    // When done, send a final event
+    
+    if (activeDownloads[modelId]) {
+      activeDownloads[modelId].maxProgress = 1;
+      activeDownloads[modelId].status = 'ready';
+    }
+
     chrome.runtime.sendMessage({
       type: 'MODEL_DOWNLOAD_PROGRESS',
       payload: {

@@ -28,6 +28,17 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
   const [downloads, setDownloads] = useState<Record<string, { progress: number; status: string }>>({});
 
   useEffect(() => {
+    // Query active downloads on mount
+    chrome.runtime.sendMessage({ type: 'GET_ACTIVE_DOWNLOADS' }, (response) => {
+      if (chrome.runtime.lastError) {
+        console.warn('[EngineSelectionPanel] Failed to query active downloads:', chrome.runtime.lastError.message);
+        return;
+      }
+      if (response && response.status === 'success' && response.downloads) {
+        setDownloads(response.downloads);
+      }
+    });
+
     const listener = (message: any) => {
       if (message.type === 'MODEL_DOWNLOAD_PROGRESS') {
         setDownloads(prev => ({
@@ -165,24 +176,29 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
           </button>
 
           {/* Redesigned INLINE progress bar (Task 6) */}
-          {downloads[activeEngine.id] && downloads[activeEngine.id].progress < 1 && (
-            <div className="mt-2 p-2 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md animate-in fade-in duration-200">
-              <div className="flex justify-between items-end mb-1.5">
-                <span className="text-[10px] font-medium text-[var(--color-dust)] uppercase tracking-wider truncate max-w-[80%]">
-                  {downloads[activeEngine.id].status}
-                </span>
-                <span className="text-xs font-bold text-[var(--color-ink)]">
-                  {Math.round(downloads[activeEngine.id].progress * 100)}%
-                </span>
+          {(() => {
+            const downloadingEngine = allEngines.find(e => downloads[e.id] && downloads[e.id].progress < 1);
+            if (!downloadingEngine) return null;
+            const dl = downloads[downloadingEngine.id];
+            return (
+              <div className="mt-2 p-2 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md animate-in fade-in duration-200">
+                <div className="flex justify-between items-end mb-1.5">
+                  <span className="text-[10px] font-medium text-[var(--color-dust)] uppercase tracking-wider truncate max-w-[80%]">
+                    {downloadingEngine.name}: {dl.status}
+                  </span>
+                  <span className="text-xs font-bold text-[var(--color-ink)]">
+                    {Math.round(dl.progress * 100)}%
+                  </span>
+                </div>
+                <div className="h-1.5 w-full bg-[var(--color-paper)] rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-[var(--color-editorial)] transition-all duration-300 ease-out" 
+                    style={{ width: `${dl.progress * 100}%` }}
+                  />
+                </div>
               </div>
-              <div className="h-1.5 w-full bg-[var(--color-paper)] rounded-full overflow-hidden">
-                <div 
-                  className="h-full bg-[var(--color-editorial)] transition-all duration-300 ease-out" 
-                  style={{ width: `${downloads[activeEngine.id].progress * 100}%` }}
-                />
-              </div>
-            </div>
-          )}
+            );
+          })()}
 
           {isOpen && (
             <div className="mt-1 bg-[var(--color-paper)] border border-[var(--color-dust)] rounded-md shadow-sm overflow-hidden flex flex-col max-h-[350px] z-50">
@@ -315,24 +331,29 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
           </button>
 
           {/* Redesigned INLINE progress bar for inpainting (Task 6) */}
-          {downloads[state.activeInpaintId || ''] && downloads[state.activeInpaintId || ''].progress < 1 && (
-            <div className="mt-2 p-2 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md animate-in fade-in duration-200">
-              <div className="flex justify-between items-end mb-1.5">
-                <span className="text-[10px] font-medium text-[var(--color-dust)] uppercase tracking-wider truncate max-w-[80%]">
-                  {downloads[state.activeInpaintId || ''].status}
-                </span>
-                <span className="text-xs font-bold text-[var(--color-ink)]">
-                  {Math.round(downloads[state.activeInpaintId || ''].progress * 100)}%
-                </span>
+          {(() => {
+            const downloadingInpaint = inpaintBaseEngines.find(e => downloads[e.id] && downloads[e.id].progress < 1);
+            if (!downloadingInpaint) return null;
+            const dl = downloads[downloadingInpaint.id];
+            return (
+              <div className="mt-2 p-2 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md animate-in fade-in duration-200">
+                <div className="flex justify-between items-end mb-1.5">
+                  <span className="text-[10px] font-medium text-[var(--color-dust)] uppercase tracking-wider truncate max-w-[80%]">
+                    {downloadingInpaint.name}: {dl.status}
+                  </span>
+                  <span className="text-xs font-bold text-[var(--color-ink)]">
+                    {Math.round(dl.progress * 100)}%
+                  </span>
+                </div>
+                <div className="h-1.5 w-full bg-[var(--color-paper)] rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-[var(--color-editorial)] transition-all duration-300 ease-out" 
+                    style={{ width: `${dl.progress * 100}%` }}
+                  />
+                </div>
               </div>
-              <div className="h-1.5 w-full bg-[var(--color-paper)] rounded-full overflow-hidden">
-                <div 
-                  className="h-full bg-[var(--color-editorial)] transition-all duration-300 ease-out" 
-                  style={{ width: `${downloads[state.activeInpaintId || ''].progress * 100}%` }}
-                />
-              </div>
-            </div>
-          )}
+            );
+          })()}
 
           {isOpenInpaint && (
             <div className="mt-1 bg-[var(--color-paper)] border border-[var(--color-dust)] rounded-md shadow-sm overflow-hidden flex flex-col max-h-[350px] z-50">

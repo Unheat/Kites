@@ -57,7 +57,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
   }
   
-  if (message.type === 'START_MODEL_DOWNLOAD' || message.type === 'CHECK_MODEL_STATUS' || message.type === 'PRELOAD_ACTIVE_ENGINE') {
+  if (message.type === 'START_MODEL_DOWNLOAD' || message.type === 'CHECK_MODEL_STATUS' || message.type === 'PRELOAD_ACTIVE_ENGINE' || message.type === 'GET_ACTIVE_DOWNLOADS') {
     console.log(`[Background] Received ${message.type}. Forwarding to Offscreen...`);
     setupOffscreenDocument('src/offscreen/offscreen.html')
       .then(() => {

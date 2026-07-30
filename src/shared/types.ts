@@ -9,6 +9,7 @@ export type MessageType =
   | 'START_MODEL_DOWNLOAD' // Popup -> Background -> Offscreen
   | 'MODEL_DOWNLOAD_PROGRESS' // Offscreen -> (Popup & Background)
   | 'MODEL_DOWNLOAD_ERROR' // Offscreen -> (Popup & Background)
+  | 'GET_ACTIVE_DOWNLOADS' // Popup -> Background -> Offscreen
   | 'CHECK_MODEL_STATUS'   // Popup -> Background -> Offscreen
   | 'PRELOAD_ACTIVE_ENGINE'; // Background -> Offscreen
 
@@ -60,6 +61,10 @@ export interface CheckModelStatusMessage {
   payload: {
     modelId: string;
   };
+}
+
+export interface GetActiveDownloadsMessage {
+  type: 'GET_ACTIVE_DOWNLOADS';
 }
 
 export interface PreloadActiveEngineMessage {
