@@ -5,7 +5,7 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const EXTENSION_PATH = path.join(__dirname, '..', 'dist');
-const SERVER_PORT = 8093;
+const SERVER_PORT = 8094;
 const MAX_WAIT_CYCLES = 600;
 const CYCLE_DELAY_MS = 500;
 const STARTUP_DELAY_MS = 3000;
@@ -33,13 +33,13 @@ function startTestServer() {
 }
 
 /**
- * Executes the NLLB-200 pipeline benchmark using Puppeteer.
+ * Executes the NLLB-200 pipeline benchmark using Puppeteer with HARDWARE GPU acceleration.
  * 
  * @param {boolean} webgpuMaster - Whether WebGPU acceleration is enabled.
  * @returns {Promise<{ modeName: string, totalElapsed: string, finished: boolean }>} Benchmark performance results.
  */
 async function runNllbBenchmark(webgpuMaster) {
-  const modeName = webgpuMaster ? '🚀 WEBGPU ON' : '🐢 WEBGPU OFF (WASM)';
+  const modeName = webgpuMaster ? '🚀 HARDWARE WEBGPU ON' : '🐢 WEBGPU OFF (WASM)';
   console.log('\n================================================================');
   console.log(`BENCHMARK RUN: ${modeName}`);
   console.log('   Model: Xenova/nllb-200-distilled-600M');
@@ -56,8 +56,7 @@ async function runNllbBenchmark(webgpuMaster) {
       '--no-sandbox',
       ...(webgpuMaster ? [
         '--enable-unsafe-webgpu',
-        '--use-gl=angle',
-        '--use-angle=metal',
+        '--enable-gpu',
         '--ignore-gpu-blocklist',
         '--enable-gpu-rasterization',
         '--enable-features=Vulkan,UseSkiaRenderer,WebGPU'
@@ -180,17 +179,13 @@ async function runNllbBenchmark(webgpuMaster) {
 (async () => {
   const server = startTestServer();
   try {
-    // 1. Run WebGPU OFF (WASM)
-    const wasmResult = await runNllbBenchmark(false);
-
-    // 2. Run WebGPU ON
+    // Run Hardware WebGPU ON benchmark
     const webgpuResult = await runNllbBenchmark(true);
 
     console.log('================================================================');
-    console.log('📊 FINAL NLLB-200 BENCHMARK SUMMARY (NLLB-200 + simple fill + Paddle)');
+    console.log('📊 HARDWARE GPU BENCHMARK SUMMARY (NLLB-200 + simple fill + Paddle)');
     console.log('================================================================');
-    console.log(`🐢 WEBGPU OFF (WASM Mode):   ${wasmResult.totalElapsed}s (Success: ${wasmResult.finished})`);
-    console.log(`🚀 WEBGPU ON  (WebGPU Mode): ${webgpuResult.totalElapsed}s (Success: ${webgpuResult.finished})`);
+    console.log(`🚀 HARDWARE WEBGPU ON: ${webgpuResult.totalElapsed}s (Success: ${webgpuResult.finished})`);
     console.log('================================================================');
   } catch (err) {
     console.error('Benchmark execution error:', err);

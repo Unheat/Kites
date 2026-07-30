@@ -5,7 +5,7 @@ import { detectNllbLanguage } from '../../utils/languageDetector';
 
 const DEFAULT_REPETITION_PENALTY = 1.2;
 const DEFAULT_NO_REPEAT_NGRAM_SIZE = 3;
-const DEFAULT_MAX_NEW_TOKENS = 256;
+const DEFAULT_MAX_NEW_TOKENS = 48;
 
 export class TransformersEngine implements ITranslationEngine {
   private modelId: string;

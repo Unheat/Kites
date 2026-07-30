@@ -76,7 +76,8 @@ export class PaddleOcrEngine implements IOcrEngine {
         // init(). That eager evaluation is what broke translation in production: the offscreen
         // document's stricter CSP hits ORT's bundle-internal eval before PipelineOrchestrator's
         // own code ever runs, so nothing gets logged and the pipeline just stalls.
-        const ort = await import('onnxruntime-web');
+        const ortUrl = chrome.runtime.getURL('/ort-wasm/ort.webgpu.mjs');
+        const ort = await import(/* @vite-ignore */ ortUrl);
         ort.env.wasm.wasmPaths = chrome.runtime.getURL('/ort-wasm/');
 
         const pkg = await import('ppu-paddle-ocr/web');
@@ -121,7 +122,7 @@ export class PaddleOcrEngine implements IOcrEngine {
         : ['wasm'];
 
       this.service = new PaddleOcrService({
-        model: MODEL_PRESETS['v6-medium'],
+        model: MODEL_PRESETS['v6-small'],
         detection: {
           maxSideLength: DETECTION_MAX_SIDE,
         },
@@ -132,11 +133,19 @@ export class PaddleOcrEngine implements IOcrEngine {
         // recognition time was statistically indistinguishable (~3.2-3.4s either way,
         // well within run-to-run noise). Re-measure before reintroducing a level override.
         session: {
-          executionProviders: isNode ? undefined : executionProviders
+          executionProviders: isNode ? undefined : executionProviders,
+          graphOptimizationLevel: 'basic'
         }
       });
 
       await this.service.initialize();
+
+      const activeEPs = this.service.options?.session?.executionProviders;
+      console.log(`[PaddleOcrEngine] Active ONNX Execution Providers:`, JSON.stringify(activeEPs));
+      if (useWebGpu && Array.isArray(activeEPs) && activeEPs.length === 1 && activeEPs[0] === 'wasm') {
+        console.warn('[PaddleOcrEngine] ⚠️ WARNING: WebGPU requested but ONNX Runtime fell back silently to WASM CPU!');
+      }
+
       this.customDetector = new CustomPaddleDetector(this.service);
       this.isInitialized = true;
       console.log(`[PaddleOcrEngine] Initialization complete in ${(performance.now() - startTime).toFixed(2)}ms.`);
