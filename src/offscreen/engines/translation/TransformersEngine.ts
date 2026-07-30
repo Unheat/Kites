@@ -1,6 +1,11 @@
 import { pipeline, env } from '@huggingface/transformers';
 import type { ITranslationEngine } from './BaseEngine';
 import { getNllbCode } from '../../../shared/utils/LanguageRegistry';
+import { detectNllbLanguage } from '../../utils/languageDetector';
+
+const DEFAULT_REPETITION_PENALTY = 1.2;
+const DEFAULT_NO_REPEAT_NGRAM_SIZE = 3;
+const DEFAULT_MAX_NEW_TOKENS = 256;
 
 export class TransformersEngine implements ITranslationEngine {
   private modelId: string;
@@ -70,14 +75,18 @@ export class TransformersEngine implements ITranslationEngine {
     }
   }
 
+  /**
+   * Translates an array of text strings using HuggingFace Transformers.js pipeline.
+   * 
+   * @param texts - Array of strings to translate.
+   * @param sourceLangId - Source language ID ('auto', 'ja', 'zh-CN', etc.).
+   * @param targetLangId - Target language ID ('en', 'vi', etc.).
+   * @returns Array of translated text strings in original order.
+   */
   async translate(texts: string[], sourceLangId: string = 'ja', targetLangId: string = 'en'): Promise<string[]> {
     if (!this.translatorPipeline) {
       throw new Error('TransformersEngine is not initialized.');
     }
-
-    // Map internal canonical language IDs to FLORES-200 NLLB codes
-    const sourceLang = sourceLangId === 'auto' ? 'eng_Latn' : getNllbCode(sourceLangId);
-    const targetLang = getNllbCode(targetLangId);
 
     if (!texts || texts.length === 0) return [];
 
@@ -94,15 +103,28 @@ export class TransformersEngine implements ITranslationEngine {
 
     if (validInputs.length === 0) return results;
 
+    const batchInput = validInputs.map(item => item.text);
+
+    // Map internal canonical language IDs to FLORES-200 NLLB codes.
+    // If 'auto' is selected, run auto-detection (Chrome AI / Script Heuristic fallback).
+    const sourceLang = sourceLangId === 'auto'
+      ? await detectNllbLanguage(batchInput)
+      : getNllbCode(sourceLangId);
+    const targetLang = getNllbCode(targetLangId);
+
     const startTime = performance.now();
     console.log(`[TransformersEngine] Batch translating ${validInputs.length} text blocks on ${this.modelId}...`);
 
     try {
-      // Pass array of text strings directly to Transformers.js for single-pass GPU batching
+      // Pass array of text strings directly to Transformers.js for single-pass GPU batching.
+      // Pass repetition_penalty, no_repeat_ngram_size, and max_new_tokens to prevent repetition loops.
       const batchInput = validInputs.map(item => item.text);
       const outputs = await this.translatorPipeline(batchInput, {
         src_lang: sourceLang,
         tgt_lang: targetLang,
+        repetition_penalty: DEFAULT_REPETITION_PENALTY,
+        no_repeat_ngram_size: DEFAULT_NO_REPEAT_NGRAM_SIZE,
+        max_new_tokens: DEFAULT_MAX_NEW_TOKENS,
       });
 
       // Map translations back to their original array indices

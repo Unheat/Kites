@@ -1,5 +1,6 @@
 import type { ITranslationEngine } from './BaseEngine';
 import { getBcp47Code } from '../../../shared/utils/LanguageRegistry';
+import { detectBcp47Language } from '../../utils/languageDetector';
 
 /**
  * Resolves the active native Chrome Translator API instance across standard spec evolutions:
@@ -43,14 +44,15 @@ export class ChromeTranslatorEngine implements ITranslationEngine {
     try {
       const scope = getNativeTranslatorScope();
       if (!scope) {
-        throw new Error("Chrome native translation API (Translator / self.translation / self.ai.translator) is unavailable on this browser.");
+        throw new Error("[ChromeTranslatorEngine] Chrome native translation API is not available on this browser. Chrome 138+ or Built-in AI feature flag is required.");
       }
 
       const api = scope.obj;
 
-      if (scope.type === 'global' && typeof api.availability === 'function') {
+      // Validate availability if standard method exists
+      if (typeof api.availability === 'function') {
         const status = await api.availability({ sourceLanguage: 'en', targetLanguage: 'es' });
-        if (status === 'no' || status === 'unavailable') {
+        if (status === 'no') {
           throw new Error("[ChromeTranslatorEngine] Chrome translation capability is unavailable on this device.");
         }
       } else if (typeof api.canTranslate === 'function') {
@@ -73,7 +75,7 @@ export class ChromeTranslatorEngine implements ITranslationEngine {
 
   /**
    * Translates an array of text blocks using Chrome native translator.
-   * 
+   *
    * @param texts - Array of strings to translate.
    * @param sourceLangId - Source language ID (e.g. 'ja', 'auto').
    * @param targetLangId - Target language ID (e.g. 'en').
@@ -88,20 +90,34 @@ export class ChromeTranslatorEngine implements ITranslationEngine {
     }
 
     const api = scope.obj;
-    const sourceLang = getBcp47Code(sourceLangId);
     const targetLang = getBcp47Code(targetLangId);
 
-    console.log(`[ChromeTranslatorEngine] Translating ${texts.length} items (${sourceLang} -> ${targetLang}) via Native Chrome AI...`);
+    let resolvedSource: string;
+    let detectionNote = '';
+    if (sourceLangId === 'auto') {
+      const detectedCanonical = await detectBcp47Language(texts);
+      resolvedSource = getBcp47Code(detectedCanonical);
+      detectionNote = ` (auto -> ${resolvedSource})`;
+    } else {
+      resolvedSource = getBcp47Code(sourceLangId);
+    }
+
+    console.log(`[ChromeTranslatorEngine] Translating ${texts.length} items (${resolvedSource} -> ${targetLang})${detectionNote} via Native Chrome AI...`);
 
     let translator;
     try {
-      const options = {
-        sourceLanguage: sourceLang === 'auto' ? undefined : sourceLang,
-        targetLanguage: targetLang,
-        source: sourceLang === 'auto' ? undefined : sourceLang,
-        target: targetLang
-      };
-      
+      // Build options using the field names matching the API surface:
+      //  - stable 'global' Translator class: sourceLanguage / targetLanguage
+      //  - legacy Origin Trial (translation / translator / ai): source / target
+      // Mixing the two in one object was a latent bug; the stable API rejects
+      // the undefined legacy fields only loosely, so keep them strictly separate.
+      let options: Record<string, string>;
+      if (scope.type === 'global') {
+        options = { sourceLanguage: resolvedSource, targetLanguage: targetLang };
+      } else {
+        options = { source: resolvedSource, target: targetLang };
+      }
+
       if (typeof api.create === 'function') {
         translator = await api.create(options);
       } else if (typeof api.createTranslator === 'function') {

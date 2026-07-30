@@ -35,7 +35,14 @@ async function runBenchmark(webgpuMaster) {
       `--disable-extensions-except=${extensionPath}`,
       `--load-extension=${extensionPath}`,
       '--no-sandbox',
-      ...(webgpuMaster ? ['--enable-unsafe-webgpu', '--enable-features=Vulkan,UseSkiaRenderer,WebGPU'] : [])
+      ...(webgpuMaster ? [
+        '--enable-unsafe-webgpu',
+        '--use-gl=angle',
+        '--use-angle=metal',
+        '--ignore-gpu-blocklist',
+        '--enable-gpu-rasterization',
+        '--enable-features=Vulkan,UseSkiaRenderer,WebGPU'
+      ] : [])
     ]
   });
 
@@ -46,7 +53,7 @@ async function runBenchmark(webgpuMaster) {
       await client.send('Runtime.enable');
       client.on('Runtime.consoleAPICalled', e => {
         const text = e.args.map(a => a.value !== undefined ? a.value : (a.description || '')).join(' ');
-        if (text.includes('[PipelineOrchestrator]') || text.includes('[PaddleOcrEngine]') || text.includes('[TranslationManager]') || text.includes('[Background]')) {
+        if (text) {
           const ts = new Date().toISOString().substring(11, 23);
           console.log(`[${ts}] ${text}`);
         }
@@ -95,18 +102,17 @@ async function runBenchmark(webgpuMaster) {
     });
   });
 
-  await page.evaluate(() => {
-    const img = document.querySelector('#manga-target');
-    if (img) img.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
-  });
-  await new Promise(r => setTimeout(r, 1500));
-
-  console.log('\n[Trigger] Clicking translate button...');
+  console.log('\n[Trigger] Dispatching TRANSLATE_IMAGE message to background service worker...');
   const startMs = Date.now();
-  await page.evaluate(() => {
-    const btn = document.querySelector('#kites-translate-btn');
-    if (btn) btn.click();
+  const triggerPage = await browser.newPage();
+  await triggerPage.goto(`chrome-extension://${extId}/popup.html`, { waitUntil: 'load' });
+  await triggerPage.evaluate(() => {
+    chrome.runtime.sendMessage({
+      type: 'TRANSLATE_IMAGE',
+      url: 'https://i.imgur.com/DvQce3b_d.webp?maxwidth=760&fidelity=grand'
+    });
   });
+  await triggerPage.close();
 
   let finished = false;
   let totalElapsed = '0.00';
