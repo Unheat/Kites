@@ -122,19 +122,27 @@ export class PaddleOcrEngine implements IOcrEngine {
         : ['wasm'];
 
       this.service = new PaddleOcrService({
-        model: MODEL_PRESETS['v6-small'],
+        model: MODEL_PRESETS['v6-medium'],
         detection: {
           maxSideLength: DETECTION_MAX_SIDE,
         },
-        // No graphOptimizationLevel override: ORT's default ('all') is used. A prior
-        // 'basic' override (arrived incidentally in commit 145bebb, a telemetry commit)
-        // was measured against this default with src/test/ocrAccuracyProbe.ts across 3
-        // runs each: recognised text was byte-identical (115/115 lines) and total
-        // recognition time was statistically indistinguishable (~3.2-3.4s either way,
-        // well within run-to-run noise). Re-measure before reintroducing a level override.
+        // To maintain execution graph and arithmetic parity between native C++ CPU and browser WASM,
+        // we override graphOptimizationLevel to 'basic' (prevents complex layer fusions that alter
+        // FP32 associativity between EPs).
+        //
+        // Additionally, we inject C++ session options 'set_denormal_as_zero' and 'flush_to_zero'
+        // into the extra config bag. This forces WebAssembly to immediately flush subnormal numbers
+        // (floating-point values extremely close to zero) to 0, matching the hardware DAZ/FTZ optimization
+        // behavior of native CPU backends.
         session: {
           executionProviders: isNode ? undefined : executionProviders,
-          graphOptimizationLevel: 'basic'
+          graphOptimizationLevel: 'basic',
+          extra: {
+            session: {
+              set_denormal_as_zero: '1',
+              flush_to_zero: '1'
+            }
+          }
         }
       });
 

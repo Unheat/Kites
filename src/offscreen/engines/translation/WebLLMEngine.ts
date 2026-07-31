@@ -108,7 +108,6 @@ export class WebLLMEngine implements ITranslationEngine {
 
     const CHUNK_SIZE = 10;
     const results: string[] = new Array(texts.length).fill('');
-    const DELIMITER = '[|||]';
 
     console.log(`[WebLLMEngine] Translating ${nonEmptyInputs.length} blocks in chunks of ${CHUNK_SIZE}...`);
 
@@ -118,13 +117,10 @@ export class WebLLMEngine implements ITranslationEngine {
       let combinedText = '';
       
       chunk.forEach((item, index) => {
-        combinedText += `Line ${index}${DELIMITER}${item.text}\n`;
+        combinedText += `<|${index + 1}|>${item.text}\n`;
       });
 
-      const prompt = `You are a highly accurate translator. Translate the following lines from ${sourceLang} to ${targetLang}. 
-Keep the exact line number and ${DELIMITER} separator for every line. Do not add any conversational filler. Only output the translated lines.
-
-${combinedText}`;
+      const prompt = `Translate the following manga text lines from ${sourceLang} to ${targetLang}. Keep the exact line number format (e.g. <|1|>, <|2|>) for every line. Do not add any conversational filler. Only output the translated lines.\n\n${combinedText}`;
 
       try {
         const reply = await this.engine.chat.completions.create({
@@ -134,21 +130,31 @@ ${combinedText}`;
         });
         
         const rawOutput = reply.choices[0].message.content || '';
-        const lines = rawOutput.split('\n').map(l => l.trim()).filter(l => l.includes(DELIMITER));
         
-        if (lines.length !== chunk.length) {
-          throw new Error(`Delimiter parsing failed for chunk. Expected ${chunk.length} lines, got ${lines.length}. Model hallucinated.`);
+        // Split by regex <|\d+|> like cotrans re.split(r'<\|\d+\|>', response)
+        let translations = rawOutput.split(/<\|\d+\|>/);
+        
+        // If it starts with a delimiter, the first element is empty. Remove it.
+        if (translations.length > 0 && !translations[0].trim()) {
+          translations = translations.slice(1);
+        }
+        
+        // Clean whitespace from translations
+        translations = translations.map(t => t.trim());
+        
+        // Fallback to newline split if delimiter split failed to find multiple translations
+        if (translations.length <= 1 && chunk.length > 1) {
+          translations = rawOutput.split('\n').map(t => t.trim()).filter(Boolean);
+        }
+
+        if (translations.length !== chunk.length) {
+          throw new Error(`Delimiter parsing failed for chunk. Expected ${chunk.length} lines, got ${translations.length}. Model hallucinated.`);
         }
 
         // 3. Map chunk back to original array
-        for (let j = 0; j < lines.length; j++) {
-          const parts = lines[j].split(DELIMITER);
-          if (parts.length < 2) {
-            throw new Error(`Missing delimiter on line: ${lines[j]}`);
-          }
-          const translatedText = parts.slice(1).join(DELIMITER).trim(); 
+        for (let j = 0; j < translations.length; j++) {
           const originalIndex = chunk[j].originalIndex;
-          results[originalIndex] = translatedText;
+          results[originalIndex] = translations[j];
         }
       } catch (e) {
         console.error(`[WebLLMEngine] Chunk translation error (items ${i} to ${i + CHUNK_SIZE}):`, e);

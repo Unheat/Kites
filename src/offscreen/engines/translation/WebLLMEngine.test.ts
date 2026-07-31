@@ -70,7 +70,7 @@ describe('WebLLMEngine Delimiter Batching', () => {
       choices: [
         {
           message: {
-            content: `Line 0[|||]こんにちは\nLine 1[|||]世界`
+            content: `<|1|>こんにちは\n<|2|>世界`
           }
         }
       ]
@@ -88,9 +88,30 @@ describe('WebLLMEngine Delimiter Batching', () => {
     const callArg = mockCreate.mock.calls[0][0];
     const prompt = callArg.messages[0].content;
     
-    expect(prompt).toContain('Line 0[|||]Hello');
-    expect(prompt).not.toContain('Line 1[|||]   ');
-    expect(prompt).toContain('Line 1[|||]World');
+    expect(prompt).toContain('<|1|>Hello');
+    expect(prompt).not.toContain('<|2|>   ');
+    expect(prompt).toContain('<|2|>World');
+  });
+
+  it('should fallback to splitting by newline if delimiters are omitted', async () => {
+    const inputs = ['Hello', '   ', 'World'];
+
+    mockCreate.mockResolvedValue({
+      choices: [
+        {
+          message: {
+            content: `こんにちは\n世界`
+          }
+        }
+      ]
+    });
+
+    const results = await engine.translate(inputs, 'English', 'Japanese');
+
+    expect(results).toHaveLength(3);
+    expect(results[0]).toBe('こんにちは');
+    expect(results[1]).toBe('');
+    expect(results[2]).toBe('世界');
   });
 
   it('should throw an error if model hallucinates and returns fewer lines', async () => {
@@ -101,7 +122,7 @@ describe('WebLLMEngine Delimiter Batching', () => {
       choices: [
         {
           message: {
-            content: `Line 0[|||]Translated 1` // Missing Line 1
+            content: `<|1|>Translated 1` // Missing Line 2
           }
         }
       ]
