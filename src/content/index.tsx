@@ -324,16 +324,23 @@ function GlobalOverlay() {
 
 // Initialization
 try {
-  const overlayRoot = document.createElement('div');
-  overlayRoot.id = 'kites-global-overlay';
+  let overlayRoot = document.getElementById('kites-global-overlay');
+  if (!overlayRoot) {
+    overlayRoot = document.createElement('div');
+    overlayRoot.id = 'kites-global-overlay';
+    
+    // Display contents ensures this wrapper does not create a new containing block
+    // This is critical so the `fixed` positioned buttons inside can anchor to the main document
+    overlayRoot.style.display = 'contents';
+    
+    document.body.appendChild(overlayRoot);
+  }
   
-  // Display contents ensures this wrapper does not create a new containing block
-  // This is critical so the `fixed` positioned buttons inside can anchor to the main document
-  overlayRoot.style.display = 'contents';
-  
-  document.body.appendChild(overlayRoot);
-  
-  const root = createRoot(overlayRoot);
+  let root = (overlayRoot as any)._reactRoot;
+  if (!root) {
+    root = createRoot(overlayRoot);
+    (overlayRoot as any)._reactRoot = root;
+  }
   root.render(<GlobalOverlay />);
   
   console.log('[Content Script] Initialized Kites Global Hover Overlay with CSS Anchors.');
