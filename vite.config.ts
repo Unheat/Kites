@@ -21,6 +21,7 @@ export default defineConfig({
     ]
   },
   build: {
+    modulePreload: false,
     rollupOptions: {
       external: [
         'ppu-paddle-ocr/node',
