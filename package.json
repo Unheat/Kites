@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "copy-wasm": "mkdir -p public/ort-wasm && cp node_modules/onnxruntime-web/dist/*.wasm node_modules/onnxruntime-web/dist/*.mjs public/ort-wasm/ 2>/dev/null || true",
+    "copy-wasm": "node scripts/copy-wasm.mjs",
     "build": "npm run copy-wasm && tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
