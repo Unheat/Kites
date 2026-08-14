@@ -68,16 +68,23 @@ export class PaddleOcrEngine implements IOcrEngine {
         // Browser environment (Chrome Extension)
         console.log('[PaddleOcrEngine] Detected Browser environment. Loading web backend...');
 
-        // Ensure ORT does not fallback to CDN under Manifest V3. Keep this import scoped to
-        // the browser branch, dynamic and awaited here: a module-level `import * as ort from
-        // 'onnxruntime-web'` forces the entire ORT bundle to be evaluated eagerly and
-        // synchronously as part of the static import graph (OcrManager -> PaddleOcrEngine ->
-        // onnxruntime-web) the moment anything imports this file, instead of lazily on first
-        // init(). That eager evaluation is what broke translation in production: the offscreen
-        // document's stricter CSP hits ORT's bundle-internal eval before PipelineOrchestrator's
-        // own code ever runs, so nothing gets logged and the pipeline just stalls.
-        const ortUrl = chrome.runtime.getURL('/ort-wasm/ort.webgpu.mjs');
-        const ort = await import(/* @vite-ignore */ ortUrl);
+        // Ensure ORT does not fallback to CDN under Manifest V3. Must dynamically import the
+        // bare 'onnxruntime-web' specifier (not a separately-copied local .mjs file under a
+        // different URL) so Vite's bundler resolves it to the exact same module instance that
+        // ppu-paddle-ocr/web's own `platform.web.js` statically imports internally -- that file
+        // sets `ort.env.wasm.wasmPaths` to jsdelivr's CDN only `if (!ort.env.wasm.wasmPaths)`,
+        // so we must configure THAT instance before `ppu-paddle-ocr/web` is imported, or our
+        // write lands on an unrelated ORT module object and the internal one still reaches out
+        // to the CDN -- which Manifest V3's CSP (no remotely-hosted code) blocks outright.
+        //
+        // Dynamic + awaited here (not a module-level `import * as ort from 'onnxruntime-web'`):
+        // a static top-level import forces the entire ORT bundle to be evaluated eagerly as
+        // part of the static import graph (OcrManager -> PaddleOcrEngine -> onnxruntime-web) the
+        // moment anything imports this file, instead of lazily on first init(). That eager
+        // evaluation is what broke translation in production before: the offscreen document's
+        // stricter CSP hits ORT's bundle-internal eval before PipelineOrchestrator's own code
+        // ever runs, so nothing gets logged and the pipeline just stalls.
+        const ort = await import('onnxruntime-web');
         ort.env.wasm.wasmPaths = chrome.runtime.getURL('/ort-wasm/');
 
         const pkg = await import('ppu-paddle-ocr/web');

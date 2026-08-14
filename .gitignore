@@ -30,7 +30,12 @@ dist-ssr
 PaddleOCR/
 result/
 models/
+model/
 scratches/
+
+# Downloaded WebLLM model fixtures (large binaries, re-fetch via scripts/download-webllm-model.mjs)
+test/model/*/
+!test/model/README.md
 # Python & ML Models
 venv/
 *.ckpt

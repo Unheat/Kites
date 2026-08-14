@@ -10,7 +10,8 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "test": "vitest run src/",
-    "test:e2e": "node scripts/test-extension.js"
+    "test:e2e": "node scripts/test-extension.js",
+    "test:webllm": "node scripts/test-webllm-user-flow.js"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",
