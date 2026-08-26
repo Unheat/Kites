@@ -36,6 +36,50 @@ const VERTICAL_CROP_ASPECT = 1.5;
  */
 const HOMOGRAPHY_DET_EPSILON = 1e-7;
 
+/**
+ * The model preset used for both detection and recognition. Extracted here so the tier is
+ * adjustable in one place; see DETECTION_MAX_SIDE's warning before changing anything that
+ * affects recognition accuracy.
+ */
+const MODEL_PRESET = 'v6-medium';
+
+/**
+ * Rewrites ppu-paddle-ocr's default `.ort` model URLs to their `.onnx` equivalents.
+ *
+ * WHY THIS EXISTS: ONNX Runtime Web's WebGPU EP CANNOT load `.ort` (ORT-format) models. The
+ * ORT format bakes in a fixed kernel-type resolver at conversion time, and it has no entries
+ * for the `com.ms.internal.nhwc` domain that the WebGPU EP requires when it transforms Conv
+ * layers to channels-last. Session creation therefore fails with
+ * `ResolveKernelTypeStr Failed to find op_id: com.ms.internal.nhwc:Conv:1`, and
+ * ppu-paddle-ocr silently falls back to the `wasm` (CPU) provider.
+ *
+ * That fallback is catastrophic for performance in the browser, where WASM also runs
+ * single-threaded: measured on image6.jpg with v6-medium, recognition took 218,995ms in the
+ * offscreen document versus 4,177ms for the same image/model under Node's native
+ * onnxruntime-node — a ~52x penalty. Serving the identical weights as `.onnx` lets the
+ * WebGPU EP build the session normally.
+ *
+ * Verified empirically: `.onnx` creates a WebGPU session successfully at BOTH
+ * graphOptimizationLevel 'basic' and 'all', while `.ort` fails at both — i.e. this is a model
+ * FORMAT issue, not a graph-optimization one.
+ *
+ * The upstream repo publishes both formats side by side, with `.ort` files nested in an
+ * `ort/` subdirectory and `.onnx` files at the category root, so the mapping is a
+ * straightforward path rewrite:
+ *   .../detection/ort/PP-OCRv6_medium_det.ort -> .../detection/PP-OCRv6_medium_det.onnx
+ *
+ * @param modelUrls - The preset's URL bundle from ppu-paddle-ocr's MODEL_PRESETS.
+ * @returns A new bundle pointing at the `.onnx` weights, dictionary URL untouched.
+ */
+function toOnnxModelUrls(modelUrls: { detection: string; recognition: string; charactersDictionary: string }) {
+  const toOnnx = (url: string) => url.replace('/ort/', '/').replace(/\.ort$/, '.onnx');
+  return {
+    ...modelUrls,
+    detection: toOnnx(modelUrls.detection),
+    recognition: toOnnx(modelUrls.recognition),
+  };
+}
+
 export class PaddleOcrEngine implements IOcrEngine {
   private service: any = null;
   private customDetector: CustomPaddleDetector | null = null;
@@ -128,8 +172,15 @@ export class PaddleOcrEngine implements IOcrEngine {
           ]
         : ['wasm'];
 
+      // Node keeps the stock `.ort` weights: native onnxruntime-node loads them fine and it is
+      // the format the accuracy baseline (src/test/ocrAccuracyProbe.ts) was measured against.
+      // Only the browser needs the `.onnx` rewrite, so the WebGPU EP can build a session at all.
+      const modelUrls = isNode
+        ? MODEL_PRESETS[MODEL_PRESET]
+        : toOnnxModelUrls(MODEL_PRESETS[MODEL_PRESET]);
+
       this.service = new PaddleOcrService({
-        model: MODEL_PRESETS['v6-medium'],
+        model: modelUrls,
         detection: {
           maxSideLength: DETECTION_MAX_SIDE,
         },

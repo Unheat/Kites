@@ -13,6 +13,13 @@ env.backends.onnx.wasm!.wasmPaths = chrome.runtime.getURL('/ort-wasm/');
 export class TranslationManager {
   private activeEngine: ITranslationEngine | null = null;
   private activeEngineId: string | null = null;
+  // Stores the in-flight load promise so concurrent callers await the same work instead of
+  // each constructing and initializing their own engine. Without this, the startup preload
+  // and the first pipeline run both see activeEngine === null and load the model twice,
+  // putting two copies of the weights on the GPU and serializing all inference behind them.
+  // Mirrors the singleton-promise pattern already used by OcrManager.getOrLoadEngine.
+  private loadPromise: Promise<ITranslationEngine> | null = null;
+  private loadPromiseEngineId: string | null = null;
 
   /**
    * Preloads the active engine into memory to avoid cold-start delays.
@@ -73,12 +80,20 @@ export class TranslationManager {
         console.log(`[TranslationManager] Attempting translation with engine: ${engineId} (Attempt ${i + 1}/${engineSequence.length})`);
         
         // 2. Load the specific engine dynamically
+        const loadStart = performance.now();
         const engine = await this.getOrLoadEngine(engineId);
-        
+        const loadMs = performance.now() - loadStart;
+
         // 3. Execute translation
+        const inferStart = performance.now();
         const results = await engine.translate(texts, sourceLang, targetLang);
-        
-        console.log(`[TranslationManager] Translation successful using engine: ${engineId}`);
+        const inferMs = performance.now() - inferStart;
+
+        console.log(
+          `[TranslationManager] Translation successful using engine: ${engineId}. ` +
+          `Timing: model wait/load ${loadMs.toFixed(2)}ms + inference ${inferMs.toFixed(2)}ms ` +
+          `= ${(loadMs + inferMs).toFixed(2)}ms for ${texts.length} blocks.`
+        );
         return results;
 
       } catch (error) {
@@ -112,31 +127,50 @@ export class TranslationManager {
       return this.activeEngine;
     }
 
-    // Clean up any previously loaded engine to free VRAM/memory
-    await this.unloadCurrentEngine();
-
-    console.log(`[TranslationManager] Factory creating engine for ID: ${engineId}`);
-    
-    // Look up the engine type in our static registry
-    const registryEntry = modelsRegistryData.find(m => m.id === engineId);
-
-    let engine: ITranslationEngine;
-    if (engineId === 'chrome-translator') {
-      engine = new ChromeTranslatorEngine();
-    } else if (engineId === 'gg-translate') {
-      engine = new GoogleTranslateEngine();
-    } else if (registryEntry?.engine === 'transformers' || engineId.startsWith('Xenova/') || engineId.startsWith('onnx-community/')) {
-      engine = new TransformersEngine(engineId);
-    } else {
-      engine = new WebLLMEngine(engineId);
+    // If the same engine is already being loaded, await that same work rather than
+    // starting a second, redundant load of the same weights.
+    if (this.loadPromise && this.loadPromiseEngineId === engineId) {
+      console.log(`[TranslationManager] Load already in progress for ${engineId}; awaiting it.`);
+      return this.loadPromise;
     }
-    
-    await engine.init?.(progressCallback);
-    
-    this.activeEngine = engine;
-    this.activeEngineId = engineId;
-    
-    return this.activeEngine;
+
+    this.loadPromiseEngineId = engineId;
+    this.loadPromise = (async () => {
+      // Clean up any previously loaded engine to free VRAM/memory
+      await this.unloadCurrentEngine();
+
+      console.log(`[TranslationManager] Factory creating engine for ID: ${engineId}`);
+
+      // Look up the engine type in our static registry
+      const registryEntry = modelsRegistryData.find(m => m.id === engineId);
+
+      let engine: ITranslationEngine;
+      if (engineId === 'chrome-translator') {
+        engine = new ChromeTranslatorEngine();
+      } else if (engineId === 'gg-translate') {
+        engine = new GoogleTranslateEngine();
+      } else if (registryEntry?.engine === 'transformers' || engineId.startsWith('Xenova/') || engineId.startsWith('onnx-community/')) {
+        engine = new TransformersEngine(engineId);
+      } else {
+        engine = new WebLLMEngine(engineId);
+      }
+
+      const loadStart = performance.now();
+      await engine.init?.(progressCallback);
+      console.log(`[TranslationManager] Engine ${engineId} load+init took ${(performance.now() - loadStart).toFixed(2)}ms.`);
+
+      this.activeEngine = engine;
+      this.activeEngineId = engineId;
+
+      return engine;
+    })();
+
+    try {
+      return await this.loadPromise;
+    } finally {
+      this.loadPromise = null;
+      this.loadPromiseEngineId = null;
+    }
   }
 
   /**

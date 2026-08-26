@@ -29,7 +29,7 @@ export class TransformersEngine implements ITranslationEngine {
           resolve(response || {});
         });
       });
-      const masterOn = state.webgpuMaster === true;
+      const masterOn = state.webgpuMaster !== false;
       const llmOn = state.webgpuOverrides?.llm !== false;
 
       const device = (masterOn && llmOn) ? 'webgpu' : 'wasm';

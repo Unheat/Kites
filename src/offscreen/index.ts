@@ -1,4 +1,9 @@
 import type { ProcessJobMessage } from '../shared/types';
+import { pipelineOrchestrator } from './services/PipelineOrchestrator';
+import { translationManager } from './services/TranslationManager';
+import { inpaintRegistry } from './engines/inpaint/inpaintRegistry';
+import { ocrRegistry } from './engines/ocr/ocrRegistry';
+import { InpaintCacheManager } from './services/InpaintCacheManager';
 
 chrome.runtime.onMessage.addListener((message: ProcessJobMessage | any, _sender: chrome.runtime.MessageSender, sendResponse: (response?: any) => void) => {
   if (message.type === 'PROCESS_JOB' && message.payload?.jobId) {
@@ -67,7 +72,6 @@ chrome.runtime.onMessage.addListener((message: ProcessJobMessage | any, _sender:
 });
 
 async function handlePreloadEngine() {
-  const { translationManager } = await import('./services/TranslationManager');
   const popupState = await new Promise<any>((resolve) => {
     chrome.runtime.sendMessage({ type: 'GET_POPUP_STATE' }, (response) => {
       resolve(response || {});
@@ -245,11 +249,9 @@ async function handleStartDownload(modelId: string, category?: string) {
 
   if (category === 'inpaint' || category === 'ocr') {
     const registry = category === 'inpaint' 
-      ? (await import('./engines/inpaint/inpaintRegistry')).inpaintRegistry
-      : (await import('./engines/ocr/ocrRegistry')).ocrRegistry;
+      ? inpaintRegistry
+      : ocrRegistry;
 
-    const { InpaintCacheManager } = await import('./services/InpaintCacheManager');
-    
     activeDownloads[modelId] = {
       files: {},
       maxProgress: 0,
@@ -279,8 +281,6 @@ async function handleStartDownload(modelId: string, category?: string) {
     return;
   }
 
-  const { translationManager } = await import('./services/TranslationManager');
-  
   activeDownloads[modelId] = {
     files: {},
     maxProgress: 0,
@@ -330,6 +330,5 @@ async function handleCheckStatus(modelId: string): Promise<boolean> {
  * Executes the Translation Pipeline Orchestrator for a given job.
  */
 async function runTranslationPipeline(jobId: number): Promise<string> {
-  const { pipelineOrchestrator } = await import('./services/PipelineOrchestrator');
   return await pipelineOrchestrator.runPipeline(jobId);
 }

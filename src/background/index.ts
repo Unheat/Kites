@@ -7,6 +7,16 @@ import { DEFAULT_POPUP_STATE } from '../shared/types';
 // const MAX_CONCURRENT_TRANSLATIONS = 3; //pass the param from UI here
 
 /**
+ * How long a job may stay in an in-flight status ('processing'/'downloading') before the
+ * queue assumes its owning offscreen document died and reclaims the concurrency slot.
+ *
+ * Sized well above a realistic worst-case first run (cold-start model downloads for OCR and a
+ * local LLM over a slow connection can legitimately take several minutes) so genuinely slow
+ * work is never cancelled -- this only catches jobs whose owner is provably gone.
+ */
+const STALE_JOB_TIMEOUT_MS = 20 * 60 * 1000;
+
+/**
  * Safely creates context menu items, avoiding duplicate ID runtime errors.
  */
 function setupContextMenu(): void {
@@ -176,6 +186,40 @@ async function queueTranslation(srcUrl: string, tabId?: number) {
  * 
  * @returns {Promise<void>}
  */
+/**
+ * Fails any job that has been sitting in an in-flight status ('processing'/'downloading')
+ * longer than STALE_JOB_TIMEOUT_MS, so its concurrency slot is released.
+ *
+ * Such a job cannot genuinely still be running: the offscreen document that owned it is gone
+ * (crash, GPU process reset, extension reload), and nothing will ever report its result. The
+ * timeout is deliberately generous so a legitimately slow job -- a first run that has to
+ * download OCR/LLM weights over a slow connection -- is never killed while it is still making
+ * progress.
+ *
+ * @returns A promise that resolves once any stale jobs have been marked as errored.
+ */
+async function reclaimStaleJobs(): Promise<void> {
+  try {
+    const cutoff = Date.now() - STALE_JOB_TIMEOUT_MS;
+    const inFlight = await db.translationJobs
+      .where('status')
+      .anyOf(['processing', 'downloading'])
+      .toArray();
+
+    const dead = inFlight.filter((job) => job.timestamp < cutoff);
+    for (const job of dead) {
+      console.warn(
+        `[Background] Reclaiming stale job ${job.id} (status '${job.status}', last touched ` +
+        `${Math.round((Date.now() - job.timestamp) / 1000)}s ago). Its owner is gone; freeing the slot.`
+      );
+      await db.translationJobs.update(job.id!, { status: 'error' });
+    }
+  } catch (err) {
+    // Never let queue maintenance block actual work.
+    console.error('[Background] Failed to reclaim stale jobs:', err);
+  }
+}
+
 async function processQueue() {
   if (isProcessingQueue) return;
   isProcessingQueue = true;
@@ -185,6 +229,18 @@ async function processQueue() {
     const stateData = await chrome.storage.local.get('popupState');
     const popupState = stateData.popupState as PopupState | undefined;
     const concurrency = popupState?.concurrency || 3;
+
+    // Reclaim slots held by dead jobs before counting capacity.
+    //
+    // A job is marked 'processing'/'downloading' in IndexedDB while the offscreen document
+    // works on it, and only moves to 'completed'/'error' when that work reports back. If the
+    // offscreen document is torn down mid-job -- a browser/tab crash, a GPU process reset, or
+    // the extension being reloaded -- nothing ever writes that terminal status, so the row
+    // stays 'processing' forever and permanently consumes a concurrency slot. At the default
+    // concurrency of 1 a single crash bricks the queue for good: every later request just logs
+    // "Queue at capacity" and never runs. Anything older than the timeout cannot still be in
+    // flight, so it is failed here to release the slot.
+    await reclaimStaleJobs();
 
     // Check how many are currently active
     const downloadingCount = await db.translationJobs.where('status').equals('downloading').count();

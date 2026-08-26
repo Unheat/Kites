@@ -49,12 +49,12 @@ export class InpaintCacheManager {
    * @param progressCallback Callback with progress from 0 to 1.
    */
   static async downloadModelWithProgress(
-    modelUrl: string, 
+    modelUrl: string,
     progressCallback: (progress: number) => void
   ): Promise<void> {
     const cache = await caches.open(this.CACHE_NAME);
     const cachedResponse = await cache.match(modelUrl);
-    
+
     if (cachedResponse) {
       progressCallback(1);
       return;
@@ -62,7 +62,7 @@ export class InpaintCacheManager {
 
     const response = await fetch(modelUrl);
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-    
+
     const contentLength = response.headers.get('content-length');
     if (!contentLength) {
       // Cannot track progress
@@ -97,7 +97,7 @@ export class InpaintCacheManager {
       status: response.status,
       statusText: response.statusText
     });
-    
+
     await cache.put(modelUrl, newResponse);
   }
 }

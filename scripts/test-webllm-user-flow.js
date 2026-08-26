@@ -32,7 +32,13 @@ const testImagePath = path.join(__dirname, '..', 'src', 'test', 'test-img', 'ima
 // real download (from Hugging Face, into the browser's own cache) stays quick.
 const WEBLLM_MODEL_ID = 'SmolLM2-135M-Instruct-q0f16-MLC';
 
-const TEST_SERVER_PORT = 8091;
+// Which translation engine to exercise. Defaults to the WebLLM model under test; pass
+// `--engine=gg-translate` to run the identical flow with the network engine instead, which
+// isolates how much of the pipeline cost comes from having a local LLM resident in the
+// offscreen document versus the OCR/inpaint stages themselves.
+const ENGINE_ARG = process.argv.find((a) => a.startsWith('--engine='));
+const ACTIVE_ENGINE_ID = ENGINE_ARG ? ENGINE_ARG.split('=')[1] : WEBLLM_MODEL_ID;
+
 // First-run downloads: WebLLM weights (~260MB from Hugging Face) AND PaddleOCR's
 // v6-medium detection+recognition .ort models (~140MB combined, from
 // media.githubusercontent.com). That GitHub media host has been observed on this
@@ -60,13 +66,35 @@ function startTestImageServer() {
       <img id="manga-target" src="/image6.jpg" style="max-width:800px;" />
     </body></html>`);
   });
+  // Port 0 = let the OS assign a free ephemeral port. Using a fixed port meant a crashed or
+  // still-shutting-down previous run would hold it and fail the next run with EADDRINUSE.
   return new Promise((resolve) => {
-    server.listen(TEST_SERVER_PORT, () => resolve(server));
+    server.listen(0, () => resolve(server));
   });
 }
 
 function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Clears the Chrome profile's singleton lock left behind when a previous run was interrupted.
+ *
+ * Puppeteer refuses to launch with "The browser is already running for <userDataDir>" if these
+ * lock files survive, which otherwise requires manual cleanup between runs.
+ */
+function releaseStaleProfileLock() {
+  for (const name of ['SingletonLock', 'SingletonCookie', 'SingletonSocket']) {
+    const p = path.join(userDataDir, name);
+    try {
+      if (fs.existsSync(p) || fs.lstatSync(p, { throwIfNoEntry: false })) {
+        fs.rmSync(p, { force: true, recursive: true });
+        console.log(`[E2E] Removed stale profile lock: ${name}`);
+      }
+    } catch {
+      // Lock may not exist, or may be held by a live browser -- launch will report it clearly.
+    }
+  }
 }
 
 /**
@@ -112,9 +140,11 @@ async function assertHardwareWebGPU(browser) {
 }
 
 async function main() {
-  console.log(`[E2E] Starting local test-image server on http://localhost:${TEST_SERVER_PORT}...`);
   const testServer = await startTestImageServer();
+  const testServerPort = testServer.address().port;
+  console.log(`[E2E] Local test-image server listening on http://localhost:${testServerPort}`);
 
+  releaseStaleProfileLock();
   console.log('[E2E] Launching Chrome with Kites extension (persistent profile)...');
   const browser = await puppeteer.launch({
     headless: false, // extensions + real WebGPU require a real browser window
@@ -126,6 +156,12 @@ async function main() {
       '--enable-unsafe-webgpu',
       '--ignore-gpu-blocklist',
       '--disable-software-rasterizer', // don't let Chrome silently fall back to SwiftShader
+      // On Windows, WebGPU's `powerPreference: 'high-performance'` is IGNORED -- Chrome reuses
+      // whichever adapter it already allocated for other Chrome workloads, which on a laptop is
+      // the integrated GPU, because Chromium cannot yet composite across GPUs on Windows.
+      // Without this switch the engine silently runs on Intel UHD instead of the discrete
+      // NVIDIA MX550. See https://developer.chrome.com/docs/web-platform/webgpu/troubleshooting-tips
+      '--force_high_performance_gpu',
     ],
   });
 
@@ -175,7 +211,7 @@ async function main() {
       isDark: true,
       sourceLang: 'ja',
       targetLang: 'en',
-      activeEngineId: WEBLLM_MODEL_ID,
+      activeEngineId: ACTIVE_ENGINE_ID,
       activeInpaintId: 'simple',
       activeOcrId: 'paddle-dbnet',
       fallbackChain: [],
@@ -189,6 +225,39 @@ async function main() {
       return new Promise((resolve) => chrome.storage.local.set({ popupState: state }, resolve));
     }, popupState);
     console.log('[E2E] Settings applied:', JSON.stringify(popupState));
+
+    // Start every run from an empty job queue. The persistent profile keeps IndexedDB between
+    // runs, so a job left in 'processing' by an earlier crashed run would still occupy the
+    // single concurrency slot and the pipeline would never start ("Queue at capacity (1/1)").
+    // A real user's first run has an empty DB; this reproduces that.
+    await settingsPage.evaluate(() => {
+      return new Promise((resolve) => {
+        const req = indexedDB.deleteDatabase('KitesDatabase');
+        req.onsuccess = req.onerror = req.onblocked = () => resolve(true);
+      });
+    });
+    console.log('[E2E] Cleared KitesDatabase so the job queue starts empty.');
+
+    // Clear stale jobs. The persistent profile keeps IndexedDB between runs, so a job left in
+    // 'processing' by an interrupted run permanently occupies a concurrency slot and the
+    // background queue reports "Queue at capacity" and never dispatches the new job.
+    const cleared = await settingsPage.evaluate(() => {
+      return new Promise((resolve) => {
+        const req = indexedDB.open('KitesDatabase');
+        req.onsuccess = () => {
+          const db = req.result;
+          const names = Array.from(db.objectStoreNames);
+          if (names.length === 0) return resolve('no stores');
+          const tx = db.transaction(names, 'readwrite');
+          for (const n of names) tx.objectStore(n).clear();
+          tx.oncomplete = () => { db.close(); resolve(`cleared: ${names.join(', ')}`); };
+          tx.onerror = () => { db.close(); resolve(`error: ${tx.error?.message}`); };
+        };
+        req.onerror = () => resolve(`open failed: ${req.error?.message}`);
+      });
+    });
+    console.log(`[E2E] Reset prior job state -> ${cleared}`);
+
     await settingsPage.close();
 
     console.log('[E2E] Verifying the offscreen document has real hardware WebGPU (not SwiftShader)...');
@@ -196,12 +265,15 @@ async function main() {
     console.log('[E2E] Confirmed: real hardware WebGPU adapter in use.');
 
     // --- Step 2: Visit a real page and find a translatable image ---
-    const testPageUrl = `http://localhost:${TEST_SERVER_PORT}/`;
+    const testPageUrl = `http://localhost:${testServerPort}/`;
     console.log(`[E2E] Navigating to ${testPageUrl} (image6.jpg)...`);
     const page = await browser.newPage();
     page.on('console', (msg) => console.log(`[PAGE ${msg.type().toUpperCase()}] ${msg.text()}`));
     page.on('pageerror', (err) => console.error('[PAGE ERROR]', err));
-    await page.goto(testPageUrl, { waitUntil: 'networkidle0' });
+    // 'load' rather than 'networkidle0': the page is a single local image, and networkidle0
+    // can hang waiting for a 500ms window with zero connections that never arrives.
+    await page.goto(testPageUrl, { waitUntil: 'load' });
+    await wait(500); // let the content script's MutationObserver attach to the image
 
     const imageSrc = await page.evaluate(() => {
       const imgs = Array.from(document.querySelectorAll('img'));
@@ -251,6 +323,17 @@ async function main() {
 
     if (resultSrc) {
       console.log(`\n[E2E] SUCCESS. Translated image rendered: ${resultSrc}`);
+      console.log('\n[E2E] ===== TIMING BREAKDOWN =====');
+      consoleBuffer
+        .filter((l) => /complete in|finished in|took |Timing:|tok\/s|branch finished/.test(l))
+        .forEach((l) => console.log('  ' + l));
+      console.log('\n[E2E] ===== TRANSLATION QUALITY =====');
+      const pairStart = consoleBuffer.findIndex((l) => l.includes('Translation pairs'));
+      if (pairStart !== -1) {
+        consoleBuffer.slice(pairStart, pairStart + 40)
+          .filter((l) => l.includes('->'))
+          .forEach((l) => console.log('  ' + l));
+      }
     } else {
       console.error('\n[E2E] FAILED. Translation did not complete within the timeout.');
       console.error('[E2E] Last captured console lines:');

@@ -37,10 +37,14 @@ export class WebLLMEngine implements ITranslationEngine {
       });
     });
     const masterOn = state.webgpuMaster === true;
-    const llmOn = state.webgpuOverrides?.llm !== false; // default true if undefined
+    const llmOn = state.webgpuOverrides?.llm !== false;
     
-    if (!isWebGpuSupported || !masterOn || !llmOn) {
-      throw new Error("WebGPU is disabled or not supported. Please use the ONNX CPU translation models instead.");
+    if (!isWebGpuSupported) {
+      throw new Error("WebGPU is not supported on this device/browser. Please use ONNX CPU translation models instead.");
+    }
+    
+    if (!masterOn || !llmOn) {
+      throw new Error("GPU Acceleration is turned OFF in Kites Settings. Please enable GPU Acceleration in Settings to use WebGPU LLM models.");
     }
     
     this.isInitializing = true;
@@ -123,13 +127,22 @@ export class WebLLMEngine implements ITranslationEngine {
       const prompt = `Translate the following manga text lines from ${sourceLang} to ${targetLang}. Keep the exact line number format (e.g. <|1|>, <|2|>) for every line. Do not add any conversational filler. Only output the translated lines.\n\n${combinedText}`;
 
       try {
+        const chunkStart = performance.now();
         const reply = await this.engine.chat.completions.create({
           messages: [{ role: 'user', content: prompt }],
           temperature: 0.1,
           max_tokens: 2048,
         });
-        
+        const chunkMs = performance.now() - chunkStart;
+
         const rawOutput = reply.choices[0].message.content || '';
+
+        const completionTokens = (reply as any).usage?.completion_tokens;
+        const tokPerSec = completionTokens ? (completionTokens / (chunkMs / 1000)).toFixed(1) : 'n/a';
+        console.log(
+          `[WebLLMEngine] Chunk ${Math.floor(i / CHUNK_SIZE) + 1}: ${chunk.length} lines in ` +
+          `${chunkMs.toFixed(2)}ms (${completionTokens ?? '?'} completion tokens, ${tokPerSec} tok/s).`
+        );
         
         // Split by regex <|\d+|> like cotrans re.split(r'<\|\d+\|>', response)
         let translations = rawOutput.split(/<\|\d+\|>/);

@@ -96,21 +96,34 @@ export class PipelineOrchestrator {
       if (shouldInpaint) {
         console.log(`[PipelineOrchestrator] Running translation and inpainting in parallel (tier: ${inpaintTier}).`);
         
-        const translationPromise = translationManager.processTranslation(ocrResult.texts, sourceLang, targetLang);
-        const inpaintPromise = this.inpaintManager.eraseText(imageBuffer, inpaintPolygons, inpaintTier as InpaintTier, ocrResult.maskRawCanvas).catch(err => {
+        const translationPromise = translationManager
+          .processTranslation(ocrResult.texts, sourceLang, targetLang)
+          .then((r) => {
+            console.log(`[PipelineOrchestrator] Translation branch finished in ${(performance.now() - stage2Start).toFixed(2)}ms.`);
+            return r;
+          });
+        const inpaintPromise = this.inpaintManager.eraseText(imageBuffer, inpaintPolygons, inpaintTier as InpaintTier, ocrResult.maskRawCanvas).then((r) => {
+          console.log(`[PipelineOrchestrator] Inpaint branch (${inpaintTier}) finished in ${(performance.now() - stage2Start).toFixed(2)}ms.`);
+          return r;
+        }).catch(err => {
           console.warn(`[PipelineOrchestrator] Inpainting failed (likely WebGPU shape mismatch). Falling back to original image. Error:`, err);
           return imageBuffer; // Fallback to original image
         });
 
         [translatedTexts, cleanedImageBuffer] = await Promise.all([translationPromise, inpaintPromise]);
         const stage2Duration = (performance.now() - stage2Start).toFixed(2);
-        console.log(`[PipelineOrchestrator] Parallel Inpainting (${inpaintTier}) & Translation complete in ${stage2Duration}ms.`);
+        console.log(`[PipelineOrchestrator] Parallel Inpainting (${inpaintTier}) & Translation complete in ${stage2Duration}ms (= the slower of the two branches above).`);
       } else {
         // No inpainting — just translate
         console.log(`[PipelineOrchestrator] Translating ${ocrResult.texts.length} text blocks (no inpainting)...`);
         translatedTexts = await translationManager.processTranslation(ocrResult.texts, sourceLang, targetLang);
         const stage2Duration = (performance.now() - stage2Start).toFixed(2);
         console.log(`[PipelineOrchestrator] Translation complete in ${stage2Duration}ms.`);
+      }
+
+      console.log(`[PipelineOrchestrator] Translation pairs (source -> translated):`);
+      for (let i = 0; i < ocrResult.texts.length; i++) {
+        console.log(`  [${i}] "${ocrResult.texts[i]}" -> "${translatedTexts[i] ?? ''}"`);
       }
 
       // 6. Bake the translated text into the image for the Live Web return
