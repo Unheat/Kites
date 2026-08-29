@@ -100,4 +100,14 @@ describe('GoogleTranslateEngine', () => {
     // Should fail gracefully and return original inputs without throwing
     expect(results).toEqual(['こんにちは', 'さようなら']);
   });
+
+  it('returns original single text gracefully if single network request fails', async () => {
+    await engine.init();
+
+    global.fetch = vi.fn().mockRejectedValue(new Error('Network offline / HTTP 429'));
+
+    const results = await engine.translate(['こんにちは'], 'ja', 'en');
+
+    expect(results).toEqual(['こんにちは']);
+  });
 });

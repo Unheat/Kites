@@ -49,8 +49,13 @@ export class GoogleTranslateEngine implements ITranslationEngine {
 
     // Handle single text block directly without delimiter overhead
     if (texts.length === 1) {
-      const singleResult = await this.translateSingle(texts[0], sourceLang, targetLang);
-      return [singleResult];
+      try {
+        const singleResult = await this.translateSingle(texts[0], sourceLang, targetLang);
+        return [singleResult];
+      } catch (err) {
+        console.error('[GoogleTranslateEngine] Single translation failed:', err);
+        return [texts[0]];
+      }
     }
 
     // Group texts into chunks that respect the maximum character limit per request
@@ -96,7 +101,12 @@ export class GoogleTranslateEngine implements ITranslationEngine {
           // Defensive Fallback: If Google dropped or modified delimiters, translate each text individually
           console.warn('[GoogleTranslateEngine] Delimiter mismatch in response. Executing individual fallback translation...');
           for (const idx of chunk.indices) {
-            finalResults[idx] = await this.translateSingle(texts[idx], sourceLang, targetLang);
+            try {
+              finalResults[idx] = await this.translateSingle(texts[idx], sourceLang, targetLang);
+            } catch (fallbackErr) {
+              console.error('[GoogleTranslateEngine] Fallback translation failed:', fallbackErr);
+              finalResults[idx] = texts[idx];
+            }
           }
         }
       } catch (err) {
