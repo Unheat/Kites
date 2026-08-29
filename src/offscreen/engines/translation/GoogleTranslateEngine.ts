@@ -122,38 +122,62 @@ export class GoogleTranslateEngine implements ITranslationEngine {
   }
 
   /**
-   * Executes a single HTTP fetch request to the Google Translate GTX endpoint.
+   * Executes a single HTTP fetch request to the Google Translate endpoint.
+   * Uses dict-chrome-ex as the primary client token with fallback to gtx.
    * 
    * @param {string} text - Payload string to translate.
    * @param {string} sourceLang - Source language code or 'auto'.
    * @param {string} targetLang - Target language code.
-   * @returns {Promise<string>} Translated string result or original text on failure.
+   * @returns {Promise<string>} Translated string result.
    */
   private async translateSingle(text: string, sourceLang: string, targetLang: string): Promise<string> {
-    const url = new URL('https://translate.googleapis.com/translate_a/single');
-    url.searchParams.append('client', 'gtx');
-    url.searchParams.append('sl', sourceLang === 'auto' ? 'auto' : sourceLang);
-    url.searchParams.append('tl', targetLang);
-    url.searchParams.append('dt', 't');
-    url.searchParams.append('q', text);
+    const sl = sourceLang === 'auto' ? 'auto' : sourceLang;
+    const clients = ['dict-chrome-ex', 'gtx'];
+    let lastError: Error | null = null;
 
-    const response = await fetch(url.toString());
-    if (!response.ok) {
-      throw new Error(`Google Translate API error: ${response.status} ${response.statusText}`);
-    }
-
-    const data = await response.json();
-    
-    // Google Translate GTX endpoint returns a nested array structure: [[[ "Translated", "Original", ... ]]]
-    let translatedText = '';
-    if (data && data[0]) {
-      for (const chunk of data[0]) {
-        if (chunk[0]) {
-          translatedText += chunk[0];
+    for (const client of clients) {
+      try {
+        let response: Response;
+        if (text.length > 600) {
+          // Use POST for longer texts to avoid URL length constraints
+          const postUrl = `https://translate.googleapis.com/translate_a/single?client=${client}&sl=${encodeURIComponent(sl)}&tl=${encodeURIComponent(targetLang)}&dt=t`;
+          const body = new URLSearchParams({ q: text });
+          response = await fetch(postUrl, {
+            method: 'POST',
+            body,
+          });
+        } else {
+          const url = new URL('https://translate.googleapis.com/translate_a/single');
+          url.searchParams.append('client', client);
+          url.searchParams.append('sl', sl);
+          url.searchParams.append('tl', targetLang);
+          url.searchParams.append('dt', 't');
+          url.searchParams.append('q', text);
+          response = await fetch(url.toString());
         }
+
+        if (!response.ok) {
+          throw new Error(`Google Translate API error (${client}): ${response.status} ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        
+        // Google Translate endpoint returns a nested array structure: [[[ "Translated", "Original", ... ]]]
+        let translatedText = '';
+        if (data && data[0]) {
+          for (const chunk of data[0]) {
+            if (chunk[0]) {
+              translatedText += chunk[0];
+            }
+          }
+        }
+        return translatedText || text;
+      } catch (err: any) {
+        lastError = err;
       }
     }
-    return translatedText || text;
+
+    throw lastError || new Error('Google Translate failed');
   }
 
   /**
