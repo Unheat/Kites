@@ -79,7 +79,6 @@ export class PaddleOcrEngine implements IOcrEngine {
   private service: any = null;
   private customDetector: CustomPaddleDetector | null = null;
   private isInitialized = false;
-  private isWebGpuActive = false;
   private modelPreset: string;
 
   constructor(modelPreset: string = 'v6-small') {
@@ -230,7 +229,6 @@ export class PaddleOcrEngine implements IOcrEngine {
       const activeEPs = this.service.options?.session?.executionProviders;
       console.log(`[PaddleOcrEngine] Active ONNX Execution Providers:`, JSON.stringify(activeEPs));
       const hasWebGpu = Array.isArray(activeEPs) && activeEPs.some((ep: any) => (typeof ep === 'string' ? ep : ep?.name) === 'webgpu');
-      this.isWebGpuActive = hasWebGpu;
 
       if (useWebGpu && Array.isArray(activeEPs) && activeEPs.length === 1 && activeEPs[0] === 'wasm') {
         console.warn('[PaddleOcrEngine] ⚠️ WARNING: WebGPU requested but ONNX Runtime fell back silently to WASM CPU!');
