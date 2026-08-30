@@ -79,6 +79,7 @@ export class PaddleOcrEngine implements IOcrEngine {
   private service: any = null;
   private customDetector: CustomPaddleDetector | null = null;
   private isInitialized = false;
+  private isWebGpuActive = false;
   private modelPreset: string;
 
   constructor(modelPreset: string = 'v6-small') {
@@ -228,6 +229,9 @@ export class PaddleOcrEngine implements IOcrEngine {
 
       const activeEPs = this.service.options?.session?.executionProviders;
       console.log(`[PaddleOcrEngine] Active ONNX Execution Providers:`, JSON.stringify(activeEPs));
+      const hasWebGpu = Array.isArray(activeEPs) && activeEPs.some((ep: any) => (typeof ep === 'string' ? ep : ep?.name) === 'webgpu');
+      this.isWebGpuActive = hasWebGpu;
+
       if (useWebGpu && Array.isArray(activeEPs) && activeEPs.length === 1 && activeEPs[0] === 'wasm') {
         console.warn('[PaddleOcrEngine] ⚠️ WARNING: WebGPU requested but ONNX Runtime fell back silently to WASM CPU!');
       }
@@ -333,13 +337,37 @@ export class PaddleOcrEngine implements IOcrEngine {
     const ctx = recognitor.buildContext();
     const dictionary = this.service.options.recognition?.charactersDictionary;
 
-    const promises = polygons.map(async (poly) => {
-      const finalCropCanvas = cropAndWarp(this.service.platform, sourceCanvas, sourcePixels, srcW, srcH, poly);
-      const { text, confidence } = await recognitor.recognizeTextViaContext(finalCropCanvas, ctx, dictionary);
-      return { text, confidence };
-    });
+    const results: { text: string; confidence: number }[] = [];
+    
+    if (this.isWebGpuActive) {
+      // WebGPU: Sequential execution prevents GPU shader compilation races & buffer collision on dynamic shapes
+      for (let idx = 0; idx < polygons.length; idx++) {
+        const poly = polygons[idx];
+        try {
+          const finalCropCanvas = cropAndWarp(this.service.platform, sourceCanvas, sourcePixels, srcW, srcH, poly);
+          const { text, confidence } = await recognitor.recognizeTextViaContext(finalCropCanvas, ctx, dictionary);
+          results.push({ text, confidence });
+        } catch (err: any) {
+          console.error(`[PaddleOcrEngine] WebGPU recognition failed on crop ${idx}:`, err?.message || err, err);
+          throw err;
+        }
+      }
+    } else {
+      // WASM/CPU (Node/Browser fallback): Concurrent Promise.all parallel execution
+      const promises = polygons.map(async (poly, idx) => {
+        try {
+          const finalCropCanvas = cropAndWarp(this.service.platform, sourceCanvas, sourcePixels, srcW, srcH, poly);
+          const { text, confidence } = await recognitor.recognizeTextViaContext(finalCropCanvas, ctx, dictionary);
+          return { text, confidence };
+        } catch (err: any) {
+          console.error(`[PaddleOcrEngine] WASM/CPU recognition failed on crop ${idx}:`, err?.message || err, err);
+          throw err;
+        }
+      });
+      const batchResults = await Promise.all(promises);
+      results.push(...batchResults);
+    }
 
-    const results = await Promise.all(promises);
     return {
       texts: results.map(r => r.text),
       scores: results.map(r => r.confidence)
