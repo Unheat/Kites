@@ -8,6 +8,10 @@ import manifest from './manifest.json' with { type: 'json' }
 import { resolve } from 'path'
 
 export default defineConfig({
+  server: {
+    port: 5173,
+    strictPort: true
+  },
   plugins: [
     react(),
     tailwindcss(),

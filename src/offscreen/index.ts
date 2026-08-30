@@ -369,3 +369,21 @@ async function handleCheckStatus(modelId: string): Promise<boolean> {
 async function runTranslationPipeline(jobId: number): Promise<string> {
   return await pipelineOrchestrator.runPipeline(jobId);
 }
+
+// Auto-check and cache default OCR model (v6-small) when offscreen document initializes
+if (typeof caches !== 'undefined') {
+  OcrCacheManager.isModelCached('v6-small')
+    .then((isCached) => {
+      if (!isCached) {
+        console.log('[Offscreen] Default OCR model (v6-small) not cached. Auto-initiating background download...');
+        handleStartDownload('v6-small', 'ocr').catch((err) => {
+          console.warn('[Offscreen] Auto-download of default OCR model failed:', err);
+        });
+      } else {
+        console.log('[Offscreen] Default OCR model (v6-small) is already cached.');
+      }
+    })
+    .catch((err) => {
+      console.warn('[Offscreen] Error checking default OCR cache status on startup:', err);
+    });
+}

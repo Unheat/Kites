@@ -17,6 +17,18 @@ import { DEFAULT_POPUP_STATE } from '../shared/types';
 const STALE_JOB_TIMEOUT_MS = 20 * 60 * 1000;
 
 /**
+ * Maximum time in milliseconds to wait for a single translation job to complete
+ * before timing out and releasing the concurrency queue slot.
+ */
+const SINGLE_JOB_TIMEOUT_MS = 60 * 1000;
+
+/**
+ * Interval in milliseconds between retries when waiting for the offscreen document
+ * to finish booting its bundle and registering message listeners.
+ */
+const OFFSCREEN_RETRY_INTERVAL_MS = 150;
+
+/**
  * Safely creates context menu items, avoiding duplicate ID runtime errors.
  */
 function setupContextMenu(): void {
@@ -69,67 +81,44 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   
   if (message.type === 'START_MODEL_DOWNLOAD' || message.type === 'CHECK_MODEL_STATUS' || message.type === 'PRELOAD_ACTIVE_ENGINE' || message.type === 'GET_ACTIVE_DOWNLOADS') {
     console.log(`[Background] Received ${message.type}. Forwarding to Offscreen...`);
-    setupOffscreenDocument('src/offscreen/offscreen.html')
-      .then(() => {
-        setTimeout(() => {
-          chrome.runtime.sendMessage(message, (response) => {
-            if (chrome.runtime.lastError) {
-              console.warn(`[Background] Message warning for ${message.type}:`, chrome.runtime.lastError.message);
-              sendResponse({ status: 'error', error: chrome.runtime.lastError.message });
-              return;
-            }
-            sendResponse(response);
-          });
-        }, 100);
-      })
+    sendMessageToOffscreen(message)
+      .then((res) => sendResponse(res))
       .catch((err) => {
-        console.error(`[Background] Failed to setup offscreen for ${message.type}:`, err);
+        console.error(`[Background] Failed to send ${message.type} to offscreen:`, err);
         sendResponse({ status: 'error', error: err instanceof Error ? err.message : String(err) });
       });
     return true; // Keep message channel open for async response
   }
 });
 
-// Trigger preload on extension boot
-chrome.runtime.onStartup.addListener(() => {
-  console.log('[Background] Extension startup. Preloading active engine...');
+// Trigger preload and auto-download on extension boot
+chrome.runtime.onStartup.addListener(async () => {
+  console.log('[Background] Extension startup. Preloading active engine & default OCR...');
   cleanupOldJobs(7);
-  setupOffscreenDocument('src/offscreen/offscreen.html').then(() => {
-    setTimeout(() => {
-      chrome.runtime.sendMessage({ type: 'PRELOAD_ACTIVE_ENGINE' } as PreloadActiveEngineMessage, () => {
-        if (chrome.runtime.lastError) {
-          console.warn('[Background] Preload warning on startup:', chrome.runtime.lastError.message);
-        }
-      });
-    }, 100);
-  });
+  try {
+    await sendMessageToOffscreen({ type: 'PRELOAD_ACTIVE_ENGINE' } as PreloadActiveEngineMessage);
+    await sendMessageToOffscreen({
+      type: 'START_MODEL_DOWNLOAD',
+      payload: { modelId: 'v6-small', category: 'ocr' }
+    });
+  } catch (error) {
+    console.warn('[Background] Startup preload/download warning:', error);
+  }
 });
-chrome.runtime.onInstalled.addListener((details) => {
-  console.log('[Background] Extension installed/updated. Preloading active engine...');
+
+chrome.runtime.onInstalled.addListener(async () => {
+  console.log('[Background] Extension installed/updated. Preloading active engine & default OCR...');
   setupContextMenu();
   cleanupOldJobs(7);
-  setupOffscreenDocument('src/offscreen/offscreen.html').then(() => {
-    setTimeout(() => {
-      // Auto-start download for the default OCR model (v6-small) when extension is first installed
-      if (details.reason === 'install') {
-        console.log('[Background] Initial install detected: auto-downloading default OCR model (v6-small)...');
-        chrome.runtime.sendMessage({
-          type: 'START_MODEL_DOWNLOAD',
-          payload: { modelId: 'v6-small', category: 'ocr' }
-        }, () => {
-          if (chrome.runtime.lastError) {
-            console.warn('[Background] Auto-download default OCR warning:', chrome.runtime.lastError.message);
-          }
-        });
-      }
-
-      chrome.runtime.sendMessage({ type: 'PRELOAD_ACTIVE_ENGINE' } as PreloadActiveEngineMessage, () => {
-        if (chrome.runtime.lastError) {
-          console.warn('[Background] Preload warning on install:', chrome.runtime.lastError.message);
-        }
-      });
-    }, 100);
-  });
+  try {
+    await sendMessageToOffscreen({
+      type: 'START_MODEL_DOWNLOAD',
+      payload: { modelId: 'v6-small', category: 'ocr' }
+    });
+    await sendMessageToOffscreen({ type: 'PRELOAD_ACTIVE_ENGINE' } as PreloadActiveEngineMessage);
+  } catch (error) {
+    console.warn('[Background] Install preload/download warning:', error);
+  }
 });
 
 // Atomic locks
@@ -160,6 +149,44 @@ async function setupOffscreenDocument(path: string) {
   await creatingOffscreenPromise;
   creatingOffscreenPromise = null;
   console.log('[Background] Offscreen document created successfully.');
+}
+
+/**
+ * Sends a message to the offscreen document, ensuring the document exists and retrying
+ * if the offscreen document is still booting and evaluating its module bundle.
+ *
+ * @param message - The message object to send to the offscreen document.
+ * @param timeoutMs - Maximum milliseconds to wait for the message to be received.
+ * @returns A promise resolving to the response from the offscreen document.
+ */
+async function sendMessageToOffscreen(message: any, timeoutMs: number = 30000): Promise<any> {
+  await setupOffscreenDocument('src/offscreen/offscreen.html');
+
+  const startTime = performance.now();
+
+  while (performance.now() - startTime < timeoutMs) {
+    try {
+      const response = await new Promise<any>((resolve, reject) => {
+        chrome.runtime.sendMessage(message, (res) => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message));
+          } else {
+            resolve(res);
+          }
+        });
+      });
+      return response;
+    } catch (err: any) {
+      // If the receiving end does not exist yet, the offscreen document is still evaluating scripts
+      if (err?.message?.includes('Receiving end does not exist')) {
+        await new Promise((resolve) => setTimeout(resolve, OFFSCREEN_RETRY_INTERVAL_MS));
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  throw new Error(`Message ${message.type} to offscreen timed out after ${timeoutMs}ms`);
 }
 
 /**
@@ -316,41 +343,32 @@ async function processImageTranslation(jobId: number, srcUrl: string, tabId?: nu
     
     await db.translationJobs.update(jobId, { status: 'processing' });
     
-    // 1. Boot up the offscreen document if it's sleeping
-    await setupOffscreenDocument('src/offscreen/offscreen.html');
-    
-    // 2. Route the Job ID to the Offscreen Document to begin processing
+    // Route the Job ID to the Offscreen Document to begin processing with a timeout guard
     const message: ProcessJobMessage = {
       type: 'PROCESS_JOB',
       payload: { jobId: jobId }
     };
     
     console.log(`[Background] Routing task ${jobId} to Offscreen Document...`);
-    chrome.runtime.sendMessage(message, (response) => {
-      if (chrome.runtime.lastError) {
-        console.error(`[Background] Error from offscreen for job ${jobId}:`, chrome.runtime.lastError);
-        db.translationJobs.update(jobId, { status: 'error' }).then(() => processQueue());
-        return;
-      }
-      
-      console.log(`[Background] Offscreen completed job ${jobId} with status:`, response?.status);
-      
-      // If successful, we receive the bakedBase64 image back from the Offscreen Document
-      // Broadcast it back to the specific Tab so the Content Script can swap the image natively!
-      if (response?.status === 'success' && response?.bakedBase64 && tabId) {
-        console.log(`[Background] Sending IMAGE_TRANSLATED back to tab ${tabId}...`);
-        chrome.tabs.sendMessage(tabId, {
-          type: 'IMAGE_TRANSLATED',
-          payload: {
-            originalUrl: srcUrl,
-            bakedBase64: response.bakedBase64
-          }
-        });
-      }
-      
-      // Trigger the queue to pull the next available image!
-      processQueue();
-    });
+    const offscreenResponse = await sendMessageToOffscreen(message, SINGLE_JOB_TIMEOUT_MS);
+    
+    console.log(`[Background] Offscreen completed job ${jobId} with status:`, offscreenResponse?.status);
+    
+    if (offscreenResponse?.status === 'success' && offscreenResponse?.bakedBase64 && tabId) {
+      console.log(`[Background] Sending IMAGE_TRANSLATED back to tab ${tabId}...`);
+      chrome.tabs.sendMessage(tabId, {
+        type: 'IMAGE_TRANSLATED',
+        payload: {
+          originalUrl: srcUrl,
+          bakedBase64: offscreenResponse.bakedBase64
+        }
+      }).catch(() => {});
+    } else if (offscreenResponse?.status === 'error') {
+      throw new Error(offscreenResponse.error || 'Offscreen translation pipeline failed');
+    }
+    
+    // Trigger the queue to pull the next available image!
+    processQueue();
     
   } catch (error) {
     console.error(`[Background] Failed to process image for job ${jobId}:`, error);
@@ -363,7 +381,7 @@ async function processImageTranslation(jobId: number, srcUrl: string, tabId?: nu
       }).catch(() => {});
     }
 
-    // Trigger queue again in case a slot opened up due to this error
+    // Trigger queue again so slots opened up by this error are immediately reclaimed
     processQueue();
     throw error;
   }
