@@ -236,6 +236,35 @@ export class PaddleOcrEngine implements IOcrEngine {
         console.warn('[PaddleOcrEngine] ⚠️ WARNING: WebGPU requested but ONNX Runtime fell back silently to WASM CPU!');
       }
 
+      // PP-OCRv6 recognition (CRNN with dynamic sequence lengths) hits known WebGPU JSEP shader incompatibilities
+      // and buffer collisions in the browser. By contrast, detection (DBNet on a static 960px image) is 100% 
+      // convolutional and gets the full ~10x GPU speedup. Re-bind the recognition session to WASM CPU to guarantee
+      // 100% stability while retaining full GPU speed for detection.
+      if (!isNode && hasWebGpu && this.service.recognitionSession) {
+        try {
+          const ort = await import('onnxruntime-web');
+          await this.service.recognitionSession.release();
+
+          let recBuffer: ArrayBuffer;
+          if (modelConfig.recognition instanceof ArrayBuffer) {
+            recBuffer = modelConfig.recognition;
+          } else {
+            const entry = ocrRegistry[canonicalPreset] || ocrRegistry['v6-small'];
+            recBuffer = await OcrCacheManager.getModelBuffer(entry.recognitionUrl);
+          }
+
+          const wasmSession = await ort.InferenceSession.create(new Uint8Array(recBuffer), {
+            executionProviders: ['wasm'],
+            graphOptimizationLevel: 'basic'
+          });
+          this.service.recognitionSession = wasmSession;
+          this.service.recognitor.session = wasmSession;
+          console.log('[PaddleOcrEngine] Split acceleration configured: Detection -> WebGPU, Recognition -> WASM (SIMD)');
+        } catch (splitErr) {
+          console.warn('[PaddleOcrEngine] Failed to split recognition session to WASM:', splitErr);
+        }
+      }
+
       this.customDetector = new CustomPaddleDetector(this.service);
       this.isInitialized = true;
       console.log(`[PaddleOcrEngine] Initialization complete in ${(performance.now() - startTime).toFixed(2)}ms.`);
@@ -286,8 +315,8 @@ export class PaddleOcrEngine implements IOcrEngine {
       console.log(`[PaddleOcrEngine] Recognition complete in ${totalDuration}ms. Found ${texts.length} text blocks.`);
       
       return { texts, boxes, scores, detectionScores, polygons, maskRawCanvas };
-    } catch (e) {
-      console.error('[PaddleOcrEngine] Recognition failed:', e);
+    } catch (e: any) {
+      console.error('[PaddleOcrEngine] Recognition failed:', e?.message || e?.name || e, e?.stack || e);
       throw e;
     }
   }
@@ -337,36 +366,18 @@ export class PaddleOcrEngine implements IOcrEngine {
     const ctx = recognitor.buildContext();
     const dictionary = this.service.options.recognition?.charactersDictionary;
 
-    const results: { text: string; confidence: number }[] = [];
-    
-    if (this.isWebGpuActive) {
-      // WebGPU: Sequential execution prevents GPU shader compilation races & buffer collision on dynamic shapes
-      for (let idx = 0; idx < polygons.length; idx++) {
-        const poly = polygons[idx];
-        try {
-          const finalCropCanvas = cropAndWarp(this.service.platform, sourceCanvas, sourcePixels, srcW, srcH, poly);
-          const { text, confidence } = await recognitor.recognizeTextViaContext(finalCropCanvas, ctx, dictionary);
-          results.push({ text, confidence });
-        } catch (err: any) {
-          console.error(`[PaddleOcrEngine] WebGPU recognition failed on crop ${idx}:`, err?.message || err, err);
-          throw err;
-        }
+    const promises = polygons.map(async (poly, idx) => {
+      try {
+        const finalCropCanvas = cropAndWarp(this.service.platform, sourceCanvas, sourcePixels, srcW, srcH, poly);
+        const { text, confidence } = await recognitor.recognizeTextViaContext(finalCropCanvas, ctx, dictionary);
+        return { text, confidence };
+      } catch (err: any) {
+        console.error(`[PaddleOcrEngine] Recognition failed on crop ${idx}:`, err?.message || err, err);
+        throw err;
       }
-    } else {
-      // WASM/CPU (Node/Browser fallback): Concurrent Promise.all parallel execution
-      const promises = polygons.map(async (poly, idx) => {
-        try {
-          const finalCropCanvas = cropAndWarp(this.service.platform, sourceCanvas, sourcePixels, srcW, srcH, poly);
-          const { text, confidence } = await recognitor.recognizeTextViaContext(finalCropCanvas, ctx, dictionary);
-          return { text, confidence };
-        } catch (err: any) {
-          console.error(`[PaddleOcrEngine] WASM/CPU recognition failed on crop ${idx}:`, err?.message || err, err);
-          throw err;
-        }
-      });
-      const batchResults = await Promise.all(promises);
-      results.push(...batchResults);
-    }
+    });
+
+    const results = await Promise.all(promises);
 
     return {
       texts: results.map(r => r.text),
