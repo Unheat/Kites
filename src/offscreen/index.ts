@@ -2,8 +2,9 @@ import type { ProcessJobMessage } from '../shared/types';
 import { pipelineOrchestrator } from './services/PipelineOrchestrator';
 import { translationManager } from './services/TranslationManager';
 import { inpaintRegistry } from './engines/inpaint/inpaintRegistry';
-import { ocrRegistry } from './engines/ocr/ocrRegistry';
+import { ocrRegistry, resolveOcrTier } from './engines/ocr/ocrRegistry';
 import { InpaintCacheManager } from './services/InpaintCacheManager';
+import { OcrCacheManager } from './services/OcrCacheManager';
 
 chrome.runtime.onMessage.addListener((message: ProcessJobMessage | any, _sender: chrome.runtime.MessageSender, sendResponse: (response?: any) => void) => {
   if (message.type === 'PROCESS_JOB' && message.payload?.jobId) {
@@ -247,19 +248,41 @@ function createProgressCallback(modelId: string) {
 async function handleStartDownload(modelId: string, category?: string) {
   const progressCallback = createProgressCallback(modelId);
 
-  if (category === 'inpaint' || category === 'ocr') {
-    const registry = category === 'inpaint' 
-      ? inpaintRegistry
-      : ocrRegistry;
+  if (category === 'ocr') {
+    const canonicalId = resolveOcrTier(modelId);
+    const entry = ocrRegistry[canonicalId];
+    if (!entry) throw new Error(`Unknown OCR engine: ${modelId}`);
+
+    activeDownloads[modelId] = {
+      files: {},
+      maxProgress: 0,
+      status: 'Downloading OCR weights...'
+    };
+
+    await OcrCacheManager.downloadModelWithProgress(canonicalId, progressCallback);
+
+    if (activeDownloads[modelId]) {
+      activeDownloads[modelId].maxProgress = 1;
+      activeDownloads[modelId].status = 'ready';
+    }
+
+    chrome.runtime.sendMessage({
+      type: 'MODEL_DOWNLOAD_PROGRESS',
+      payload: { modelId, progress: 1, status: 'ready' }
+    }).catch(() => {});
+
+    return;
+  }
+
+  if (category === 'inpaint') {
+    const entry = inpaintRegistry[modelId];
+    if (!entry) throw new Error(`Unknown inpaint engine: ${modelId}`);
 
     activeDownloads[modelId] = {
       files: {},
       maxProgress: 0,
       status: 'Downloading weights...'
     };
-    
-    const entry = registry[modelId];
-    if (!entry) throw new Error(`Unknown ${category} engine: ${modelId}`);
     
     if (entry.dataUrl) {
       await InpaintCacheManager.downloadModelWithProgress(entry.onnxUrl, (p) => progressCallback(p * 0.5));
@@ -311,7 +334,21 @@ async function handleStartDownload(modelId: string, category?: string) {
 async function handleCheckStatus(modelId: string): Promise<boolean> {
   // Check the Cache API to see if the model files are resident on disk.
   try {
-    // For WebLLM, we can rely on their internal checks. We'll add this later if needed.
+    const canonicalOcr = resolveOcrTier(modelId);
+    if (ocrRegistry[canonicalOcr]) {
+      return await OcrCacheManager.isModelCached(canonicalOcr);
+    }
+
+    if (inpaintRegistry[modelId]) {
+      const entry = inpaintRegistry[modelId];
+      const isCached = await InpaintCacheManager.isModelCached(entry.onnxUrl);
+      if (entry.dataUrl) {
+        const isDataCached = await InpaintCacheManager.isModelCached(entry.dataUrl);
+        return isCached && isDataCached;
+      }
+      return isCached;
+    }
+
     // For transformers, it uses 'transformers-cache'
     const hasTransformersCache = await caches.has('transformers-cache');
     if (!hasTransformersCache) return false;

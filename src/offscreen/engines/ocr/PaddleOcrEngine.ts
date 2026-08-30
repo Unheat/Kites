@@ -1,6 +1,8 @@
 import type { IOcrEngine, OcrResult } from './BaseOcrEngine';
 import { checkWebGPUAvailability } from '../../utils/hardware';
 import { CustomPaddleDetector } from './CustomPaddleDetector';
+import { ocrRegistry, resolveOcrTier } from './ocrRegistry';
+import { OcrCacheManager } from '../../services/OcrCacheManager';
 
 /**
  * Longest-side resize applied to the page before DBNet detection inference.
@@ -35,13 +37,6 @@ const VERTICAL_CROP_ASPECT = 1.5;
  * Prevents division by zero or numerical instability when solving the homography linear system.
  */
 const HOMOGRAPHY_DET_EPSILON = 1e-7;
-
-/**
- * The model preset used for both detection and recognition. Extracted here so the tier is
- * adjustable in one place; see DETECTION_MAX_SIDE's warning before changing anything that
- * affects recognition accuracy.
- */
-const MODEL_PRESET = 'v6-medium';
 
 /**
  * Rewrites ppu-paddle-ocr's default `.ort` model URLs to their `.onnx` equivalents.
@@ -84,6 +79,11 @@ export class PaddleOcrEngine implements IOcrEngine {
   private service: any = null;
   private customDetector: CustomPaddleDetector | null = null;
   private isInitialized = false;
+  private modelPreset: string;
+
+  constructor(modelPreset: string = 'v6-small') {
+    this.modelPreset = resolveOcrTier(modelPreset);
+  }
 
   /**
    * Initializes the PaddleOCR Engine, loading either Node or Browser native dependencies
@@ -95,7 +95,8 @@ export class PaddleOcrEngine implements IOcrEngine {
     if (this.isInitialized) return;
 
     try {
-      console.log('[PaddleOcrEngine] Initializing...');
+      const canonicalPreset = resolveOcrTier(this.modelPreset);
+      console.log(`[PaddleOcrEngine] Initializing preset: ${canonicalPreset}...`);
       const isNode = typeof window === 'undefined';
       let PaddleOcrService: any;
       let MODEL_PRESETS: any;
@@ -172,15 +173,34 @@ export class PaddleOcrEngine implements IOcrEngine {
           ]
         : ['wasm'];
 
-      // Node keeps the stock `.ort` weights: native onnxruntime-node loads them fine and it is
-      // the format the accuracy baseline (src/test/ocrAccuracyProbe.ts) was measured against.
-      // Only the browser needs the `.onnx` rewrite, so the WebGPU EP can build a session at all.
-      const modelUrls = isNode
-        ? MODEL_PRESETS[MODEL_PRESET]
-        : toOnnxModelUrls(MODEL_PRESETS[MODEL_PRESET]);
+      let modelConfig: any;
+      if (isNode) {
+        // Node keeps the stock `.ort` weights: native onnxruntime-node loads them fine
+        const presetUrls = MODEL_PRESETS[canonicalPreset] || MODEL_PRESETS['v6-small'] || MODEL_PRESETS['v6-medium'];
+        modelConfig = presetUrls;
+      } else {
+        const entry = ocrRegistry[canonicalPreset] || ocrRegistry['v6-small'];
+        try {
+          // Pre-fetch model weights and dictionary via Cache API so inference runs 100% offline
+          const [detBuffer, recBuffer, dictBuffer] = await Promise.all([
+            OcrCacheManager.getModelBuffer(entry.detectionUrl),
+            OcrCacheManager.getModelBuffer(entry.recognitionUrl),
+            OcrCacheManager.getModelBuffer(entry.charactersDictionaryUrl)
+          ]);
+          modelConfig = {
+            detection: detBuffer,
+            recognition: recBuffer,
+            charactersDictionary: dictBuffer
+          };
+        } catch (cacheErr) {
+          console.warn(`[PaddleOcrEngine] Could not load from cache, falling back to URLs:`, cacheErr);
+          const rawUrls = MODEL_PRESETS[canonicalPreset] || MODEL_PRESETS['v6-small'];
+          modelConfig = toOnnxModelUrls(rawUrls);
+        }
+      }
 
       this.service = new PaddleOcrService({
-        model: modelUrls,
+        model: modelConfig,
         detection: {
           maxSideLength: DETECTION_MAX_SIDE,
         },

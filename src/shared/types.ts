@@ -111,7 +111,7 @@ export const DEFAULT_POPUP_STATE: PopupState = {
   targetLang: 'en',
   activeEngineId: 'gg-translate',
   activeInpaintId: 'simple',
-  activeOcrId: 'paddle-dbnet',
+  activeOcrId: 'v6-small',
   fallbackChain: [],
   customApis: [],
   webgpuSupported: null,

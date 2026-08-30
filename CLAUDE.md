@@ -76,3 +76,10 @@ warning: because chrome cdn not allow to import code, library like opencv-js can
 *   **Library -> Custom JS:** If Cotrans uses a heavy library function that is either missing in our WASM builds (e.g., `cv2.findNonZero`) or too bloated to import, and it is easy to implement efficiently in JavaScript, write the custom JS logic from scratch.
 
 
+## Workarounds & Upstream Library Mitigations
+
+- **Preserve Existing Workarounds:** Never refactor, simplify, or "clean up" non-standard patterns, weird type casts, or unconventional file handling marked with `WORKAROUND`, `HACK`, or upstream issue links. They exist to bypass library-level bugs.
+- **Reuse Established Workarounds:** When writing new code or touching other parts of the project that use the same external library/function, look for and apply our existing workaround patterns instead of trying standard approaches that are known to fail.
+- **Documenting New Workarounds:** If you exhaust standard solutions and must implement a non-obvious workaround:
+  1. Add an inline comment: `# WORKAROUND: [Explain upstream failure] -> [Why this weird approach works]`.
+  2. Briefly document the quirk and affected modules in this file so future turns follow the same pattern without re-debugging.

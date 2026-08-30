@@ -4,6 +4,7 @@ import type { PopupState } from '../../shared/types';
 import AddApiForm from './AddApiForm';
 import MiniSearch from 'minisearch';
 import { ModelRegistry } from '../services/ModelRegistry';
+import { ocrRegistry } from '../../offscreen/engines/ocr/ocrRegistry';
 
 interface EngineSelectionPanelProps {
   state: PopupState;
@@ -83,26 +84,50 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
   ]);
 
   const [ocrBaseEngines, setOcrBaseEngines] = useState<Engine[]>([
-    { id: 'paddle-dbnet', name: 'PaddleOCR (Default)', type: 'local', isDownloaded: true },
+    { id: 'v6-small', name: 'PaddleOCR v6 Small (Default)', type: 'local', isDownloaded: false },
+    { id: 'v6-medium', name: 'PaddleOCR v6 Medium', type: 'local', isDownloaded: false },
+    { id: 'v6-tiny', name: 'PaddleOCR v6 Tiny', type: 'local', isDownloaded: false },
+    { id: 'v5-mobile', name: 'PaddleOCR v5 Mobile', type: 'local', isDownloaded: false },
+    { id: 'v5-server', name: 'PaddleOCR v5 Server', type: 'local', isDownloaded: false },
+    { id: 'v5-en-mobile', name: 'PaddleOCR v5 English Mobile', type: 'local', isDownloaded: false },
+    { id: 'v4-mobile', name: 'PaddleOCR v4 Mobile', type: 'local', isDownloaded: false },
+    { id: 'v4-server', name: 'PaddleOCR v4 Server', type: 'local', isDownloaded: false },
+    { id: 'v3-mobile', name: 'PaddleOCR v3 Mobile', type: 'local', isDownloaded: false },
+    { id: 'v3-japanese-mobile', name: 'PaddleOCR v3 Japanese Mobile', type: 'local', isDownloaded: false },
   ]);
 
   useEffect(() => {
     (async () => {
       try {
         const hasCache = await caches.has('kites-inpaint-models-v1');
-        if (!hasCache) return;
-        const cache = await caches.open('kites-inpaint-models-v1');
-        const keys = await cache.keys();
-        const urls = keys.map(k => k.url);
-        setInpaintBaseEngines(prev => prev.map(e => {
-          if (e.id === 'aotgan') return { ...e, isDownloaded: urls.some(u => u.includes('aotgan')) };
-          if (e.id === 'lama-base') return { ...e, isDownloaded: urls.some(u => u.includes('lama-base')) };
-          if (e.id === 'lama-manga') return { ...e, isDownloaded: urls.some(u => u.includes('lama-manga')) };
-          return e;
-        }));
-        // OCR: PaddleOCR ships bundled in the extension, so there is nothing to cache-check.
+        if (hasCache) {
+          const cache = await caches.open('kites-inpaint-models-v1');
+          const keys = await cache.keys();
+          const urls = keys.map(k => k.url);
+          setInpaintBaseEngines(prev => prev.map(e => {
+            if (e.id === 'aotgan') return { ...e, isDownloaded: urls.some(u => u.includes('aotgan')) };
+            if (e.id === 'lama-base') return { ...e, isDownloaded: urls.some(u => u.includes('lama-base')) };
+            if (e.id === 'lama-manga') return { ...e, isDownloaded: urls.some(u => u.includes('lama-manga')) };
+            return e;
+          }));
+        }
+
+        const hasOcrCache = await caches.has('kites-ocr-models-v1');
+        if (hasOcrCache) {
+          const ocrCache = await caches.open('kites-ocr-models-v1');
+          const ocrKeys = await ocrCache.keys();
+          const ocrUrls = ocrKeys.map(k => k.url);
+          setOcrBaseEngines(prev => prev.map(e => {
+            const entry = ocrRegistry[e.id];
+            if (!entry) return e;
+            const isDownloaded = ocrUrls.includes(entry.detectionUrl) &&
+                                 ocrUrls.includes(entry.recognitionUrl) &&
+                                 ocrUrls.includes(entry.charactersDictionaryUrl);
+            return { ...e, isDownloaded };
+          }));
+        }
       } catch (e) {
-        console.warn('Inpaint cache check failed:', e);
+        console.warn('Model cache check failed:', e);
       }
     })();
   }, []);
@@ -416,7 +441,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
           
           <div className="absolute left-0 top-full pt-1.5 w-[280px] max-w-[85vw] z-50 opacity-0 pointer-events-none peer-hover:opacity-100 peer-hover:pointer-events-auto hover:opacity-100 hover:pointer-events-auto transition-opacity">
             <div className="p-2.5 bg-[var(--color-ink)] text-[var(--color-paper)] text-xs rounded-md shadow-xl">
-              Select text detection engine. PaddleOCR is fast and built-in. Comic Text Detector is a heavy, highly accurate model for manga.
+              Select PaddleOCR text detection and recognition model tier. v6-small is fast and lightweight. Higher tiers provide enhanced precision for specialized scripts.
             </div>
           </div>
         </div>
@@ -427,36 +452,42 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
             className="w-full flex items-center justify-between p-3 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md hover:border-[var(--color-ink)] transition-colors cursor-pointer"
           >
             <span className="font-medium truncate pr-2">
-              {ocrBaseEngines.find(e => e.id === (state.activeOcrId || 'paddle-dbnet'))?.name || 'Loading...'}
+              {ocrBaseEngines.find(e => e.id === (state.activeOcrId || 'v6-small'))?.name || 'Loading...'}
             </span>
             <ChevronDown size={16} className={`text-[var(--color-dust)] transition-transform ${isOpenOcr ? 'rotate-180' : ''}`} />
           </button>
 
-          {downloads[state.activeOcrId || ''] && downloads[state.activeOcrId || ''].progress < 1 && (
-            <div className="mt-2 p-2 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md animate-in fade-in duration-200">
-              <div className="flex justify-between items-end mb-1.5">
-                <span className="text-[10px] font-medium text-[var(--color-dust)] uppercase tracking-wider truncate max-w-[80%]">
-                  {downloads[state.activeOcrId || ''].status}
-                </span>
-                <span className="text-xs font-bold text-[var(--color-ink)]">
-                  {Math.round(downloads[state.activeOcrId || ''].progress * 100)}%
-                </span>
+          {/* Inline progress bar for OCR model download */}
+          {(() => {
+            const downloadingOcr = ocrBaseEngines.find(e => downloads[e.id] && downloads[e.id].progress < 1);
+            if (!downloadingOcr) return null;
+            const dl = downloads[downloadingOcr.id];
+            return (
+              <div className="mt-2 p-2 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md animate-in fade-in duration-200">
+                <div className="flex justify-between items-end mb-1.5">
+                  <span className="text-[10px] font-medium text-[var(--color-dust)] uppercase tracking-wider truncate max-w-[80%]">
+                    {downloadingOcr.name}: {dl.status}
+                  </span>
+                  <span className="text-xs font-bold text-[var(--color-ink)]">
+                    {Math.round(dl.progress * 100)}%
+                  </span>
+                </div>
+                <div className="h-1.5 w-full bg-[var(--color-paper)] rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-[var(--color-editorial)] transition-all duration-300 ease-out" 
+                    style={{ width: `${dl.progress * 100}%` }}
+                  />
+                </div>
               </div>
-              <div className="h-1.5 w-full bg-[var(--color-paper)] rounded-full overflow-hidden">
-                <div 
-                  className="h-full bg-[var(--color-editorial)] transition-all duration-300 ease-out" 
-                  style={{ width: `${downloads[state.activeOcrId || ''].progress * 100}%` }}
-                />
-              </div>
-            </div>
-          )}
+            );
+          })()}
 
           {isOpenOcr && (
             <div className="mt-1 bg-[var(--color-paper)] border border-[var(--color-dust)] rounded-md shadow-sm overflow-hidden flex flex-col max-h-[350px] z-50">
               <div className="overflow-y-auto flex-1 p-1 custom-scrollbar">
                 {ocrBaseEngines.map((engine) => {
                   const isUninstalled = !engine.isDownloaded;
-                  const isActive = (state.activeOcrId || 'paddle-dbnet') === engine.id;
+                  const isActive = (state.activeOcrId || 'v6-small') === engine.id;
                   return (
                     <button
                       key={engine.id}
@@ -489,8 +520,6 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                             onClick={(e) => {
                               e.stopPropagation();
                               chrome.runtime.sendMessage({ type: 'START_MODEL_DOWNLOAD', payload: { modelId: engine.id, category: 'ocr' } });
-                              updateState({ activeOcrId: engine.id as any });
-                              setIsOpenOcr(false);
                             }}
                             className="p-1 -mr-1 rounded hover:bg-[var(--color-vellum)] transition-colors cursor-pointer text-[var(--color-ink)] opacity-100"
                             title="Download model"

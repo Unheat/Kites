@@ -1,5 +1,6 @@
 import type { IOcrEngine, OcrResult } from '../engines/ocr/BaseOcrEngine';
 import { PaddleOcrEngine } from '../engines/ocr/PaddleOcrEngine';
+import { resolveOcrTier } from '../engines/ocr/ocrRegistry';
 import { Quadrilateral, Graph, calculateBoundingBox, computeMinAreaRect, polygonArea, quadrilateralCanMergeRegion, splitTextRegion } from '../../shared/utils/geometry';
 
 /**
@@ -27,17 +28,16 @@ export function isValuableText(text: string): boolean {
 }
 
 /**
- * Available OCR tiers. Paddle is the sole detector + recognizer: `CustomPaddleDetector`
- * runs DBNet detection and `PaddleOcrEngine.recognizeCrops` reads the resulting crops,
- * mirroring Cotrans's `detector: paddle` flow (detection/paddle_rust.py).
+ * Available OCR tiers. Defaults to 'v6-small'.
+ * Dynamically maps to any preset registered in ocrRegistry.
  */
-export type OcrTier = 'paddle-dbnet' | 'none';
+export type OcrTier = string;
 
 export class OcrManager {
-  private engines: Map<OcrTier, IOcrEngine> = new Map();
+  private engines: Map<string, IOcrEngine> = new Map();
   // Stores the in-flight initialization promise so that concurrent callers
   // all await the same work rather than spinning in a polling loop.
-  private initPromises: Map<OcrTier, Promise<IOcrEngine>> = new Map();
+  private initPromises: Map<string, Promise<IOcrEngine>> = new Map();
 
   /**
    * Returns the initialized OCR engine, creating and initializing it on first call.
@@ -46,30 +46,25 @@ export class OcrManager {
    *
    * @returns A promise that resolves to the loaded OCR engine instance.
    */
-  async getOrLoadEngine(tier: OcrTier = 'paddle-dbnet'): Promise<IOcrEngine> {
-    if (this.engines.has(tier)) return this.engines.get(tier)!;
+  async getOrLoadEngine(tier: OcrTier = 'v6-small'): Promise<IOcrEngine> {
+    const canonicalTier = resolveOcrTier(tier);
+    if (this.engines.has(canonicalTier)) return this.engines.get(canonicalTier)!;
 
-    if (!this.initPromises.has(tier)) {
+    if (!this.initPromises.has(canonicalTier)) {
       const promise = (async () => {
-        console.log(`[OcrManager] Instantiating OCR Engine for tier: ${tier}...`);
-        let engine: IOcrEngine;
-        switch (tier) {
-          case 'paddle-dbnet':
-            engine = new PaddleOcrEngine();
-            break;
-          case 'none':
-            throw new Error('[OcrManager] None OCR engine is not yet implemented.');
-          default:
-            throw new Error(`[OcrManager] Unknown OCR tier: ${tier}`);
+        console.log(`[OcrManager] Instantiating OCR Engine for tier: ${canonicalTier}...`);
+        if (canonicalTier === 'none') {
+          throw new Error('[OcrManager] None OCR engine is not yet implemented.');
         }
+        const engine = new PaddleOcrEngine(canonicalTier);
         await engine.init();
-        this.engines.set(tier, engine);
+        this.engines.set(canonicalTier, engine);
         return engine;
       })();
-      this.initPromises.set(tier, promise);
+      this.initPromises.set(canonicalTier, promise);
     }
 
-    return this.initPromises.get(tier)!;
+    return this.initPromises.get(canonicalTier)!;
   }
 
   /**
@@ -366,7 +361,7 @@ export class OcrManager {
    * @param imageBuffer - The raw ArrayBuffer of the image.
    * @returns A promise that resolves to the standardized OCR result.
    */
-  async processImage(imageBuffer: ArrayBuffer, tier: OcrTier = 'paddle-dbnet'): Promise<OcrResult> {
+  async processImage(imageBuffer: ArrayBuffer, tier: OcrTier = 'v6-small'): Promise<OcrResult> {
     const engine = await this.getOrLoadEngine(tier);
     const rawResult = await engine.recognize(imageBuffer);
     return this.mergeTextBlocks(rawResult);

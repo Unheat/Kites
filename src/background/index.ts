@@ -104,12 +104,25 @@ chrome.runtime.onStartup.addListener(() => {
     }, 100);
   });
 });
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener((details) => {
   console.log('[Background] Extension installed/updated. Preloading active engine...');
   setupContextMenu();
   cleanupOldJobs(7);
   setupOffscreenDocument('src/offscreen/offscreen.html').then(() => {
     setTimeout(() => {
+      // Auto-start download for the default OCR model (v6-small) when extension is first installed
+      if (details.reason === 'install') {
+        console.log('[Background] Initial install detected: auto-downloading default OCR model (v6-small)...');
+        chrome.runtime.sendMessage({
+          type: 'START_MODEL_DOWNLOAD',
+          payload: { modelId: 'v6-small', category: 'ocr' }
+        }, () => {
+          if (chrome.runtime.lastError) {
+            console.warn('[Background] Auto-download default OCR warning:', chrome.runtime.lastError.message);
+          }
+        });
+      }
+
       chrome.runtime.sendMessage({ type: 'PRELOAD_ACTIVE_ENGINE' } as PreloadActiveEngineMessage, () => {
         if (chrome.runtime.lastError) {
           console.warn('[Background] Preload warning on install:', chrome.runtime.lastError.message);

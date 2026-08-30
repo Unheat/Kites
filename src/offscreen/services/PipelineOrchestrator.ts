@@ -49,9 +49,7 @@ export class PipelineOrchestrator {
       const inpaintTier = popupState?.activeInpaintId || 'none';
       const sourceLang = popupState?.sourceLang || 'auto';
       const targetLang = popupState?.targetLang || 'en';
-      // Paddle is the only detector+recognizer tier (Cotrans `detector: paddle` flow).
-      // Kept as a variable so a future tier can be reintroduced without touching call sites.
-      const ocrTier: OcrTier = 'paddle-dbnet';
+      const ocrTier: OcrTier = popupState?.activeOcrId || 'v6-small';
 
       // 2. Fetch image from DB
       const imageRecord = await db.images.where('jobId').equals(jobId).first();

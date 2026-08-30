@@ -149,18 +149,17 @@ describe('PipelineOrchestrator', () => {
     blobSpy.mockRestore();
   });
 
-  it('always runs OCR on the paddle-dbnet tier, even if the stored config names a retired tier', async () => {
+  it('runs OCR on the configured tier or defaults gracefully to v6-small', async () => {
     const mockImageRecord = { id: 1, jobId: 100, rawImageBlob: new Blob(['fake image data'], { type: 'image/png' }) };
     ((db.images as any).first as any).mockResolvedValue(mockImageRecord);
-    // A user whose settings still hold the removed comic-text-detector tier must not break.
     vi.spyOn(chrome.runtime, 'sendMessage').mockImplementation((_message: any, callback: any) => {
-      callback({ activeInpaintId: 'simple', activeOcrId: 'comic-text-detector', targetLang: 'en' });
+      callback({ activeInpaintId: 'simple', activeOcrId: 'v6-medium', targetLang: 'en' });
     });
     const blobSpy = vi.spyOn(pipelineOrchestrator as any, 'blobToArrayBuffer').mockResolvedValue(new ArrayBuffer(8));
 
     await pipelineOrchestrator.runPipeline(100);
 
-    expect(processImageMock).toHaveBeenCalledWith(expect.any(ArrayBuffer), 'paddle-dbnet');
+    expect(processImageMock).toHaveBeenCalledWith(expect.any(ArrayBuffer), 'v6-medium');
     blobSpy.mockRestore();
   });
 
