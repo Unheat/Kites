@@ -41,7 +41,7 @@ export default function FallbackConfigPanel({ state, updateState, onClose }: Fal
   };
 
   const handleAddFallback = () => {
-    updateState({ fallbackChain: [...state.fallbackChain, 'nllb-200'] });
+    updateState({ fallbackChain: [...state.fallbackChain, 'gg-translate'] });
   };
 
   return (

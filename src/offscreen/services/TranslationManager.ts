@@ -1,14 +1,9 @@
 import type { ITranslationEngine } from '../engines/translation/BaseEngine';
-import { env } from '@huggingface/transformers';
 import { WebLLMEngine } from '../engines/translation/WebLLMEngine';
 import { ChromeTranslatorEngine } from '../engines/translation/ChromeTranslatorEngine';
 import { GoogleTranslateEngine } from '../engines/translation/GoogleTranslateEngine';
-import { TransformersEngine } from '../engines/translation/TransformersEngine';
 import type { PopupState } from '../../shared/types';
 import modelsRegistryData from '../../shared/models-registry.json';
-
-// Fix CDN fetching for Manifest V3
-env.backends.onnx.wasm!.wasmPaths = chrome.runtime.getURL('/ort-wasm/');
 
 export class TranslationManager {
   private activeEngine: ITranslationEngine | null = null;
@@ -149,10 +144,10 @@ export class TranslationManager {
         engine = new ChromeTranslatorEngine();
       } else if (engineId === 'gg-translate') {
         engine = new GoogleTranslateEngine();
-      } else if (registryEntry?.engine === 'transformers' || engineId.startsWith('Xenova/') || engineId.startsWith('onnx-community/')) {
-        engine = new TransformersEngine(engineId);
-      } else {
+      } else if (registryEntry?.engine === 'webllm') {
         engine = new WebLLMEngine(engineId);
+      } else {
+        throw new Error(`Unsupported translation engine: ${engineId}`);
       }
 
       const loadStart = performance.now();

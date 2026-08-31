@@ -62,7 +62,7 @@ const extensionPath = path.join(__dirname, '..', 'dist');
           popupState: {
             activeEngineId: eId,
             activeInpaintId: iId,
-            fallbackChain: ['Xenova/opus-mt-ja-en'],
+            fallbackChain: [],
             sourceLang: 'auto',
             targetLang: 'en',
             concurrency: 1,
@@ -155,7 +155,6 @@ const extensionPath = path.join(__dirname, '..', 'dist');
   await benchmarkTier('Tier 3: AOT-GAN (WebGPU)', 'gg-translate', 'aotgan');
 
   // Run Transformers & WebLLM models with GPU acceleration
-  await benchmarkTier('Transformers GPU (Xenova/opus-mt-ja-en)', 'Xenova/opus-mt-ja-en', 'simple');
   await benchmarkTier('WebLLM GPU (SmolLM2-135M-Instruct-q0f16-MLC)', 'SmolLM2-135M-Instruct-q0f16-MLC', 'simple');
 
   console.log('\n======================================================');

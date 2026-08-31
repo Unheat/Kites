@@ -55,7 +55,7 @@ const extensionPath = path.join(__dirname, '..', 'dist');
         popupState: {
           activeEngineId: 'gg-translate',
           activeInpaintId: 'lama-manga',
-          fallbackChain: ['Xenova/opus-mt-ja-en'],
+          fallbackChain: [],
           sourceLang: 'auto',
           targetLang: 'en',
           concurrency: 1,

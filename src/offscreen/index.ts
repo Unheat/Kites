@@ -349,14 +349,7 @@ async function handleCheckStatus(modelId: string): Promise<boolean> {
       return isCached;
     }
 
-    // For transformers, it uses 'transformers-cache'
-    const hasTransformersCache = await caches.has('transformers-cache');
-    if (!hasTransformersCache) return false;
-    
-    const cache = await caches.open('transformers-cache');
-    const keys = await cache.keys();
-    // Simply check if any key includes the modelId (basic heuristic for now)
-    return keys.some(req => req.url.includes(modelId));
+    return false;
   } catch (err) {
     console.error(`[Offscreen] Check status failed for ${modelId}:`, err);
     return false;

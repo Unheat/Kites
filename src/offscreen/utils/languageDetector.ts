@@ -1,4 +1,4 @@
-import { getNllbCode, LANGUAGES } from '../../shared/utils/LanguageRegistry';
+import { LANGUAGES } from '../../shared/utils/LanguageRegistry';
 
 /**
  * Maximum sample length in characters used when auto-detecting language.
@@ -136,20 +136,4 @@ export async function detectBcp47Language(texts: string[]): Promise<string> {
   const heuristicResult = detectScriptHeuristic(sample);
   console.log(`[LanguageDetector] Script heuristic detected source language: ${heuristicResult}`);
   return heuristicResult;
-}
-
-/**
- * Detects the source language for NLLB-200, returning its FLORES-200 code (e.g. 'jpn_Jpan').
- * 
- * @param {string[]} texts - Array of OCR text blocks.
- * @returns {Promise<string>} FLORES-200 language code string (e.g. 'jpn_Jpan', 'zho_Hans').
- */
-export async function detectNllbLanguage(texts: string[]): Promise<string> {
-  const canonicalId = await detectBcp47Language(texts);
-  try {
-    return getNllbCode(canonicalId);
-  } catch (err) {
-    console.warn(`[LanguageDetector] Unable to map '${canonicalId}' to NLLB code. Defaulting to jpn_Jpan. Error:`, err);
-    return 'jpn_Jpan';
-  }
 }

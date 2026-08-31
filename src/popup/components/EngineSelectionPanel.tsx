@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Download, Upload, ChevronDown, Plus, Search, Check } from 'lucide-react';
+import { Download, ChevronDown, Plus, Search, Check } from 'lucide-react';
 import type { PopupState } from '../../shared/types';
 import AddApiForm from './AddApiForm';
 import MiniSearch from 'minisearch';
@@ -307,10 +307,6 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                     >
                       <Plus size={14} className="text-[var(--color-editorial)]" />
                       <span className="text-[var(--color-editorial)] font-medium">Add Custom API Key</span>
-                    </button>
-                    <button className="w-full flex items-center gap-2 p-2 text-sm text-left hover:bg-[var(--color-paper)] rounded-sm cursor-pointer transition-colors">
-                      <Upload size={14} className="text-[var(--color-dust)]" />
-                      <span>Import Local .onnx Model</span>
                     </button>
                   </div>
                 </>

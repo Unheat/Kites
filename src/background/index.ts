@@ -1,6 +1,7 @@
 import { db, cleanupOldJobs } from '../db';
 import type { ProcessJobMessage, PopupState, PreloadActiveEngineMessage } from '../shared/types';
 import { DEFAULT_POPUP_STATE } from '../shared/types';
+import modelsRegistryData from '../shared/models-registry.json';
 
 // Magic Number: Limit concurrency to avoid network/CPU throttling
 // We now dynamically load this from user's PopupState (fallback to 3)
@@ -27,6 +28,38 @@ const SINGLE_JOB_TIMEOUT_MS = 60 * 1000;
  * to finish booting its bundle and registering message listeners.
  */
 const OFFSCREEN_RETRY_INTERVAL_MS = 150;
+
+/**
+ * Removes translation engines that are no longer supported from stored popup settings.
+ *
+ * @param popupState - The persisted popup state to validate.
+ * @returns The normalized popup state and whether it needs to be saved.
+ */
+function normalizePopupState(popupState: PopupState): { state: PopupState; changed: boolean } {
+  const webLlmIds = new Set(modelsRegistryData
+    .filter((model) => model.engine === 'webllm')
+    .map((model) => model.id));
+  const customApiIds = new Set(popupState.customApis.map((api) => api.id));
+  const isSupportedEngine = (engineId: string): boolean =>
+    engineId === 'gg-translate' ||
+    engineId === 'chrome-translator' ||
+    webLlmIds.has(engineId) ||
+    customApiIds.has(engineId);
+
+  const activeEngineId = isSupportedEngine(popupState.activeEngineId)
+    ? popupState.activeEngineId
+    : DEFAULT_POPUP_STATE.activeEngineId;
+  const fallbackChain = popupState.fallbackChain.filter((engineId, index, chain) =>
+    engineId !== activeEngineId && isSupportedEngine(engineId) && chain.indexOf(engineId) === index
+  );
+  const changed = activeEngineId !== popupState.activeEngineId ||
+    fallbackChain.length !== popupState.fallbackChain.length;
+
+  return {
+    state: changed ? { ...popupState, activeEngineId, fallbackChain } : popupState,
+    changed,
+  };
+}
 
 /**
  * Safely creates context menu items, avoiding duplicate ID runtime errors.
@@ -62,8 +95,22 @@ chrome.contextMenus.onClicked.addListener(async (info: chrome.contextMenus.OnCli
 // Forward messages from content script or offscreen to popup
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'GET_POPUP_STATE') {
-    chrome.storage.local.get('popupState').then(data => {
-      sendResponse(data.popupState || DEFAULT_POPUP_STATE);
+    chrome.storage.local.get('popupState').then(async (data) => {
+      const storedState = data.popupState as PopupState | undefined;
+      if (!storedState) {
+        sendResponse(DEFAULT_POPUP_STATE);
+        return;
+      }
+
+      const { state, changed } = normalizePopupState(storedState);
+      if (changed) {
+        console.log('[Background] Removed archived translation engines from popup settings.');
+        await chrome.storage.local.set({ popupState: state });
+      }
+      sendResponse(state);
+    }).catch((error) => {
+      console.error('[Background] Failed to load popup state:', error);
+      sendResponse(DEFAULT_POPUP_STATE);
     });
     return true; // Keep channel open
   }

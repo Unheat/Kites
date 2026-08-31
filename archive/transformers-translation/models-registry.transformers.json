@@ -1,0 +1,668 @@
+[
+  {
+    "id": "Xenova/nllb-200-distilled-600M",
+    "name": "NLLB-200 (nllb-200-distilled-600M)",
+    "vramEstimate": "~600 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-en-zh",
+    "name": "Marian-MT (EN to ZH)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-fr-en",
+    "name": "Marian-MT (FR to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-es-en",
+    "name": "Marian-MT (ES to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-zh-en",
+    "name": "Marian-MT (ZH to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-de-en",
+    "name": "Marian-MT (DE to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-ru-en",
+    "name": "Marian-MT (RU to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-ar-en",
+    "name": "Marian-MT (AR to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-ko-en",
+    "name": "Marian-MT (KO to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-en-de",
+    "name": "Marian-MT (EN to DE)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-mul-en",
+    "name": "Marian-MT (MUL to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-nl-en",
+    "name": "Marian-MT (NL to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-it-en",
+    "name": "Marian-MT (IT to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-pl-en",
+    "name": "Marian-MT (PL to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-en-fr",
+    "name": "Marian-MT (EN to FR)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-en-es",
+    "name": "Marian-MT (EN to ES)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-cs-en",
+    "name": "Marian-MT (CS to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-en-it",
+    "name": "Marian-MT (EN to IT)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-fi-en",
+    "name": "Marian-MT (FI to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-en-ru",
+    "name": "Marian-MT (EN to RU)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-en-ROMANCE",
+    "name": "Marian-MT (EN to ROMANCE)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-tc-big-tr-en",
+    "name": "Marian-MT (TC to BIG)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-sv-en",
+    "name": "Marian-MT (SV to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-gem-gem",
+    "name": "Marian-MT (GEM to GEM)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-it-fr",
+    "name": "Marian-MT (IT to FR)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-da-en",
+    "name": "Marian-MT (DA to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-tr-en",
+    "name": "Marian-MT (TR to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-id-en",
+    "name": "Marian-MT (ID to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-bat-en",
+    "name": "Marian-MT (BAT to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-ja-en",
+    "name": "Marian-MT (JA to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-fr-de",
+    "name": "Marian-MT (FR to DE)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-da-de",
+    "name": "Marian-MT (DA to DE)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-no-de",
+    "name": "Marian-MT (NO to DE)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-ROMANCE-en",
+    "name": "Marian-MT (ROMANCE to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-gmw-gmw",
+    "name": "Marian-MT (GMW to GMW)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-fi-de",
+    "name": "Marian-MT (FI to DE)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-hi-en",
+    "name": "Marian-MT (HI to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-en-nl",
+    "name": "Marian-MT (EN to NL)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-et-en",
+    "name": "Marian-MT (ET to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-en-ar",
+    "name": "Marian-MT (EN to AR)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-th-en",
+    "name": "Marian-MT (TH to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-vi-en",
+    "name": "Marian-MT (VI to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-en-da",
+    "name": "Marian-MT (EN to DA)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-nl-fr",
+    "name": "Marian-MT (NL to FR)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-en-fi",
+    "name": "Marian-MT (EN to FI)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/m2m100_418M",
+    "name": "Xenova/m2m100_418M",
+    "vramEstimate": "~200 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-en-vi",
+    "name": "Marian-MT (EN to VI)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-it-es",
+    "name": "Marian-MT (IT to ES)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-jap-en",
+    "name": "Marian-MT (JAP to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-ro-fr",
+    "name": "Marian-MT (RO to FR)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-ru-es",
+    "name": "Marian-MT (RU to ES)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-ru-fr",
+    "name": "Marian-MT (RU to FR)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-ru-uk",
+    "name": "Marian-MT (RU to UK)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-uk-en",
+    "name": "Marian-MT (UK to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-uk-ru",
+    "name": "Marian-MT (UK to RU)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-xh-en",
+    "name": "Marian-MT (XH to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-en-ro",
+    "name": "Marian-MT (EN to RO)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-en-sv",
+    "name": "Marian-MT (EN to SV)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-en-uk",
+    "name": "Marian-MT (EN to UK)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-en-xh",
+    "name": "Marian-MT (EN to XH)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-es-de",
+    "name": "Marian-MT (ES to DE)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-es-fr",
+    "name": "Marian-MT (ES to FR)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-es-it",
+    "name": "Marian-MT (ES to IT)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-es-ru",
+    "name": "Marian-MT (ES to RU)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-fr-es",
+    "name": "Marian-MT (FR to ES)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-fr-ro",
+    "name": "Marian-MT (FR to RO)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-fr-ru",
+    "name": "Marian-MT (FR to RU)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-hu-en",
+    "name": "Marian-MT (HU to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-af-en",
+    "name": "Marian-MT (AF to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-de-es",
+    "name": "Marian-MT (DE to ES)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-de-fr",
+    "name": "Marian-MT (DE to FR)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-en-af",
+    "name": "Marian-MT (EN to AF)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-en-hi",
+    "name": "Marian-MT (EN to HI)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-en-hu",
+    "name": "Marian-MT (EN to HU)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-en-id",
+    "name": "Marian-MT (EN to ID)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-en-jap",
+    "name": "Marian-MT (EN to JAP)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-en-mul",
+    "name": "Marian-MT (EN to MUL)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/opus-mt-en-cs",
+    "name": "Marian-MT (EN to CS)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/mbart-large-50-many-to-many-mmt",
+    "name": "Xenova/mbart-large-50-many-to-many-mmt",
+    "vramEstimate": "~200 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/mbart-large-50-many-to-one-mmt",
+    "name": "Xenova/mbart-large-50-many-to-one-mmt",
+    "vramEstimate": "~200 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "Xenova/mbart-large-50",
+    "name": "Xenova/mbart-large-50",
+    "vramEstimate": "~200 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/tiny-random-MarianMTModel",
+    "name": "onnx-community/tiny-random-MarianMTModel",
+    "vramEstimate": "~200 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/opus-mt-zh-en",
+    "name": "Marian-MT (ZH to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/opus-mt-es-en",
+    "name": "Marian-MT (ES to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/opus-mt-de-en",
+    "name": "Marian-MT (DE to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/opus-mt-mul-en",
+    "name": "Marian-MT (MUL to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/opus-mt-it-en",
+    "name": "Marian-MT (IT to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/opus-mt-fr-en",
+    "name": "Marian-MT (FR to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/opus-mt-en-es",
+    "name": "Marian-MT (EN to ES)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/opus-mt-vi-en",
+    "name": "Marian-MT (VI to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/opus-mt-nl-en",
+    "name": "Marian-MT (NL to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/opus-mt-da-en",
+    "name": "Marian-MT (DA to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/opus-mt-en-fr",
+    "name": "Marian-MT (EN to FR)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/opus-mt-en-de",
+    "name": "Marian-MT (EN to DE)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/opus-mt-ar-en",
+    "name": "Marian-MT (AR to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/opus-mt-sv-en",
+    "name": "Marian-MT (SV to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/opus-mt-en-zh",
+    "name": "Marian-MT (EN to ZH)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/opus-mt-tc-big-tr-en",
+    "name": "Marian-MT (TC to BIG)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/opus-mt-en-ru",
+    "name": "Marian-MT (EN to RU)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/opus-mt-en-nl",
+    "name": "Marian-MT (EN to NL)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/opus-mt-fi-en",
+    "name": "Marian-MT (FI to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/opus-mt-ru-en",
+    "name": "Marian-MT (RU to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/opus-mt-tc-big-en-tr",
+    "name": "Marian-MT (TC to BIG)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/opus-mt-pl-en",
+    "name": "Marian-MT (PL to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/opus-mt-ROMANCE-en",
+    "name": "Marian-MT (ROMANCE to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/opus-mt-ja-en",
+    "name": "Marian-MT (JA to EN)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/opus-mt-en-ar",
+    "name": "Marian-MT (EN to AR)",
+    "vramEstimate": "~70 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/sarvam-translate-onnx",
+    "name": "onnx-community/sarvam-translate-onnx",
+    "vramEstimate": "~200 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/LFM2-350M-ENJP-MT-ONNX",
+    "name": "onnx-community/LFM2-350M-ENJP-MT-ONNX",
+    "vramEstimate": "~200 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/HY-MT1.5-1.8B-ONNX",
+    "name": "onnx-community/HY-MT1.5-1.8B-ONNX",
+    "vramEstimate": "~200 MB",
+    "engine": "transformers"
+  },
+  {
+    "id": "onnx-community/english-guyarati-ONNX",
+    "name": "onnx-community/english-guyarati-ONNX",
+    "vramEstimate": "~200 MB",
+    "engine": "transformers"
+  }
+]

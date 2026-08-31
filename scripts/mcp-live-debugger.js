@@ -73,7 +73,6 @@ import puppeteer from 'puppeteer';
   await runTestTier('Task 2: Chrome Native Translate + LaMa Manga', 'gg-translate', 'lama-manga');
   await runTestTier('Task 2: Chrome Native Translate + AOT-GAN', 'gg-translate', 'aotgan');
 
-  await runTestTier('Task 3: Transformers Model + Simple Inpaint', 'Xenova/opus-mt-ja-en', 'simple');
   await runTestTier('Task 3: WebLLM Model + Simple Inpaint', 'SmolLM2-135M-Instruct-q0f16-MLC', 'simple');
 
   console.log('\n======================================================');

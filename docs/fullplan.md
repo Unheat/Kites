@@ -17,7 +17,7 @@ A Chrome Extension-first web application that allows users to translate text wit
 - **Backend (Cloud API Compute):** FastAPI (Python) or Express.js (RESTful API) strictly for cloud translation processing and Auth.
 - **Local Database (Data & Images):** `IndexedDB` (using `Dexie.js` ORM) running inside the browser to store images as Blobs and translation history.
 - **Cloud Database (Auth Only):** PostgreSQL (for managing premium user accounts/subscriptions).
-- **Local AI Compute:** `Transformers.js` and `PaddleOCR` (ONNX Runtime Web) running in an Offscreen Document.
+- **Local AI Compute:** `WebLLM`, Chrome Translator, and `PaddleOCR` (ONNX Runtime Web) running in an Offscreen Document.
 - **Image Editor/Canvas:** `react-konva` for handling the interactive canvas (moving text boxes, changing fonts).
 
 ## 3. Database System Design (Schema Draft)
@@ -40,37 +40,27 @@ Only used for authentication and subscription management when the user opts for 
 
 ### A. How to run AI locally for Non-Tech Users (Zero Setup)
 *The Problem:* We want users to translate locally without installing Python, Docker, or external keys.
-*The Solution:* We use WebAssembly (Wasm) and WebGPU to run compressed models directly in JavaScript. We use a **Triple-Tier Local Translation Compute Strategy**:
-1.  **Chrome Translator API (Default):** The primary default translation engine uses Chrome's built-in Translation and Language Detector APIs (available natively in Chrome 138+). It runs Gemini Nano on-device, requiring 0MB download and zero user setup, providing completely free, offline, and unlimited translation.
-2.  **Transformers.js v3 (@huggingface/transformers):** Serves as a local fallback to support over 200 languages using specialized translation models like **NLLB-200** or **MarianMT**. Unlike v2, v3 supports both WebGPU and WASM execution. It integrates with our GPU acceleration settings: if WebGPU is enabled, it initializes with `device: 'webgpu'`; otherwise, it falls back to CPU via `device: 'wasm'`.
-3.  **WebLLM (WebGPU):** For users with capable GPUs, we provide WebLLM to run full Large Language Models (like Llama-3.2-1B or Qwen-1.5B). LLMs provide superior contextual translation quality but require more resources and run exclusively on WebGPU.
+*The Solution:* Kites uses Chrome's native Translator API where available and WebLLM for users with capable WebGPU hardware. Google Translate remains an online option. The former Transformers.js / NLLB model path is archived and is not an active engine.
 
-**Unified Model Search Registry & Optimizations:**
-Instead of hardcoding a massive list of downloadable models in our UI, we have implemented a high-performance model search bar combining multiple registries. Each registry has a specific update strategy:
-
-*   **ONNX / Transformers.js (Dynamic GitHub Registry):** Instead of querying the Hugging Face API directly (which causes rate limits), we dynamically fetch `onnx-registry.json` from `raw.githubusercontent.com`. 
-    *   **How to Update:** Run `node scripts/generate-registry.cjs` to scrape Hugging Face and rebuild the JSON file, then commit it to GitHub. Extension users will see the new models *instantly* without needing a new Chrome Extension release.
-*   **WebLLM (Hardcoded NPM Registry):** We read the `webllm.prebuiltAppConfig.model_list` directly from the NPM package. We intentionally DO NOT fetch this dynamically over the internet because WebLLM models are tightly coupled to the exact WebAssembly/WebGPU shader code in the NPM package. If we dynamically updated models, older extension engines would crash trying to load them.
-    *   **How to Update:** Run `npm update @mlc-ai/web-llm`, run `npm run build` to recompile the extension, and publish a new version to the Chrome Web Store.
-*   **MiniSearch & DOM Capping:** The UI merges both lists and displays badges (`[WebGPU]` / `[CPU]`). To ensure the popup never lags while rendering 150+ models, we use `MiniSearch` for fuzzy autocomplete, and hard-cap the DOM to only render the top 50 results at a time.
+**Supported translation engines:**
+1. **Chrome Translator API:** Uses Chrome's built-in Translation and Language Detector APIs when available, with no Kites model download.
+2. **WebLLM (WebGPU):** Runs supported MLC models locally through WebGPU. Models are bundled in the static registry because they must match the installed WebLLM runtime.
+3. **Google Translate:** Provides the online translation route and the default engine.
 
 **The User Flow (Extension Dashboard & Setup):**
-1. **Instant Access:** Upon extension installation, no translation model download is triggered. The default engine is set to the **Chrome Translator API**, allowing users to translate images immediately.
-2. **Lazy-Loading:** If the user selects a custom NLLB-200 or WebLLM model, the dashboard displays a progress bar and begins downloading the model weights.
-3. **Persistent Disk Cache:** The weights are cached permanently in Chrome's local storage (Cache API). Future translation runs load the model instantly from the local disk cache in milliseconds.
-4. **VRAM/RAM Resident Singleton:** Once loaded, the engine instance is kept active in memory by the `TranslationManager` singleton. This avoids reloading weights or recompiling WebGPU shaders for subsequent images, preventing VRAM churn.
+1. **Instant Access:** The default engine is Google Translate; Chrome Translator can also be selected when available.
+2. **Lazy-Loading:** Selecting a WebLLM model displays progress while its model weights download.
+3. **VRAM/RAM Resident Singleton:** Once loaded, `TranslationManager` keeps the active engine in memory to avoid repeated WebGPU initialization.
 
 #### VRAM/Memory Lifetime & Storage Matrix
 
-This matrix describes how each of the 5 model categories is downloaded, cached on disk, loaded into memory, and how they handle WebGPU vs. WASM fallback using the local GPU settings:
-
-| Model Category | Download Source | Disk Caching | Memory Residency (VRAM/RAM) | GPU / WASM Fallback Logic |
+| Model Category | Download Source | Disk Caching | Memory Residency | Runtime |
 | :--- | :--- | :--- | :--- | :--- |
-| **1. WebLLM** | MLC CDN (auto-resolved by ID) | Cache API (automatic) | Kept in VRAM via `WebLLMEngine` singleton | WebGPU only. If GPU setting or hardware check fails, falls back to throwing an error pointing to CPU models. |
-| **2. Transformers.js v3** | HuggingFace CDN (auto-resolved by ID) | Cache API (automatic) | Kept in RAM/VRAM via `TransformersEngine` singleton | Automatic fallback based on settings (`popupState`): calls `pipeline(..., { device: useWebGpu ? 'webgpu' : 'wasm' })`. |
-| **3. PaddleOCR** | SDK CDN (auto-resolved by preset ID) | SDK internal cache | Kept in RAM/VRAM via `PaddleOcrEngine` singleton | Automatic fallback based on settings: initializes the SDK service with `executionProviders: useWebGpu ? ['webgpu', 'wasm'] : ['wasm']`. |
-| **4. LaMa / AOT-GAN** | Custom HF Repo (resolves from local TS registry) | Browser HTTP Cache | Kept in RAM/VRAM via `InpaintManager` singleton | Automatic fallback based on settings: passes `executionProviders: useWebGpu ? ['webgpu', 'wasm'] : ['wasm']` to `InferenceSession.create()`. |
-| **5. Chrome Translator** | Chrome internal (downloaded by browser) | Chrome internal cache | Managed internally by browser API | Pure CPU-based Gemini Nano on-device (no GPU setting required). |
+| **WebLLM** | MLC CDN (auto-resolved by ID) | WebLLM-managed browser cache | Kept in VRAM via `WebLLMEngine` | WebGPU only |
+| **PaddleOCR** | Preset registry URLs | Cache API | Kept in RAM/VRAM via `PaddleOcrEngine` | WebGPU/WASM |
+| **LaMa / AOT-GAN** | Preset registry URLs | Cache API | Kept in RAM/VRAM via `InpaintManager` | WebGPU/WASM |
+| **Chrome Translator** | Chrome internal | Chrome internal cache | Browser-managed | Chrome native API |
+| **Google Translate** | Google service | No local model cache | Stateless requests | Online API |
 
 ### B. The OCR & Detection Breakthrough (PaddleOCR ONNX)
 *The Problem:* We need a robust tool that does TWO things: finds the exact X/Y coordinates of text (detection) AND reads it accurately (recognition) across multiple popular languages (not just Japanese manga), all while running locally in the browser without Python.

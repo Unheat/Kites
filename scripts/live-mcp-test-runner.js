@@ -99,7 +99,7 @@ const extensionPath = path.join(__dirname, '..', 'dist');
     await setPopupState({
       activeEngineId: engineId,
       activeInpaintId: inpaintId,
-      fallbackChain: ['Xenova/opus-mt-ja-en'],
+      fallbackChain: [],
       sourceLang: 'auto',
       targetLang: 'en',
       concurrency: 1,
@@ -177,7 +177,6 @@ const extensionPath = path.join(__dirname, '..', 'dist');
   await runTestPass('Task 2: Inpaint Tier 3 (AOT-GAN)', 'gg-translate', 'aotgan');
 
   // STEP 3: Test HuggingFace Transformers & WebLLM MLC Models
-  await runTestPass('Task 3: Transformers (Xenova/opus-mt-ja-en)', 'Xenova/opus-mt-ja-en', 'simple');
   await runTestPass('Task 3: WebLLM (SmolLM2-135M-Instruct-q0f16-MLC)', 'SmolLM2-135M-Instruct-q0f16-MLC', 'simple');
 
   console.log('\n================================================================');

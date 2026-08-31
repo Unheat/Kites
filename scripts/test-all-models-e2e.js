@@ -172,11 +172,6 @@ async function testModelConfig(browser, configName, popupState) {
       manualMode: 'hover'
     });
 
-    // 4. Task 3: Transformers Model (Xenova/opus-mt-ja-en) + Simple Fill
-    await testModelConfig(browser, 'Task 3: HuggingFace Transformers Model', {
-      activeEngineId: 'Xenova/opus-mt-ja-en',
-      activeInpaintId: 'simple',
-      sourceLang: 'ja',
       targetLang: 'en',
       concurrency: 1,
       isAuto: false,

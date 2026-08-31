@@ -72,7 +72,7 @@ server.listen(8089);
         popupState: {
           activeEngineId: 'gg-translate',
           activeInpaintId: 'simple',
-          fallbackChain: ['Xenova/opus-mt-ja-en'],
+          fallbackChain: [],
           sourceLang: 'auto',
           targetLang: 'en',
           concurrency: 1,
