@@ -9,6 +9,7 @@ const MIN_WIDTH_IMAGE_PX = 150;
 const MIN_HEIGHT_IMAGE_PX = 150;
 
 const TIMEOUT_MS = 300; // Debounce timeout in ms
+const HOVER_LEAVE_DELAY_MS = 150; // Debounce delay before hiding button on mouse leave
 
 /**
  * Renders the floating translation button using modern CSS Anchor Positioning.
@@ -253,9 +254,35 @@ function GlobalOverlay() {
         if (timeoutId) window.clearTimeout(timeoutId);
       };
     } else {
+      let hideTimeoutId: number | null = null;
+
+      const cancelHide = () => {
+        if (hideTimeoutId !== null) {
+          window.clearTimeout(hideTimeoutId);
+          hideTimeoutId = null;
+        }
+      };
+
+      const scheduleHide = () => {
+        if (hideTimeoutId === null) {
+          hideTimeoutId = window.setTimeout(() => {
+            setActiveImg(null);
+            hideTimeoutId = null;
+          }, HOVER_LEAVE_DELAY_MS);
+        }
+      };
+
       const handleMouseOver = (e: MouseEvent) => {
         const target = e.target as HTMLElement;
-        if (target && target.tagName === 'IMG') {
+        if (!target) return;
+
+        // If hovering over the currently active image or the translate button, keep it visible
+        if (activeImgRef.current && (target === activeImgRef.current.imgElement || target.closest('#kites-translate-btn'))) {
+          cancelHide();
+          return;
+        }
+
+        if (target.tagName === 'IMG') {
           const img = target as HTMLImageElement;
           
           // Use getBoundingClientRect for accurate rendered size
@@ -264,10 +291,17 @@ function GlobalOverlay() {
 
           let anchorName = img.style.getPropertyValue('anchor-name');
           if (!anchorName) {
-            anchorName = `--kites-img-${Math.random().toString(36).substr(2, 9)}`;
+            anchorName = `--kites-img-${Math.random().toString(36).substring(2, 11)}`;
             img.style.setProperty('anchor-name', anchorName);
           }
 
+          // If this image is already the active image, just cancel any scheduled hide
+          if (activeImgRef.current?.imgElement === img) {
+            cancelHide();
+            return;
+          }
+
+          cancelHide();
           setActiveImg({
             srcUrl: img.src,
             imgElement: img,
@@ -276,24 +310,34 @@ function GlobalOverlay() {
         }
       };
 
-      const handleMouseMove = (e: MouseEvent) => {
+      const handleMouseOut = (e: MouseEvent) => {
         if (!activeImgRef.current) return;
         const target = e.target as HTMLElement;
-        
-        const isOverImg = target === activeImgRef.current.imgElement;
-        const isOverButton = target.closest('#kites-translate-btn');
-        
-        if (!isOverImg && !isOverButton) {
-          setActiveImg(null);
+        const relatedTarget = e.relatedTarget as HTMLElement | null;
+
+        // If moving directly into the translate button or still inside the active image, don't hide
+        const isStayingInImage = relatedTarget && (relatedTarget === activeImgRef.current.imgElement || relatedTarget.closest('#kites-translate-btn') !== null);
+        if (isStayingInImage) {
+          cancelHide();
+          return;
+        }
+
+        // If cursor left the active image or translate button
+        const isLeavingImage = target === activeImgRef.current.imgElement;
+        const isLeavingButton = target.closest('#kites-translate-btn') !== null;
+
+        if (isLeavingImage || isLeavingButton) {
+          scheduleHide();
         }
       };
 
-      document.addEventListener('mouseover', handleMouseOver);
-      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseover', handleMouseOver, { passive: true });
+      document.addEventListener('mouseout', handleMouseOut, { passive: true });
 
       return () => {
+        cancelHide();
         document.removeEventListener('mouseover', handleMouseOver);
-        document.removeEventListener('mousemove', handleMouseMove);
+        document.removeEventListener('mouseout', handleMouseOut);
       };
     }
   }, [mode, autoTranslate]);
