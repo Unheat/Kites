@@ -11,6 +11,7 @@ export type MessageType =
   | 'MODEL_DOWNLOAD_ERROR' // Offscreen -> (Popup & Background)
   | 'GET_ACTIVE_DOWNLOADS' // Popup -> Background -> Offscreen
   | 'CHECK_MODEL_STATUS'   // Popup -> Background -> Offscreen
+  | 'GET_MODEL_STATUSES'   // Popup -> Background -> Offscreen
   | 'PRELOAD_ACTIVE_ENGINE'; // Background -> Offscreen
 
 export interface TranslateImageMessage {

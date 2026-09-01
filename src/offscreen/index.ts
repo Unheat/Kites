@@ -5,6 +5,7 @@ import { inpaintRegistry } from './engines/inpaint/inpaintRegistry';
 import { ocrRegistry, resolveOcrTier } from './engines/ocr/ocrRegistry';
 import { InpaintCacheManager } from './services/InpaintCacheManager';
 import { OcrCacheManager } from './services/OcrCacheManager';
+import { hasModelInCache } from '@mlc-ai/web-llm';
 
 chrome.runtime.onMessage.addListener((message: ProcessJobMessage | any, _sender: chrome.runtime.MessageSender, sendResponse: (response?: any) => void) => {
   if (message.type === 'PROCESS_JOB' && message.payload?.jobId) {
@@ -67,6 +68,13 @@ chrome.runtime.onMessage.addListener((message: ProcessJobMessage | any, _sender:
   if (message.type === 'CHECK_MODEL_STATUS' && message.payload?.modelId) {
     handleCheckStatus(message.payload.modelId)
       .then((isCached) => sendResponse({ status: 'success', isCached }))
+      .catch((err) => sendResponse({ status: 'error', error: err.message }));
+    return true;
+  }
+
+  if (message.type === 'GET_MODEL_STATUSES' && Array.isArray(message.payload?.modelIds)) {
+    handleGetModelStatuses(message.payload.modelIds)
+      .then(({ statuses, downloads }) => sendResponse({ status: 'success', statuses, downloads }))
       .catch((err) => sendResponse({ status: 'error', error: err.message }));
     return true;
   }
@@ -349,11 +357,40 @@ async function handleCheckStatus(modelId: string): Promise<boolean> {
       return isCached;
     }
 
-    return false;
+    return await hasModelInCache(modelId);
   } catch (err) {
     console.error(`[Offscreen] Check status failed for ${modelId}:`, err);
     return false;
   }
+}
+
+/**
+ * Returns persistent cache availability and active-download progress for popup model lists.
+ *
+ * @param modelIds - Model IDs currently displayed by the popup.
+ * @returns Complete cache statuses plus the active download snapshot.
+ */
+async function handleGetModelStatuses(modelIds: string[]): Promise<{
+  statuses: Record<string, boolean>;
+  downloads: Record<string, { progress: number; status: string }>;
+}> {
+  const uniqueIds = [...new Set(modelIds)];
+  const results = await Promise.allSettled(uniqueIds.map(async (modelId) => [modelId, await handleCheckStatus(modelId)] as const));
+  const statuses: Record<string, boolean> = {};
+
+  for (const result of results) {
+    if (result.status === 'fulfilled') {
+      statuses[result.value[0]] = result.value[1];
+    } else {
+      console.error('[Offscreen] Model status check failed:', result.reason);
+    }
+  }
+
+  const downloads = Object.fromEntries(Object.entries(activeDownloads).map(([modelId, download]) => [
+    modelId,
+    { progress: download.maxProgress, status: download.status },
+  ]));
+  return { statuses, downloads };
 }
 
 /**

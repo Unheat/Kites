@@ -59,6 +59,14 @@ The full test suite and production build are recorded separately in the final ve
 
 ---
 
+## Follow-up: WebLLM Cache Rehydration and Event-Only Ordering
+
+The archive cleanup exposed a pre-existing WebLLM availability gap: the popup rebuilt every WebLLM row as unavailable after a remount because its completed cache was never queried. A follow-up now requests one batched status snapshot from the offscreen document. The offscreen owner uses WebLLM's public complete-cache validator and existing OCR/inpaint cache managers, preventing a large WebLLM runtime import or hundreds of popup message round trips.
+
+Initial dropdown order remains unchanged. The popup reorders only after a model reaches `ready` or a custom API is added: the configured default stays first, downloaded entries move above pending entries, and each group is lexical. Search results retain MiniSearch relevance order.
+
+---
+
 ## Next Steps / Key Takeaways
 
 * **Key Takeaway:** Retiring an engine requires removing its runtime factory, catalog entries, persisted-state compatibility, cache UX, package dependency, and test/tooling references—not merely its implementation file.

@@ -1,10 +1,9 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Download, ChevronDown, Plus, Search, Check } from 'lucide-react';
 import type { PopupState } from '../../shared/types';
 import AddApiForm from './AddApiForm';
 import MiniSearch from 'minisearch';
 import { ModelRegistry } from '../services/ModelRegistry';
-import { ocrRegistry } from '../../offscreen/engines/ocr/ocrRegistry';
 
 interface EngineSelectionPanelProps {
   state: PopupState;
@@ -20,6 +19,21 @@ export interface Engine {
   vramEstimate?: string;
 }
 
+/**
+ * Orders a changed model catalog without mutating React state.
+ *
+ * @param engines - Models to order after a download or custom API addition.
+ * @param defaultId - The model that must remain pinned first.
+ * @returns The ordered model list.
+ */
+export function orderChangedCatalog(engines: readonly Engine[], defaultId: string): Engine[] {
+  return [...engines].sort((left, right) =>
+    Number(right.id === defaultId) - Number(left.id === defaultId) ||
+    Number(Boolean(right.isDownloaded)) - Number(Boolean(left.isDownloaded)) ||
+    left.name.localeCompare(right.name)
+  );
+}
+
 export default function EngineSelectionPanel({ state, updateState }: EngineSelectionPanelProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [isOpenInpaint, setIsOpenInpaint] = useState(false);
@@ -27,6 +41,10 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
   const [showAddApi, setShowAddApi] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [downloads, setDownloads] = useState<Record<string, { progress: number; status: string }>>({});
+  const [translationOrder, setTranslationOrder] = useState<string[] | null>(null);
+  const customApiIds = useRef<string[] | null>(null);
+  const customApisRef = useRef(state.customApis);
+  const readyModelIds = useRef(new Set<string>());
 
   useEffect(() => {
     // Query active downloads on mount
@@ -51,9 +69,33 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
         }));
         
         if (message.payload.progress >= 1 || message.payload.status === 'ready') {
-          setBaseEngines(prev => prev.map(e => e.id === message.payload.modelId ? { ...e, isDownloaded: true } : e));
-          setInpaintBaseEngines(prev => prev.map(e => e.id === message.payload.modelId ? { ...e, isDownloaded: true } : e));
-          setOcrBaseEngines(prev => prev.map(e => e.id === message.payload.modelId ? { ...e, isDownloaded: true } : e));
+          readyModelIds.current.add(message.payload.modelId);
+          setBaseEngines(prev => {
+            if (!prev.some(engine => engine.id === message.payload.modelId)) return prev;
+            const ordered = orderChangedCatalog(
+              prev.map(engine => engine.id === message.payload.modelId ? { ...engine, isDownloaded: true } : engine),
+              'gg-translate'
+            );
+            setTranslationOrder(orderChangedCatalog([
+              ...ordered,
+              ...customApisRef.current.map(api => ({ id: api.id, name: `${api.provider}/${api.modelName}`, type: 'custom' as const, isDownloaded: true })),
+            ], 'gg-translate').map(engine => engine.id));
+            return ordered;
+          });
+          setInpaintBaseEngines(prev => prev.some(engine => engine.id === message.payload.modelId)
+            ? orderChangedCatalog(
+              prev.map(engine => engine.id === message.payload.modelId ? { ...engine, isDownloaded: true } : engine),
+              'simple'
+            )
+            : prev
+          );
+          setOcrBaseEngines(prev => prev.some(engine => engine.id === message.payload.modelId)
+            ? orderChangedCatalog(
+              prev.map(engine => engine.id === message.payload.modelId ? { ...engine, isDownloaded: true } : engine),
+              'v6-small'
+            )
+            : prev
+          );
         }
       }
 
@@ -96,47 +138,59 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
     { id: 'v3-japanese-mobile', name: 'PaddleOCR v3 Japanese Mobile', type: 'local', isDownloaded: false },
   ]);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const hasCache = await caches.has('kites-inpaint-models-v1');
-        if (hasCache) {
-          const cache = await caches.open('kites-inpaint-models-v1');
-          const keys = await cache.keys();
-          const urls = keys.map(k => k.url);
-          setInpaintBaseEngines(prev => prev.map(e => {
-            if (e.id === 'aotgan') return { ...e, isDownloaded: urls.some(u => u.includes('aotgan')) };
-            if (e.id === 'lama-base') return { ...e, isDownloaded: urls.some(u => u.includes('lama-base')) };
-            if (e.id === 'lama-manga') return { ...e, isDownloaded: urls.some(u => u.includes('lama-manga')) };
-            return e;
-          }));
-        }
-
-        const hasOcrCache = await caches.has('kites-ocr-models-v1');
-        if (hasOcrCache) {
-          const ocrCache = await caches.open('kites-ocr-models-v1');
-          const ocrKeys = await ocrCache.keys();
-          const ocrUrls = ocrKeys.map(k => k.url);
-          setOcrBaseEngines(prev => prev.map(e => {
-            const entry = ocrRegistry[e.id];
-            if (!entry) return e;
-            const isDownloaded = ocrUrls.includes(entry.detectionUrl) &&
-                                 ocrUrls.includes(entry.recognitionUrl) &&
-                                 ocrUrls.includes(entry.charactersDictionaryUrl);
-            return { ...e, isDownloaded };
-          }));
-        }
-      } catch (e) {
-        console.warn('Model cache check failed:', e);
-      }
-    })();
-  }, []);
-
   const [baseEngines, setBaseEngines] = useState<Engine[]>([]);
 
   useEffect(() => {
-    ModelRegistry.getAvailableEngines().then(setBaseEngines);
+    ModelRegistry.getAvailableEngines().then((engines) => {
+      const initializedEngines = engines.map(engine => ({
+        ...engine,
+        isDownloaded: Boolean(engine.isDownloaded || readyModelIds.current.has(engine.id)),
+      }));
+      const completedDuringLoad = initializedEngines.some(engine => readyModelIds.current.has(engine.id));
+      const nextEngines = completedDuringLoad
+        ? orderChangedCatalog(initializedEngines, 'gg-translate')
+        : initializedEngines;
+      setBaseEngines(nextEngines);
+      if (completedDuringLoad) {
+        setTranslationOrder(orderChangedCatalog([
+          ...nextEngines,
+          ...customApisRef.current.map(api => ({ id: api.id, name: `${api.provider}/${api.modelName}`, type: 'custom' as const, isDownloaded: true })),
+        ], 'gg-translate').map(engine => engine.id));
+      }
+      const modelIds = [
+        ...engines.filter(engine => engine.hardware === 'WebGPU').map(engine => engine.id),
+        ...inpaintBaseEngines.map(engine => engine.id),
+        ...ocrBaseEngines.map(engine => engine.id),
+      ];
+      chrome.runtime.sendMessage({ type: 'GET_MODEL_STATUSES', payload: { modelIds } }, (response) => {
+        if (chrome.runtime.lastError || response?.status !== 'success') {
+          console.warn('[EngineSelectionPanel] Failed to hydrate model statuses:', chrome.runtime.lastError?.message || response?.error);
+          return;
+        }
+        setDownloads(prev => ({ ...prev, ...response.downloads }));
+        const hydrate = (items: Engine[]) => items.map(engine => ({
+          ...engine,
+          isDownloaded: Boolean(engine.isDownloaded || readyModelIds.current.has(engine.id) || response.statuses[engine.id]),
+        }));
+        setBaseEngines(prev => hydrate(prev));
+        setInpaintBaseEngines(prev => hydrate(prev));
+        setOcrBaseEngines(prev => hydrate(prev));
+      });
+    });
   }, []);
+
+  useEffect(() => {
+    const currentIds = state.customApis.map(api => api.id);
+    customApisRef.current = state.customApis;
+    if (customApiIds.current !== null && currentIds.length > customApiIds.current.length) {
+      const ordered = orderChangedCatalog([
+        ...baseEngines,
+        ...state.customApis.map(api => ({ id: api.id, name: `${api.provider}/${api.modelName}`, type: 'custom' as const, isDownloaded: true })),
+      ], 'gg-translate');
+      setTranslationOrder(ordered.map(engine => engine.id));
+    }
+    customApiIds.current = currentIds;
+  }, [baseEngines, state.customApis]);
 
   const allEngines = useMemo(() => {
     let custom: Engine[] = (state.customApis || []).map(api => ({
@@ -152,8 +206,10 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
       combined = combined.filter(e => e.hardware !== 'WebGPU');
     }
     
-    return combined;
-  }, [baseEngines, state.customApis, state.webgpuSupported]);
+    if (!translationOrder) return combined;
+    const rank = new Map(translationOrder.map((id, index) => [id, index]));
+    return [...combined].sort((left, right) => (rank.get(left.id) ?? Number.MAX_SAFE_INTEGER) - (rank.get(right.id) ?? Number.MAX_SAFE_INTEGER));
+  }, [baseEngines, state.customApis, state.webgpuSupported, translationOrder]);
 
   const miniSearch = useMemo(() => {
     if (allEngines.length === 0) return null;
