@@ -4,24 +4,37 @@ import type { ITranslationEngine } from './BaseEngine';
 
 const MAX_SEGMENTS_PER_BATCH = 10;
 const REQUEST_TIMEOUT_MS = 45_000;
-const MAX_TRANSIENT_ATTEMPTS = 2;
+const MAX_ATTEMPTS_PER_MODE = 2;
 const ANTHROPIC_VERSION = '2023-06-01';
 const GEMINI_API_ROOT = 'https://generativelanguage.googleapis.com/v1beta';
 const OPENAI_API_ROOT = 'https://api.openai.com/v1';
 const ANTHROPIC_API_ROOT = 'https://api.anthropic.com/v1';
 
-interface TranslationSegment {
-  id: string;
-  text: string;
-}
+type OutputMode = 'strict-schema' | 'json-mode' | 'prompt-json';
+type ProviderError = Error & { status?: number; code?: string; param?: string; capability?: OutputMode };
 
-interface RequestOptions {
-  signal: AbortSignal;
-  structuredOutput: boolean;
-}
+interface TranslationSegment { id: string; text: string; }
+interface RequestOptions { signal: AbortSignal; mode: OutputMode; }
+
+const TRANSLATION_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['translations'],
+  properties: {
+    translations: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['id', 'text'],
+        properties: { id: { type: 'string' }, text: { type: 'string' } },
+      },
+    },
+  },
+};
 
 /**
- * Translates OCR text through one configured remote API provider.
+ * Translates OCR text through one configured remote provider with native schema output.
  *
  * @param config - The saved provider, model, credential, and optional compatible API root.
  * @returns An engine that preserves the positional ITranslationEngine translation contract.
@@ -29,15 +42,14 @@ interface RequestOptions {
 export class CustomApiEngine implements ITranslationEngine {
   private initialized = false;
   private readonly config: CustomApiConfig;
+  private preferredOutputMode: OutputMode | undefined;
 
   /**
    * Creates a remote translation engine from a saved custom API configuration.
    *
    * @param config - The provider configuration used for all engine requests.
    */
-  constructor(config: CustomApiConfig) {
-    this.config = config;
-  }
+  constructor(config: CustomApiConfig) { this.config = config; }
 
   /**
    * Validates the saved provider configuration before it can issue network requests.
@@ -51,7 +63,7 @@ export class CustomApiEngine implements ITranslationEngine {
   }
 
   /**
-   * Translates nonblank texts in bounded JSON batches and restores original array positions.
+   * Translates nonblank texts in bounded batches and restores original array positions.
    *
    * @param texts - OCR strings whose output positions must be preserved.
    * @param sourceLangId - Source language identifier or auto.
@@ -61,24 +73,18 @@ export class CustomApiEngine implements ITranslationEngine {
   async translate(texts: string[], sourceLangId = 'auto', targetLangId = 'en'): Promise<string[]> {
     if (!this.initialized) throw new Error('CustomApiEngine is not initialized. Call init() first.');
     if (texts.length === 0) return [];
-
-    const segments = texts.flatMap((text, index) => text.trim()
-      ? [{ id: String(index), text: text.trim() }]
-      : []);
+    const segments = texts.flatMap((text, index) => text.trim() ? [{ id: String(index), text: text.trim() }] : []);
     const results = new Array<string>(texts.length).fill('');
     if (segments.length === 0) return results;
 
     const sourceLang = sourceLangId === 'auto' ? 'the detected source language' : getLanguageName(sourceLangId);
     const targetLang = getLanguageName(targetLangId);
     console.log(`[CustomApiEngine] Translating ${segments.length} blocks with ${this.config.provider}.`);
-
     for (let offset = 0; offset < segments.length; offset += MAX_SEGMENTS_PER_BATCH) {
       const batch = segments.slice(offset, offset + MAX_SEGMENTS_PER_BATCH);
-      const rawOutput = await this.requestBatch(batch, sourceLang, targetLang);
-      const translations = this.parseTranslations(rawOutput, batch);
+      const translations = this.parseTranslations(await this.requestBatch(batch, sourceLang, targetLang), batch);
       for (const translation of translations) results[Number(translation.id)] = translation.text;
     }
-
     return results;
   }
 
@@ -87,9 +93,7 @@ export class CustomApiEngine implements ITranslationEngine {
    *
    * @returns A promise that resolves after state is cleared.
    */
-  async destroy(): Promise<void> {
-    this.initialized = false;
-  }
+  async destroy(): Promise<void> { this.initialized = false; }
 
   /**
    * Validates fields that are required to safely send credentials to a provider.
@@ -97,36 +101,28 @@ export class CustomApiEngine implements ITranslationEngine {
    * @returns Nothing; throws when the configuration is unusable.
    */
   private validateConfig(): void {
-    if (!this.config.modelName.trim() || !this.config.apiKey.trim()) {
-      throw new Error('Custom API requires both a model name and API key.');
-    }
+    if (!this.config.modelName.trim() || !this.config.apiKey.trim()) throw new Error('Custom API requires both a model name and API key.');
     if (this.config.provider === 'openai-compatible') this.getCompatibleApiRoot();
   }
 
   /**
    * Resolves and validates a user-controlled compatible API root.
    *
-   * @returns The normalized API root without a trailing slash.
+   * @returns The normalized API root without a trailing slash or completion path.
    */
   private getCompatibleApiRoot(): string {
     if (!this.config.baseUrl?.trim()) throw new Error('OpenAI-compatible APIs require a base URL.');
     let url: URL;
-    try {
-      url = new URL(this.config.baseUrl.trim());
-    } catch {
-      throw new Error('Custom API base URL must be an absolute HTTP(S) URL.');
-    }
-    const localhost = url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '[::1]';
+    try { url = new URL(this.config.baseUrl.trim()); } catch { throw new Error('Custom API base URL must be an absolute HTTP(S) URL.'); }
+    const localhost = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
     if ((url.protocol !== 'https:' && !(localhost && url.protocol === 'http:')) || url.username || url.password) {
       throw new Error('Custom API base URL must be HTTPS (or HTTP localhost) without embedded credentials.');
     }
-    return url.toString()
-      .replace(/\/+$/, '')
-      .replace(/\/chat\/completions$/i, '');
+    return url.toString().replace(/\/+$/, '').replace(/\/chat\/completions$/i, '');
   }
 
   /**
-   * Sends a batch with one structured-output attempt and a compatible prompt-only retry.
+   * Negotiates the strongest provider output format that the selected model supports.
    *
    * @param segments - Indexed source texts in the current batch.
    * @param sourceLang - Human-readable source language.
@@ -134,49 +130,68 @@ export class CustomApiEngine implements ITranslationEngine {
    * @returns The provider's raw JSON completion text.
    */
   private async requestBatch(segments: TranslationSegment[], sourceLang: string, targetLang: string): Promise<string> {
-    try {
-      return await this.requestWithRetries(segments, sourceLang, targetLang, true);
-    } catch (error) {
-      if (this.config.provider !== 'openai-compatible' || !this.isStructuredOutputRejection(error)) throw error;
-      console.warn('[CustomApiEngine] Compatible endpoint rejected structured output; retrying with prompt-only JSON.');
-      return this.requestWithRetries(segments, sourceLang, targetLang, false);
+    const modes = this.getOutputModes();
+    const startIndex = this.preferredOutputMode ? Math.max(0, modes.indexOf(this.preferredOutputMode)) : 0;
+    for (let index = startIndex; index < modes.length; index++) {
+      const mode = modes[index];
+      try {
+        const output = await this.requestWithRetries(segments, sourceLang, targetLang, mode);
+        this.preferredOutputMode = mode;
+        return output;
+      } catch (error) {
+        if (this.isCapabilityRejection(error, mode) && index < modes.length - 1) {
+          console.warn(`[CustomApiEngine] ${this.config.provider} rejected ${mode}; using the next compatible output mode.`);
+          continue;
+        }
+        throw error;
+      }
     }
+    throw new Error('Provider does not support a usable JSON output mode.');
   }
 
   /**
-   * Retries transient provider failures without retrying authentication or invalid-request errors.
+   * Lists real output modes supported by the selected provider protocol.
+   *
+   * @returns Output modes ordered from strictest to broadest compatibility.
+   */
+  private getOutputModes(): OutputMode[] {
+    return this.config.provider === 'claude'
+      ? ['strict-schema', 'prompt-json']
+      : ['strict-schema', 'json-mode', 'prompt-json'];
+  }
+
+  /**
+   * Retries only transient transport failures while retaining the same output mode.
    *
    * @param segments - Indexed source texts in the current batch.
    * @param sourceLang - Human-readable source language.
    * @param targetLang - Human-readable target language.
-   * @param structuredOutput - Whether to request the provider's JSON response feature.
+   * @param mode - Current provider output mode.
    * @returns The provider's raw JSON completion text.
    */
-  private async requestWithRetries(segments: TranslationSegment[], sourceLang: string, targetLang: string, structuredOutput: boolean): Promise<string> {
+  private async requestWithRetries(segments: TranslationSegment[], sourceLang: string, targetLang: string, mode: OutputMode): Promise<string> {
     let lastError: unknown;
-    for (let attempt = 1; attempt <= MAX_TRANSIENT_ATTEMPTS; attempt++) {
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS_PER_MODE; attempt++) {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
       try {
-        return await this.requestProvider(segments, sourceLang, targetLang, { signal: controller.signal, structuredOutput });
+        return await this.requestProvider(segments, sourceLang, targetLang, { signal: controller.signal, mode });
       } catch (error) {
         lastError = error;
-        if (attempt === MAX_TRANSIENT_ATTEMPTS || !this.isTransientFailure(error)) throw error;
-        console.warn(`[CustomApiEngine] Transient ${this.config.provider} failure; retrying batch (${attempt + 1}/${MAX_TRANSIENT_ATTEMPTS}).`);
-      } finally {
-        clearTimeout(timeout);
-      }
+        if (attempt === MAX_ATTEMPTS_PER_MODE || !this.isTransientFailure(error)) throw error;
+        console.warn(`[CustomApiEngine] Transient ${this.config.provider} failure; retrying ${mode} (${attempt + 1}/${MAX_ATTEMPTS_PER_MODE}).`);
+      } finally { clearTimeout(timeout); }
     }
     throw lastError;
   }
 
   /**
-   * Builds and sends the provider-native request, then extracts its generated text.
+   * Builds and sends the provider-native request, then extracts generated text.
    *
    * @param segments - Indexed source texts in the current batch.
    * @param sourceLang - Human-readable source language.
    * @param targetLang - Human-readable target language.
-   * @param options - Request cancellation and structured-output settings.
+   * @param options - Request cancellation and output-mode settings.
    * @returns The raw generated JSON text.
    */
   private async requestProvider(segments: TranslationSegment[], sourceLang: string, targetLang: string, options: RequestOptions): Promise<string> {
@@ -202,44 +217,41 @@ export class CustomApiEngine implements ITranslationEngine {
    * Calls an OpenAI or OpenAI-compatible Chat Completions endpoint.
    *
    * @param instruction - Translation instruction and source JSON.
-   * @param options - Request cancellation and structured-output settings.
+   * @param options - Request cancellation and output-mode settings.
    * @returns The assistant completion content.
    */
   private async requestOpenAi(instruction: string, options: RequestOptions): Promise<string> {
     const root = this.config.provider === 'openai' ? OPENAI_API_ROOT : this.getCompatibleApiRoot();
-    const body: Record<string, unknown> = {
-      model: this.config.modelName,
-      temperature: 0,
-      messages: [{ role: 'user', content: instruction }],
-    };
-    if (options.structuredOutput) body.response_format = { type: 'json_object' };
-    const response = await fetch(`${root}/chat/completions`, {
+    const body: Record<string, unknown> = { model: this.config.modelName, temperature: 0, messages: [{ role: 'user', content: instruction }] };
+    if (options.mode === 'strict-schema') {
+      body.response_format = { type: 'json_schema', json_schema: { name: 'translation_batch', strict: true, schema: TRANSLATION_SCHEMA } };
+    } else if (options.mode === 'json-mode') body.response_format = { type: 'json_object' };
+    const payload = await this.readResponse(await fetch(`${root}/chat/completions`, {
       method: 'POST', signal: options.signal,
-      headers: { Authorization: `Bearer ${this.config.apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    const payload = await this.readResponse(response);
-    const content = payload?.choices?.[0]?.message?.content;
-    if (typeof content !== 'string') throw new Error('Provider response did not contain a chat completion.');
-    return content;
+      headers: { Authorization: `Bearer ${this.config.apiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    }));
+    const message = payload?.choices?.[0]?.message;
+    if (typeof message?.refusal === 'string') throw new Error(`Provider refused translation: ${message.refusal}`);
+    if (typeof message?.content !== 'string') throw new Error('Provider response did not contain a chat completion.');
+    return message.content;
   }
 
   /**
-   * Calls Gemini's generateContent endpoint and extracts its generated text.
+   * Calls Gemini's GenerateContent endpoint and extracts generated text.
    *
    * @param instruction - Translation instruction and source JSON.
-   * @param options - Request cancellation and structured-output settings.
+   * @param options - Request cancellation and output-mode settings.
    * @returns The generated candidate text.
    */
   private async requestGemini(instruction: string, options: RequestOptions): Promise<string> {
     const generationConfig: Record<string, unknown> = { temperature: 0 };
-    if (options.structuredOutput) generationConfig.responseMimeType = 'application/json';
-    const response = await fetch(`${GEMINI_API_ROOT}/models/${encodeURIComponent(this.config.modelName)}:generateContent`, {
+    if (options.mode === 'strict-schema') Object.assign(generationConfig, { responseMimeType: 'application/json', responseJsonSchema: TRANSLATION_SCHEMA });
+    else if (options.mode === 'json-mode') generationConfig.responseMimeType = 'application/json';
+    const payload = await this.readResponse(await fetch(`${GEMINI_API_ROOT}/models/${encodeURIComponent(this.config.modelName)}:generateContent`, {
       method: 'POST', signal: options.signal,
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': this.config.apiKey },
       body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: instruction }] }], generationConfig }),
-    });
-    const payload = await this.readResponse(response);
+    }));
     const content = payload?.candidates?.[0]?.content?.parts?.map((part: { text?: unknown }) => part.text).filter((text: unknown): text is string => typeof text === 'string').join('');
     if (!content) throw new Error('Gemini response did not contain generated text.');
     return content;
@@ -249,23 +261,23 @@ export class CustomApiEngine implements ITranslationEngine {
    * Calls Anthropic's Messages endpoint and extracts its text blocks.
    *
    * @param instruction - Translation instruction and source JSON.
-   * @param options - Request cancellation and structured-output settings.
+   * @param options - Request cancellation and output-mode settings.
    * @returns The generated message text.
    */
   private async requestClaude(instruction: string, options: RequestOptions): Promise<string> {
-    const response = await fetch(`${ANTHROPIC_API_ROOT}/messages`, {
+    const body: Record<string, unknown> = { model: this.config.modelName, max_tokens: 2048, temperature: 0, messages: [{ role: 'user', content: instruction }] };
+    if (options.mode === 'strict-schema') body.output_config = { format: { type: 'json_schema', schema: TRANSLATION_SCHEMA } };
+    const payload = await this.readResponse(await fetch(`${ANTHROPIC_API_ROOT}/messages`, {
       method: 'POST', signal: options.signal,
-      headers: { 'Content-Type': 'application/json', 'x-api-key': this.config.apiKey, 'anthropic-version': ANTHROPIC_VERSION },
-      body: JSON.stringify({ model: this.config.modelName, max_tokens: 2048, temperature: 0, messages: [{ role: 'user', content: instruction }] }),
-    });
-    const payload = await this.readResponse(response);
+      headers: { 'Content-Type': 'application/json', 'x-api-key': this.config.apiKey, 'anthropic-version': ANTHROPIC_VERSION }, body: JSON.stringify(body),
+    }));
     const content = payload?.content?.filter((block: { type?: unknown; text?: unknown }) => block.type === 'text' && typeof block.text === 'string').map((block: { text: string }) => block.text).join('');
     if (!content) throw new Error('Claude response did not contain generated text.');
     return content;
   }
 
   /**
-   * Reads a provider response and turns HTTP failures into safe errors.
+   * Reads a provider response and preserves machine-readable error details for classification.
    *
    * @param response - Fetch response from a provider.
    * @returns Parsed JSON response data.
@@ -273,13 +285,13 @@ export class CustomApiEngine implements ITranslationEngine {
   private async readResponse(response: Response): Promise<any> {
     let payload: any;
     try { payload = await response.json(); } catch { throw new Error(`Provider returned invalid JSON (HTTP ${response.status}).`); }
-    if (!response.ok) {
-      const message = payload?.error?.message || payload?.message || `HTTP ${response.status}`;
-      const error = new Error(`Provider request failed (${response.status}): ${String(message)}`) as Error & { status?: number };
-      error.status = response.status;
-      throw error;
-    }
-    return payload;
+    if (response.ok) return payload;
+    const providerError = payload?.error ?? payload;
+    const error = new Error(`Provider request failed (${response.status}): ${String(providerError?.message ?? payload?.message ?? `HTTP ${response.status}`)}`) as ProviderError;
+    error.status = response.status;
+    error.code = typeof providerError?.code === 'string' ? providerError.code : undefined;
+    error.param = typeof providerError?.param === 'string' ? providerError.param : undefined;
+    return Promise.reject(error);
   }
 
   /**
@@ -295,13 +307,10 @@ export class CustomApiEngine implements ITranslationEngine {
     try { parsed = JSON.parse(cleaned); } catch { throw new Error('Provider returned invalid translation JSON.'); }
     const translations = (parsed as { translations?: unknown })?.translations;
     if (!Array.isArray(translations)) throw new Error('Provider translation JSON must contain a translations array.');
-
     const expectedIds = new Set(expectedSegments.map(({ id }) => id));
     const byId = new Map<string, string>();
     for (const item of translations) {
-      if (!item || typeof item !== 'object' || typeof (item as TranslationSegment).id !== 'string' || typeof (item as TranslationSegment).text !== 'string') {
-        throw new Error('Provider returned a translation item with an invalid id or text.');
-      }
+      if (!item || typeof item !== 'object' || typeof (item as TranslationSegment).id !== 'string' || typeof (item as TranslationSegment).text !== 'string') throw new Error('Provider returned a translation item with an invalid id or text.');
       const { id, text } = item as TranslationSegment;
       if (!expectedIds.has(id) || byId.has(id)) throw new Error('Provider returned an unknown or duplicate translation id.');
       byId.set(id, text);
@@ -311,24 +320,35 @@ export class CustomApiEngine implements ITranslationEngine {
   }
 
   /**
+   * Checks whether the provider explicitly rejected the current output-format feature.
+   *
+   * @param error - A provider request failure.
+   * @param mode - Output mode used by the failed request.
+   * @returns Whether it is safe to attempt the next output mode.
+   */
+  private isCapabilityRejection(error: unknown, mode: OutputMode): boolean {
+    const providerError = error as ProviderError;
+    if (!providerError || ![400, 404, 422].includes(providerError.status ?? 0)) return false;
+    const detail = `${providerError.param ?? ''} ${providerError.code ?? ''} ${providerError.message}`.toLowerCase();
+    const terms = mode === 'strict-schema'
+      ? ['json_schema', 'responsejsonschema', 'response_json_schema', 'response_format', 'output_config', 'structured output']
+      : mode === 'json-mode'
+        ? ['json_object', 'responsemimetype', 'response_mime_type', 'response_format', 'json mode']
+        : [];
+    return terms.some((term) => detail.includes(term));
+  }
+
+  /**
    * Determines whether an error is worth one bounded transport retry.
    *
    * @param error - The request failure.
    * @returns Whether the failure is transient.
    */
   private isTransientFailure(error: unknown): boolean {
-    const status = (error as { status?: number })?.status;
-    return error instanceof DOMException || status === 408 || status === 409 || status === 429 || (typeof status === 'number' && status >= 500);
-  }
-
-  /**
-   * Determines whether a compatible endpoint likely rejected JSON mode capability.
-   *
-   * @param error - The structured-output request failure.
-   * @returns Whether a prompt-only compatibility retry is appropriate.
-   */
-  private isStructuredOutputRejection(error: unknown): boolean {
-    const status = (error as { status?: number })?.status;
-    return status === 400 || status === 404 || status === 422;
+    const providerError = error as ProviderError;
+    const status = providerError?.status;
+    if (error instanceof DOMException) return error.name !== 'AbortError';
+    if (error instanceof TypeError) return true;
+    return status === 408 || status === 409 || status === 500 || status === 502 || status === 503 || status === 504;
   }
 }
