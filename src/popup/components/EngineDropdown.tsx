@@ -11,7 +11,7 @@ interface EngineDropdownProps {
 
 export default function EngineDropdown({ state, updateState }: EngineDropdownProps) {
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-3">
       {/* 1. Language Selection (Source & Target) on top */}
       <LanguageSelector state={state} updateState={updateState} />
 

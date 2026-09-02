@@ -330,7 +330,8 @@ async function processQueue() {
     // Dynamically fetch concurrency setting
     const stateData = await chrome.storage.local.get('popupState');
     const popupState = stateData.popupState as PopupState | undefined;
-    const concurrency = popupState?.concurrency || 3;
+    const configuredConcurrency = popupState?.concurrency || 3;
+    const concurrency = Math.min(5, Math.max(1, configuredConcurrency));
 
     // Reclaim slots held by dead jobs before counting capacity.
     //

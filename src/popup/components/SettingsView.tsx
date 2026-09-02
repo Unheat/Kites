@@ -15,20 +15,10 @@ export default function SettingsView({ state, updateState }: SettingsViewProps) 
   const [showApiManager, setShowApiManager] = useState(false);
   const [showFallbackConfig, setShowFallbackConfig] = useState(false);
 
+  const concurrency = Math.min(5, Math.max(1, state.concurrency));
+
   return (
-    <div className="flex flex-col gap-6">
-      
-      {/* 1. Engine Selection (Translation & Image Cleaning) at Top */}
-      <EngineSelectionPanel state={state} updateState={updateState} />
-
-      <hr className="border-[var(--color-dust)] opacity-50" />
-
-      {/* 2. GPU Acceleration Panel */}
-      <GpuAccelerationPanel state={state} updateState={updateState} />
-
-      <hr className="border-[var(--color-dust)] opacity-50" />
-
-      {/* 3. Theme Toggle & Preferences Header */}
+    <div className="flex flex-col gap-3.5">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold tracking-wide uppercase text-[var(--color-dust)]">Preferences</h2>
         <button 
@@ -40,19 +30,27 @@ export default function SettingsView({ state, updateState }: SettingsViewProps) 
         </button>
       </div>
 
-      {/* 4. Advanced Configuration */}
+      <EngineSelectionPanel state={state} updateState={updateState} />
+
+      <hr className="border-[var(--color-dust)] opacity-50" />
+
+      <GpuAccelerationPanel state={state} updateState={updateState} />
+
+      <hr className="border-[var(--color-dust)] opacity-50" />
+
+      {/* Advanced Configuration */}
       <div>
         <div className="flex justify-between items-center mb-3">
           <span className="font-medium text-sm">Advanced Configuration</span>
         </div>
       
-        <div className="flex flex-col gap-5">
+        <div className="flex flex-col gap-3.5">
           {/* Custom APIs & Fallback Chain */}
           <div className="flex flex-col gap-2">
             {!showApiManager ? (
               <button 
                 onClick={() => setShowApiManager(true)}
-                className="w-full flex items-center justify-between p-3 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md hover:border-[var(--color-ink)] transition-colors cursor-pointer"
+                className="w-full flex items-center justify-between p-2.5 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md hover:border-[var(--color-ink)] transition-colors cursor-pointer"
               >
                 <div className="flex items-center gap-2">
                   <KeyRound size={16} className="text-[var(--color-dust)]" />
@@ -67,7 +65,7 @@ export default function SettingsView({ state, updateState }: SettingsViewProps) 
             {!showFallbackConfig ? (
               <button 
                 onClick={() => setShowFallbackConfig(true)}
-                className="w-full flex items-center justify-between p-3 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md hover:border-[var(--color-ink)] transition-colors cursor-pointer"
+                className="w-full flex items-center justify-between p-2.5 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md hover:border-[var(--color-ink)] transition-colors cursor-pointer"
               >
                 <div className="flex items-center gap-2">
                   <Network size={16} className="text-[var(--color-dust)]" />
@@ -89,14 +87,14 @@ export default function SettingsView({ state, updateState }: SettingsViewProps) 
             <input 
               type="range" 
               min="1" 
-              max="10" 
-              value={state.concurrency}
-              onChange={(e) => updateState({ concurrency: parseInt(e.target.value) })}
+              max="5"
+              value={concurrency}
+              onChange={(e) => updateState({ concurrency: parseInt(e.target.value, 10) })}
               className="w-full h-2 bg-[var(--color-vellum)] rounded-lg appearance-none cursor-pointer accent-[var(--color-editorial)]"
             />
             <div className="flex justify-between text-xs text-[var(--color-dust)] mt-1">
               <span>1</span>
-              <span>10</span>
+              <span>5</span>
             </div>
           </div>
         </div>

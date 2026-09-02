@@ -260,7 +260,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
     || { name: 'Loading...', id: '' };
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-3">
       {/* Translation Engine Selector */}
       <div className="flex flex-col gap-1.5">
         <div className="flex items-center gap-1.5 mb-1 relative">
@@ -515,7 +515,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
       </div>
 
       {/* OCR Engine Selector */}
-      <div className="flex flex-col gap-1.5 mt-4">
+      <div className="flex flex-col gap-1.5">
         <div className="flex items-center gap-1.5 mb-1 relative">
           <h2 className="text-sm font-medium">OCR Engine</h2>
           <div className="peer w-4 h-4 rounded-full border border-[var(--color-dust)] flex items-center justify-center text-[10px] text-[var(--color-dust)] cursor-help hover:bg-[var(--color-dust)] hover:text-[var(--color-paper)] transition-colors">?</div>

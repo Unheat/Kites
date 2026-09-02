@@ -33,7 +33,7 @@ export default function GpuAccelerationPanel({ state, updateState }: GpuAccelera
   const inpaintVramText = INPAINT_VRAM_MAP[state.activeInpaintId] || 'Inpaint Engine • ~50 MB';
 
   return (
-    <div className="flex flex-col gap-1.5 mt-2">
+    <div className="flex flex-col gap-1.5">
       <div className="flex items-center gap-1.5 mb-1 relative">
         <span className="font-medium text-sm">GPU Acceleration</span>
         <div className="peer w-4 h-4 rounded-full border border-[var(--color-dust)] flex items-center justify-center text-[10px] text-[var(--color-dust)] cursor-help hover:bg-[var(--color-dust)] hover:text-[var(--color-paper)] transition-colors">?</div>
@@ -53,7 +53,7 @@ export default function GpuAccelerationPanel({ state, updateState }: GpuAccelera
               setShowWebGpuConfig(!showWebGpuConfig);
             }
           }}
-          className={`w-full flex items-center justify-between p-3 bg-[var(--color-paper)] border-2 transition-colors ${
+          className={`w-full flex items-center justify-between p-2.5 bg-[var(--color-paper)] border-2 transition-colors ${
             state.webgpuSupported === true && state.webgpuMaster 
               ? 'border-[var(--color-dust)] cursor-pointer hover:border-[var(--color-editorial)]' 
               : 'border-[var(--color-dust)] border-opacity-50'

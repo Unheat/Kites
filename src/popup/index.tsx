@@ -57,7 +57,7 @@ function PopupApp() {
     <div className="flex flex-col bg-[var(--color-paper)] text-[var(--color-ink)] font-body relative" style={{ width: '320px', minHeight: '350px' }}>
       
       {/* Header */}
-      <div className="flex justify-between items-center mb-4 p-4 pb-0">
+      <div className="flex justify-between items-center mb-2.5 p-3.5 pb-0">
         <h1 className="text-xl font-bold font-display tracking-tight text-[var(--color-editorial)] flex items-center gap-2">
           Kites
           {!state.isExtensionEnabled && <span className="text-xs font-normal text-[var(--color-dust)] px-2 py-0.5 border border-[var(--color-dust)] rounded-full">OFF</span>}
@@ -90,7 +90,7 @@ function PopupApp() {
 
       {/* Main Content Area (Dims when disabled) */}
       <div className={`flex-1 flex flex-col transition-opacity duration-300 ${!state.isExtensionEnabled ? 'opacity-40 pointer-events-none grayscale' : ''}`}>
-        <div className="flex-1 flex flex-col p-4 pt-0">
+        <div className="flex-1 flex flex-col px-3.5 pb-3.5">
           {activeTab === 'home' ? (
             <EngineDropdown state={state} updateState={updateState} />
           ) : (
@@ -99,7 +99,7 @@ function PopupApp() {
         </div>
 
         {/* Footer Action */}
-        <div className="p-4 pt-0">
+        <div className="px-3.5 pb-3.5">
           <button 
             onClick={() => {
               chrome.tabs.create({ url: chrome.runtime.getURL('index.html') });
