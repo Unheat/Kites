@@ -87,7 +87,7 @@ function PopupApp() {
       </div>
 
       {/* Main Content Area (Dims when disabled) */}
-      <div className={`flex-1 flex flex-col transition-all duration-300 ${!state.isExtensionEnabled ? 'opacity-40 pointer-events-none grayscale' : ''}`}>
+      <div className={`flex-1 flex flex-col transition-opacity duration-300 ${!state.isExtensionEnabled ? 'opacity-40 pointer-events-none grayscale' : ''}`}>
         <div className="flex-1 flex flex-col p-4 pt-0">
           {activeTab === 'home' ? (
             <EngineDropdown state={state} updateState={updateState} />
