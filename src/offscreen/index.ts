@@ -342,8 +342,8 @@ async function handleStartDownload(modelId: string, category?: string) {
 async function handleCheckStatus(modelId: string): Promise<boolean> {
   // Check the Cache API to see if the model files are resident on disk.
   try {
-    const canonicalOcr = resolveOcrTier(modelId);
-    if (ocrRegistry[canonicalOcr]) {
+    if (modelId in ocrRegistry || modelId === 'paddle-dbnet') {
+      const canonicalOcr = resolveOcrTier(modelId);
       return await OcrCacheManager.isModelCached(canonicalOcr);
     }
 
