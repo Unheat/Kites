@@ -4,6 +4,7 @@ import type { PopupState } from '../../shared/types';
 import AddApiForm from './AddApiForm';
 import MiniSearch from 'minisearch';
 import { ModelRegistry } from '../services/ModelRegistry';
+import { isLlmGpuAvailable } from '../../shared/utils/hardwareUtils';
 
 interface EngineSelectionPanelProps {
   state: PopupState;
@@ -327,13 +328,16 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                   </div>
                   <div className="overflow-y-auto flex-1 p-1 custom-scrollbar">
                     {displayedEngines.length > 0 ? displayedEngines.map((engine) => {
+                      const isGpuDisabledForModel = engine.hardware === 'WebGPU' && !isLlmGpuAvailable(state);
                       const isUninstalledLocal = engine.type === 'local' && !engine.isDownloaded;
-                      const isActive = state.activeEngineId === engine.id && !isUninstalledLocal;
+                      const isSelectable = !isGpuDisabledForModel && !isUninstalledLocal;
+                      const isActive = state.activeEngineId === engine.id && isSelectable;
                       return (
                         <button
                           key={engine.id}
+                          disabled={!isSelectable && !isActive}
                           onClick={() => {
-                            if (isActive || isUninstalledLocal) return;
+                            if (isActive || !isSelectable) return;
                             updateState({ activeEngineId: engine.id });
                             setIsOpen(false);
                             setSearchQuery('');
@@ -341,29 +345,28 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                           className={`w-full flex items-center justify-between p-2 text-left rounded-sm transition-colors ${
                             isActive
                               ? 'bg-[var(--color-vellum)] text-[var(--color-editorial)] font-semibold cursor-pointer'
-                              : isUninstalledLocal
-                                ? 'text-[var(--color-dust)] opacity-50 cursor-not-allowed'
-                                : 'hover:bg-[var(--color-vellum)] cursor-pointer'
+                              : isGpuDisabledForModel
+                                ? 'text-[var(--color-dust)] opacity-40 cursor-not-allowed'
+                                : isUninstalledLocal
+                                  ? 'text-[var(--color-dust)] opacity-50 cursor-not-allowed'
+                                  : 'hover:bg-[var(--color-vellum)] cursor-pointer'
                           }`}
                         >
                           <div className="flex flex-col overflow-hidden">
                             <span className="truncate pr-2 text-sm">{engine.name}</span>
                             {engine.hardware && (
-                              <span className="text-[10px] font-bold uppercase tracking-wider">
-                                [{engine.hardware}] {engine.type === 'local' ? 'Local' : ''}
+                              <span className={`text-[10px] font-bold uppercase tracking-wider ${isGpuDisabledForModel ? 'text-amber-500/80' : ''}`}>
+                                [{engine.hardware}{isGpuDisabledForModel ? ' · GPU OFF' : ''}] {engine.type === 'local' ? 'Local' : ''}
                               </span>
                             )}
                           </div>
                           <div className="flex-shrink-0 ml-2">
                             {isActive ? (
                               <Check size={14} className="text-[var(--color-editorial)]" />
-                            ) : isUninstalledLocal ? (
+                            ) : isGpuDisabledForModel ? null : isUninstalledLocal ? (
                               <div 
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  // Only trigger the download here. The model becomes selectable
-                                  // once MODEL_DOWNLOAD_PROGRESS confirms it's actually ready —
-                                  // the user then clicks the row itself to select it.
                                   chrome.runtime.sendMessage({ type: 'START_MODEL_DOWNLOAD', payload: { modelId: engine.id } });
                                 }}
                                 className="p-1 -mr-1 rounded hover:bg-[var(--color-vellum)] transition-colors cursor-pointer text-[var(--color-ink)] opacity-100"
