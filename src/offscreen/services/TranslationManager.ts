@@ -1,8 +1,8 @@
 import type { ITranslationEngine } from '../engines/translation/BaseEngine';
 import { WebLLMEngine } from '../engines/translation/WebLLMEngine';
-import { ChromeTranslatorEngine } from '../engines/translation/ChromeTranslatorEngine';
 import { GoogleTranslateEngine } from '../engines/translation/GoogleTranslateEngine';
-import type { PopupState } from '../../shared/types';
+import { CustomApiEngine } from '../engines/translation/CustomApiEngine';
+import type { CustomApiConfig, PopupState } from '../../shared/types';
 import modelsRegistryData from '../../shared/models-registry.json';
 
 export class TranslationManager {
@@ -76,7 +76,8 @@ export class TranslationManager {
         
         // 2. Load the specific engine dynamically
         const loadStart = performance.now();
-        const engine = await this.getOrLoadEngine(engineId);
+        const customApi = popupState.customApis?.find((api) => api.id === engineId);
+        const engine = await this.getOrLoadEngine(engineId, undefined, customApi);
         const loadMs = performance.now() - loadStart;
 
         // 3. Execute translation
@@ -114,9 +115,14 @@ export class TranslationManager {
    * 
    * @param engineId - The identifier of the translation engine.
    * @param progressCallback - Optional callback for download progress.
+   * @param customApi - The saved custom API configuration when engineId belongs to one.
    * @returns A promise that resolves to the instantiated translation engine.
    */
-  private async getOrLoadEngine(engineId: string, progressCallback?: (info: any) => void): Promise<ITranslationEngine> {
+  private async getOrLoadEngine(
+    engineId: string,
+    progressCallback?: (info: any) => void,
+    customApi?: CustomApiConfig,
+  ): Promise<ITranslationEngine> {
     // If the requested engine is already loaded, reuse it
     if (this.activeEngine && this.activeEngineId === engineId) {
       return this.activeEngine;
@@ -140,8 +146,8 @@ export class TranslationManager {
       const registryEntry = modelsRegistryData.find(m => m.id === engineId);
 
       let engine: ITranslationEngine;
-      if (engineId === 'chrome-translator') {
-        engine = new ChromeTranslatorEngine();
+      if (customApi) {
+        engine = new CustomApiEngine(customApi);
       } else if (engineId === 'gg-translate') {
         engine = new GoogleTranslateEngine();
       } else if (registryEntry?.engine === 'webllm') {

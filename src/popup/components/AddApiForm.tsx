@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { CustomApiConfig } from '../../shared/types';
+import { validateCompatibleBaseUrl } from '../../shared/customApi';
 
 interface AddApiFormProps {
   onSave: (api: CustomApiConfig) => void;
@@ -11,16 +12,33 @@ export default function AddApiForm({ onSave, onCancel }: AddApiFormProps) {
   const [newModelName, setNewModelName] = useState('');
   const [newApiKey, setNewApiKey] = useState('');
   const [newBaseUrl, setNewBaseUrl] = useState('');
+  const [validationError, setValidationError] = useState('');
 
+  /**
+   * Validates the provider fields and saves a new custom API configuration.
+   *
+   * @returns Nothing; displays an inline error when a required field is invalid.
+   */
   const handleSave = () => {
-    if (!newModelName.trim() || !newApiKey.trim()) return;
-    
+    if (!newModelName.trim() || !newApiKey.trim()) {
+      setValidationError('Model name and API key are required.');
+      return;
+    }
+
+    const compatibleBaseUrl = provider === 'openai-compatible'
+      ? validateCompatibleBaseUrl(newBaseUrl)
+      : undefined;
+    if (compatibleBaseUrl?.error) {
+      setValidationError(compatibleBaseUrl.error);
+      return;
+    }
+
     const newApi: CustomApiConfig = {
-      id: `api_${Date.now()}`,
+      id: `api_${crypto.randomUUID()}`,
       provider,
       modelName: newModelName.trim(),
       apiKey: newApiKey.trim(),
-      ...(provider === 'openai-compatible' && newBaseUrl.trim() ? { baseUrl: newBaseUrl.trim() } : {})
+      ...(compatibleBaseUrl?.normalized ? { baseUrl: compatibleBaseUrl.normalized } : {}),
     };
 
     onSave(newApi);
@@ -32,7 +50,10 @@ export default function AddApiForm({ onSave, onCancel }: AddApiFormProps) {
         <label className="text-xs font-semibold text-[var(--color-dust)] uppercase mb-1 block">Provider</label>
         <select 
           value={provider}
-          onChange={(e) => setProvider(e.target.value as CustomApiConfig['provider'])}
+          onChange={(e) => {
+            setProvider(e.target.value as CustomApiConfig['provider']);
+            setValidationError('');
+          }}
           className="w-full p-2 text-sm bg-[var(--color-paper)] border border-[var(--color-dust)] rounded focus:outline-none focus:border-[var(--color-ink)] transition-colors cursor-pointer"
         >
           <option value="openai">OpenAI</option>
@@ -78,6 +99,8 @@ export default function AddApiForm({ onSave, onCancel }: AddApiFormProps) {
         />
       </div>
       
+      {validationError && <p className="text-xs text-red-600" role="alert">{validationError}</p>}
+
       <div className="flex gap-2 mt-2">
         <button 
           onClick={handleSave}

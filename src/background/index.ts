@@ -2,6 +2,7 @@ import { db, cleanupOldJobs } from '../db';
 import type { ProcessJobMessage, PopupState, PreloadActiveEngineMessage } from '../shared/types';
 import { DEFAULT_POPUP_STATE } from '../shared/types';
 import modelsRegistryData from '../shared/models-registry.json';
+import { normalizeCustomApiConfig } from '../shared/customApi';
 
 // Magic Number: Limit concurrency to avoid network/CPU throttling
 // We now dynamically load this from user's PopupState (fallback to 3)
@@ -36,27 +37,32 @@ const OFFSCREEN_RETRY_INTERVAL_MS = 150;
  * @returns The normalized popup state and whether it needs to be saved.
  */
 function normalizePopupState(popupState: PopupState): { state: PopupState; changed: boolean } {
+  const customApis = Array.isArray(popupState.customApis)
+    ? popupState.customApis.map(normalizeCustomApiConfig).filter((api): api is NonNullable<typeof api> => Boolean(api))
+    : [];
+  const uniqueCustomApis = customApis.filter((api, index, apis) => apis.findIndex((candidate) => candidate.id === api.id) === index);
   const webLlmIds = new Set(modelsRegistryData
     .filter((model) => model.engine === 'webllm')
     .map((model) => model.id));
-  const customApiIds = new Set(popupState.customApis.map((api) => api.id));
+  const customApiIds = new Set(uniqueCustomApis.map((api) => api.id));
   const isSupportedEngine = (engineId: string): boolean =>
     engineId === 'gg-translate' ||
-    engineId === 'chrome-translator' ||
     webLlmIds.has(engineId) ||
     customApiIds.has(engineId);
 
   const activeEngineId = isSupportedEngine(popupState.activeEngineId)
     ? popupState.activeEngineId
     : DEFAULT_POPUP_STATE.activeEngineId;
-  const fallbackChain = popupState.fallbackChain.filter((engineId, index, chain) =>
+  const fallbackSource = Array.isArray(popupState.fallbackChain) ? popupState.fallbackChain : [];
+  const fallbackChain = fallbackSource.filter((engineId, index, chain) =>
     engineId !== activeEngineId && isSupportedEngine(engineId) && chain.indexOf(engineId) === index
   );
   const changed = activeEngineId !== popupState.activeEngineId ||
-    fallbackChain.length !== popupState.fallbackChain.length;
+    fallbackChain.length !== fallbackSource.length ||
+    uniqueCustomApis.length !== (Array.isArray(popupState.customApis) ? popupState.customApis.length : 0);
 
   return {
-    state: changed ? { ...popupState, activeEngineId, fallbackChain } : popupState,
+    state: changed ? { ...popupState, customApis: uniqueCustomApis, activeEngineId, fallbackChain } : popupState,
     changed,
   };
 }
