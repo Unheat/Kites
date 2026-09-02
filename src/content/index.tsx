@@ -1,131 +1,163 @@
 import { createRoot } from 'react-dom/client';
-import { useEffect, useState, useRef } from 'react';
-import './content.css'; 
+import { useEffect, useRef, useState } from 'react';
+import './content.css';
 import { Languages } from 'lucide-react';
 import type { PopupState } from '../shared/types';
 
-// Minimum image size to avoid detect small icons
+// Minimum rendered dimensions prevent controls and thumbnails from entering the pipeline.
 const MIN_WIDTH_IMAGE_PX = 150;
 const MIN_HEIGHT_IMAGE_PX = 150;
+const IMAGE_SCAN_DEBOUNCE_MS = 300;
+const HOVER_LEAVE_DELAY_MS = 150;
+const IMAGE_SWAP_TRANSITION_MS = 300;
 
-const TIMEOUT_MS = 300; // Debounce timeout in ms
-const HOVER_LEAVE_DELAY_MS = 150; // Debounce delay before hiding button on mouse leave
+type OverlayImage = {
+  srcUrl: string;
+  imgElement: HTMLImageElement;
+  anchorName: string;
+};
 
 /**
- * Renders the floating translation button using modern CSS Anchor Positioning.
- * 
- * @param {Object} props - The component properties.
- * @param {string} props.srcUrl - The URL of the image to translate.
- * @param {string} props.anchorName - The unique CSS anchor-name (e.g., "--kites-img-123") attached to the target image.
- * @returns {JSX.Element} The floating button component.
+ * Returns whether an image is a visible, supported translation target.
+ *
+ * @param img - Image element to inspect.
+ * @returns Whether the image satisfies Kites' rendered-size and visibility requirements.
  */
-function TranslateButton({ srcUrl, anchorName }: { srcUrl: string, anchorName: string }) {
+function isValidImage(img: HTMLImageElement): boolean {
+  const rect = img.getBoundingClientRect();
+  if (!img.src || rect.width < MIN_WIDTH_IMAGE_PX || rect.height < MIN_HEIGHT_IMAGE_PX) return false;
+
+  const style = window.getComputedStyle(img);
+  return style.filter === 'none' && style.opacity !== '0' && style.visibility !== 'hidden';
+}
+
+/**
+ * Returns whether an image meets Hover mode's original size-only eligibility rule.
+ *
+ * @param img - Image element under the cursor.
+ * @returns Whether the image can receive a manual Hover button.
+ */
+function isHoverableImage(img: HTMLImageElement): boolean {
+  const rect = img.getBoundingClientRect();
+  return Boolean(img.src) && rect.width >= MIN_WIDTH_IMAGE_PX && rect.height >= MIN_HEIGHT_IMAGE_PX;
+}
+
+/**
+ * Gets or assigns the CSS anchor used to place an image's translation button.
+ *
+ * @param img - Image element receiving an anchor.
+ * @returns The image's CSS anchor name.
+ */
+function getAnchorName(img: HTMLImageElement): string {
+  let anchorName = img.style.getPropertyValue('anchor-name');
+  if (!anchorName) {
+    anchorName = `--kites-img-${Math.random().toString(36).substring(2, 11)}`;
+    img.style.setProperty('anchor-name', anchorName);
+  }
+  return anchorName;
+}
+
+/**
+ * Renders a floating translation button anchored to an image.
+ *
+ * @param props - Button state and callbacks.
+ * @param props.srcUrl - Image URL to translate.
+ * @param props.anchorName - CSS anchor assigned to target image.
+ * @param props.isTranslating - Whether this image has a pending translation job.
+ * @param props.onTranslate - Queues translation for this image.
+ * @returns Floating translate button.
+ */
+function TranslateButton({
+  srcUrl,
+  anchorName,
+  isTranslating,
+  onTranslate,
+}: {
+  srcUrl: string;
+  anchorName: string;
+  isTranslating: boolean;
+  onTranslate: (srcUrl: string) => void;
+}) {
   const buttonRef = useRef<HTMLButtonElement>(null);
-  const [isTranslating, setIsTranslating] = useState(false);
 
   useEffect(() => {
     if (buttonRef.current) {
-      // Direct DOM manipulation bypasses React's style object filtering for cutting-edge CSS
       buttonRef.current.style.setProperty('position-anchor', anchorName);
       buttonRef.current.style.setProperty('top', 'anchor(top)');
       buttonRef.current.style.setProperty('left', 'anchor(left)');
     }
   }, [anchorName]);
 
-  useEffect(() => {
-    const handleMessage = (message: any) => {
-      if ((message.type === 'IMAGE_TRANSLATED' || message.type === 'TRANSLATION_ERROR') && message.payload) {
-        if (message.payload.originalUrl === srcUrl) {
-          setIsTranslating(false);
-        }
-      }
-    };
+  return (
+    <button
+      ref={buttonRef}
+      id="kites-translate-btn"
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onTranslate(srcUrl);
+      }}
+      disabled={isTranslating}
+      className={`fixed z-[999999] w-8 h-8 flex items-center justify-center rounded-full bg-[var(--color-editorial)] hover:brightness-110 transition-colors cursor-pointer border-none text-white disabled:cursor-wait ${isTranslating ? 'kites-anim-spin' : ''}`}
+      style={{ marginTop: '8px', marginLeft: '8px', pointerEvents: 'auto' }}
+      title="Translate Image"
+    >
+      <Languages size={18} aria-hidden="true" />
+      <span className="sr-only">Translate Image</span>
+    </button>
+  );
+}
 
-    try {
-      if (chrome.runtime?.id) {
-        chrome.runtime.onMessage.addListener(handleMessage);
-        return () => {
-          try {
-            if (chrome.runtime?.id) {
-              chrome.runtime.onMessage.removeListener(handleMessage);
-            }
-          } catch (e) {}
-        };
-      }
-    } catch (e) {}
-  }, [srcUrl]);
+/**
+ * Manages automatic image detection plus hover/persistent manual translation overlays.
+ *
+ * @returns Collection of active translation buttons or null in idle Hover mode.
+ */
+function GlobalOverlay() {
+  const [activeImg, setActiveImg] = useState<OverlayImage | null>(null);
+  const [consistentImages, setConsistentImages] = useState<OverlayImage[]>([]);
+  const [mode, setMode] = useState<'hover' | 'persistent'>('hover');
+  const [autoTranslate, setAutoTranslate] = useState(false);
+  const [translatingUrl, setTranslatingUrl] = useState<string | null>(null);
 
-  const handleTranslate = () => {
-    if (!srcUrl) {
-      console.error('[Content Script] Cannot translate: No image URL provided.');
-      return;
-    }
-    setIsTranslating(true);
+  const activeImgRef = useRef(activeImg);
+  const translatingUrlRef = useRef(translatingUrl);
+  activeImgRef.current = activeImg;
+  translatingUrlRef.current = translatingUrl;
+
+  /**
+   * Sends an image to the background queue and keeps its overlay visible until completion.
+   *
+   * @param srcUrl - Original image URL to queue.
+   * @param image - Optional DOM image for pinning Hover mode.
+   * @returns Nothing.
+   */
+  const requestTranslation = (srcUrl: string, image?: OverlayImage): void => {
+    if (!srcUrl || translatingUrlRef.current === srcUrl) return;
+
+    if (image) setActiveImg(image);
+    setTranslatingUrl(srcUrl);
     console.log('[Content Script] Sending TRANSLATE_IMAGE to background:', srcUrl);
-    
+
     try {
       if (!chrome.runtime?.id) {
-        setIsTranslating(false);
+        setTranslatingUrl(null);
         console.warn('[Content Script] Extension context invalidated. Please refresh the page.');
         return;
       }
       chrome.runtime.sendMessage({ type: 'TRANSLATE_IMAGE', url: srcUrl }, (response) => {
         if (chrome.runtime.lastError || response?.status === 'error') {
-          setIsTranslating(false);
+          setTranslatingUrl((current) => current === srcUrl ? null : current);
           console.error('[Content Script] Message failed:', chrome.runtime.lastError?.message || response?.error);
         }
       });
-    } catch (err) {
-      setIsTranslating(false);
-      console.warn('[Content Script] Chrome runtime call failed (extension reloaded/invalidated):', err);
+    } catch (error) {
+      setTranslatingUrl((current) => current === srcUrl ? null : current);
+      console.warn('[Content Script] Chrome runtime call failed (extension reloaded/invalidated):', error);
     }
   };
 
-  return (
-    <button 
-      ref={buttonRef}
-      id="kites-translate-btn"
-      onClick={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        handleTranslate();
-      }}
-      // We use 'fixed' instead of 'absolute' so the viewport is the containing block.
-      // This is required for CSS Anchors to target elements outside the React root.
-      className={`fixed z-[999999] w-8 h-8 flex items-center justify-center rounded-full bg-transparent hover:bg-black/5 transition-colors cursor-pointer border-none text-black ${isTranslating ? 'kites-anim-spin' : ''}`}
-      style={{ 
-        marginTop: '8px',
-        marginLeft: '8px',
-        pointerEvents: 'auto' 
-      }}
-      title="Translate Image"
-    >
-      <Languages size={18} className="opacity-80 hover:opacity-100 transition-opacity" />
-    </button>
-  );
-}
-
-// Keep track of which URLs we have already sent to the background to avoid spamming
-const processedUrls = new Set<string>();
-
-/**
- * Manages the global state of the translation overlays.
- * In Hover Mode, tracks the mouse to anchor a single button.
- * In Consistent Mode, periodically scans the DOM to anchor buttons to all valid images.
- * 
- * @returns {JSX.Element|null} The collection of TranslateButtons or null if none active.
- */
-function GlobalOverlay() {
-  const [activeImg, setActiveImg] = useState<{ srcUrl: string, imgElement: HTMLImageElement, anchorName: string } | null>(null);
-  const [consistentImages, setConsistentImages] = useState<{ srcUrl: string, anchorName: string }[]>([]);
-  
-  const [mode, setMode] = useState<'hover' | 'persistent'>('hover');
-  const [autoTranslate, setAutoTranslate] = useState(false);
-
-  const activeImgRef = useRef(activeImg);
-  activeImgRef.current = activeImg;
-
-  // 1. Fetch User Settings
+  // Load user settings and react to popup updates.
   useEffect(() => {
     const loadSettings = () => {
       chrome.storage.local.get('popupState', (data) => {
@@ -137,257 +169,208 @@ function GlobalOverlay() {
       });
     };
     loadSettings();
-    chrome.storage.onChanged.addListener((changes, area) => {
-      if (area === 'local' && changes.popupState) {
-        loadSettings();
-      }
-    });
+    const handleStorageChange = (changes: { [key: string]: chrome.storage.StorageChange }, area: string) => {
+      if (area === 'local' && changes.popupState) loadSettings();
+    };
+    chrome.storage.onChanged.addListener(handleStorageChange);
+    return () => chrome.storage.onChanged.removeListener(handleStorageChange);
   }, []);
 
-  // 2. Listen for the pub/sub IMAGE_TRANSLATED broadcast from Background Worker
+  // Receive terminal job events, restore the image, and allow Hover mode to disappear again.
   useEffect(() => {
     const handleMessage = (message: any) => {
-      if (message.type === 'IMAGE_TRANSLATED' && message.payload) {
-        const { originalUrl, bakedBase64 } = message.payload;
-        console.log(`[Content Script] Received translated image for: ${originalUrl}`);
-        
-        // Find the image on the page that matches the original URL
-        const imgs = Array.from(document.querySelectorAll('img'));
-        const targetImg = imgs.find(img => img.src === originalUrl);
-        
-        if (targetImg) {
-          // Swap the image natively!
-          // We apply a smooth transition for a premium feel
-          targetImg.style.transition = 'opacity 0.3s ease-in-out';
-          targetImg.style.opacity = '0';
-          setTimeout(() => {
-            targetImg.src = bakedBase64;
-            targetImg.style.opacity = '1';
-          }, 300);
-        }
-      }
+      if (!message.payload || (message.type !== 'IMAGE_TRANSLATED' && message.type !== 'TRANSLATION_ERROR')) return;
+
+      const { originalUrl, bakedBase64 } = message.payload;
+      setTranslatingUrl((current) => current === originalUrl ? null : current);
+      setActiveImg((current) => current?.srcUrl === originalUrl ? null : current);
+
+      if (message.type !== 'IMAGE_TRANSLATED' || !bakedBase64) return;
+      console.log(`[Content Script] Received translated image for: ${originalUrl}`);
+      const targetImg = Array.from(document.querySelectorAll('img')).find((img) => img.src === originalUrl);
+      if (!targetImg) return;
+
+      targetImg.style.transition = `opacity ${IMAGE_SWAP_TRANSITION_MS}ms ease-in-out`;
+      targetImg.style.opacity = '0';
+      window.setTimeout(() => {
+        targetImg.src = bakedBase64;
+        targetImg.style.opacity = '1';
+      }, IMAGE_SWAP_TRANSITION_MS);
     };
 
     chrome.runtime.onMessage.addListener(handleMessage);
     return () => chrome.runtime.onMessage.removeListener(handleMessage);
   }, []);
 
+  // Automatic mode observes only images entering the viewport. Queue capacity remains owned by background.
   useEffect(() => {
-    if (mode === 'persistent') { // Consistent Mode
-      const updateImages = () => {
-        const imgs = Array.from(document.querySelectorAll('img'));
-        const validImgs = imgs.filter(img => {
-          // Use getBoundingClientRect for accurate rendered size, bypassing lazy-load 0 width attributes
-          const rect = img.getBoundingClientRect();
-          if (!img.src || rect.width < MIN_WIDTH_IMAGE_PX || rect.height < MIN_HEIGHT_IMAGE_PX) return false;
-          
-          // Ignore Reddit background images or other elements with CSS filters that break CSS Anchors
-          const style = window.getComputedStyle(img);
-          if (style.filter !== 'none' || style.opacity === '0' || style.visibility === 'hidden') return false;
-          
-          return true;
-        });
+    if (!autoTranslate) return;
 
-        const newConsistentImages = validImgs.map(img => {
-          let anchorName = img.style.getPropertyValue('anchor-name');
-          if (!anchorName) {
-            anchorName = `--kites-img-${Math.random().toString(36).substr(2, 9)}`;
-            img.style.setProperty('anchor-name', anchorName);
-          }
-          
-          if (autoTranslate && !processedUrls.has(img.src)) {
-            processedUrls.add(img.src);
-            console.log('[Content Script] Auto-Translating image:', img.src);
-            chrome.runtime.sendMessage({ type: 'TRANSLATE_IMAGE', url: img.src }, () => {
-              if (chrome.runtime.lastError) {
-                console.error('[Content Script] Auto-Translate message failed:', chrome.runtime.lastError.message);
-              }
-            });
-          }
-          
-          return { srcUrl: img.src, anchorName };
-        });
+    const queuedUrls = new Set<string>();
+    const translatedImages = new WeakSet<HTMLImageElement>();
+    const observedImages = new WeakSet<HTMLImageElement>();
+    let timeoutId: number | null = null;
 
-        setConsistentImages(newConsistentImages);
-      };
-
-      updateImages();
-      
-      // Debounce the update call to prevent CPU spikes during heavy DOM mutations
-      let timeoutId: number | null = null;
-      const debouncedUpdate = () => {
-        if (timeoutId) window.clearTimeout(timeoutId);
-        timeoutId = window.setTimeout(updateImages, TIMEOUT_MS);
-      };
-
-      // Use a MutationObserver (Industry Standard) instead of setInterval to instantly catch dynamic images
-      const observer = new MutationObserver((mutations) => {
-        let shouldUpdate = false;
-        for (const mutation of mutations) {
-          if (mutation.type === 'childList' && (mutation.addedNodes.length > 0 || mutation.removedNodes.length > 0)) {
-            shouldUpdate = true;
-            break;
-          }
-          if (mutation.type === 'attributes' && mutation.attributeName === 'src' && mutation.target.nodeName === 'IMG') {
-            shouldUpdate = true;
-            break;
-          }
-        }
-        if (shouldUpdate) {
-          debouncedUpdate();
+    const queueVisibleImage = (img: HTMLImageElement) => {
+      if (!isValidImage(img) || translatedImages.has(img) || queuedUrls.has(img.src)) return;
+      queuedUrls.add(img.src);
+      console.log('[Content Script] Auto-Translating visible image:', img.src);
+      chrome.runtime.sendMessage({ type: 'TRANSLATE_IMAGE', url: img.src }, (response) => {
+        if (chrome.runtime.lastError || response?.status === 'error') {
+          queuedUrls.delete(img.src);
+          console.error('[Content Script] Auto-Translate message failed:', chrome.runtime.lastError?.message || response?.error);
         }
       });
+    };
 
-      observer.observe(document.body, {
-        childList: true,
-        subtree: true,
-        attributes: true,
-        attributeFilter: ['src']
-      });
+    const intersectionObserver = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) queueVisibleImage(entry.target as HTMLImageElement);
+      }
+    });
 
-      // Also update on window resize in case images change dimensions
-      window.addEventListener('resize', debouncedUpdate, { passive: true });
-
-      return () => {
-        observer.disconnect();
-        window.removeEventListener('resize', debouncedUpdate);
-        if (timeoutId) window.clearTimeout(timeoutId);
-      };
-    } else {
-      let hideTimeoutId: number | null = null;
-
-      const cancelHide = () => {
-        if (hideTimeoutId !== null) {
-          window.clearTimeout(hideTimeoutId);
-          hideTimeoutId = null;
+    const observeImages = () => {
+      for (const img of Array.from(document.querySelectorAll('img'))) {
+        if (isValidImage(img) && !observedImages.has(img)) {
+          observedImages.add(img);
+          intersectionObserver.observe(img);
         }
-      };
+      }
+    };
 
-      const scheduleHide = () => {
-        if (hideTimeoutId === null) {
-          hideTimeoutId = window.setTimeout(() => {
-            setActiveImg(null);
-            hideTimeoutId = null;
-          }, HOVER_LEAVE_DELAY_MS);
+    const scheduleObserve = () => {
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+      timeoutId = window.setTimeout(observeImages, IMAGE_SCAN_DEBOUNCE_MS);
+    };
+
+    const mutationObserver = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        if (mutation.type === 'attributes' && mutation.target instanceof HTMLImageElement && mutation.attributeName === 'src') {
+          translatedImages.add(mutation.target);
         }
-      };
+      }
+      scheduleObserve();
+    });
 
-      const handleMouseOver = (e: MouseEvent) => {
-        const target = e.target as HTMLElement;
-        if (!target) return;
+    observeImages();
+    mutationObserver.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
+    window.addEventListener('resize', scheduleObserve, { passive: true });
 
-        // If hovering over the currently active image or the translate button, keep it visible
-        if (activeImgRef.current && (target === activeImgRef.current.imgElement || target.closest('#kites-translate-btn'))) {
-          cancelHide();
-          return;
-        }
+    return () => {
+      mutationObserver.disconnect();
+      intersectionObserver.disconnect();
+      window.removeEventListener('resize', scheduleObserve);
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+    };
+  }, [autoTranslate]);
 
-        if (target.tagName === 'IMG') {
-          const img = target as HTMLImageElement;
-          
-          // Use getBoundingClientRect for accurate rendered size
-          const rect = img.getBoundingClientRect();
-          if (!img.src || rect.width < MIN_WIDTH_IMAGE_PX || rect.height < MIN_HEIGHT_IMAGE_PX) return; // skip small icons
-
-          let anchorName = img.style.getPropertyValue('anchor-name');
-          if (!anchorName) {
-            anchorName = `--kites-img-${Math.random().toString(36).substring(2, 11)}`;
-            img.style.setProperty('anchor-name', anchorName);
-          }
-
-          // If this image is already the active image, just cancel any scheduled hide
-          if (activeImgRef.current?.imgElement === img) {
-            cancelHide();
-            return;
-          }
-
-          cancelHide();
-          setActiveImg({
-            srcUrl: img.src,
-            imgElement: img,
-            anchorName,
-          });
-        }
-      };
-
-      const handleMouseOut = (e: MouseEvent) => {
-        if (!activeImgRef.current) return;
-        const target = e.target as HTMLElement;
-        const relatedTarget = e.relatedTarget as HTMLElement | null;
-
-        // If moving directly into the translate button or still inside the active image, don't hide
-        const isStayingInImage = relatedTarget && (relatedTarget === activeImgRef.current.imgElement || relatedTarget.closest('#kites-translate-btn') !== null);
-        if (isStayingInImage) {
-          cancelHide();
-          return;
-        }
-
-        // If cursor left the active image or translate button
-        const isLeavingImage = target === activeImgRef.current.imgElement;
-        const isLeavingButton = target.closest('#kites-translate-btn') !== null;
-
-        if (isLeavingImage || isLeavingButton) {
-          scheduleHide();
-        }
-      };
-
-      document.addEventListener('mouseover', handleMouseOver, { passive: true });
-      document.addEventListener('mouseout', handleMouseOut, { passive: true });
-
-      return () => {
-        cancelHide();
-        document.removeEventListener('mouseover', handleMouseOver);
-        document.removeEventListener('mouseout', handleMouseOut);
-      };
+  // Persistent mode creates a manual button for every valid image.
+  useEffect(() => {
+    if (mode !== 'persistent') {
+      setConsistentImages([]);
+      return;
     }
-  }, [mode, autoTranslate]);
+
+    let timeoutId: number | null = null;
+    const updateImages = () => {
+      setConsistentImages(Array.from(document.querySelectorAll('img'))
+        .filter(isValidImage)
+        .map((img) => ({ srcUrl: img.src, imgElement: img, anchorName: getAnchorName(img) })));
+    };
+    const scheduleUpdate = () => {
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+      timeoutId = window.setTimeout(updateImages, IMAGE_SCAN_DEBOUNCE_MS);
+    };
+    const observer = new MutationObserver(scheduleUpdate);
+
+    updateImages();
+    observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
+    window.addEventListener('resize', scheduleUpdate, { passive: true });
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', scheduleUpdate);
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+    };
+  }, [mode]);
+
+  // Hover mode retains its normal fade behavior, except a queued translation remains pinned.
+  useEffect(() => {
+    if (mode !== 'hover') return;
+
+    let hideTimeoutId: number | null = null;
+    const cancelHide = () => {
+      if (hideTimeoutId !== null) {
+        window.clearTimeout(hideTimeoutId);
+        hideTimeoutId = null;
+      }
+    };
+    const scheduleHide = () => {
+      if (hideTimeoutId === null && !translatingUrlRef.current) {
+        hideTimeoutId = window.setTimeout(() => {
+          if (!translatingUrlRef.current) setActiveImg(null);
+          hideTimeoutId = null;
+        }, HOVER_LEAVE_DELAY_MS);
+      }
+    };
+    const handleMouseOver = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (activeImgRef.current && (target === activeImgRef.current.imgElement || target.closest('#kites-translate-btn'))) {
+        cancelHide();
+        return;
+      }
+      if (!(target instanceof HTMLImageElement) || !isHoverableImage(target)) return;
+      cancelHide();
+      setActiveImg({ srcUrl: target.src, imgElement: target, anchorName: getAnchorName(target) });
+    };
+    const handleMouseOut = (event: MouseEvent) => {
+      const current = activeImgRef.current;
+      if (!current) return;
+      const target = event.target as HTMLElement;
+      const relatedTarget = event.relatedTarget as HTMLElement | null;
+      if (relatedTarget && (relatedTarget === current.imgElement || relatedTarget.closest('#kites-translate-btn'))) {
+        cancelHide();
+        return;
+      }
+      if (target === current.imgElement || target.closest('#kites-translate-btn')) scheduleHide();
+    };
+
+    document.addEventListener('mouseover', handleMouseOver, { passive: true });
+    document.addEventListener('mouseout', handleMouseOut, { passive: true });
+    return () => {
+      cancelHide();
+      document.removeEventListener('mouseover', handleMouseOver);
+      document.removeEventListener('mouseout', handleMouseOut);
+    };
+  }, [mode]);
 
   if (mode === 'persistent') {
-    return (
-      <>
-        {consistentImages.map((img) => (
-          <TranslateButton 
-            key={img.anchorName} 
-            srcUrl={img.srcUrl} 
-            anchorName={img.anchorName} 
-          />
-        ))}
-      </>
-    );
+    return <>{consistentImages.map((image) => (
+      <TranslateButton key={image.anchorName} srcUrl={image.srcUrl} anchorName={image.anchorName}
+        isTranslating={translatingUrl === image.srcUrl} onTranslate={(srcUrl) => requestTranslation(srcUrl)} />
+    ))}</>;
   }
 
   if (!activeImg) return null;
-
-  return (
-    <TranslateButton 
-      srcUrl={activeImg.srcUrl} 
-      anchorName={activeImg.anchorName} 
-    />
-  );
+  return <TranslateButton srcUrl={activeImg.srcUrl} anchorName={activeImg.anchorName}
+    isTranslating={translatingUrl === activeImg.srcUrl} onTranslate={(srcUrl) => requestTranslation(srcUrl, activeImg)} />;
 }
 
-// Initialization
 try {
   let overlayRoot = document.getElementById('kites-global-overlay');
   if (!overlayRoot) {
     overlayRoot = document.createElement('div');
     overlayRoot.id = 'kites-global-overlay';
-    
-    // Display contents ensures this wrapper does not create a new containing block
-    // This is critical so the `fixed` positioned buttons inside can anchor to the main document
     overlayRoot.style.display = 'contents';
-    
     document.body.appendChild(overlayRoot);
   }
-  
+
   let root = (overlayRoot as any)._reactRoot;
   if (!root) {
     root = createRoot(overlayRoot);
     (overlayRoot as any)._reactRoot = root;
   }
   root.render(<GlobalOverlay />);
-  
-  console.log('[Content Script] Initialized Kites Global Hover Overlay with CSS Anchors.');
+  console.log('[Content Script] Initialized Kites image translation overlay.');
 } catch (error) {
   console.error('[Content Script] Failed to initialize overlay:', error);
 }
