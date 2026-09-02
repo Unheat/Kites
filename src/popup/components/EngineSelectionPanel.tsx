@@ -45,6 +45,11 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
   const customApiIds = useRef<string[] | null>(null);
   const customApisRef = useRef(state.customApis);
   const readyModelIds = useRef(new Set<string>());
+  const stateRef = useRef(state);
+
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
 
   useEffect(() => {
     // Query active downloads on mount
@@ -172,9 +177,28 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
           ...engine,
           isDownloaded: Boolean(engine.isDownloaded || readyModelIds.current.has(engine.id) || response.statuses[engine.id]),
         }));
-        setBaseEngines(prev => hydrate(prev));
-        setInpaintBaseEngines(prev => hydrate(prev));
-        setOcrBaseEngines(prev => hydrate(prev));
+        const hydratedTranslation = hydrate(engines);
+        const hydratedInpaint = hydrate(inpaintBaseEngines);
+        const hydratedOcr = hydrate(ocrBaseEngines);
+        setBaseEngines(hydratedTranslation);
+        setInpaintBaseEngines(hydratedInpaint);
+        setOcrBaseEngines(hydratedOcr);
+
+        const currentState = stateRef.current;
+        const selectedTranslation = hydratedTranslation.find((engine) => engine.id === currentState.activeEngineId);
+        const translationUnavailable = selectedTranslation?.type === 'local' && !selectedTranslation.isDownloaded;
+        const selectedInpaint = hydratedInpaint.find((engine) => engine.id === currentState.activeInpaintId);
+        const inpaintUnavailable = Boolean(selectedInpaint && !selectedInpaint.isDownloaded);
+        const selectedOcr = hydratedOcr.find((engine) => engine.id === (currentState.activeOcrId || 'v6-small'));
+        const ocrUnavailable = Boolean(selectedOcr && !selectedOcr.isDownloaded);
+        const repairs: Partial<PopupState> = {};
+        if (translationUnavailable) repairs.activeEngineId = 'gg-translate';
+        if (inpaintUnavailable) repairs.activeInpaintId = 'simple';
+        if (ocrUnavailable) repairs.activeOcrId = 'v6-small';
+        if (Object.keys(repairs).length > 0) {
+          console.warn('[EngineSelectionPanel] Resetting unavailable local model selections.', repairs);
+          updateState(repairs);
+        }
       });
     });
   }, []);
@@ -230,7 +254,10 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
     return results.slice(0, 50) as unknown as Engine[];
   }, [searchQuery, miniSearch, allEngines]);
 
-  const activeEngine = allEngines.find(e => e.id === state.activeEngineId) || allEngines[0] || { name: 'Loading...', id: '' };
+  const activeEngine = allEngines.find((engine) => engine.id === state.activeEngineId && !(engine.type === 'local' && !engine.isDownloaded))
+    || allEngines.find((engine) => engine.id === 'gg-translate')
+    || allEngines[0]
+    || { name: 'Loading...', id: '' };
 
   return (
     <div className="flex flex-col gap-5">
@@ -301,20 +328,19 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                   <div className="overflow-y-auto flex-1 p-1 custom-scrollbar">
                     {displayedEngines.length > 0 ? displayedEngines.map((engine) => {
                       const isUninstalledLocal = engine.type === 'local' && !engine.isDownloaded;
+                      const isActive = state.activeEngineId === engine.id && !isUninstalledLocal;
                       return (
                         <button
                           key={engine.id}
                           onClick={() => {
-                            if (state.activeEngineId === engine.id) return;
-                            // Task 5: User cannot select model until installed
-                            if (isUninstalledLocal) return;
+                            if (isActive || isUninstalledLocal) return;
                             updateState({ activeEngineId: engine.id });
                             setIsOpen(false);
                             setSearchQuery('');
                           }}
                           className={`w-full flex items-center justify-between p-2 text-left rounded-sm transition-colors ${
-                            state.activeEngineId === engine.id 
-                              ? 'bg-[var(--color-vellum)] text-[var(--color-editorial)] font-semibold cursor-pointer' 
+                            isActive
+                              ? 'bg-[var(--color-vellum)] text-[var(--color-editorial)] font-semibold cursor-pointer'
                               : isUninstalledLocal
                                 ? 'text-[var(--color-dust)] opacity-50 cursor-not-allowed'
                                 : 'hover:bg-[var(--color-vellum)] cursor-pointer'
@@ -329,7 +355,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                             )}
                           </div>
                           <div className="flex-shrink-0 ml-2">
-                            {state.activeEngineId === engine.id ? (
+                            {isActive ? (
                               <Check size={14} className="text-[var(--color-editorial)]" />
                             ) : isUninstalledLocal ? (
                               <div 
@@ -402,7 +428,9 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
             className="w-full flex items-center justify-between p-3 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md hover:border-[var(--color-ink)] transition-colors cursor-pointer"
           >
             <span className="font-medium truncate pr-2">
-              {inpaintBaseEngines.find(e => e.id === state.activeInpaintId)?.name || 'Loading...'}
+              {inpaintBaseEngines.find((engine) => engine.id === state.activeInpaintId && engine.isDownloaded)?.name
+                || inpaintBaseEngines.find((engine) => engine.id === 'simple')?.name
+                || 'Loading...'}
             </span>
             <ChevronDown size={16} className={`text-[var(--color-dust)] transition-transform ${isOpenInpaint ? 'rotate-180' : ''}`} />
           </button>
@@ -437,6 +465,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
               <div className="overflow-y-auto flex-1 p-1 custom-scrollbar">
                 {inpaintBaseEngines.map((engine) => {
                   const isUninstalled = !engine.isDownloaded;
+                  const isActive = state.activeInpaintId === engine.id && !isUninstalled;
                   return (
                     <button
                       key={engine.id}
@@ -447,8 +476,8 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                         setIsOpenInpaint(false);
                       }}
                       className={`w-full flex items-center justify-between p-2 text-left rounded-sm transition-colors ${
-                        state.activeInpaintId === engine.id 
-                          ? 'bg-[var(--color-vellum)] text-[var(--color-editorial)] font-semibold cursor-pointer' 
+                        isActive
+                          ? 'bg-[var(--color-vellum)] text-[var(--color-editorial)] font-semibold cursor-pointer'
                           : isUninstalled
                             ? 'text-[var(--color-dust)] opacity-50 cursor-not-allowed'
                             : 'hover:bg-[var(--color-vellum)] cursor-pointer'
@@ -458,7 +487,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                         <span className="truncate pr-2 text-sm">{engine.name}</span>
                       </div>
                       <div className="flex-shrink-0 ml-2">
-                        {state.activeInpaintId === engine.id ? (
+                        {isActive ? (
                           <Check size={14} className="text-[var(--color-editorial)]" />
                         ) : isUninstalled ? (
                           <div 
@@ -504,7 +533,9 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
             className="w-full flex items-center justify-between p-3 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md hover:border-[var(--color-ink)] transition-colors cursor-pointer"
           >
             <span className="font-medium truncate pr-2">
-              {ocrBaseEngines.find(e => e.id === (state.activeOcrId || 'v6-small'))?.name || 'Loading...'}
+              {ocrBaseEngines.find((engine) => engine.id === (state.activeOcrId || 'v6-small') && engine.isDownloaded)?.name
+                || ocrBaseEngines.find((engine) => engine.id === 'v6-small')?.name
+                || 'Loading...'}
             </span>
             <ChevronDown size={16} className={`text-[var(--color-dust)] transition-transform ${isOpenOcr ? 'rotate-180' : ''}`} />
           </button>
@@ -539,7 +570,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
               <div className="overflow-y-auto flex-1 p-1 custom-scrollbar">
                 {ocrBaseEngines.map((engine) => {
                   const isUninstalled = !engine.isDownloaded;
-                  const isActive = (state.activeOcrId || 'v6-small') === engine.id;
+                  const isActive = (state.activeOcrId || 'v6-small') === engine.id && !isUninstalled;
                   return (
                     <button
                       key={engine.id}

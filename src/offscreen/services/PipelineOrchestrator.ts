@@ -5,6 +5,8 @@ import { translationManager } from './TranslationManager';
 import { InpaintManager } from './InpaintManager';
 import type { InpaintTier } from './InpaintManager';
 import type { Point2D } from '../engines/inpaint/BaseInpaintEngine';
+import { inpaintRegistry } from '../engines/inpaint/inpaintRegistry';
+import { InpaintCacheManager } from './InpaintCacheManager';
 import { renderTextBlocksBatch, type TextBlockItem, type RenderedBlockInfo } from '../utils/canvasTypesetting';
 
 export class PipelineOrchestrator {
@@ -16,7 +18,31 @@ export class PipelineOrchestrator {
     this.inpaintManager = new InpaintManager();
   }
 
-  // helper to convert Blob to ArrayBuffer
+  /**
+   * Uses Simple Fill when a selected advanced inpaint model is not fully cached.
+   *
+   * @param requestedTier - The persisted inpaint tier requested by the user.
+   * @returns A built-in or fully installed inpaint tier that will not trigger an implicit download.
+   */
+  private async resolveInstalledInpaintTier(requestedTier: string): Promise<InpaintTier> {
+    const canonicalTier = requestedTier === 'aot' ? 'aotgan' : requestedTier;
+    const registryEntry = inpaintRegistry[canonicalTier];
+    if (!registryEntry) return canonicalTier as InpaintTier;
+
+    const assets = [registryEntry.onnxUrl, registryEntry.dataUrl].filter((url): url is string => Boolean(url));
+    const cached = await Promise.all(assets.map((url) => InpaintCacheManager.isModelCached(url)));
+    if (cached.every(Boolean)) return canonicalTier as InpaintTier;
+
+    console.warn(`[PipelineOrchestrator] Selected inpaint model ${canonicalTier} is not installed; using Simple Fill.`);
+    return 'simple';
+  }
+
+  /**
+   * Converts an image Blob into an ArrayBuffer for OCR and inpainting engines.
+   *
+   * @param blob - Source image data.
+   * @returns The image bytes.
+   */
   private async blobToArrayBuffer(blob: Blob): Promise<ArrayBuffer> {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -46,7 +72,8 @@ export class PipelineOrchestrator {
           resolve(response as PopupState | undefined);
         });
       });
-      const inpaintTier = popupState?.activeInpaintId || 'none';
+      const requestedInpaintTier = popupState?.activeInpaintId || 'none';
+      const inpaintTier = await this.resolveInstalledInpaintTier(requestedInpaintTier);
       const sourceLang = popupState?.sourceLang || 'auto';
       const targetLang = popupState?.targetLang || 'en';
       const ocrTier: OcrTier = popupState?.activeOcrId || 'v6-small';

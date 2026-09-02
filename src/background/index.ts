@@ -3,6 +3,8 @@ import type { ProcessJobMessage, PopupState, PreloadActiveEngineMessage } from '
 import { DEFAULT_POPUP_STATE } from '../shared/types';
 import modelsRegistryData from '../shared/models-registry.json';
 import { normalizeCustomApiConfig } from '../shared/customApi';
+import { inpaintRegistry } from '../offscreen/engines/inpaint/inpaintRegistry';
+import { resolveOcrTier } from '../offscreen/engines/ocr/ocrRegistry';
 
 // Magic Number: Limit concurrency to avoid network/CPU throttling
 // We now dynamically load this from user's PopupState (fallback to 3)
@@ -57,12 +59,19 @@ function normalizePopupState(popupState: PopupState): { state: PopupState; chang
   const fallbackChain = fallbackSource.filter((engineId, index, chain) =>
     engineId !== activeEngineId && isSupportedEngine(engineId) && chain.indexOf(engineId) === index
   );
+  const supportedInpaintIds = new Set(['none', 'simple', 'telea', ...Object.keys(inpaintRegistry)]);
+  const activeInpaintId = supportedInpaintIds.has(popupState.activeInpaintId)
+    ? popupState.activeInpaintId === 'aot' ? 'aotgan' : popupState.activeInpaintId
+    : DEFAULT_POPUP_STATE.activeInpaintId;
+  const activeOcrId = resolveOcrTier(popupState.activeOcrId);
   const changed = activeEngineId !== popupState.activeEngineId ||
+    activeInpaintId !== popupState.activeInpaintId ||
+    activeOcrId !== popupState.activeOcrId ||
     fallbackChain.length !== fallbackSource.length ||
     uniqueCustomApis.length !== (Array.isArray(popupState.customApis) ? popupState.customApis.length : 0);
 
   return {
-    state: changed ? { ...popupState, customApis: uniqueCustomApis, activeEngineId, fallbackChain } : popupState,
+    state: changed ? { ...popupState, customApis: uniqueCustomApis, activeEngineId, activeInpaintId, activeOcrId, fallbackChain } : popupState,
     changed,
   };
 }

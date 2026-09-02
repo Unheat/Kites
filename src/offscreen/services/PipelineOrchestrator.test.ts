@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { pipelineOrchestrator } from './PipelineOrchestrator';
 import { db } from '../../db';
+import { InpaintCacheManager } from './InpaintCacheManager';
 import { createCanvas, Canvas } from 'canvas';
 
 // vi.hoisted lifts the mock above the module imports. PipelineOrchestrator.ts constructs an
@@ -55,6 +56,10 @@ vi.mock('./TranslationManager', () => ({
   translationManager: {
     processTranslation: vi.fn().mockResolvedValue(['Hello', 'World'])
   }
+}));
+
+vi.mock('./InpaintCacheManager', () => ({
+  InpaintCacheManager: { isModelCached: vi.fn().mockResolvedValue(true) },
 }));
 
 vi.mock('./InpaintManager', () => {
@@ -160,6 +165,22 @@ describe('PipelineOrchestrator', () => {
     await pipelineOrchestrator.runPipeline(100);
 
     expect(processImageMock).toHaveBeenCalledWith(expect.any(ArrayBuffer), 'v6-medium');
+    blobSpy.mockRestore();
+  });
+
+  it('falls back to Simple Fill when an advanced inpaint model is not cached', async () => {
+    const mockImageRecord = { id: 1, jobId: 100, rawImageBlob: new Blob(['fake image data'], { type: 'image/png' }) };
+    ((db.images as any).first as any).mockResolvedValue(mockImageRecord);
+    vi.spyOn(chrome.runtime, 'sendMessage').mockImplementation((_message: any, callback: any) => {
+      callback({ activeInpaintId: 'lama-base', activeOcrId: 'v6-small', targetLang: 'en' });
+    });
+    vi.mocked(InpaintCacheManager.isModelCached).mockResolvedValue(false);
+    const eraseTextSpy = vi.spyOn((pipelineOrchestrator as any).inpaintManager, 'eraseText');
+    const blobSpy = vi.spyOn(pipelineOrchestrator as any, 'blobToArrayBuffer').mockResolvedValue(new ArrayBuffer(8));
+
+    await pipelineOrchestrator.runPipeline(100);
+
+    expect(eraseTextSpy).toHaveBeenCalledWith(expect.any(ArrayBuffer), expect.any(Array), 'simple', undefined);
     blobSpy.mockRestore();
   });
 
