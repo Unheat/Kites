@@ -3,6 +3,7 @@ import { X, ChevronDown, Plus } from 'lucide-react';
 import type { PopupState } from '../../shared/types';
 import type { Engine } from './EngineDropdown';
 import { ModelRegistry } from '../services/ModelRegistry';
+import { isLlmGpuAvailable } from '../../shared/utils/hardwareUtils';
 
 interface FallbackConfigPanelProps {
   state: PopupState;
@@ -26,7 +27,22 @@ export default function FallbackConfigPanel({ state, updateState, onClose }: Fal
       isDownloaded: true
     }))
   ];
+  const availableEngines = allEngines.filter((engine) =>
+    (engine.type !== 'local' || engine.isDownloaded) &&
+    (engine.hardware !== 'WebGPU' || isLlmGpuAvailable(state))
+  );
 
+  /**
+   * Lists engines available to one fallback row while excluding the primary and other fallback stages.
+   *
+   * @param index - Index of current fallback row.
+   * @returns Selectable engines for the row.
+   */
+  const getRowEngines = (index: number): Engine[] => {
+    const currentId = state.fallbackChain[index];
+    const usedIds = new Set([state.activeEngineId, ...state.fallbackChain.filter((_, chainIndex) => chainIndex !== index)]);
+    return availableEngines.filter((engine) => engine.id === currentId || !usedIds.has(engine.id));
+  };
 
   const handleUpdateChain = (index: number, newId: string) => {
     const newChain = [...state.fallbackChain];
@@ -41,7 +57,10 @@ export default function FallbackConfigPanel({ state, updateState, onClose }: Fal
   };
 
   const handleAddFallback = () => {
-    updateState({ fallbackChain: [...state.fallbackChain, 'gg-translate'] });
+    const usedIds = new Set([state.activeEngineId, ...state.fallbackChain]);
+    const nextEngine = availableEngines.find((engine) => engine.id === 'gg-translate' && !usedIds.has(engine.id))
+      || availableEngines.find((engine) => !usedIds.has(engine.id));
+    if (nextEngine) updateState({ fallbackChain: [...state.fallbackChain, nextEngine.id] });
   };
 
   return (
@@ -73,6 +92,7 @@ export default function FallbackConfigPanel({ state, updateState, onClose }: Fal
         </div>
 
         {state.fallbackChain.map((engineId, index) => {
+          const rowEngines = getRowEngines(index);
           return (
             <div key={`${index}-${engineId}`} className="relative flex flex-col items-center">
               
@@ -88,14 +108,14 @@ export default function FallbackConfigPanel({ state, updateState, onClose }: Fal
                     onChange={(e) => handleUpdateChain(index, e.target.value)}
                     className="w-full appearance-none p-3 pr-8 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md hover:border-[var(--color-ink)] transition-colors cursor-pointer text-sm font-medium text-[var(--color-ink)]"
                   >
-                    <optgroup label="Local Models">
-                      {allEngines.filter(e => e.type === 'local').map(e => (
+                    <optgroup label="Available Engines">
+                      {rowEngines.filter(e => e.type !== 'custom').map(e => (
                         <option key={e.id} value={e.id}>{e.name}</option>
                       ))}
                     </optgroup>
-                    {allEngines.filter(e => e.type === 'custom').length > 0 && (
+                    {rowEngines.some(e => e.type === 'custom') && (
                       <optgroup label="Custom APIs">
-                        {allEngines.filter(e => e.type === 'custom').map(e => (
+                        {rowEngines.filter(e => e.type === 'custom').map(e => (
                           <option key={e.id} value={e.id}>{e.name}</option>
                         ))}
                       </optgroup>

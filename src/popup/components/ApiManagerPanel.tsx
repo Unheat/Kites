@@ -15,6 +15,7 @@ export default function ApiManagerPanel({ state, updateState, onClose }: ApiMana
   const handleDeleteApi = (id: string) => {
     updateState({
       customApis: state.customApis.filter(api => api.id !== id),
+      activeEngineId: state.activeEngineId === id ? 'gg-translate' : state.activeEngineId,
       fallbackChain: state.fallbackChain.filter(chainId => chainId !== id)
     });
   };

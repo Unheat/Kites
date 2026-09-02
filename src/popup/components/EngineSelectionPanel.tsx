@@ -231,9 +231,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
       combined = combined.filter(e => e.hardware !== 'WebGPU');
     }
     
-    if (!translationOrder) return combined;
-    const rank = new Map(translationOrder.map((id, index) => [id, index]));
-    return [...combined].sort((left, right) => (rank.get(left.id) ?? Number.MAX_SAFE_INTEGER) - (rank.get(right.id) ?? Number.MAX_SAFE_INTEGER));
+    return orderChangedCatalog(combined, 'gg-translate');
   }, [baseEngines, state.customApis, state.webgpuSupported, translationOrder]);
 
   const miniSearch = useMemo(() => {
