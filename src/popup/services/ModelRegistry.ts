@@ -23,7 +23,7 @@ export class ModelRegistry {
   /**
    * Returns the translation engines that the popup may present to the user.
    *
-   * @returns Built-in online/native engines followed by supported local WebLLM models.
+   * @returns Google Translate followed by supported local WebLLM models.
    */
   public static async getAvailableEngines(): Promise<Engine[]> {
     const staticModels = await this.fetchModels();
@@ -34,13 +34,6 @@ export class ModelRegistry {
         name: 'Google Translate',
         type: 'api',
         isDownloaded: true,
-      },
-      {
-        id: 'chrome-translator',
-        name: 'Gemini Nano',
-        type: 'local',
-        isDownloaded: true,
-        hardware: 'CPU',
       },
       ...staticModels,
     ];

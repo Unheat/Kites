@@ -58,7 +58,6 @@ Below is the complete step-by-step technical execution flow for image translatio
        │  
        │  -- Branch A: Translation Waterfall (`TranslationManager`)
        │  File: src/offscreen/services/TranslationManager.ts -> TranslationManager.processTranslation()
-       │  File: src/offscreen/engines/translation/ChromeTranslatorEngine.ts -> translate()
        │  File: src/offscreen/engines/translation/WebLLMEngine.ts -> translate()
        │  File: src/offscreen/engines/translation/GoogleTranslateEngine.ts -> translate()
        │  
@@ -128,7 +127,6 @@ Below is the complete step-by-step technical execution flow for image translatio
 #### Stage 4: Translation Waterfall
 * **Translation Manager**: `src/offscreen/services/TranslationManager.ts` -> `TranslationManager.processTranslation()`
 * **Engine Waterfall Chain**: `src/offscreen/services/TranslationManager.ts` -> `processTranslation()` (iterates over `engineSequence`)
-* **Built-in Chrome AI Engine**: `src/offscreen/engines/translation/ChromeTranslatorEngine.ts` -> `translate()`
 * **WebLLM Local LLM Engine**: `src/offscreen/engines/translation/WebLLMEngine.ts` -> `translate()`
 * **Google Translate Engine**: `src/offscreen/engines/translation/GoogleTranslateEngine.ts` -> `translate()`
 

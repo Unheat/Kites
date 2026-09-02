@@ -24,9 +24,11 @@ function PopupApp() {
     }).catch(err => {
       console.warn("Failed to load hardware util in popup", err);
     });
-    chrome.storage.local.get(['popupState'], (result) => {
-      if (result.popupState && typeof result.popupState === 'object') {
-        setState(prev => ({ ...prev, ...(result.popupState as Partial<PopupState>) }));
+    chrome.runtime.sendMessage({ type: 'GET_POPUP_STATE' }, (popupState) => {
+      if (chrome.runtime.lastError) {
+        console.warn('[Popup] Failed to load normalized popup state:', chrome.runtime.lastError.message);
+      } else if (popupState && typeof popupState === 'object') {
+        setState(prev => ({ ...prev, ...(popupState as Partial<PopupState>) }));
       }
       setIsLoaded(true);
     });

@@ -45,7 +45,7 @@ async function testModelConfig(browser, configName, popupState) {
     }, popupState.activeInpaintId).catch(err => console.warn(`[E2E] Download warning/notice:`, err.message));
   }
 
-  if (popupState.activeEngineId !== 'gg-translate' && popupState.activeEngineId !== 'chrome-translator') {
+  if (popupState.activeEngineId !== 'gg-translate') {
     console.log(`[E2E] Triggering download for translation model: ${popupState.activeEngineId}...`);
     await extPage.evaluate((modelId) => {
       return new Promise((resolve, reject) => {
@@ -63,7 +63,7 @@ async function testModelConfig(browser, configName, popupState) {
   
   page.on('console', msg => {
     const text = msg.text();
-    if (text.includes('[PipelineOrchestrator]') || text.includes('[ChromeTranslatorEngine]') || text.includes('[InpaintManager]') || text.includes('[TranslationManager]')) {
+    if (text.includes('[PipelineOrchestrator]') || text.includes('[InpaintManager]') || text.includes('[TranslationManager]')) {
       console.log(`   [Logs] ${text}`);
     }
   });

@@ -17,7 +17,7 @@ A Chrome Extension-first web application that allows users to translate text wit
 - **Backend (Cloud API Compute):** FastAPI (Python) or Express.js (RESTful API) strictly for cloud translation processing and Auth.
 - **Local Database (Data & Images):** `IndexedDB` (using `Dexie.js` ORM) running inside the browser to store images as Blobs and translation history.
 - **Cloud Database (Auth Only):** PostgreSQL (for managing premium user accounts/subscriptions).
-- **Local AI Compute:** `WebLLM`, Chrome Translator, and `PaddleOCR` (ONNX Runtime Web) running in an Offscreen Document.
+- **Local AI Compute:** `WebLLM`, Google Translate, and `PaddleOCR` (ONNX Runtime Web) running in an Offscreen Document.
 - **Image Editor/Canvas:** `react-konva` for handling the interactive canvas (moving text boxes, changing fonts).
 
 ## 3. Database System Design (Schema Draft)
@@ -40,15 +40,14 @@ Only used for authentication and subscription management when the user opts for 
 
 ### A. How to run AI locally for Non-Tech Users (Zero Setup)
 *The Problem:* We want users to translate locally without installing Python, Docker, or external keys.
-*The Solution:* Kites uses Chrome's native Translator API where available and WebLLM for users with capable WebGPU hardware. Google Translate remains an online option. The former Transformers.js / NLLB model path is archived and is not an active engine.
+*The Solution:* Kites uses WebLLM for users with capable WebGPU hardware. Google Translate is the default online option. The former Transformers.js / NLLB model path is archived and is not an active engine.
 
 **Supported translation engines:**
-1. **Chrome Translator API:** Uses Chrome's built-in Translation and Language Detector APIs when available, with no Kites model download.
-2. **WebLLM (WebGPU):** Runs supported MLC models locally through WebGPU. Models are bundled in the static registry because they must match the installed WebLLM runtime.
-3. **Google Translate:** Provides the online translation route and the default engine.
+1. **WebLLM (WebGPU):** Runs supported MLC models locally through WebGPU. Models are bundled in the static registry because they must match the installed WebLLM runtime.
+2. **Google Translate:** Provides the online translation route and the default engine.
 
 **The User Flow (Extension Dashboard & Setup):**
-1. **Instant Access:** The default engine is Google Translate; Chrome Translator can also be selected when available.
+1. **Instant Access:** The default engine is Google Translate.
 2. **Lazy-Loading:** Selecting a WebLLM model displays progress while its model weights download.
 3. **VRAM/RAM Resident Singleton:** Once loaded, `TranslationManager` keeps the active engine in memory to avoid repeated WebGPU initialization.
 
@@ -59,7 +58,6 @@ Only used for authentication and subscription management when the user opts for 
 | **WebLLM** | MLC CDN (auto-resolved by ID) | WebLLM-managed browser cache | Kept in VRAM via `WebLLMEngine` | WebGPU only |
 | **PaddleOCR** | Preset registry URLs | Cache API | Kept in RAM/VRAM via `PaddleOcrEngine` | WebGPU/WASM |
 | **LaMa / AOT-GAN** | Preset registry URLs | Cache API | Kept in RAM/VRAM via `InpaintManager` | WebGPU/WASM |
-| **Chrome Translator** | Chrome internal | Chrome internal cache | Browser-managed | Chrome native API |
 | **Google Translate** | Google service | No local model cache | Stateless requests | Online API |
 
 ### B. The OCR & Detection Breakthrough (PaddleOCR ONNX)

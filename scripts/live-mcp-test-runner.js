@@ -120,7 +120,7 @@ const extensionPath = path.join(__dirname, '..', 'dist');
       await extPage.close();
     }
 
-    if (engineId !== 'gg-translate' && engineId !== 'chrome-translator') {
+    if (engineId !== 'gg-translate') {
       console.log(`[Download] Triggering download for translation model: ${engineId}...`);
       const extPage = await browser.newPage();
       await extPage.goto(`chrome-extension://${extId}/popup.html`);
