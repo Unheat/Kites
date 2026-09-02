@@ -1,6 +1,7 @@
 import type { ProcessJobMessage } from '../shared/types';
 import { pipelineOrchestrator } from './services/PipelineOrchestrator';
 import { translationManager } from './services/TranslationManager';
+import { CustomApiEngine } from './engines/translation/CustomApiEngine';
 import { inpaintRegistry } from './engines/inpaint/inpaintRegistry';
 import { ocrRegistry, resolveOcrTier } from './engines/ocr/ocrRegistry';
 import { InpaintCacheManager } from './services/InpaintCacheManager';
@@ -78,7 +79,23 @@ chrome.runtime.onMessage.addListener((message: ProcessJobMessage | any, _sender:
       .catch((err) => sendResponse({ status: 'error', error: err.message }));
     return true;
   }
+
+  if (message.type === 'VALIDATE_CUSTOM_API' && message.payload?.config) {
+    handleValidateCustomApi(message.payload.config)
+      .then(() => sendResponse({ status: 'success' }))
+      .catch((err) => sendResponse({ status: 'error', error: err instanceof Error ? err.message : String(err) }));
+    return true;
+  }
 });
+
+async function handleValidateCustomApi(config: any): Promise<void> {
+  const engine = new CustomApiEngine(config);
+  await engine.init();
+  const testResults = await engine.translate(['test'], 'en', 'es');
+  if (!testResults || testResults.length === 0 || !testResults[0]) {
+    throw new Error('API returned an empty response during validation.');
+  }
+}
 
 async function handlePreloadEngine() {
   const popupState = await new Promise<any>((resolve) => {
@@ -340,6 +357,11 @@ async function handleStartDownload(modelId: string, category?: string) {
 }
 
 async function handleCheckStatus(modelId: string): Promise<boolean> {
+  // Built-in inpaint algorithms require no downloaded model files
+  if (modelId === 'none' || modelId === 'simple' || modelId === 'telea') {
+    return true;
+  }
+
   // Check the Cache API to see if the model files are resident on disk.
   try {
     if (modelId in ocrRegistry || modelId === 'paddle-dbnet') {

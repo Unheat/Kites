@@ -3,7 +3,7 @@ import { CustomApiEngine } from './CustomApiEngine';
 import type { CustomApiConfig } from '../../../shared/types';
 
 const openAiConfig: CustomApiConfig = { id: 'api-openai', provider: 'openai', modelName: 'gpt-test', apiKey: 'secret' };
-const validTranslation = { choices: [{ message: { content: '{"translations":[{"id":"0","text":"bonjour"}]}' } }] };
+const validDelimitedReply = { choices: [{ message: { content: '<|1|>bonjour\n<|2|>monde' } }] };
 
 /**
  * Creates an initialized engine for a provider test.
@@ -28,124 +28,83 @@ function jsonResponse(payload: unknown, status = 200): Response {
   return { ok: status >= 200 && status < 300, status, json: vi.fn().mockResolvedValue(payload) } as unknown as Response;
 }
 
-/**
- * Parses an outbound JSON request body from a fetch mock call.
- *
- * @param fetchMock - The mocked fetch implementation.
- * @param call - Zero-based request index.
- * @returns The parsed request body.
- */
-function requestBody(fetchMock: ReturnType<typeof vi.spyOn>, call = 0): any {
-  return JSON.parse(String(fetchMock.mock.calls[call][1]?.body));
-}
-
 describe('CustomApiEngine', () => {
   beforeEach(() => vi.restoreAllMocks());
 
-  it('uses OpenAI strict JSON Schema and restores output positions by id', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({
-      choices: [{ message: { content: '{"translations":[{"id":"2","text":"trois"},{"id":"0","text":"un"}]}' } }],
-    }));
+  it('translates text using line delimiter prompt and maps results', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse(validDelimitedReply));
     const engine = await createEngine();
 
-    await expect(engine.translate(['one', '   ', 'three'], 'en', 'fr')).resolves.toEqual(['un', '', 'trois']);
-    expect(fetchMock).toHaveBeenCalledWith('https://api.openai.com/v1/chat/completions', expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer secret' }) }));
-    expect(requestBody(fetchMock).response_format).toMatchObject({
-      type: 'json_schema',
-      json_schema: { name: 'translation_batch', strict: true, schema: { type: 'object', additionalProperties: false, required: ['translations'], properties: { translations: { items: { additionalProperties: false, required: ['id', 'text'] } } } } },
-    });
+    const result = await engine.translate(['hello', 'world'], 'en', 'fr');
+    expect(result).toEqual(['bonjour', 'monde']);
+    expect(fetchMock).toHaveBeenCalledWith('https://api.openai.com/v1/chat/completions', expect.objectContaining({
+      headers: expect.objectContaining({ Authorization: 'Bearer secret' })
+    }));
   });
 
-  it('uses Gemini responseJsonSchema with JSON MIME output', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({ candidates: [{ content: { parts: [{ text: '{"translations":[{"id":"0","text":"bonjour"}]}' }] } }] }));
+  it('handles Gemini generateContent endpoint correctly', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({
+      candidates: [{ content: { parts: [{ text: '<|1|>bonjour' }] } }]
+    }));
     const engine = await createEngine({ ...openAiConfig, provider: 'gemini' });
 
     await expect(engine.translate(['hello'], 'en', 'fr')).resolves.toEqual(['bonjour']);
-    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('generativelanguage.googleapis.com/v1beta/models/gpt-test:generateContent'), expect.objectContaining({ headers: expect.objectContaining({ 'x-goog-api-key': 'secret' }) }));
-    expect(requestBody(fetchMock).generationConfig).toMatchObject({ responseMimeType: 'application/json', responseJsonSchema: { type: 'object', required: ['translations'] } });
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('generativelanguage.googleapis.com/v1beta/models/gpt-test:generateContent'),
+      expect.objectContaining({ headers: expect.objectContaining({ 'x-goog-api-key': 'secret' }) })
+    );
   });
 
-  it('uses Claude output_config JSON Schema without an OpenAI strict flag', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({ content: [{ type: 'text', text: '{"translations":[{"id":"0","text":"bonjour"}]}' }] }));
+  it('handles Claude Messages endpoint correctly', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({
+      content: [{ type: 'text', text: '<|1|>bonjour' }]
+    }));
     const engine = await createEngine({ ...openAiConfig, provider: 'claude' });
 
     await expect(engine.translate(['hello'], 'en', 'fr')).resolves.toEqual(['bonjour']);
-    expect(fetchMock).toHaveBeenCalledWith('https://api.anthropic.com/v1/messages', expect.objectContaining({ headers: expect.objectContaining({ 'x-api-key': 'secret', 'anthropic-version': '2023-06-01' }) }));
-    expect(requestBody(fetchMock).output_config).toMatchObject({ format: { type: 'json_schema', schema: { type: 'object', additionalProperties: false } } });
-    expect(requestBody(fetchMock).output_config.format).not.toHaveProperty('strict');
+    expect(fetchMock).toHaveBeenCalledWith('https://api.anthropic.com/v1/messages', expect.objectContaining({
+      headers: expect.objectContaining({ 'x-api-key': 'secret', 'anthropic-version': '2023-06-01' })
+    }));
   });
 
-  it('downgrades an explicitly unsupported compatible schema to JSON mode', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(jsonResponse({ error: { message: 'json_schema response_format unsupported', param: 'response_format' } }, 400))
-      .mockResolvedValueOnce(jsonResponse(validTranslation));
-    const engine = await createEngine({ ...openAiConfig, provider: 'openai-compatible', baseUrl: 'https://api.example.com/v1/' });
+  it('handles openai-compatible base URL routing', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse(validDelimitedReply));
+    const engine = await createEngine({
+      ...openAiConfig,
+      provider: 'openai-compatible',
+      baseUrl: 'https://openrouter.ai/api/v1'
+    });
 
-    await expect(engine.translate(['hello'], 'en', 'fr')).resolves.toEqual(['bonjour']);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(requestBody(fetchMock, 0).response_format.type).toBe('json_schema');
-    expect(requestBody(fetchMock, 1).response_format).toEqual({ type: 'json_object' });
+    await expect(engine.translate(['hello', 'world'], 'en', 'fr')).resolves.toEqual(['bonjour', 'monde']);
+    expect(fetchMock).toHaveBeenCalledWith('https://openrouter.ai/api/v1/chat/completions', expect.any(Object));
   });
 
-  it('downgrades compatible JSON mode to prompt JSON and caches the working mode', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(jsonResponse({ error: { message: 'json_schema unsupported', param: 'response_format' } }, 400))
-      .mockResolvedValueOnce(jsonResponse({ error: { message: 'json_object unsupported', param: 'response_format' } }, 400))
-      .mockResolvedValueOnce(jsonResponse(validTranslation))
-      .mockResolvedValueOnce(jsonResponse(validTranslation));
-    const engine = await createEngine({ ...openAiConfig, provider: 'openai-compatible', baseUrl: 'https://api.example.com/v1' });
-
-    await expect(engine.translate(['hello'])).resolves.toEqual(['bonjour']);
-    await expect(engine.translate(['hello'])).resolves.toEqual(['bonjour']);
-    expect(fetchMock).toHaveBeenCalledTimes(4);
-    expect(requestBody(fetchMock, 2)).not.toHaveProperty('response_format');
-    expect(requestBody(fetchMock, 3)).not.toHaveProperty('response_format');
-  });
-
-  it('downgrades Claude directly from strict schema to prompt JSON', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(jsonResponse({ error: { message: 'output_config is unsupported', param: 'output_config' } }, 400))
-      .mockResolvedValueOnce(jsonResponse({ content: [{ type: 'text', text: '{"translations":[{"id":"0","text":"bonjour"}]}' }] }));
-    const engine = await createEngine({ ...openAiConfig, provider: 'claude' });
-
-    await expect(engine.translate(['hello'])).resolves.toEqual(['bonjour']);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(requestBody(fetchMock, 1)).not.toHaveProperty('output_config');
-  });
-
-  it('does not downgrade on authentication, rate-limit, or generic request errors', async () => {
-    for (const [status, message] of [[401, 'invalid API key'], [429, 'rate limit'], [400, 'model does not exist']] as const) {
-      const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({ error: { message } }, status));
-      const engine = await createEngine({ ...openAiConfig, id: `api-${status}` });
-      await expect(engine.translate(['hello'])).rejects.toThrow(message);
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-      vi.restoreAllMocks();
-    }
-  });
-
-  it('retries an eligible transient failure once in the same output mode', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(jsonResponse({ error: { message: 'upstream unavailable' } }, 503))
-      .mockResolvedValueOnce(jsonResponse(validTranslation));
+  it('falls back to newline split if delimiter is missing from response', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({
+      choices: [{ message: { content: 'bonjour\nmonde' } }]
+    }));
     const engine = await createEngine();
 
-    await expect(engine.translate(['hello'])).resolves.toEqual(['bonjour']);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(requestBody(fetchMock, 0).response_format.type).toBe('json_schema');
-    expect(requestBody(fetchMock, 1).response_format.type).toBe('json_schema');
+    await expect(engine.translate(['hello', 'world'], 'en', 'fr')).resolves.toEqual(['bonjour', 'monde']);
   });
 
-  it('rejects refusals and invalid translation IDs without downgrading', async () => {
-    const refusalFetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({ choices: [{ message: { refusal: 'safety policy' } }] }));
-    const refusalEngine = await createEngine();
-    await expect(refusalEngine.translate(['hello'])).rejects.toThrow('refused translation');
-    expect(refusalFetch).toHaveBeenCalledTimes(1);
-    vi.restoreAllMocks();
+  it('throws error when provider response cannot match expected line count', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({
+      choices: [{ message: { content: '<|1|>only one line' } }]
+    }));
+    const engine = await createEngine();
 
-    const invalidFetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({ choices: [{ message: { content: '{"translations":[{"id":"9","text":"wrong"}]}' } }] }));
-    const invalidEngine = await createEngine();
-    await expect(invalidEngine.translate(['hello'])).rejects.toThrow('unknown or duplicate translation id');
-    expect(invalidFetch).toHaveBeenCalledTimes(1);
+    await expect(engine.translate(['line1', 'line2'], 'en', 'fr')).rejects.toThrow('Delimiter parsing failed');
+  });
+
+  it('retries on transient failure', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(jsonResponse({ error: { message: 'upstream unavailable' } }, 503))
+      .mockResolvedValueOnce(jsonResponse({ choices: [{ message: { content: '<|1|>bonjour' } }] }));
+    const engine = await createEngine();
+
+    await expect(engine.translate(['hello'], 'en', 'fr')).resolves.toEqual(['bonjour']);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('rejects invalid compatible URLs before fetching', async () => {

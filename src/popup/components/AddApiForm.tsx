@@ -13,13 +13,14 @@ export default function AddApiForm({ onSave, onCancel }: AddApiFormProps) {
   const [newApiKey, setNewApiKey] = useState('');
   const [newBaseUrl, setNewBaseUrl] = useState('');
   const [validationError, setValidationError] = useState('');
+  const [isValidating, setIsValidating] = useState(false);
 
   /**
-   * Validates the provider fields and saves a new custom API configuration.
+   * Validates the provider fields, tests the connection via offscreen, and saves on success.
    *
-   * @returns Nothing; displays an inline error when a required field is invalid.
+   * @returns Nothing; displays an inline error when verification fails.
    */
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!newModelName.trim() || !newApiKey.trim()) {
       setValidationError('Model name and API key are required.');
       return;
@@ -41,7 +42,33 @@ export default function AddApiForm({ onSave, onCancel }: AddApiFormProps) {
       ...(compatibleBaseUrl?.normalized ? { baseUrl: compatibleBaseUrl.normalized } : {}),
     };
 
-    onSave(newApi);
+    setIsValidating(true);
+    setValidationError('');
+
+    try {
+      const response = await new Promise<{ status: string; error?: string }>((resolve) => {
+        chrome.runtime.sendMessage({
+          type: 'VALIDATE_CUSTOM_API',
+          payload: { config: newApi }
+        }, (res) => {
+          if (chrome.runtime.lastError) {
+            resolve({ status: 'error', error: chrome.runtime.lastError.message });
+          } else {
+            resolve(res || { status: 'error', error: 'No response from background validator.' });
+          }
+        });
+      });
+
+      if (response.status === 'success') {
+        onSave(newApi);
+      } else {
+        setValidationError(response.error || 'Failed to connect to API with provided credentials.');
+      }
+    } catch (err: any) {
+      setValidationError(err?.message || 'Error validating custom API.');
+    } finally {
+      setIsValidating(false);
+    }
   };
 
   return (
@@ -54,6 +81,7 @@ export default function AddApiForm({ onSave, onCancel }: AddApiFormProps) {
             setProvider(e.target.value as CustomApiConfig['provider']);
             setValidationError('');
           }}
+          disabled={isValidating}
           className="w-full p-2 text-sm bg-[var(--color-paper)] border border-[var(--color-dust)] rounded focus:outline-none focus:border-[var(--color-ink)] transition-colors cursor-pointer"
         >
           <option value="openai">OpenAI</option>
@@ -71,6 +99,7 @@ export default function AddApiForm({ onSave, onCancel }: AddApiFormProps) {
           placeholder="e.g. gpt-4o or claude-3-5-sonnet" 
           value={newModelName}
           onChange={(e) => setNewModelName(e.target.value)}
+          disabled={isValidating}
           className="w-full p-2 text-sm bg-[var(--color-paper)] border border-[var(--color-dust)] rounded focus:outline-none focus:border-[var(--color-ink)] transition-colors placeholder:text-[var(--color-dust)]"
         />
       </div>
@@ -83,6 +112,7 @@ export default function AddApiForm({ onSave, onCancel }: AddApiFormProps) {
             placeholder="https://openrouter.ai/api/v1" 
             value={newBaseUrl}
             onChange={(e) => setNewBaseUrl(e.target.value)}
+            disabled={isValidating}
             className="w-full p-2 text-sm bg-[var(--color-paper)] border border-[var(--color-dust)] rounded focus:outline-none focus:border-[var(--color-ink)] transition-colors placeholder:text-[var(--color-dust)]"
           />
         </div>
@@ -95,22 +125,25 @@ export default function AddApiForm({ onSave, onCancel }: AddApiFormProps) {
           placeholder="sk-..." 
           value={newApiKey}
           onChange={(e) => setNewApiKey(e.target.value)}
+          disabled={isValidating}
           className="w-full p-2 text-sm bg-[var(--color-paper)] border border-[var(--color-dust)] rounded focus:outline-none focus:border-[var(--color-ink)] transition-colors placeholder:text-[var(--color-dust)]"
         />
       </div>
       
-      {validationError && <p className="text-xs text-red-600" role="alert">{validationError}</p>}
+      {validationError && <p className="text-xs text-red-600 leading-tight" role="alert">{validationError}</p>}
 
       <div className="flex gap-2 mt-2">
         <button 
           onClick={handleSave}
-          className="flex-1 py-2 bg-[var(--color-ink)] text-[var(--color-paper)] text-sm font-bold rounded hover:bg-[var(--color-editorial)] transition-colors cursor-pointer"
+          disabled={isValidating}
+          className="flex-1 py-2 bg-[var(--color-ink)] text-[var(--color-paper)] text-sm font-bold rounded hover:bg-[var(--color-editorial)] transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          Save API
+          {isValidating ? 'Testing API...' : 'Save API'}
         </button>
         <button 
           onClick={onCancel}
-          className="flex-1 py-2 bg-transparent border border-[var(--color-dust)] text-[var(--color-ink)] text-sm font-bold rounded hover:bg-[var(--color-dust)] transition-colors cursor-pointer"
+          disabled={isValidating}
+          className="flex-1 py-2 bg-transparent border border-[var(--color-dust)] text-[var(--color-ink)] text-sm font-bold rounded hover:bg-[var(--color-dust)] transition-colors cursor-pointer disabled:opacity-50"
         >
           Cancel
         </button>
