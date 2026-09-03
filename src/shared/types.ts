@@ -116,7 +116,7 @@ export const DEFAULT_POPUP_STATE: PopupState = {
   fallbackChain: [],
   customApis: [],
   webgpuSupported: null,
-  webgpuMaster: false,
+  webgpuMaster: true,
   webgpuOverrides: {
     llm: true,
     inpaint: true,

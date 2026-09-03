@@ -20,16 +20,17 @@
   height: 32px;
   cursor: pointer;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
-  transition: background-color 0.2s ease, transform 0.15s ease, opacity 0.2s ease;
+  transition: background-color 0.2s ease, opacity 0.2s ease;
 }
 
 #kites-translate-btn:hover {
   background-color: #e02065;
-  transform: scale(1.05);
 }
 
 .kites-anim-spin {
-  animation: kites-spin 1s linear infinite;
+  animation: kites-spin 1s linear infinite !important;
+  transform-origin: center center !important;
+  display: inline-block !important;
 }
 
 @keyframes kites-spin {

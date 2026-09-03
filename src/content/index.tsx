@@ -9,7 +9,6 @@ const MIN_WIDTH_IMAGE_PX = 150;
 const MIN_HEIGHT_IMAGE_PX = 150;
 const IMAGE_SCAN_DEBOUNCE_MS = 300;
 const HOVER_LEAVE_DELAY_MS = 150;
-const IMAGE_SWAP_TRANSITION_MS = 300;
 
 type OverlayImage = {
   srcUrl: string;
@@ -79,6 +78,8 @@ function TranslateButton({
   onTranslate: (srcUrl: string) => void;
 }) {
   const buttonRef = useRef<HTMLButtonElement>(null);
+  const [localTranslating, setLocalTranslating] = useState(false);
+  const activeTranslating = isTranslating || localTranslating;
 
   useEffect(() => {
     if (buttonRef.current) {
@@ -88,6 +89,29 @@ function TranslateButton({
     }
   }, [anchorName]);
 
+  useEffect(() => {
+    const handleMessage = (message: any) => {
+      if ((message.type === 'IMAGE_TRANSLATED' || message.type === 'TRANSLATION_ERROR') && message.payload) {
+        if (message.payload.originalUrl === srcUrl) {
+          setLocalTranslating(false);
+        }
+      }
+    };
+
+    try {
+      if (chrome.runtime?.id) {
+        chrome.runtime.onMessage.addListener(handleMessage);
+        return () => {
+          try {
+            if (chrome.runtime?.id) {
+              chrome.runtime.onMessage.removeListener(handleMessage);
+            }
+          } catch (e) {}
+        };
+      }
+    } catch (e) {}
+  }, [srcUrl]);
+
   return (
     <button
       ref={buttonRef}
@@ -95,15 +119,20 @@ function TranslateButton({
       onClick={(event) => {
         event.preventDefault();
         event.stopPropagation();
+        setLocalTranslating(true);
         onTranslate(srcUrl);
       }}
-      disabled={isTranslating}
-      className={`fixed z-[999999] w-8 h-8 flex items-center justify-center rounded-full bg-[var(--color-editorial)] hover:brightness-110 transition-colors cursor-pointer border-none text-white disabled:cursor-wait ${isTranslating ? 'kites-anim-spin' : ''}`}
+      disabled={activeTranslating}
+      className={`fixed z-[999999] w-8 h-8 flex items-center justify-center rounded-full bg-[#ff2d75] transition-colors cursor-pointer border-none text-white disabled:cursor-wait ${activeTranslating ? 'kites-anim-spin' : ''}`}
       style={{ marginTop: '8px', marginLeft: '8px', pointerEvents: 'auto' }}
       title="Translate Image"
     >
-      <Languages size={18} aria-hidden="true" />
-      <span className="sr-only">Translate Image</span>
+      <Languages 
+        size={18} 
+        aria-hidden="true" 
+        className={activeTranslating ? 'kites-anim-spin' : ''} 
+        style={activeTranslating ? { animation: 'kites-spin 1s linear infinite' } : undefined}
+      />
     </button>
   );
 }
@@ -190,12 +219,8 @@ function GlobalOverlay() {
       const targetImg = Array.from(document.querySelectorAll('img')).find((img) => img.src === originalUrl);
       if (!targetImg) return;
 
-      targetImg.style.transition = `opacity ${IMAGE_SWAP_TRANSITION_MS}ms ease-in-out`;
-      targetImg.style.opacity = '0';
-      window.setTimeout(() => {
-        targetImg.src = bakedBase64;
-        targetImg.style.opacity = '1';
-      }, IMAGE_SWAP_TRANSITION_MS);
+      // Instant native swap (no opacity fade/blink)
+      targetImg.src = bakedBase64;
     };
 
     chrome.runtime.onMessage.addListener(handleMessage);

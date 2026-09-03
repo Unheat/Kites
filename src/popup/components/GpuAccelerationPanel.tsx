@@ -65,8 +65,8 @@ export default function GpuAccelerationPanel({ state, updateState }: GpuAccelera
               state.webgpuSupported === false ? 'bg-red-500/10 text-red-500 border border-red-500/30' : 
               'bg-gray-500/10 text-gray-400 border border-gray-500/30'
             }`}>
-              {state.webgpuSupported === true ? '✓' : 
-               state.webgpuSupported === false ? '✗' : 
+              {state.webgpuSupported === true ? 'Supported✓' : 
+               state.webgpuSupported === false ? 'Unsupported✗' :
                '...'}
             </span>
             
