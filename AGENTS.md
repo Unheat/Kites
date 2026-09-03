@@ -15,6 +15,7 @@ This file defines the behavior and guiding principles for Antigravity when colla
 ---
 
 ## 0 critical code writing, if yoy unsure about something, search official docs or looking for community discussion do not hallucinate the problem/solution to problem.
+you can use hound mcp i already install for advance search
 
 ## 1. Role: Pedagogical Guide & Architectural Mentor
 

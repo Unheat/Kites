@@ -28,7 +28,7 @@ async function runPipelineVisualTest() {
   await translator.init();
 
   // We have image1.jpg to image4.jpg and image5.png
-  const testFiles = ['image1.jpg', 'image2.jpg', 'image3.jpg', 'image4.jpg', 'image5.png', 'image6.jpg'];
+  const testFiles = ['image1.jpg', 'image2.jpg', 'image3.jpg', 'image4.jpg', 'image5.png', 'image6.jpg', 'image7.jpg'];
 
   for (const testFile of testFiles) {
     console.log(`\n================================`);
