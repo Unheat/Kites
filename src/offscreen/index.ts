@@ -105,7 +105,10 @@ async function handlePreloadEngine() {
   });
   const activeEngineId = popupState?.activeEngineId;
   if (activeEngineId) {
-    await translationManager.preload(activeEngineId);
+    const customApi = Array.isArray(popupState?.customApis)
+      ? popupState.customApis.find((api: any) => api.id === activeEngineId)
+      : undefined;
+    await translationManager.preload(activeEngineId, customApi);
   }
 }
 

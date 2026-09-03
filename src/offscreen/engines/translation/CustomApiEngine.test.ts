@@ -25,7 +25,13 @@ async function createEngine(config = openAiConfig): Promise<CustomApiEngine> {
  * @returns A browser-like fetch response mock.
  */
 function jsonResponse(payload: unknown, status = 200): Response {
-  return { ok: status >= 200 && status < 300, status, json: vi.fn().mockResolvedValue(payload) } as unknown as Response;
+  const textBody = typeof payload === 'string' ? payload : JSON.stringify(payload);
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    json: vi.fn().mockResolvedValue(typeof payload === 'string' ? JSON.parse(payload) : payload),
+    text: vi.fn().mockResolvedValue(textBody),
+  } as unknown as Response;
 }
 
 describe('CustomApiEngine', () => {

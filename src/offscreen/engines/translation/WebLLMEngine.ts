@@ -2,6 +2,7 @@ import { MLCEngine, CreateMLCEngine } from '@mlc-ai/web-llm';
 import type { ITranslationEngine } from './BaseEngine';
 import { checkWebGPUAvailability } from '../../utils/hardware';
 import { getLanguageName } from '../../../shared/utils/LanguageRegistry';
+const MAX_SEGMENTS_PER_BATCH = 30;
 
 export class WebLLMEngine implements ITranslationEngine {
   private engine: MLCEngine | null = null;
@@ -110,7 +111,7 @@ export class WebLLMEngine implements ITranslationEngine {
       return texts.map(() => ''); // All were empty
     }
 
-    const CHUNK_SIZE = 10;
+    const CHUNK_SIZE = MAX_SEGMENTS_PER_BATCH;
     const results: string[] = new Array(texts.length).fill('');
 
     console.log(`[WebLLMEngine] Translating ${nonEmptyInputs.length} blocks in chunks of ${CHUNK_SIZE}...`);

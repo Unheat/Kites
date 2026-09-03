@@ -2,7 +2,7 @@ import type { CustomApiConfig } from '../../../shared/types';
 import { getLanguageName } from '../../../shared/utils/LanguageRegistry';
 import type { ITranslationEngine } from './BaseEngine';
 
-const MAX_SEGMENTS_PER_BATCH = 10;
+const MAX_SEGMENTS_PER_BATCH = 30;
 const REQUEST_TIMEOUT_MS = 45_000;
 const MAX_ATTEMPTS = 2;
 const ANTHROPIC_VERSION = '2023-06-01';
@@ -182,13 +182,17 @@ export class CustomApiEngine implements ITranslationEngine {
       messages: [{ role: 'user', content: prompt }],
     };
 
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${this.config.apiKey}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': 'https://kites.ai',
+      'X-Title': 'Kites Manga Translator',
+    };
+
     const payload = await this.readResponse(await fetch(`${root}/chat/completions`, {
       method: 'POST',
       signal,
-      headers: {
-        Authorization: `Bearer ${this.config.apiKey}`,
-        'Content-Type': 'application/json',
-      },
+      headers,
       body: JSON.stringify(body),
     }));
 
@@ -274,17 +278,19 @@ export class CustomApiEngine implements ITranslationEngine {
   }
 
   /**
-   * Parses JSON HTTP response and preserves provider error details.
+   * Parses HTTP response as text first, then JSON, preserving provider error details.
    *
    * @param response - Fetch response.
    * @returns Parsed JSON body.
    */
   private async readResponse(response: Response): Promise<any> {
+    const rawText = await response.text();
     let payload: any;
     try {
-      payload = await response.json();
+      payload = JSON.parse(rawText);
     } catch {
-      throw new Error(`Provider returned invalid JSON (HTTP ${response.status}).`);
+      const preview = rawText.trim().slice(0, 200);
+      throw new Error(`Provider returned invalid JSON (HTTP ${response.status}): ${preview || '(empty response)'}`);
     }
 
     if (response.ok) return payload;
