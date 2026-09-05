@@ -1,0 +1,14 @@
+# Copy this file to .dev.vars for local testing with `wrangler dev`
+# For production, set each secret with: npx wrangler secret put <NAME>
+
+# Google OAuth Client ID (audience check for ID token verification)
+GOOGLE_CLIENT_ID=your-google-oauth-client-id.apps.googleusercontent.com
+
+# HMAC Salt for anonymous user quota hashing
+JWT_SALT=kites-production-secret-salt-replace-this
+
+# Provider Secrets (Set whichever you have enabled in src/config/providers.ts)
+NVIDIA_API_KEY=nvapi-your-nvidia-api-key-here
+OPENROUTER_API_KEY=sk-or-v1-your-openrouter-key-here
+GEMINI_API_KEY=AIzaSy-your-gemini-key-here
+GROQ_API_KEY=gsk_your-groq-key-here
