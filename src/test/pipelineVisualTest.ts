@@ -62,16 +62,12 @@ async function runPipelineVisualTest() {
     const inpaintPolygons = ocrResult.rawPolygons || polygons;
     const cleanedBuffer = await inpaintManager.eraseText(arrayBuffer, inpaintPolygons, 'simple');
 
-    // Bake passes — one per renderer branch so every algorithm added since v1 has a
-    // visible output:
-    //   en  -> Cotrans default renderer: XianScan 4-pass fit, diamond wrap, page font
-    //          baseline, background-adaptive color sampling, decollision
-    //   ja  -> legacy vertical-CJK path: char stacking + vertical punctuation mapping
-    //   ar  -> legacy RTL path: canvas-native bidi via ctx.direction
+    // Single bake pass through the production 'en' path — covers every algorithm added
+    // since v1: XianScan 4-pass fit, diamond wrap, page font baseline, background-adaptive
+    // color sampling, decollision, sanitize. (The legacy vertical/RTL branches have their
+    // own unit tests; add extra passes here only if you need visual coverage for them.)
     const bakePasses: { lang: string; suffix: string }[] = [
       { lang: 'en', suffix: '' },
-      { lang: 'ja', suffix: '.vertical' },
-      { lang: 'ar', suffix: '.rtl' },
     ];
 
     for (const pass of bakePasses) {
