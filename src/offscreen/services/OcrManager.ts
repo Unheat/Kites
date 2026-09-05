@@ -373,6 +373,45 @@ export class OcrManager {
       };
     }
 
+    // Build Cotrans Quadrilateral objects once (sorts points, derives direction/font_size)
+    const quads = polygons.map(p => new Quadrilateral(p));
+
+    // Stage 1.5: assign per-line reading direction (Cotrans _generate_text_direction)
+    this.assignTextDirections(quads);
+
+    // XianScan low-confidence suppression (builder.rs:278-282), NEIGHBORHOOD-GATED:
+    // the source suppresses weak lines inside a container that also holds a strong
+    // line. We have no containers pre-merge, so the gate is "can actually merge with"
+    // a high-confidence line. A faint whisper bubble elsewhere on the page cannot
+    // merge with the strong line and is untouched.
+    let workingTexts = texts;
+    let workingPolygons = polygons;
+    let workingScores = scores;
+    let workingQuads = quads;
+    const pageMaxScore = scores.reduce((m, s) => Math.max(m, s || 0), 0);
+    if (pageMaxScore >= 0.70) {
+      const suppressed = new Set<number>();
+      for (let i = 0; i < texts.length; i++) {
+        const scoreI = scores[i] || 0;
+        if (scoreI >= 0.60 || scoreI >= pageMaxScore * 0.85) continue;
+        for (let j = 0; j < texts.length; j++) {
+          if (i === j || (scores[j] || 0) < 0.70) continue;
+          if (quadrilateralCanMergeRegion(quads[i], quads[j], 1.9, 2, 1, 3, 2, 1.3)) {
+            suppressed.add(i);
+            console.log(`[OcrManager] Suppressed low-confidence line "${texts[i].trim()}" (score=${scoreI.toFixed(2)}) near high-confidence line (score=${(scores[j] || 0).toFixed(2)})`);
+            break;
+          }
+        }
+      }
+      if (suppressed.size > 0) {
+        const kept = texts.map((_, i) => i).filter(i => !suppressed.has(i));
+        workingTexts = kept.map(i => texts[i]);
+        workingPolygons = kept.map(i => polygons[i]);
+        workingScores = kept.map(i => scores[i]);
+        workingQuads = kept.map(i => quads[i]);
+      }
+    }
+
     const mergedPolygons: any[] = [];
     const mergedTexts: string[] = [];
     const mergedScores: number[] = [];
@@ -382,20 +421,14 @@ export class OcrManager {
     const mergedAngles: number[] = [];
     const mergedLineCounts: number[] = [];
 
-    // Build Cotrans Quadrilateral objects once (sorts points, derives direction/font_size)
-    const quads = polygons.map(p => new Quadrilateral(p));
-
-    // Stage 1.5: assign per-line reading direction (Cotrans _generate_text_direction)
-    this.assignTextDirections(quads);
-
     // Step 1: divide into text region candidates (textline_merge/__init__.py merge graph).
     // Cotrans call: quadrilateral_can_merge_region(ubox, vbox, aspect_ratio_tol=1.3,
     // font_size_ratio_tol=2, char_gap_tolerance=1, char_gap_tolerance2=3)
     const mergeGraph = new Graph();
-    for (let i = 0; i < quads.length; i++) mergeGraph.addNode(i);
-    for (let i = 0; i < quads.length; i++) {
-      for (let j = i + 1; j < quads.length; j++) {
-        if (quadrilateralCanMergeRegion(quads[i], quads[j], 1.9, 2, 1, 3, 2, 1.3)) {
+    for (let i = 0; i < workingQuads.length; i++) mergeGraph.addNode(i);
+    for (let i = 0; i < workingQuads.length; i++) {
+      for (let j = i + 1; j < workingQuads.length; j++) {
+        if (quadrilateralCanMergeRegion(workingQuads[i], workingQuads[j], 1.9, 2, 1, 3, 2, 1.3)) {
           mergeGraph.addEdge(i, j);
         }
       }
@@ -404,7 +437,7 @@ export class OcrManager {
     // Step 2: postprocess - further split each region using Cotrans Kruskal MST statistics
     const finalGroups: number[][] = [];
     for (const component of mergeGraph.connectedComponents()) {
-      const splitSets = splitTextRegion(quads, component);
+      const splitSets = splitTextRegion(workingQuads, component);
       for (const set of splitSets) {
         finalGroups.push(Array.from(set));
       }
@@ -412,7 +445,7 @@ export class OcrManager {
 
     // Step 3: emit one merged region per final group
     for (const groupIndices of finalGroups) {
-      const groupQuads = groupIndices.map(idx => quads[idx]);
+      const groupQuads = groupIndices.map(idx => workingQuads[idx]);
 
       // Majority direction vote with Cotrans top-2 tie-break
       const majorityDir = this.majorityDirection(groupQuads);
@@ -420,18 +453,18 @@ export class OcrManager {
       // Sort textlines in reading order (1:1 textline_merge/__init__.py)
       if (majorityDir === 'h') {
         // Horizontal text: sort top-to-bottom (Y ascending)
-        groupIndices.sort((a, b) => quads[a].centroid.y - quads[b].centroid.y);
+        groupIndices.sort((a, b) => workingQuads[a].centroid.y - workingQuads[b].centroid.y);
       } else {
         // Vertical manga: sort right-to-left (X descending)
-        groupIndices.sort((a, b) => quads[b].centroid.x - quads[a].centroid.x);
+        groupIndices.sort((a, b) => workingQuads[b].centroid.x - workingQuads[a].centroid.x);
       }
 
       // 1:1 Cotrans CJK aware text concatenation (textblock.py)
       let groupText = '';
       if (groupIndices.length > 0) {
-        groupText = texts[groupIndices[0]] || '';
+        groupText = workingTexts[groupIndices[0]] || '';
         for (let k = 1; k < groupIndices.length; k++) {
-          const txt = texts[groupIndices[k]] || '';
+          const txt = workingTexts[groupIndices[k]] || '';
           const lastChar = groupText.slice(-1);
           const firstChar = txt.slice(0, 1);
           const isLastCJK = lastChar >= '\u3000' && lastChar <= '\u9fff';
@@ -446,21 +479,21 @@ export class OcrManager {
       }
 
       console.log(`[OcrManager] Merged Speech Bubble: "${groupText}" (${majorityDir}) from ${groupIndices.length} lines`);
-      const groupScore = groupIndices.reduce((sum, idx) => sum + (scores[idx] || 1), 0) / groupIndices.length;
+      const groupScore = groupIndices.reduce((sum, idx) => sum + (workingScores[idx] || 1), 0) / groupIndices.length;
 
       // 1:1 Cotrans block font size: int(min(textline font sizes)) (textline_merge dispatch)
-      const groupFontSize = Math.floor(Math.min(...groupIndices.map(idx => quads[idx].font_size)));
+      const groupFontSize = Math.floor(Math.min(...groupIndices.map(idx => workingQuads[idx].font_size)));
 
       // 1:1 Cotrans average angle calculation and threshold snapping (textline_merge/__init__.py):
       // angle = rad2deg(mean(line angles)) - 90, snapped to 0 below 3 degrees
-      const meanAngleRad = groupIndices.reduce((sum, idx) => sum + quads[idx].angle, 0) / groupIndices.length;
+      const meanAngleRad = groupIndices.reduce((sum, idx) => sum + workingQuads[idx].angle, 0) / groupIndices.length;
       let angleDeg = (meanAngleRad * 180) / Math.PI - 90;
       if (Math.abs(angleDeg) < 3) {
         angleDeg = 0;
       }
 
       // 1:1 Cotrans min_rect computation (textblock.py min_rect property - ALWAYS 4 points)
-      const groupPolygons = groupIndices.map(idx => quads[idx].pts);
+      const groupPolygons = groupIndices.map(idx => workingQuads[idx].pts);
       const minRect = computeMinAreaRect(groupPolygons, angleDeg);
       const minBox = calculateBoundingBox(minRect);
 
