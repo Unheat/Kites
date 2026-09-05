@@ -82,12 +82,17 @@ function makeCanvas(ctx: any, w: number, h: number): AnyCanvas {
 }
 
 /**
- * 1:1 port of Cotrans `compact_special_symbols`: collapses ellipses and strips spaces after punctuation.
+ * Collapses ellipses; strips FULL-WIDTH spaces after punctuation only.
+ *
+ * Deliberate divergence from Cotrans upstream master (which also strips ASCII spaces
+ * after punctuation): fusing "Teacher, please" into "Teacher,please" glues two words
+ * into one oversized token, forcing the wrap fallback to slice English mid-word
+ * ("Teacher,p-" / "lease"). ASCII spacing is meaningful for Western word-wrap.
  */
 export function compactSpecialSymbols(text: string): string {
   text = text.replace(/\.\.\./g, '…').replace(/\.\./g, '…');
-  // Remove half/full-width spaces immediately after a punctuation mark.
-  text = text.replace(/([^\w\s])[ 　]+/g, '$1');
+  // Remove full-width spaces immediately after a punctuation mark (ASCII space kept).
+  text = text.replace(/([^\w\s])[　]+/g, '$1');
   return text;
 }
 

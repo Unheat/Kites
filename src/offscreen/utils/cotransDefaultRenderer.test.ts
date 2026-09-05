@@ -32,10 +32,16 @@ describe('calcHorizontal', () => {
 });
 
 describe('compactSpecialSymbols', () => {
-  it('collapses ellipses and strips spaces after punctuation', () => {
+  it('collapses ellipses and strips full-width spaces after punctuation', () => {
     expect(compactSpecialSymbols('wait...')).toBe('wait…');
     expect(compactSpecialSymbols('really..')).toBe('really…');
-    expect(compactSpecialSymbols('Stop! Go')).toBe('Stop!Go');
+    expect(compactSpecialSymbols('Stop!　Go')).toBe('Stop!Go');
+  });
+
+  it('keeps ASCII spaces after punctuation so English words stay separate', () => {
+    // Fusing "Teacher, please" caused mid-word char-slicing ("Teacher,p-"/"lease").
+    expect(compactSpecialSymbols('Teacher, please')).toBe('Teacher, please');
+    expect(compactSpecialSymbols('Stop! Go')).toBe('Stop! Go');
   });
 });
 
