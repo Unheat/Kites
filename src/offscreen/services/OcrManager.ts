@@ -6,6 +6,7 @@ import {
   isScanlatorWatermark,
   isThoughtBubbleTailOrnament,
   isStandaloneDigitOrOrnamentNoise,
+  cleanStrayOcrArtifacts,
 } from '../../shared/utils/textCleaning';
 
 /**
@@ -168,6 +169,13 @@ export class OcrManager {
     const rawPolygons = [...(result.polygons || [])];
     const rawScores = [...(result.scores || [])];
     if (rawTexts.length <= 1 || rawPolygons.length === 0) return { ...result, rawPolygons };
+
+    // XianScan clean_stray_ocr_artifacts: per-line rewrite BEFORE any filtering so
+    // trailing digit runs after ellipsis ("ちょっと…200000") and slash debris are
+    // cleaned once and every downstream filter sees the cleaned text.
+    for (let i = 0; i < rawTexts.length; i++) {
+      rawTexts[i] = cleanStrayOcrArtifacts(rawTexts[i]);
+    }
 
     // XianScan-style orphan punctuation recovery. Cotrans deliberately drops pure punctuation
     // as noise, but vertical manga often detects a terminal `!`/`?` in its own small quad.

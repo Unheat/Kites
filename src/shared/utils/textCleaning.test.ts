@@ -4,10 +4,28 @@ import {
   isScanlatorWatermark,
   isThoughtBubbleTailOrnament,
   isStandaloneDigitOrOrnamentNoise,
+  cleanStrayOcrArtifacts,
   CJK_SCRIPT_REGEX,
 } from './textCleaning';
 
 describe('textCleaning', () => {
+  describe('cleanStrayOcrArtifacts', () => {
+    it('strips trailing digit runs after ellipsis', () => {
+      expect(cleanStrayOcrArtifacts('ちょっと…200000')).toBe('ちょっと…');
+      expect(cleanStrayOcrArtifacts('wait.500')).toBe('wait.');
+    });
+
+    it('trims trailing slash debris', () => {
+      expect(cleanStrayOcrArtifacts('trust/')).toBe('trust');
+      expect(cleanStrayOcrArtifacts('go \\')).toBe('go');
+    });
+
+    it('leaves normal dialogue untouched', () => {
+      expect(cleanStrayOcrArtifacts('ここで待って…？')).toBe('ここで待って…？');
+      expect(cleanStrayOcrArtifacts('wait... for me')).toBe('wait... for me');
+    });
+  });
+
   describe('sanitizeTypesetText', () => {
     it('normalizes CJK quotes and tildes for Western text', () => {
       expect(sanitizeTypesetText('「Hello there」')).toBe('"Hello there"');

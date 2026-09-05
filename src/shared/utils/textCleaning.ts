@@ -49,6 +49,30 @@ export function isStandaloneDigitOrOrnamentNoise(text: string): boolean {
   return false;
 }
 
+/** Trailing digit-noise run after an ellipsis/dot ("ちょっと…200000"). */
+const ELLIPSIS_TAIL_DIGIT_NOISE = /([.．…·。])[0oO23589]{3,8}$/;
+
+/**
+ * Universal per-line cleaning for OCR artifacts (XianScan `clean_stray_ocr_artifacts`).
+ * Strips trailing ellipsis-attached digit noise runs and trailing slash/backslash debris.
+ * Pure string rewrite — the caller keeps the line and its polygon.
+ *
+ * @param text - Raw OCR line text.
+ * @returns Cleaned text.
+ */
+export function cleanStrayOcrArtifacts(text: string): string {
+  let t = text.replace(/\s+$/, '');
+  // "ちょっと…200000" -> "ちょっと…" (keep the ellipsis, drop the digit run)
+  let match: RegExpExecArray | null;
+  while ((match = ELLIPSIS_TAIL_DIGIT_NOISE.exec(t)) !== null) {
+    t = t.slice(0, match.index + 1);
+  }
+  if (t.endsWith('/') || t.endsWith('\\')) {
+    t = t.slice(0, -1).trimEnd();
+  }
+  return t.trim();
+}
+
 /**
  * Normalize translated text for comic typesetting.
  *
