@@ -270,11 +270,12 @@ export default function App() {
    * @param newText - Updated translated text content.
    */
   const handleTextChange = async (blockId: number, newText: string) => {
+    // When text is edited, clear cached static lines so the live preview updates immediately with newText
     setTextBlocks((prev) =>
-      prev.map((b) => (b.id === blockId ? { ...b, translatedText: newText } : b))
+      prev.map((b) => (b.id === blockId ? { ...b, translatedText: newText, lines: undefined } : b))
     );
     try {
-      await db.textBlocks.update(blockId, { translatedText: newText });
+      await db.textBlocks.update(blockId, { translatedText: newText, lines: undefined });
     } catch (err) {
       console.error('[Dashboard] Failed updating text block:', err);
     }
@@ -605,7 +606,7 @@ export default function App() {
                           }}
                         >
                           {(block.lines?.length ? block.lines : [block.translatedText]).map((line, index) => (
-                            <span key={index} className="block whitespace-nowrap">{line}</span>
+                            <span key={index} className={`block ${block.lines?.length ? 'whitespace-nowrap' : 'break-words'}`}>{line}</span>
                           ))}
                         </div>
                       </div>

@@ -9,8 +9,11 @@
  * 4. Logical paragraph splitting & text reflow (reflowText).
  */
 
-export const NON_LATIN_SCRIPT_REGEX = /[\u3040-\u30ff\u31f0-\u31ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af\u1100-\u11ff\u3130-\u318f\u0900-\u097f\u0e00-\u0e7f\u0400-\u04ff\uff01-\uffee\u3000-\u303f\u00ab\u00bb\u2018-\u201f\u2039\u203a]/;
-export const CJK_REGEX = NON_LATIN_SCRIPT_REGEX;
+// STRICTLY matches East Asian CJK ideograms and Hangul glyphs.
+// Must NEVER match punctuation like curly apostrophe ('\u2019'), quotes ('\u2018'..'\u201F'),
+// or ellipsis ('\u2026'), which caused English dialogue ("There's", "don't") to be chopped as Kanji!
+export const CJK_REGEX = /[\u3040-\u30ff\u31f0-\u31ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af\u1100-\u11ff\u3130-\u318f\u3001-\u3003\u3008-\u3011\u3014-\u301f]/;
+export const NON_LATIN_SCRIPT_REGEX = CJK_REGEX;
 
 export const DEFAULT_FONT_FAMILY = 'CC Wild Words, "Comic Sans MS", "Bangers", sans-serif';
 export const CJK_FONT_STACK = '"Microsoft YaHei Bold", "Microsoft YaHei", "WenQuanYi Micro Hei", "Noto Sans CJK SC", "Noto Sans CJK JP", "Noto Sans CJK KR", "PingFang SC", "PingFang TC", sans-serif';

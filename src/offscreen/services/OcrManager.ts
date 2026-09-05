@@ -216,6 +216,17 @@ export class OcrManager {
         continue;
       }
 
+      // XianScan noise rule: standalone 1-2 char Latin/digit noise (e.g. "er", "u", "N") on
+      // speedlines and clothing folds with low score (< 0.65) is background artifact.
+      const trimmedTxt = txt.trim();
+      const isShortLatinNoise = trimmedTxt.length <= 2 
+        && /^[a-zA-Z0-9]+$/.test(trimmedTxt) 
+        && (rawScores[i] || 0) < 0.65;
+      if (isShortLatinNoise) {
+        console.log(`[OcrManager] Filtered out short Latin noise line "${trimmedTxt}" (score=${rawScores[i]})`);
+        continue;
+      }
+
       const area = polygonArea(poly);
       if (area < 16) continue; // Cotrans area filter (area > 16)
 
@@ -326,9 +337,7 @@ export class OcrManager {
     for (let i = 0; i < quads.length; i++) mergeGraph.addNode(i);
     for (let i = 0; i < quads.length; i++) {
       for (let j = i + 1; j < quads.length; j++) {
-        const terminalBoundary = /[。！？…!?」』）]$/.test(texts[i].trim()) || /[。！？…!?」』）]$/.test(texts[j].trim());
-        const characterGapTolerance = terminalBoundary ? 0.45 : 1;
-        if (quadrilateralCanMergeRegion(quads[i], quads[j], 1.9, 2, characterGapTolerance, 3, 2, 1.3)) {
+        if (quadrilateralCanMergeRegion(quads[i], quads[j], 1.9, 2, 1, 3, 2, 1.3)) {
           mergeGraph.addEdge(i, j);
         }
       }

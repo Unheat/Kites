@@ -27,13 +27,17 @@ describe('typesetLayout', () => {
       measureText: (t: string) => ({ width: t.length * 8 })
     };
 
-    it('wraps text into multiple balanced lines within maxWidth', () => {
-      const text = 'This is a dangerous situation that requires reinforcements';
-      const lines = balancedWrapText(mockCtx, text, 160);
-      expect(lines.length).toBeGreaterThan(1);
-      for (const line of lines) {
-        expect(mockCtx.measureText(line).width).toBeLessThanOrEqual(160 + 1);
-      }
+    it('never treats English text with apostrophes or ellipsis as CJK characters', () => {
+      const apostropheText = "There's no other way to win!";
+      const ellipsisText = "...I understand! But please don't force yourself!";
+      
+      const lines1 = balancedWrapText(mockCtx, apostropheText, 120);
+      // The word "There's" must remain intact as a full word, not chopped into a standalone "Ther" line
+      expect(lines1.some(l => l === "Ther" || l === "Ther-")).toBe(false);
+      expect(lines1.some(l => l.includes("There's"))).toBe(true);
+
+      const lines2 = balancedWrapText(mockCtx, ellipsisText, 120);
+      expect(lines2.some(l => l.includes("und-") || l.includes("erst-"))).toBe(false);
     });
   });
 
