@@ -84,7 +84,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
             );
             setTranslationOrder(orderChangedCatalog([
               ...ordered,
-              ...customApisRef.current.map(api => ({ id: api.id, name: `${api.provider}/${api.modelName}`, type: 'custom' as const, isDownloaded: true })),
+              ...customApisRef.current.map(api => ({ id: api.id, name: `${api.modelName}`, type: 'custom' as const, isDownloaded: true })),
             ], 'gg-translate').map(engine => engine.id));
             return ordered;
           });
@@ -328,53 +328,78 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                     {displayedEngines.length > 0 ? displayedEngines.map((engine) => {
                       const isGpuDisabledForModel = engine.hardware === 'WebGPU' && !isLlmGpuAvailable(state);
                       const isUninstalledLocal = engine.type === 'local' && !engine.isDownloaded;
-                      const isSelectable = !isGpuDisabledForModel && !isUninstalledLocal;
+                      const isAuthRequired = engine.id === 'cloudflare-translate' && !state.userAccount?.signedIn;
+                      const isSelectable = !isGpuDisabledForModel && !isUninstalledLocal && !isAuthRequired;
                       const isActive = state.activeEngineId === engine.id && isSelectable;
                       return (
-                        <button
-                          key={engine.id}
-                          disabled={!isSelectable && !isActive}
-                          onClick={() => {
-                            if (isActive || !isSelectable) return;
-                            updateState({ activeEngineId: engine.id });
-                            setIsOpen(false);
-                            setSearchQuery('');
-                          }}
-                          className={`w-full flex items-center justify-between p-2 text-left rounded-sm transition-colors ${
-                            isActive
-                              ? 'bg-[var(--color-vellum)] text-[var(--color-editorial)] font-semibold cursor-pointer'
-                              : isGpuDisabledForModel
-                                ? 'text-[var(--color-dust)] opacity-40 cursor-not-allowed'
-                                : isUninstalledLocal
-                                  ? 'text-[var(--color-dust)] opacity-50 cursor-not-allowed'
-                                  : 'hover:bg-[var(--color-vellum)] cursor-pointer'
-                          }`}
-                        >
-                          <div className="flex flex-col overflow-hidden">
-                            <span className="truncate pr-2 text-sm">{engine.name}</span>
-                            {engine.hardware && (
-                              <span className={`text-[10px] font-bold uppercase tracking-wider ${isGpuDisabledForModel ? 'text-amber-500/80' : ''}`}>
-                                [{engine.hardware}{isGpuDisabledForModel ? ' · GPU OFF' : ''}] {engine.type === 'local' ? 'Local' : ''}
-                              </span>
-                            )}
-                          </div>
-                          <div className="flex-shrink-0 ml-2">
-                            {isActive ? (
-                              <Check size={14} className="text-[var(--color-editorial)]" />
-                            ) : isGpuDisabledForModel ? null : isUninstalledLocal ? (
-                              <div 
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  chrome.runtime.sendMessage({ type: 'START_MODEL_DOWNLOAD', payload: { modelId: engine.id } });
-                                }}
-                                className="p-1 -mr-1 rounded hover:bg-[var(--color-vellum)] transition-colors cursor-pointer text-[var(--color-ink)] opacity-100"
-                                title="Download model"
-                              >
-                                <Download size={14} />
+                        <div key={engine.id} className="relative">
+                          <button
+                            disabled={!isSelectable && !isActive}
+                            onClick={() => {
+                              if (isActive || !isSelectable) return;
+                              updateState({ activeEngineId: engine.id });
+                              setIsOpen(false);
+                              setSearchQuery('');
+                            }}
+                            className={`w-full flex items-center justify-between p-2 text-left rounded-sm transition-colors ${
+                              isActive
+                                ? 'bg-[var(--color-vellum)] text-[var(--color-editorial)] font-semibold cursor-pointer'
+                                : isAuthRequired
+                                  ? 'opacity-40 blur-[0.4px] cursor-not-allowed select-none'
+                                  : isGpuDisabledForModel
+                                    ? 'text-[var(--color-dust)] opacity-40 cursor-not-allowed'
+                                    : isUninstalledLocal
+                                      ? 'text-[var(--color-dust)] opacity-50 cursor-not-allowed'
+                                      : 'hover:bg-[var(--color-vellum)] cursor-pointer'
+                            }`}
+                          >
+                            <div className="flex flex-col overflow-hidden">
+                              <span className="truncate pr-2 text-sm">{engine.name}</span>
+                              {isAuthRequired ? (
+                                <span className="text-[10px] font-medium tracking-wide uppercase text-[var(--color-editorial)]">
+                                  [Sign In Required]
+                                </span>
+                              ) : engine.hardware ? (
+                                <span className={`text-[10px] font-bold uppercase tracking-wider ${isGpuDisabledForModel ? 'text-amber-500/80' : ''}`}>
+                                  [{engine.hardware}{isGpuDisabledForModel ? ' · GPU OFF' : ''}] {engine.type === 'local' ? 'Local' : ''}
+                                </span>
+                              ) : null}
+                            </div>
+                            <div className="flex-shrink-0 ml-2">
+                              {isActive ? (
+                                <Check size={14} className="text-[var(--color-editorial)]" />
+                              ) : isGpuDisabledForModel ? null : isUninstalledLocal ? (
+                                <div 
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    chrome.runtime.sendMessage({ type: 'START_MODEL_DOWNLOAD', payload: { modelId: engine.id } });
+                                  }}
+                                  className="p-1 -mr-1 rounded hover:bg-[var(--color-vellum)] transition-colors cursor-pointer text-[var(--color-ink)] opacity-100"
+                                  title="Download model"
+                                >
+                                  <Download size={14} />
+                                </div>
+                              ) : null}
+                            </div>
+                          </button>
+
+                          {/* ? Help icon & tooltip for unauthenticated Cloudflare Shared Pool */}
+                          {isAuthRequired && (
+                            <div 
+                              className="absolute right-2 top-1/2 -translate-y-1/2 z-20 flex items-center"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <div className="peer w-3.5 h-3.5 rounded-full border border-[var(--color-dust)] flex items-center justify-center text-[9px] text-[var(--color-dust)] cursor-help hover:bg-[var(--color-dust)] hover:text-[var(--color-paper)] transition-colors flex-shrink-0">
+                                ?
                               </div>
-                            ) : null}
-                          </div>
-                        </button>
+                              <div className="absolute right-0 top-full mt-1.5 w-[210px] z-50 opacity-0 pointer-events-none peer-hover:opacity-100 transition-opacity">
+                                <div className="p-2 bg-[var(--color-ink)] text-[var(--color-paper)] text-[11px] leading-snug rounded-md shadow-xl border border-[var(--color-dust)]/20">
+                                  Sign in with Google in <span className="font-semibold text-[var(--color-editorial)]">Settings</span> to use the free shared pool (100 free translations/day).
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
                       );
                     }) : (
                       <div className="p-4 text-center text-sm text-[var(--color-dust)]">

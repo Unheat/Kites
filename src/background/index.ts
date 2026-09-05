@@ -5,6 +5,7 @@ import modelsRegistryData from '../shared/models-registry.json';
 import { normalizeCustomApiConfig } from '../shared/customApi';
 import { inpaintRegistry } from '../offscreen/engines/inpaint/inpaintRegistry';
 import { resolveOcrTier } from '../offscreen/engines/ocr/ocrRegistry';
+import { oAuthManager } from './auth/OAuthManager';
 
 // Magic Number: Limit concurrency to avoid network/CPU throttling
 // We now dynamically load this from user's PopupState (fallback to 3)
@@ -49,6 +50,7 @@ function normalizePopupState(popupState: PopupState): { state: PopupState; chang
   const customApiIds = new Set(uniqueCustomApis.map((api) => api.id));
   const isSupportedEngine = (engineId: string): boolean =>
     engineId === 'gg-translate' ||
+    engineId === 'cloudflare-translate' ||
     webLlmIds.has(engineId) ||
     customApiIds.has(engineId);
 
@@ -141,6 +143,76 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
   }
   
+  // Pluggable OAuth Dispatcher (Google, Apple, etc.)
+  if (message.type === 'SIGN_IN_GOOGLE' || message.type === 'SIGN_IN_AUTH') {
+    (async () => {
+      try {
+        const provider = message.provider || 'google';
+        const strategy = oAuthManager.get(provider);
+        const userAccount = await strategy.signIn();
+
+        const currentData = await chrome.storage.local.get('popupState');
+        const updatedState = {
+          ...(currentData.popupState || DEFAULT_POPUP_STATE),
+          userAccount,
+        };
+        await chrome.storage.local.set({ popupState: updatedState });
+
+        sendResponse({ success: true, userAccount });
+      } catch (err: any) {
+        console.error(`[Background] OAuth sign-in failed:`, err);
+        sendResponse({ success: false, error: err?.message || 'Sign in failed' });
+      }
+    })();
+    return true;
+  }
+
+  if (message.type === 'SIGN_OUT_GOOGLE' || message.type === 'SIGN_OUT_AUTH') {
+    (async () => {
+      try {
+        const currentData = await chrome.storage.local.get('popupState');
+        const storedState = currentData.popupState as PopupState | undefined;
+        const provider = message.provider || storedState?.userAccount?.provider || 'google';
+        
+        try {
+          const strategy = oAuthManager.get(provider);
+          await strategy.signOut();
+        } catch {
+          // Continue clearing state even if strategy fails
+        }
+
+        const updatedState = {
+          ...(currentData.popupState || DEFAULT_POPUP_STATE),
+          userAccount: undefined,
+        };
+        await chrome.storage.local.set({ popupState: updatedState });
+
+        sendResponse({ success: true });
+      } catch (err: any) {
+        console.error('[Background] OAuth sign-out failed:', err);
+        sendResponse({ success: false, error: err?.message || 'Sign out failed' });
+      }
+    })();
+    return true;
+  }
+
+  if (message.type === 'GET_AUTH_TOKEN') {
+    (async () => {
+      try {
+        const token = await new Promise<string | undefined>((resolve) => {
+          chrome.identity.getAuthToken({ interactive: false }, (tok) => {
+            const strToken = typeof tok === 'string' ? tok : (tok as any)?.token;
+            resolve(strToken);
+          });
+        });
+        sendResponse({ success: Boolean(token), token: token || '' });
+      } catch (err: any) {
+        sendResponse({ success: false, token: '', error: err?.message });
+      }
+    })();
+    return true;
+  }
+
   if (message.type === 'START_MODEL_DOWNLOAD' || message.type === 'CHECK_MODEL_STATUS' || message.type === 'GET_MODEL_STATUSES' || message.type === 'PRELOAD_ACTIVE_ENGINE' || message.type === 'GET_ACTIVE_DOWNLOADS' || message.type === 'VALIDATE_CUSTOM_API') {
     console.log(`[Background] Received ${message.type}. Forwarding to Offscreen...`);
     sendMessageToOffscreen(message)

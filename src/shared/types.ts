@@ -80,6 +80,15 @@ export interface CustomApiConfig {
   baseUrl?: string; // Optional for openAI-compatible
 }
 
+export interface UserAccountInfo {
+  provider: 'google' | 'apple' | string;
+  email: string;
+  name?: string;
+  picture?: string;
+  sub: string;
+  signedIn: boolean;
+}
+
 export interface PopupState {
   isExtensionEnabled: boolean;
   isAuto: boolean;
@@ -100,6 +109,7 @@ export interface PopupState {
     inpaint: boolean;
     ocr: boolean;
   };
+  userAccount?: UserAccountInfo;
 }
 
 export const DEFAULT_POPUP_STATE: PopupState = {

@@ -5,6 +5,7 @@ import ApiManagerPanel from './ApiManagerPanel';
 import FallbackConfigPanel from './FallbackConfigPanel';
 import EngineSelectionPanel from './EngineSelectionPanel';
 import GpuAccelerationPanel from './GpuAccelerationPanel';
+import { AccountCard } from './AccountCard';
 
 interface SettingsViewProps {
   state: PopupState;
@@ -19,6 +20,12 @@ export default function SettingsView({ state, updateState }: SettingsViewProps) 
 
   return (
     <div className="flex flex-col gap-3.5">
+      {/* Google Sign-in & Shared Pool Pass */}
+      <AccountCard
+        userAccount={state.userAccount}
+        onAccountChange={(account) => updateState({ userAccount: account })}
+      />
+
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold tracking-wide uppercase text-[var(--color-dust)]">Preferences</h2>
         <button 

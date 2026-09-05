@@ -11,8 +11,17 @@
     "activeTab",
     "storage",
     "contextMenus",
-    "offscreen"
+    "offscreen",
+    "identity"
   ],
+  "oauth2": {
+    "client_id": "13839997652-1pfe7h8arhiqlvh3dtn81tc5aibh8pnm.apps.googleusercontent.com",
+    "scopes": [
+      "https://www.googleapis.com/auth/userinfo.email",
+      "https://www.googleapis.com/auth/userinfo.profile",
+      "openid"
+    ]
+  },
   "host_permissions": [
     "<all_urls>"
   ],

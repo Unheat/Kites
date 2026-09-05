@@ -29,7 +29,8 @@ export default function FallbackConfigPanel({ state, updateState, onClose }: Fal
   ];
   const availableEngines = allEngines.filter((engine) =>
     (engine.type !== 'local' || engine.isDownloaded) &&
-    (engine.hardware !== 'WebGPU' || isLlmGpuAvailable(state))
+    (engine.hardware !== 'WebGPU' || isLlmGpuAvailable(state)) &&
+    (engine.id !== 'cloudflare-translate' || state.userAccount?.signedIn)
   );
 
   /**
