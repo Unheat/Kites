@@ -96,7 +96,7 @@ export class InpaintManager {
     imageBuffer: ArrayBuffer,
     maskPolygons: Point2D[][],
     tier: InpaintTier = 'telea',
-    maskRawCanvas?: any
+    _maskRawCanvas?: any
   ): Promise<ArrayBuffer> {
     if (!maskPolygons || maskPolygons.length === 0) {
       return imageBuffer;
@@ -104,15 +104,17 @@ export class InpaintManager {
 
     const engine = await this.getEngine(tier);
     console.log(`[InpaintManager] Executing inpainting using tier: ${tier}...`);
-    
+
     // For Tiers that don't need erasing, we can skip mask generation
     if (tier === 'none' || tier === 'original') {
       return await engine.inpaint(imageBuffer, maskPolygons);
     }
 
-    // Forward the raw stroke-detection mask when available so engines can use
-    // the precise ink mask (pixel-level) instead of the coarse polygon envelope.
-    return await engine.inpaint(imageBuffer, maskPolygons, maskRawCanvas);
+    // v1 contract: engines build their own masks FROM the polygons. The raw DBNet
+    // blob mask is NOT forwarded — for flat fills the polygon envelope is strictly
+    // better (covers anti-aliased fringes, clean straight edges), and forwarding the
+    // neural blob made simple-fill paint bubble-shaped patches instead of text boxes.
+    return await engine.inpaint(imageBuffer, maskPolygons);
   }
 
   /**

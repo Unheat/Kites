@@ -677,7 +677,8 @@ export function renderRegionDefault(
   ctx: any,
   region: DefaultRenderRegion,
   dstPoints: Point2D[],
-  fontSize: number
+  fontSize: number,
+  maxFontSizeCap?: number
 ): DefaultRenderResult | null {
   const [tl, tr, br, bl] = dstPoints;
   // Layout and aspect padding must use the resized destination dimensions. Using the
@@ -701,7 +702,7 @@ export function renderRegionDefault(
     normH,
     normV,
     fontSize,
-    Math.max(fontSize, 48),
+    Math.min(Math.max(fontSize, 48), maxFontSizeCap ?? Number.POSITIVE_INFINITY),
     0.05
   );
   const temp = putTextLines(ctx, fitted.size, fitted.lines, region.alignment, fg, bg);

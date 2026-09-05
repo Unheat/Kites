@@ -5,6 +5,7 @@ import {
   renderRegionDefault,
   type DefaultRenderRegion
 } from './cotransDefaultRenderer';
+import { fitFontSizeWithLines } from './typesetLayout';
 
 /**
  * Batch driver for translated-text rendering.
@@ -418,6 +419,21 @@ function renderTextBlocksDefault(
   pageHeight: number
 ): (RenderedBlockInfo | null)[] {
   const results: (RenderedBlockInfo | null)[] = blocks.map(() => null);
+  const fontSizeMinimum = Math.max(1, Math.round((pageWidth + pageHeight) / FONT_SIZE_MINIMUM_DIVISOR));
+
+  // XianScan typeset.ts two-pass harmonization. Pass 1: fit every multi-word dialogue
+  // block independently and collect its ideal font size; the page MEDIAN becomes the
+  // dialogue baseline. Pass 2: clamp short non-shout bubbles toward the baseline so one
+  // small bubble cannot render giant text next to a dense neighbor. Pure measurement —
+  // a handful of extra measureText binary-search probes per page, no model cost.
+  const planned: {
+    index: number;
+    region: DefaultRenderRegion;
+    dstPoints: Point2D[];
+    targetFontSize: number;
+    wordCount: number;
+  }[] = [];
+  const dialogueSizes: number[] = [];
 
   for (let i = 0; i < blocks.length; i++) {
     const b = blocks[i];
@@ -430,7 +446,6 @@ function renderTextBlocksDefault(
 
     const angle = b.angle ?? (calculateRotationAngle(b.polygon) * 180) / Math.PI;
     const aabb = calculateAabb(b.polygon);
-    const fontSizeMinimum = Math.max(1, Math.round((pageWidth + pageHeight) / FONT_SIZE_MINIMUM_DIVISOR));
     const lineCount = b.sourceLineCount && b.sourceLineCount > 0
       ? b.sourceLineCount
       : (b.fontSize && b.fontSize > 0 ? Math.max(1, Math.round(aabb.height / b.fontSize)) : 1);
@@ -455,10 +470,38 @@ function renderTextBlocksDefault(
 
     try {
       const { dstPoints, fontSize: targetFontSize } = resizeRegionToFontSize(region, pageWidth, pageHeight);
-      const info = renderRegionDefault(ctx, region, dstPoints, targetFontSize);
-      if (info) results[i] = { fontSize: info.fontSize, lineCount: info.lineCount, lines: info.lines };
+      const wordCount = translation.split(/\s+/).filter(Boolean).length;
+      if (wordCount >= 2) {
+        // Same quad dims renderRegionDefault will lay out against (edge midpoints).
+        const [tl, tr, br, bl] = dstPoints;
+        const normH = Math.hypot((tr.x + br.x) / 2 - (tl.x + bl.x) / 2, (tr.y + br.y) / 2 - (tl.y + bl.y) / 2);
+        const normV = Math.hypot((bl.x + br.x) / 2 - (tl.x + tr.x) / 2, (bl.y + br.y) / 2 - (tl.y + tr.y) / 2);
+        const fitted = fitFontSizeWithLines(ctx, translation, RENDER_FONT_FAMILY, normH, normV, targetFontSize, Math.max(targetFontSize, 48), 0.05);
+        dialogueSizes.push(fitted.size);
+      }
+      planned.push({ index: i, region, dstPoints, targetFontSize, wordCount });
     } catch (e) {
       console.error('[canvasTypesetting] Default renderer failed for block', i, e);
+    }
+  }
+
+  dialogueSizes.sort((a, b) => a - b);
+  const pageDialogueBaseline = dialogueSizes.length > 0
+    ? dialogueSizes[Math.floor(dialogueSizes.length / 2)]
+    : 0;
+
+  for (const plan of planned) {
+    try {
+      // XianScan clamp: only short non-shout bubbles follow the page baseline; dense
+      // paragraphs and exclamations keep their fitted size.
+      const isShortNonShout = plan.wordCount <= 2 && !/[!！]/.test(plan.region.translation);
+      const baselineCap = pageDialogueBaseline > 0 && isShortNonShout
+        ? Math.max(18, Math.round(pageDialogueBaseline * 1.25))
+        : undefined;
+      const info = renderRegionDefault(ctx, plan.region, plan.dstPoints, plan.targetFontSize, baselineCap);
+      if (info) results[plan.index] = { fontSize: info.fontSize, lineCount: info.lineCount, lines: info.lines };
+    } catch (e) {
+      console.error('[canvasTypesetting] Default renderer failed for block', plan.index, e);
     }
   }
 

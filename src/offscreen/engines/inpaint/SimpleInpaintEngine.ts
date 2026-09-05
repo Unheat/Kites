@@ -1,11 +1,5 @@
 import type { IInpaintEngine, Point2D } from './BaseInpaintEngine';
 
-/** Pixels sampled immediately outside each detected text polygon. */
-const OUTER_SAMPLE_RING_PX = 3;
-/** White speech bubbles are high-luminance, low-variance surfaces. */
-const WHITE_BUBBLE_LUMINANCE_MIN = 220;
-const WHITE_BUBBLE_STANDARD_DEVIATION_MAX = 10;
-
 /**
  * Tier 1 Inpainting Engine: Dominant Edge Color Fill.
  * Samples the border pixels around each text block and fills the polygon path with the average color.
@@ -66,12 +60,10 @@ export class SimpleInpaintEngine implements IInpaintEngine {
         if (p.y > maxY) maxY = p.y;
       }
 
-      // Include a small exterior ring. Sampling under the glyphs darkens a simple
-      // fill with ink and anti-aliasing; the adjacent bubble paper is the true source.
-      const x = Math.max(0, Math.floor(minX) - OUTER_SAMPLE_RING_PX);
-      const y = Math.max(0, Math.floor(minY) - OUTER_SAMPLE_RING_PX);
-      const w = Math.min(width - x, Math.ceil(maxX - minX) + OUTER_SAMPLE_RING_PX * 2);
-      const h = Math.min(height - y, Math.ceil(maxY - minY) + OUTER_SAMPLE_RING_PX * 2);
+      const x = Math.max(0, Math.floor(minX));
+      const y = Math.max(0, Math.floor(minY));
+      const w = Math.min(width - x, Math.ceil(maxX - minX));
+      const h = Math.min(height - y, Math.ceil(maxY - minY));
 
       if (w <= 0 || h <= 0) continue;
 
@@ -109,65 +101,26 @@ export class SimpleInpaintEngine implements IInpaintEngine {
       const rSamples: number[] = [];
       const gSamples: number[] = [];
       const bSamples: number[] = [];
-      const luminances: number[] = [];
 
-      const resetSamples = () => {
-        rSamples.length = 0;
-        gSamples.length = 0;
-        bSamples.length = 0;
-        luminances.length = 0;
-      };
-
-      // Samples pixels matching the `insidePolygon` filter above a luminance floor.
-      const collectSamples = (insidePolygon: boolean, luminanceFloor: number) => {
-        for (let i = 0; i < w * h; i++) {
-          const idx = i * 4;
-          const isInsideTextPolygon = polyData[idx] > 0;
-          if (isInsideTextPolygon !== insidePolygon) continue;
-          const isStroke = (maskImgData?.data[idx] ?? 0) > 127;
-          if (isStroke) continue;
-
-          const rPixel = pixels[idx];
-          const gPixel = pixels[idx + 1];
-          const bPixel = pixels[idx + 2];
-          const luminance = 0.299 * rPixel + 0.587 * gPixel + 0.114 * bPixel;
-          if (luminance < luminanceFloor) continue;
+      // v1 contract: simple fill is DUMB and FAST. Sample the paper BETWEEN glyph
+      // strokes inside the polygon (luminance >= 180), fill with the median. Quality
+      // work belongs to the LaMa tier — this tier must never grow inpainting logic.
+      // The v1 first-pixel fallback (take any pixel when nothing is bright) is kept
+      // verbatim so dark-art panels behave exactly as v1 did.
+      let count = 0;
+      for (let i = 0; i < w * h; i++) {
+        const idx = i * 4;
+        // Pixel must be strictly inside the OCR polygon (bubble paper between strokes)
+        if (polyData[idx] === 0) continue;
+        const rPixel = pixels[idx];
+        const gPixel = pixels[idx + 1];
+        const bPixel = pixels[idx + 2];
+        const luminance = 0.299 * rPixel + 0.587 * gPixel + 0.114 * bPixel;
+        if (luminance >= 180 || count === 0) {
           rSamples.push(rPixel);
           gSamples.push(gPixel);
           bSamples.push(bPixel);
-          luminances.push(luminance);
-        }
-      };
-
-      const stats = () => {
-        if (luminances.length === 0) return { mean: 0, stdDev: 255 };
-        const mean = luminances.reduce((sum, value) => sum + value, 0) / luminances.length;
-        const stdDev = Math.sqrt(luminances.reduce((sum, value) => sum + (value - mean) ** 2, 0) / luminances.length);
-        return { mean, stdDev };
-      };
-
-      // Strategy 1 (XianScan gate): the exterior ring is used ONLY when it is a confirmed
-      // white-bubble background. Kites' OCR polygons are tight per-line quads, so on dark
-      // art or dense vertical columns the ring hits neighboring ink — ungated ring
-      // sampling produced gray blocks (regression vs v1). A flat-but-dark ring must NOT
-      // pass: white paper under the text is still the correct fill source.
-      collectSamples(false, 80);
-      const ringStats = stats();
-      const ringIsSolid = ringStats.mean >= WHITE_BUBBLE_LUMINANCE_MIN && ringStats.stdDev < WHITE_BUBBLE_STANDARD_DEVIATION_MAX;
-
-      // Strategy 2 (v1 behavior): bubble paper BETWEEN glyph strokes. White-bubble
-      // interiors stay white regardless of the artwork outside the polygon.
-      if (!ringIsSolid) {
-        resetSamples();
-        collectSamples(true, 180);
-        if (rSamples.length < 8) {
-          resetSamples();
-          collectSamples(true, 120);
-        }
-        if (rSamples.length < 8) {
-          // Strategy 3: interior without floor — dark-art panels get an art-matched fill.
-          resetSamples();
-          collectSamples(true, 0);
+          count++;
         }
       }
 
@@ -176,19 +129,12 @@ export class SimpleInpaintEngine implements IInpaintEngine {
         samples.sort((a, b) => a - b);
         return samples[Math.floor(samples.length / 2)];
       };
-      const { mean: meanLuminance, stdDev: standardDeviation } = stats();
 
-      // Empty-sample fallback MUST be white (main-branch behavior): when the dilated
-      // OCR mask swallows every interior pixel (dense/bold small text), all strategies
-      // return 0 samples and the masked region is pure glyph ink on bubble paper.
-      let r = median(rSamples, 255);
-      let g = median(gSamples, 255);
-      let b = median(bSamples, 255);
-      if (rSamples.length > 0 && meanLuminance >= WHITE_BUBBLE_LUMINANCE_MIN && standardDeviation < WHITE_BUBBLE_STANDARD_DEVIATION_MAX) {
-        r = 255;
-        g = 255;
-        b = 255;
-      }
+      // Empty-sample fallback is white (v1 behavior): no bright interior pixel means
+      // the bubble paper is the fallback.
+      const r = median(rSamples, 255);
+      const g = median(gSamples, 255);
+      const b = median(bSamples, 255);
 
       // 3. Fill the polygon path with the sampled color
       if (maskImgData) {
