@@ -27,6 +27,8 @@ dist-ssr
 
 !docs/fullplan.md
 .env
+.env*
+scripts/.env
 PaddleOCR/
 result/
 models/

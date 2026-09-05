@@ -1,0 +1,229 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Kites Translation Pipeline",
+    "animation": "trace",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "e2e-pipeline",
+        "label": "End-to-End Translation",
+        "focus": ["dom_trigger", "bg_queue", "offscreen_ocr", "parallel_trans", "parallel_inpaint", "typeset_bake", "dom_swap"],
+        "note": "Follow an image from user detection through background queueing, offscreen AI, to visual DOM swap."
+      },
+      {
+        "id": "dual-compute",
+        "label": "Dual-Compute & Inpaint",
+        "focus": ["offscreen_ocr", "parallel_trans", "parallel_inpaint", "typeset_bake", "dexie_db"],
+        "note": "Inspect concurrent WebLLM/Google translation and 6-tier inpainting execution before canvas baking."
+      },
+      {
+        "id": "local-storage",
+        "label": "Zero-Copy DB & Dashboard",
+        "focus": ["bg_queue", "dexie_db", "typeset_bake", "dashboard_editor"],
+        "note": "Trace how raw image blobs, clean inpainted plates, and OCR text blocks are persisted in Dexie IndexedDB."
+      }
+    ],
+    "output": "docs/workflow.html"
+  },
+  "lanes": [
+    { "id": "webpage", "label": "Webpage Content" },
+    { "id": "background", "label": "Background Worker" },
+    { "id": "offscreen", "label": "Offscreen Runtime" },
+    { "id": "storage", "label": "Local Storage" }
+  ],
+  "phases": [
+    { "id": "capture_phase", "label": "Intake", "fromCol": 0, "toCol": 1 },
+    { "id": "ai_phase", "label": "AI Compute", "fromCol": 2, "toCol": 3, "variant": "emphasis" },
+    { "id": "render_phase", "label": "Bake & Save", "fromCol": 4, "toCol": 5, "variant": "dashed" }
+  ],
+  "groups": [
+    { "id": "intake_group", "label": "Queueing", "lane": "background", "fromCol": 0, "toCol": 1 },
+    { "id": "parallel_ai_group", "label": "Parallel AI", "lane": "offscreen", "fromCol": 2, "toCol": 3, "variant": "emphasis" },
+    { "id": "persistence_group", "label": "Storage", "lane": "storage", "fromCol": 4, "toCol": 5, "variant": "dashed" }
+  ],
+  "mainPath": [
+    "dom_trigger",
+    "bg_queue",
+    "offscreen_ocr",
+    "parallel_trans",
+    "typeset_bake",
+    "dom_swap"
+  ],
+  "nodes": [
+    {
+      "id": "dom_trigger",
+      "lane": "webpage",
+      "col": 0,
+      "type": "frontend",
+      "label": "Image Detection",
+      "sublabel": "Hover / Auto / Menu",
+      "width": 136
+    },
+    {
+      "id": "bg_queue",
+      "lane": "background",
+      "col": 1,
+      "type": "backend",
+      "label": "Queue Manager",
+      "sublabel": "1-5 Concurrent Slots",
+      "width": 136
+    },
+    {
+      "id": "offscreen_ocr",
+      "lane": "offscreen",
+      "col": 2,
+      "type": "backend",
+      "label": "PaddleOCR Engine",
+      "sublabel": "DBNet + CRNN Text",
+      "width": 136
+    },
+    {
+      "id": "parallel_trans",
+      "lane": "offscreen",
+      "col": 3,
+      "type": "cloud",
+      "label": "Translation Engine",
+      "sublabel": "WebLLM / Cloud API",
+      "width": 136
+    },
+    {
+      "id": "parallel_inpaint",
+      "lane": "offscreen",
+      "col": 3,
+      "type": "backend",
+      "label": "Inpaint Eraser",
+      "sublabel": "Simple / Telea / LaMa",
+      "yOffset": 60,
+      "width": 136
+    },
+    {
+      "id": "typeset_bake",
+      "lane": "offscreen",
+      "col": 4,
+      "type": "backend",
+      "label": "Canvas Typesetter",
+      "sublabel": "1:1 Cotrans Bake",
+      "width": 136
+    },
+    {
+      "id": "dom_swap",
+      "lane": "webpage",
+      "col": 5,
+      "type": "frontend",
+      "label": "DOM Image Swap",
+      "sublabel": "Smooth Opacity Swap",
+      "width": 136
+    },
+    {
+      "id": "dexie_db",
+      "lane": "storage",
+      "col": 4,
+      "type": "database",
+      "label": "Dexie IndexedDB",
+      "sublabel": "Blobs & Text Blocks",
+      "width": 136
+    },
+    {
+      "id": "dashboard_editor",
+      "lane": "storage",
+      "col": 5,
+      "type": "frontend",
+      "label": "Interactive Editor",
+      "sublabel": "Konva Canvas Editing",
+      "width": 136
+    }
+  ],
+  "edges": [
+    {
+      "id": "trigger-to-queue",
+      "from": "dom_trigger",
+      "to": "bg_queue",
+      "label": "TRANSLATE_IMAGE",
+      "variant": "emphasis"
+    },
+    {
+      "id": "queue-to-ocr",
+      "from": "bg_queue",
+      "to": "offscreen_ocr",
+      "label": "PROCESS_JOB",
+      "variant": "emphasis"
+    },
+    {
+      "id": "ocr-to-trans",
+      "from": "offscreen_ocr",
+      "to": "parallel_trans",
+      "label": "Text lines",
+      "variant": "default"
+    },
+    {
+      "id": "ocr-to-inpaint",
+      "from": "offscreen_ocr",
+      "to": "parallel_inpaint",
+      "label": "Polygons & mask",
+      "variant": "dashed"
+    },
+    {
+      "id": "trans-to-typeset",
+      "from": "parallel_trans",
+      "to": "typeset_bake",
+      "label": "Translated text",
+      "variant": "emphasis"
+    },
+    {
+      "id": "inpaint-to-typeset",
+      "from": "parallel_inpaint",
+      "to": "typeset_bake",
+      "label": "Clean plate",
+      "variant": "dashed"
+    },
+    {
+      "id": "typeset-to-swap",
+      "from": "typeset_bake",
+      "to": "dom_swap",
+      "label": "Base64 DataURL",
+      "variant": "emphasis"
+    },
+    {
+      "id": "typeset-to-db",
+      "from": "typeset_bake",
+      "to": "dexie_db",
+      "label": "Save Job & Blocks",
+      "variant": "dashed"
+    },
+    {
+      "id": "db-to-dashboard",
+      "from": "dexie_db",
+      "to": "dashboard_editor",
+      "label": "Load Project",
+      "variant": "default"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Dual-Compute Engine",
+      "items": [
+        "WebLLM provides local GPU translation, Google Translate acts as fast online fallback",
+        "6-tier hybrid inpainting routes from microsecond simple edge fill to neural LaMa Fourier CNN"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Zero Layout Shift & 1:1 Cotrans Math",
+      "items": [
+        "Bakes translated text directly onto clean image canvas before DOM swap",
+        "Calculates font sizing and text placement using Cotrans 1:1 Kruskal MST region splitting"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Local-First Privacy & Persistence",
+      "items": [
+        "Raw image blobs, clean inpainted plates, and editable OCR text blocks stay in IndexedDB",
+        "Dashboard enables full typography tweaking and PSD / JSON coordinate export"
+      ]
+    }
+  ]
+}
