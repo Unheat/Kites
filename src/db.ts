@@ -37,6 +37,8 @@ export interface TextBlock {
   fontFamily: string;
   color: string;
   direction?: 'h' | 'v';
+  /** Exact Canvas layout lines, persisted so Studio preview matches baked output. */
+  lines?: string[];
 }
 
 const db = new Dexie('KitesDatabase') as Dexie & {
@@ -74,6 +76,14 @@ db.translationJobs.hook('deleting', function(jobId) {
   });
 });
 
+/**
+ * Deletes translation jobs older than the specified retention window.
+ * Cascading delete hooks on the translationJobs table handle child image
+ * and text block removal automatically.
+ *
+ * @param daysToKeep - Number of days to retain jobs (default 7).
+ * @returns Resolves when cleanup completes or logs an error on failure.
+ */
 export async function cleanupOldJobs(daysToKeep: number = 7) {
   const cutoffTime = Date.now() - (daysToKeep * 24 * 60 * 60 * 1000);
   try {

@@ -31,10 +31,18 @@ export class CloudflareTranslateEngine implements ITranslationEngine {
     this.endpoint = endpoint;
   }
 
+  /**
+   * No-op initialization; the engine is stateless HTTP.
+   * @returns Resolves immediately.
+   */
   async init(): Promise<void> {
     // Stateless HTTP engine; no initialization needed
   }
 
+  /**
+   * No-op teardown; the engine holds no persistent resources.
+   * @returns Resolves immediately.
+   */
   async destroy(): Promise<void> {
     // Stateless; nothing to clean up
   }
@@ -60,6 +68,15 @@ export class CloudflareTranslateEngine implements ITranslationEngine {
     return (globalThis as any).__KITES_TEST_ID_TOKEN__ || '';
   }
 
+  /**
+   * Translate an array of text segments via the Cloudflare shared pool,
+   * splitting into batches of MAX_SEGMENTS_PER_BATCH.
+   *
+   * @param texts - Source text segments to translate.
+   * @param sourceLang - BCP-47 source language code (default 'auto').
+   * @param targetLang - BCP-47 target language code (default 'en').
+   * @returns Translated text array in the same positional order as input.
+   */
   async translate(texts: string[], sourceLang?: string, targetLang?: string): Promise<string[]> {
     if (!texts || texts.length === 0) return [];
 
@@ -75,6 +92,17 @@ export class CloudflareTranslateEngine implements ITranslationEngine {
     return results;
   }
 
+  /**
+   * Send a single batch of text segments to the worker endpoint using
+   * delimiter line tagging and parse the tagged response back into
+   * positional translations.
+   *
+   * @param texts - Batch of source text segments (max MAX_SEGMENTS_PER_BATCH).
+   * @param sourceLang - BCP-47 source language code.
+   * @param targetLang - BCP-47 target language code.
+   * @returns Translated segments preserving input order; falls back to
+   *          original text for any tag the model drops.
+   */
   private async translateBatch(texts: string[], sourceLang?: string, targetLang?: string): Promise<string[]> {
     const src = sourceLang || 'auto';
     const tgt = targetLang || 'en';

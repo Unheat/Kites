@@ -35,6 +35,12 @@ export interface GoogleTokenPayload {
 let jwksCache: { keys: GoogleJwksKey[]; expiresAt: number } | null = null;
 const JWKS_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
 
+/**
+ * Fetch Google's public JSON Web Key Set (JWKS) for verifying ID token signatures.
+ * Results are cached in-memory for 6 hours to minimize network calls.
+ *
+ * @returns The array of Google RSA public keys used for RS256 JWT verification.
+ */
 export async function getGoogleJwks(): Promise<GoogleJwksKey[]> {
   const now = Date.now();
   if (jwksCache && now < jwksCache.expiresAt) {
@@ -57,6 +63,13 @@ export async function getGoogleJwks(): Promise<GoogleJwksKey[]> {
   return data.keys;
 }
 
+/**
+ * Decode a Base64-URL-encoded string into a Uint8Array.
+ * Handles the URL-safe alphabet (- and _) and adds required padding.
+ *
+ * @param base64Url - The Base64-URL-encoded string to decode.
+ * @returns A Uint8Array containing the decoded binary data.
+ */
 function base64UrlToUint8Array(base64Url: string): Uint8Array {
   const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
   const padLen = (4 - (base64.length % 4)) % 4;
@@ -69,6 +82,13 @@ function base64UrlToUint8Array(base64Url: string): Uint8Array {
   return bytes;
 }
 
+/**
+ * Decode the payload section of a JWT without verifying its signature.
+ * Used for quick inspection (e.g., reading the issuer) before full verification.
+ *
+ * @param token - The raw JWT string (header.payload.signature).
+ * @returns The parsed payload object, or null if the token is malformed.
+ */
 export function decodeJwtPayloadUnsafe(token: string): any {
   const parts = token.split('.');
   if (parts.length !== 3) return null;
@@ -79,6 +99,12 @@ export function decodeJwtPayloadUnsafe(token: string): any {
   }
 }
 
+/**
+ * Import a Google JWKS RSA public key into the Web Crypto API for RS256 verification.
+ *
+ * @param jwk - The Google JWKS key object containing RSA modulus (n) and exponent (e).
+ * @returns A CryptoKey usable with crypto.subtle.verify for RSASSA-PKCS1-v1_5.
+ */
 async function importRsaKey(jwk: GoogleJwksKey): Promise<CryptoKey> {
   return await crypto.subtle.importKey(
     'jwk',
@@ -98,6 +124,15 @@ async function importRsaKey(jwk: GoogleJwksKey): Promise<CryptoKey> {
   );
 }
 
+/**
+ * Cryptographically verify a Google OIDC ID token using Google's public JWKS.
+ * Validates the RS256 signature, expiry, issuer, and optionally the audience (Client ID).
+ *
+ * @param token - The raw JWT ID token string from the Authorization header.
+ * @param expectedAudience - Optional Google OAuth Client ID to assert against the aud claim.
+ * @returns The parsed and verified token payload.
+ * @throws Error if the token is expired, has an invalid signature, wrong issuer/audience, or is malformed.
+ */
 export async function verifyGoogleIdToken(
   token: string,
   expectedAudience?: string
@@ -160,6 +195,14 @@ export async function verifyGoogleIdToken(
 export class GoogleAuthVerifier implements IAuthProviderVerifier {
   readonly provider = 'google';
 
+  /**
+   * Determine whether this verifier can handle the given token.
+   * Recognizes Chrome Extension OAuth access tokens (starts with 'ya29.')
+   * and standard Google OIDC JWTs (by inspecting the iss claim).
+   *
+   * @param token - The raw token string from the Authorization header.
+   * @returns True if the token belongs to Google authentication, false otherwise.
+   */
   canHandle(token: string): boolean {
     // 1. Chrome Extension OAuth Access Token (starts with ya29.)
     if (token.startsWith('ya29.')) {
@@ -170,6 +213,15 @@ export class GoogleAuthVerifier implements IAuthProviderVerifier {
     return payload?.iss === 'https://accounts.google.com' || payload?.iss === 'accounts.google.com';
   }
 
+  /**
+   * Verify a Google authentication token (either a Chrome Extension OAuth access token
+   * via the tokeninfo endpoint, or an OIDC JWT via Web Crypto).
+   *
+   * @param token - The raw bearer token string.
+   * @param env - Worker environment bindings containing GOOGLE_CLIENT_ID for audience checks.
+   * @returns The extracted and verified user identity.
+   * @throws Error if the token verification fails or audience mismatches.
+   */
   async verify(token: string, env: Env): Promise<VerifiedIdentity> {
     // Handle Chrome Extension OAuth Access Token
     if (token.startsWith('ya29.')) {
@@ -211,6 +263,14 @@ export class GoogleAuthVerifier implements IAuthProviderVerifier {
   }
 }
 
+/**
+ * Generate a privacy-preserving HMAC-SHA256 pseudonym hash for a user subject.
+ * Used as the primary key in rate-limiting and quota tracking without storing PII.
+ *
+ * @param sub - The user identifier (typically `${provider}:${subject}`).
+ * @param salt - Secret salt string from worker environment (JWT_SALT).
+ * @returns A 64-character lowercase hex string representing the HMAC-SHA256 digest.
+ */
 export async function hashUserSubject(sub: string, salt: string = 'kites-default-salt'): Promise<string> {
   const key = await crypto.subtle.importKey(
     'raw',

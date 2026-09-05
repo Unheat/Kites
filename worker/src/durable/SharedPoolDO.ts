@@ -56,10 +56,21 @@ export class SharedPoolDO extends DurableObject {
     `);
   }
 
+  /**
+   * Initialize the in-memory UTC day tracker to current date (YYYY-MM-DD).
+   *
+   * @returns void
+   */
   private initDayCounter() {
     this.currentUtcDay = new Date().toISOString().slice(0, 10);
   }
 
+  /**
+   * Check if the UTC calendar day has changed since the last request,
+   * and reset the in-memory global daily count to zero when rotating days.
+   *
+   * @returns void
+   */
   private checkAndRotateDay() {
     const today = new Date().toISOString().slice(0, 10);
     if (today !== this.currentUtcDay) {

@@ -14,6 +14,13 @@ export { SharedPoolDO } from './durable/SharedPoolDO';
 
 const MAX_PAYLOAD_CHARS = 1000;
 
+/**
+ * Build CORS response headers based on the request's Origin.
+ * Falls back to wildcard ('*') if no Origin header is present.
+ *
+ * @param request - The incoming HTTP request to extract the Origin from.
+ * @returns A record of CORS headers to include in the response.
+ */
 function corsHeaders(request: Request): Record<string, string> {
   const origin = request.headers.get('Origin') || '*';
   return {
@@ -24,6 +31,14 @@ function corsHeaders(request: Request): Record<string, string> {
   };
 }
 
+/**
+ * Create a JSON-serialized HTTP Response with the given status and headers.
+ *
+ * @param data - The payload to JSON-serialize into the response body.
+ * @param status - HTTP status code (defaults to 200).
+ * @param headers - Additional response headers to merge (e.g., CORS headers).
+ * @returns A Response object with Content-Type application/json.
+ */
 function jsonResponse(data: any, status = 200, headers: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(data), {
     status,
@@ -35,6 +50,16 @@ function jsonResponse(data: any, status = 200, headers: Record<string, string> =
 }
 
 export default {
+  /**
+   * Cloudflare Worker fetch handler. Routes incoming requests to the appropriate
+   * endpoint: CORS preflight, health check, or translation via SharedPoolDO.
+   * Authenticates translation requests using a Bearer Google ID token.
+   *
+   * @param request - The incoming HTTP Request from the Cloudflare edge.
+   * @param env - Cloudflare Worker environment bindings (secrets, DO namespaces, etc.).
+   * @param ctx - Execution context for background tasks (e.g., waitUntil).
+   * @returns A JSON Response for every route, including errors.
+   */
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const cors = corsHeaders(request);
 

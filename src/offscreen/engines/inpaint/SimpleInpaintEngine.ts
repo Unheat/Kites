@@ -1,5 +1,11 @@
 import type { IInpaintEngine, Point2D } from './BaseInpaintEngine';
 
+/** Pixels sampled immediately outside each detected text polygon. */
+const OUTER_SAMPLE_RING_PX = 3;
+/** White speech bubbles are high-luminance, low-variance surfaces. */
+const WHITE_BUBBLE_LUMINANCE_MIN = 220;
+const WHITE_BUBBLE_STANDARD_DEVIATION_MAX = 10;
+
 /**
  * Tier 1 Inpainting Engine: Dominant Edge Color Fill.
  * Samples the border pixels around each text block and fills the polygon path with the average color.
@@ -12,11 +18,26 @@ export class SimpleInpaintEngine implements IInpaintEngine {
     this.platform = platform;
   }
 
+  /**
+   * Initializes the engine. This is a no-op as the simple color-fill engine requires no models or external dependencies.
+   *
+   * @returns A promise that resolves immediately.
+   */
   async init(): Promise<void> {
     // Zero dependencies to initialize
     return Promise.resolve();
   }
 
+  /**
+   * Erases text by sampling boundary pixels around each text block and filling
+   * the polygon with the sampled dominant/median background color.
+   * Detects white speech bubbles to avoid ink contamination from nearby outlines.
+   *
+   * @param imageBuffer - Raw ArrayBuffer of the input image.
+   * @param maskPolygons - Array of polygon vertex arrays defining text regions to erase.
+   * @param strokeMaskCanvas - Optional pre-rendered stroke mask canvas to fill only the text strokes.
+   * @returns A promise resolving to the inpainted image as an ArrayBuffer.
+   */
   async inpaint(imageBuffer: ArrayBuffer, maskPolygons: Point2D[][], strokeMaskCanvas?: any): Promise<ArrayBuffer> {
     // 1. Prepare canvas containing the source image
     const rawCanvas = await this.platform.canvas.prepareCanvas(imageBuffer);
@@ -45,10 +66,12 @@ export class SimpleInpaintEngine implements IInpaintEngine {
         if (p.y > maxY) maxY = p.y;
       }
 
-      const x = Math.max(0, Math.floor(minX));
-      const y = Math.max(0, Math.floor(minY));
-      const w = Math.min(width - x, Math.ceil(maxX - minX));
-      const h = Math.min(height - y, Math.ceil(maxY - minY));
+      // Include a small exterior ring. Sampling under the glyphs darkens a simple
+      // fill with ink and anti-aliasing; the adjacent bubble paper is the true source.
+      const x = Math.max(0, Math.floor(minX) - OUTER_SAMPLE_RING_PX);
+      const y = Math.max(0, Math.floor(minY) - OUTER_SAMPLE_RING_PX);
+      const w = Math.min(width - x, Math.ceil(maxX - minX) + OUTER_SAMPLE_RING_PX * 2);
+      const h = Math.min(height - y, Math.ceil(maxY - minY) + OUTER_SAMPLE_RING_PX * 2);
 
       if (w <= 0 || h <= 0) continue;
 
@@ -83,33 +106,48 @@ export class SimpleInpaintEngine implements IInpaintEngine {
       polyCtx.fill();
       const polyData = polyCtx.getImageData(0, 0, w, h).data;
 
-      let rSum = 0, gSum = 0, bSum = 0, count = 0;
+      const rSamples: number[] = [];
+      const gSamples: number[] = [];
+      const bSamples: number[] = [];
+      const luminances: number[] = [];
       for (let i = 0; i < w * h; i++) {
         const idx = i * 4;
-        
-        // Pixel must be strictly inside the OCR polygon
-        if (polyData[idx] > 0) {
-          const rPixel = pixels[idx];
-          const gPixel = pixels[idx + 1];
-          const bPixel = pixels[idx + 2];
-          const luminance = 0.299 * rPixel + 0.587 * gPixel + 0.114 * bPixel;
+        const isInsideTextPolygon = polyData[idx] > 0;
+        const isStroke = maskImgData?.data[idx] > 127;
+        if (isInsideTextPolygon || isStroke) continue;
 
-          // Exclude dark text ink pixels (luminance < 180) to get pure background color
-          if (!maskImgData || maskImgData.data[idx] === 0) {
-            if (luminance >= 180 || count === 0) {
-              rSum += rPixel;
-              gSum += gPixel;
-              bSum += bPixel;
-              count++;
-            }
-          }
-        }
+        const rPixel = pixels[idx];
+        const gPixel = pixels[idx + 1];
+        const bPixel = pixels[idx + 2];
+        const luminance = 0.299 * rPixel + 0.587 * gPixel + 0.114 * bPixel;
+        // Skip dark outline ink while retaining nearby coloured bubble paper.
+        if (luminance < 80) continue;
+        rSamples.push(rPixel);
+        gSamples.push(gPixel);
+        bSamples.push(bPixel);
+        luminances.push(luminance);
       }
 
-      // Compute average background color
-      const r = count > 0 ? Math.round(rSum / count) : 255;
-      const g = count > 0 ? Math.round(gSum / count) : 255;
-      const b = count > 0 ? Math.round(bSum / count) : 255;
+      const median = (samples: number[], fallback: number): number => {
+        if (samples.length === 0) return fallback;
+        samples.sort((a, b) => a - b);
+        return samples[Math.floor(samples.length / 2)];
+      };
+      const meanLuminance = luminances.length > 0
+        ? luminances.reduce((sum, value) => sum + value, 0) / luminances.length
+        : 255;
+      const standardDeviation = luminances.length > 0
+        ? Math.sqrt(luminances.reduce((sum, value) => sum + (value - meanLuminance) ** 2, 0) / luminances.length)
+        : 0;
+
+      let r = median(rSamples, 255);
+      let g = median(gSamples, 255);
+      let b = median(bSamples, 255);
+      if (meanLuminance >= WHITE_BUBBLE_LUMINANCE_MIN && standardDeviation < WHITE_BUBBLE_STANDARD_DEVIATION_MAX) {
+        r = 255;
+        g = 255;
+        b = 255;
+      }
 
       // 3. Fill the polygon path with the sampled color
       if (maskImgData) {
@@ -163,6 +201,11 @@ export class SimpleInpaintEngine implements IInpaintEngine {
     }
   }
 
+  /**
+   * Cleans up engine resources. This is a no-op since no resources are held.
+   *
+   * @returns A promise that resolves immediately.
+   */
   async destroy(): Promise<void> {
     return Promise.resolve();
   }

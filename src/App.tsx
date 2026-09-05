@@ -277,9 +277,15 @@ export default function App() {
       ctx.strokeStyle = '#FFFFFF';
       const cx = block.posX + block.width / 2;
       const cy = block.posY + block.height / 2;
+      const lines = block.lines?.filter((line) => line.trim()) || [block.translatedText];
+      const lineHeight = fontSize * 1.2;
+      const startY = cy - ((lines.length - 1) * lineHeight) / 2;
 
-      ctx.strokeText(block.translatedText, cx, cy);
-      ctx.fillText(block.translatedText, cx, cy);
+      for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+        const lineY = startY + lineIndex * lineHeight;
+        ctx.strokeText(lines[lineIndex], cx, lineY);
+        ctx.fillText(lines[lineIndex], cx, lineY);
+      }
       ctx.restore();
     });
 
@@ -552,16 +558,19 @@ export default function App() {
 
                         {/* Rendered Text Inside Box */}
                         <div 
-                          className="w-full h-full flex items-center justify-center p-1 text-center overflow-hidden pointer-events-none select-none"
+                          className="w-full h-full flex flex-col items-center justify-center p-1 text-center overflow-hidden pointer-events-none select-none"
                           style={{
                             fontSize: `${block.fontSize || 14}px`,
                             color: block.color || '#000000',
                             fontFamily: block.fontFamily || 'sans-serif',
                             fontWeight: 'bold',
+                            lineHeight: 1.2,
                             textShadow: '0 0 2px #fff, 0 0 4px #fff'
                           }}
                         >
-                          {block.translatedText}
+                          {(block.lines?.length ? block.lines : [block.translatedText]).map((line, index) => (
+                            <span key={index} className="block whitespace-nowrap">{line}</span>
+                          ))}
                         </div>
                       </div>
                     );

@@ -63,14 +63,13 @@ function region(w: number, h: number, fontSize: number, originalText: string, tr
   };
 }
 
-describe('resizeRegionToFontSize (Cotrans 2023 semantics)', () => {
-  it('shrinks the font until the translation fits the existing box', () => {
-    // Real case: vertical bubble 33x128, 7 source chars -> 18 translated chars.
-    // Cotrans shrinks until floor(33/fs) * floor(128/fs) >= 18. At 14px that is
-    // 2 * 9 = 18, so the loop stops there — down from the detected 33px.
+describe('resizeRegionToFontSize (hybrid layout semantics)', () => {
+  it('preserves detected font size for the measured multi-line layout engine', () => {
+    // The old Cotrans grid loop reduced this 33px vertical region to 14px before
+    // measuring English text. XianScan-style fitting owns that decision later.
     const r = region(33, 128, 33, '这样下去的话…', 'If this goes on...');
     const { fontSize } = resizeRegionToFontSize(r, 888, 1214);
-    expect(fontSize).toBe(14);
+    expect(fontSize).toBe(33);
   });
 
   it('never widens the box — the destination quad stays the detection min_rect', () => {
@@ -108,17 +107,9 @@ describe('resizeRegionToFontSize (Cotrans 2023 semantics)', () => {
     }
   });
 
-  it('does not swap layout dimensions for vertical regions', () => {
-    // Vertical region: 30x150. Detected font size 24.
-    // 7 characters translated.
-    // If layout dimensions are swapped (incorrectly using Math.max/min):
-    // rows = floor(150 / 21) = 7, cols = floor(30 / 21) = 1. rows * cols = 7 >= 7.
-    // Returns font size 21.
-    // If layout dimensions are not swapped (correctly using boxW / boxH):
-    // rows = floor(30 / 21) = 1, cols = floor(150 / 21) = 7. rows * cols = 7 >= 7.
-    // Returns font size 21.
+  it('preserves vertical source font size until measured line fitting', () => {
     const r = region(30, 150, 24, '先生', 'teacher');
     const { fontSize } = resizeRegionToFontSize(r, 1000, 1500);
-    expect(fontSize).toBe(21);
+    expect(fontSize).toBe(24);
   });
 });

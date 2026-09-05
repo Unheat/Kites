@@ -1,5 +1,6 @@
 import type { Point2D } from '../../shared/utils/geometry';
 import { syllables } from './hyphenation';
+import { fitFontSizeWithLines, fontSpec } from './typesetLayout';
 
 /**
  * 1:1 port of Cotrans's DEFAULT renderer (the one cotrans.touhou.ai uses): rendering/__init__.py
@@ -59,6 +60,8 @@ export interface DefaultRenderRegion {
 export interface DefaultRenderResult {
   fontSize: number;
   lineCount: number;
+  /** Exact validated lines rendered onto the page. */
+  lines: string[];
 }
 
 type AnyCanvas = { getContext(type: '2d', options?: { willReadFrequently?: boolean }): any; width: number; height: number };
@@ -433,6 +436,62 @@ export function putTextHorizontal(
 }
 
 /**
+ * Renders already-validated layout lines so drawing cannot drift from the fitting pass.
+ *
+ * @param ctx - Parent canvas context, used to create a compatible intermediate canvas.
+ * @param fontSize - Fitted font size in pixels.
+ * @param lines - Layout-engine output in reading order.
+ * @param alignment - Horizontal alignment for each line.
+ * @param fg - Fill color.
+ * @param bg - Optional outline color.
+ * @returns Cropped transparent text canvas, or null when no lines are drawable.
+ */
+export function putTextLines(
+  ctx: any,
+  fontSize: number,
+  lines: string[],
+  alignment: 'left' | 'center' | 'right',
+  fg: string,
+  bg: string | null
+): { canvas: AnyCanvas; width: number; height: number } | null {
+  const drawableLines = lines.filter((line) => line.trim());
+  if (drawableLines.length === 0) return null;
+
+  const measure = makeMeasurer(ctx, fontSize);
+  const widths = drawableLines.map(measure);
+  const maxLineWidth = Math.max(...widths);
+  const bgSize = bg ? Math.max(Math.trunc(fontSize * STROKE_WIDTH_RATIO), 1) : 0;
+  const spacingY = Math.trunc(fontSize * LINE_SPACING_RATIO);
+  const canvasW = maxLineWidth + (fontSize + bgSize) * 2;
+  const canvasH = fontSize * drawableLines.length + spacingY * (drawableLines.length - 1) + (fontSize + bgSize) * 2;
+  const tmp = makeCanvas(ctx, canvasW, canvasH);
+  const textCtx = tmp.getContext('2d');
+  textCtx.font = fontSpec(fontSize, RENDER_FONT_FAMILY);
+  textCtx.textBaseline = 'top';
+  textCtx.textAlign = 'left';
+  textCtx.fillStyle = fg;
+  textCtx.lineJoin = 'round';
+  if (bg) {
+    textCtx.strokeStyle = bg;
+    textCtx.lineWidth = Math.max(1, bgSize * 2);
+  }
+
+  const originX = fontSize + bgSize;
+  const originY = fontSize + bgSize;
+  for (let i = 0; i < drawableLines.length; i++) {
+    let x = originX;
+    if (alignment === 'center') x += (maxLineWidth - widths[i]) / 2;
+    else if (alignment === 'right') x += maxLineWidth - widths[i];
+    const y = originY + i * (fontSize + spacingY);
+    if (bg) textCtx.strokeText(drawableLines[i], x, y);
+    textCtx.fillText(drawableLines[i], x, y);
+  }
+
+  const cropped = cropToContent(ctx, tmp);
+  return cropped ?? { canvas: tmp, width: tmp.width, height: tmp.height };
+}
+
+/**
  * Crops a canvas to the bounding box of its non-transparent pixels.
  * @returns The cropped canvas + size, or null if fully transparent.
  */
@@ -519,32 +578,12 @@ export function resizeRegionToFontSize(
   const minY = Math.min(...unrotated.map(p => p.y));
   const maxX = Math.max(...unrotated.map(p => p.x));
   const maxY = Math.max(...unrotated.map(p => p.y));
-  const boxW = maxX - minX;
-  const boxH = maxY - minY;
-
   let fontSize = region.fontSize > 0 ? Math.trunc(region.fontSize) : fontSizeMinimum;
 
-  // Step 1: more characters were added, so reduce the font size to fit the allotted area.
-  // Cotrans counts raw string length here (not count_text_length), and leaves font_size
-  // untouched if the loop bottoms out at zero without ever fitting.
-  const charCountOrig = (region.originalText || '').length;
-  const charCountTrans = region.translation.trim().length;
-  if (charCountTrans > charCountOrig) {
-    // Use actual dimensions directly (YAGNI / Cotrans 2023 math).
-    // ponytail: no dimension swap. Swapping layoutW/H makes vertical block text sizes huge.
-    const layoutW = boxW;
-    const layoutH = boxH;
-    let rescaled = fontSize;
-    while (rescaled > 0) {
-      const rows = Math.floor(layoutW / rescaled);
-      const cols = Math.floor(layoutH / rescaled);
-      if (rows * cols >= charCountTrans) {
-        fontSize = rescaled;
-        break;
-      }
-      rescaled -= 1;
-    }
-  }
+  // The 2023 Cotrans grid shrink loop reduced English translations to 5px inside
+  // Japanese vertical columns. The layout engine now measures real Canvas word widths,
+  // so preserve the detected size here and let its validated multi-line fit choose a
+  // readable size without treating Latin characters as square glyph cells.
 
   // Step 2: infer the target font size (font_size_offset is 0 for us).
   let targetFontSize = fontSize;
@@ -627,15 +666,13 @@ function warpBoxOntoQuad(ctx: any, boxCanvas: AnyCanvas, boxW: number, boxH: num
  * @param region - Region metadata.
  * @param dstPoints - Destination quad from resizeRegionToFontSize ([tl, tr, br, bl]).
  * @param fontSize - Font size from resizeRegionToFontSize.
- * @param lineSpacing - Extra inter-line spacing.
  * @returns Render info, or null if nothing was drawn.
  */
 export function renderRegionDefault(
   ctx: any,
   region: DefaultRenderRegion,
   dstPoints: Point2D[],
-  fontSize: number,
-  lineSpacing = 0
+  fontSize: number
 ): DefaultRenderResult | null {
   const [tl, tr, br, bl] = dstPoints;
   // Layout and aspect padding must use the resized destination dimensions. Using the
@@ -648,7 +685,20 @@ export function renderRegionDefault(
   const fg = region.textColor || '#000000';
   const bg = region.strokeColor && region.strokeColor !== 'transparent' ? region.strokeColor : null;
 
-  const temp = putTextHorizontal(ctx, fontSize, region.translation, Math.round(normH), Math.round(normV), region.alignment, fg, bg, lineSpacing);
+  // XianScan-style fit returns both the verified font size and exact wrapped lines.
+  // Rendering those same lines prevents Cotrans's independent syllable pass from
+  // turning English dialogue into narrow barcode columns.
+  const fitted = fitFontSizeWithLines(
+    ctx,
+    compactSpecialSymbols(region.translation),
+    RENDER_FONT_FAMILY,
+    normH,
+    normV,
+    fontSize,
+    Math.max(fontSize, 48),
+    0.05
+  );
+  const temp = putTextLines(ctx, fitted.size, fitted.lines, region.alignment, fg, bg);
   if (!temp) return null;
 
   // Extend the text box to the destination aspect ratio (Cotrans render horizontal branch).
@@ -677,7 +727,5 @@ export function renderRegionDefault(
   // Warp the text box onto the destination quad and alpha-composite over the page.
   warpBoxOntoQuad(ctx, boxCanvas, boxW, boxH, [tl, tr, br, bl]);
 
-  // Count rendered lines for reporting.
-  const lineInfo = calcHorizontal(ctx, fontSize, compactSpecialSymbols(region.translation), Math.round(normH), Math.round(normV), true);
-  return { fontSize, lineCount: lineInfo.lineTexts.length };
+  return { fontSize: fitted.size, lineCount: fitted.lines.length, lines: fitted.lines };
 }

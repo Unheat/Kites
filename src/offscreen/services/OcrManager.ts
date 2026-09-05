@@ -159,8 +159,48 @@ export class OcrManager {
    */
   private mergeTextBlocks(result: OcrResult): OcrResult {
     // Merge algorithm entry point
-    const { texts: rawTexts, polygons: rawPolygons = [], scores: rawScores = [] } = result;
+    const rawTexts = [...result.texts];
+    const rawPolygons = [...(result.polygons || [])];
+    const rawScores = [...(result.scores || [])];
     if (rawTexts.length <= 1 || rawPolygons.length === 0) return { ...result, rawPolygons };
+
+    // XianScan-style orphan punctuation recovery. Cotrans deliberately drops pure punctuation
+    // as noise, but vertical manga often detects a terminal `!`/`?` in its own small quad.
+    const purePunctuation = /^[！!？?…~〜ー─―.]+$/;
+    const claimedPunctuation = new Set<number>();
+    for (let punctuationIndex = 0; punctuationIndex < rawTexts.length; punctuationIndex++) {
+      const punctuation = rawTexts[punctuationIndex]?.trim();
+      const punctuationPolygon = rawPolygons[punctuationIndex];
+      if (!punctuation || !purePunctuation.test(punctuation) || !punctuationPolygon || punctuationPolygon.length < 3) continue;
+
+      const punctuationBox = calculateBoundingBox(punctuationPolygon);
+      let closestIndex = -1;
+      let closestDistance = Number.POSITIVE_INFINITY;
+      for (let lineIndex = 0; lineIndex < rawTexts.length; lineIndex++) {
+        if (lineIndex === punctuationIndex || !isValuableText(rawTexts[lineIndex] || '')) continue;
+        const linePolygon = rawPolygons[lineIndex];
+        if (!linePolygon || linePolygon.length < 3) continue;
+        const lineBox = calculateBoundingBox(linePolygon);
+        const horizontalGap = Math.max(lineBox.x - (punctuationBox.x + punctuationBox.width), punctuationBox.x - (lineBox.x + lineBox.width), 0);
+        const verticalGap = Math.max(lineBox.y - (punctuationBox.y + punctuationBox.height), punctuationBox.y - (lineBox.y + lineBox.height), 0);
+        const characterSize = Math.max(8, Math.min(lineBox.width, lineBox.height));
+        const distance = Math.hypot(horizontalGap, verticalGap);
+        if (distance <= characterSize * 1.5 && distance < closestDistance) {
+          closestIndex = lineIndex;
+          closestDistance = distance;
+        }
+      }
+
+      if (closestIndex >= 0) {
+        const lineBox = calculateBoundingBox(rawPolygons[closestIndex]);
+        const append = punctuationBox.y >= lineBox.y || punctuationBox.x >= lineBox.x;
+        rawTexts[closestIndex] = append
+          ? `${rawTexts[closestIndex]}${punctuation}`
+          : `${punctuation}${rawTexts[closestIndex]}`;
+        claimedPunctuation.add(punctuationIndex);
+        console.log(`[OcrManager] Attached orphan punctuation "${punctuation}" to "${rawTexts[closestIndex]}"`);
+      }
+    }
 
     // Stage 1: Cotrans Noise Filtering (area > 16, non-empty text, and isValuableText - manga_translator.py)
     const validIndices: number[] = [];
@@ -169,6 +209,7 @@ export class OcrManager {
       const txt = rawTexts[i];
       if (!poly || poly.length < 3) continue;
       if (!txt || !txt.trim()) continue;
+      if (claimedPunctuation.has(i)) continue;
 
       if (!isValuableText(txt)) {
         console.log(`[OcrManager] Filtered out non-valuable noise line "${txt}"`);
@@ -230,9 +271,36 @@ export class OcrManager {
       validIndices.push(i);
     }
 
-    const texts = validIndices.map(i => rawTexts[i]);
-    const polygons = validIndices.map(i => rawPolygons[i]);
-    const scores = validIndices.map(i => rawScores[i]);
+    const filteredTexts = validIndices.map(i => rawTexts[i]);
+    const filteredPolygons = validIndices.map(i => rawPolygons[i]);
+    const filteredScores = validIndices.map(i => rawScores[i]);
+
+    // PaddleOCR can report a complete vertical line and a nested substring slice in the
+    // same column. Retain the longer, higher-confidence line before it reaches Cotrans MST.
+    const duplicateIndices = new Set<number>();
+    for (let i = 0; i < filteredTexts.length; i++) {
+      const boxA = calculateBoundingBox(filteredPolygons[i]);
+      const isVerticalA = boxA.height > boxA.width * 1.2;
+      if (!isVerticalA) continue;
+      for (let j = i + 1; j < filteredTexts.length; j++) {
+        const boxB = calculateBoundingBox(filteredPolygons[j]);
+        const isVerticalB = boxB.height > boxB.width * 1.2;
+        if (!isVerticalB) continue;
+        const sameColumn = Math.abs((boxA.x + boxA.width / 2) - (boxB.x + boxB.width / 2))
+          <= Math.max(8, Math.min(boxA.width, boxB.width));
+        const yOverlap = Math.max(0, Math.min(boxA.y + boxA.height, boxB.y + boxB.height) - Math.max(boxA.y, boxB.y));
+        if (!sameColumn || yOverlap <= 0) continue;
+
+        const aContainsB = filteredTexts[i].includes(filteredTexts[j]) && filteredTexts[i].length > filteredTexts[j].length;
+        const bContainsA = filteredTexts[j].includes(filteredTexts[i]) && filteredTexts[j].length > filteredTexts[i].length;
+        if (aContainsB && (filteredScores[i] || 0) >= (filteredScores[j] || 0)) duplicateIndices.add(j);
+        if (bContainsA && (filteredScores[j] || 0) >= (filteredScores[i] || 0)) duplicateIndices.add(i);
+      }
+    }
+
+    const texts = filteredTexts.filter((_, index) => !duplicateIndices.has(index));
+    const polygons = filteredPolygons.filter((_, index) => !duplicateIndices.has(index));
+    const scores = filteredScores.filter((_, index) => !duplicateIndices.has(index));
 
     if (texts.length === 0) return result;
 
@@ -258,7 +326,9 @@ export class OcrManager {
     for (let i = 0; i < quads.length; i++) mergeGraph.addNode(i);
     for (let i = 0; i < quads.length; i++) {
       for (let j = i + 1; j < quads.length; j++) {
-        if (quadrilateralCanMergeRegion(quads[i], quads[j], 1.9, 2, 1, 3, 2, 1.3)) {
+        const terminalBoundary = /[。！？…!?」』）]$/.test(texts[i].trim()) || /[。！？…!?」』）]$/.test(texts[j].trim());
+        const characterGapTolerance = terminalBoundary ? 0.45 : 1;
+        if (quadrilateralCanMergeRegion(quads[i], quads[j], 1.9, 2, characterGapTolerance, 3, 2, 1.3)) {
           mergeGraph.addEdge(i, j);
         }
       }

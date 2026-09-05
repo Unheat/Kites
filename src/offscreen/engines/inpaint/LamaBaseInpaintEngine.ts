@@ -17,6 +17,14 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
     this.platform = platform;
   }
 
+  /**
+   * Initializes the ONNX Runtime session and loads the LaMa model weights.
+   * In Node.js, loads the model from the local filesystem. In the browser,
+   * fetches the model from the extension's cached model registry and configures
+   * WebGPU or WASM execution providers based on hardware availability and user settings.
+   *
+   * @returns A promise that resolves when the ONNX session is ready for inference.
+   */
   async init(): Promise<void> {
     if (this.session) return;
     
@@ -99,22 +107,53 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
     }
   }
 
+  /**
+   * Returns the unique model identifier used for registry lookup and cache keying.
+   *
+   * @returns The model registry key 'lama-base'.
+   */
   protected getModelId(): string {
     return 'lama-base';
   }
 
+  /**
+   * Returns the local filesystem path to the LaMa ONNX model file (used in Node.js test environment).
+   *
+   * @returns The relative path to the ONNX model binary.
+   */
   protected getModelPath(): string {
     return 'src/test/models/lama/lama-base.onnx';
   }
 
+  /**
+   * Normalizes a pixel value from [0, 255] to [0.0, 1.0] range for LaMa model input.
+   *
+   * @param value - Raw pixel value in [0, 255].
+   * @returns Normalized pixel value in [0.0, 1.0].
+   */
   protected normalizeImagePixel(value: number): number {
     return value / 255.0;
   }
 
+  /**
+   * Denormalizes a pixel value from model output back to display range.
+   * For LaMa-base, the model already outputs values in [0, 255] so this is an identity pass-through.
+   *
+   * @param value - Model output pixel value (already in [0, 255] for lama-base).
+   * @returns The pixel value unchanged.
+   */
   protected denormalizeImagePixel(value: number): number {
     return value;
   }
 
+  /**
+   * Creates a 2D canvas element compatible with the current runtime environment.
+   * Uses node-canvas in Node.js and DOM OffscreenCanvas/HTMLCanvasElement in the browser.
+   *
+   * @param width - The width of the canvas in pixels.
+   * @param height - The height of the canvas in pixels.
+   * @returns A promise resolving to a Canvas instance.
+   */
   private async createCanvas(width: number, height: number): Promise<any> {
     if (typeof window === 'undefined') {
       const { createCanvas } = await import('canvas');
@@ -127,6 +166,13 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
     }
   }
 
+  /**
+   * Converts a canvas to an ArrayBuffer containing a PNG/JPEG image.
+   * Handles both Node.js (node-canvas toBuffer) and browser (convertToBlob/toBlob) environments.
+   *
+   * @param canvas - The canvas element to convert (node-canvas, OffscreenCanvas, or HTMLCanvasElement).
+   * @returns A promise resolving to the image data as an ArrayBuffer.
+   */
   private async canvasToArrayBuffer(canvas: any): Promise<ArrayBuffer> {
     if (typeof window === 'undefined') {
       return new Uint8Array(canvas.toBuffer('image/jpeg', { quality: 1.0 })).buffer;
@@ -149,6 +195,17 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
   // We intentionally skip Cotrans's complex mask expansion/inpainting logic and
   // strictly use the raw polygon patches directly. Do not attempt to synchronize
   // this engine with Cotrans.
+  /**
+   * Erases text from the source image by running the LaMa neural network model.
+   * Clusters nearby text bounding boxes into square patches (min 128px), crops each patch,
+   * runs sequential ONNX inference at 512x512 resolution, and composites the inpainted results
+   * back onto the full canvas masked by the polygon/stroke areas.
+   *
+   * @param imageBuffer - Raw ArrayBuffer of the input image.
+   * @param polygons - Array of polygon vertex arrays defining text regions to erase.
+   * @param strokeMaskCanvas - Optional pre-rendered stroke mask canvas to use instead of polygons.
+   * @returns A promise resolving to the clean inpainted image as an ArrayBuffer.
+   */
   async inpaint(
     imageBuffer: ArrayBuffer,
     polygons: Point2D[][],
@@ -398,6 +455,11 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
     return await this.canvasToArrayBuffer(finalCanvas);
   }
 
+  /**
+   * Releases the ONNX Runtime inference session and frees allocated GPU/WASM memory.
+   *
+   * @returns A promise that resolves when the session is released.
+   */
   async destroy(): Promise<void> {
     if (this.session && typeof this.session.release === 'function') {
       await this.session.release();

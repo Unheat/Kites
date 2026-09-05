@@ -8,6 +8,17 @@ import { ProviderRouteConfig } from '../config/providers';
 import { OpenAIChatRequest, OpenAIChatResponse } from '../types';
 import { AdapterExecutionResult } from './openai-compatible';
 
+/**
+ * Execute a chat completion request against Google Gemini's generateContent REST API.
+ * Converts OpenAI message formatting to Gemini contents format, handles abort timeouts,
+ * filters thought reasoning parts, and maps the response back into an OpenAI Chat Response.
+ *
+ * @param route - Provider route configuration containing the Gemini model name.
+ * @param request - OpenAI-compatible chat completion request with messages and sampling parameters.
+ * @param apiKey - Google Gemini API key.
+ * @param timeoutMs - Maximum allowed duration for the HTTP call in milliseconds.
+ * @returns An AdapterExecutionResult containing success status, status code, and parsed response or error.
+ */
 export async function executeGemini(
   route: ProviderRouteConfig,
   request: OpenAIChatRequest,

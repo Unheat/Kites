@@ -334,6 +334,8 @@ export interface RenderedBlockInfo {
   fontSize: number;
   /** Number of laid out lines. */
   lineCount: number;
+  /** Exact validated lines drawn by the layout engine. */
+  lines: string[];
 }
 
 /** Page dimensions used to derive the Cotrans font-size minimum. */
@@ -453,8 +455,8 @@ function renderTextBlocksDefault(
 
     try {
       const { dstPoints, fontSize: targetFontSize } = resizeRegionToFontSize(region, pageWidth, pageHeight);
-      const info = renderRegionDefault(ctx, region, dstPoints, targetFontSize, 0);
-      if (info) results[i] = { fontSize: info.fontSize, lineCount: info.lineCount };
+      const info = renderRegionDefault(ctx, region, dstPoints, targetFontSize);
+      if (info) results[i] = { fontSize: info.fontSize, lineCount: info.lineCount, lines: info.lines };
     } catch (e) {
       console.error('[canvasTypesetting] Default renderer failed for block', i, e);
     }
@@ -585,7 +587,7 @@ function renderTextBlocksLegacy(
     }
 
     ctx.restore();
-    results[meta.index] = { fontSize: meta.fontSize, lineCount: meta.lines.length };
+    results[meta.index] = { fontSize: meta.fontSize, lineCount: meta.lines.length, lines: meta.lines };
   }
 
   return results;

@@ -12,11 +12,27 @@ import { GoogleAuthVerifier } from './google';
 export class AuthManager {
   private verifiers: IAuthProviderVerifier[] = [];
 
+  /**
+   * Register a new authentication provider verifier strategy.
+   * Enables chaining during instance configuration.
+   *
+   * @param verifier - The auth provider verifier implementation to register.
+   * @returns This AuthManager instance for method chaining.
+   */
   register(verifier: IAuthProviderVerifier): this {
     this.verifiers.push(verifier);
     return this;
   }
 
+  /**
+   * Verify an authentication token by dispatching to the first registered verifier
+   * that claims to handle it. Iterates through registered verifiers in order.
+   *
+   * @param token - The raw bearer token from the Authorization header.
+   * @param env - Worker environment bindings for provider-specific configuration.
+   * @returns The verified user identity from the matching provider.
+   * @throws Error if no registered verifier can handle the token.
+   */
   async verifyToken(token: string, env: Env): Promise<VerifiedIdentity> {
     const verifier = this.verifiers.find((v) => v.canHandle(token));
     if (!verifier) {

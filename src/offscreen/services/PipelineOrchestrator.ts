@@ -237,7 +237,8 @@ export class PipelineOrchestrator {
           fontSize,
           fontFamily: 'sans-serif',
           color: '#000000',
-          direction: dir
+          direction: dir,
+          lines: renderInfoByOcrIndex.get(i)?.lines
         };
       });
 

@@ -1,10 +1,33 @@
+/**
+ * Lightweight undirected weighted graph for Kruskal MST region splitting.
+ *
+ * Used by the OCR post-processing pipeline to decide which detected text
+ * polygons belong to the same speech bubble and which should be kept separate.
+ */
 export class Graph {
   nodes = new Set<number>();
   edges: { u: number; v: number; weight: number }[] = [];
 
+  /**
+   * Register a node index in the graph.
+   * @param n - Node identifier (typically a polygon/region index).
+   */
   addNode(n: number) { this.nodes.add(n); }
+
+  /**
+   * Add an undirected weighted edge between two nodes.
+   * @param u - First node index.
+   * @param v - Second node index.
+   * @param weight - Edge weight (e.g. spatial distance between regions).
+   */
   addEdge(u: number, v: number, weight: number = 0) { this.edges.push({ u, v, weight }); }
 
+  /**
+   * Build a Minimum Spanning Tree using Kruskal's algorithm with
+   * union-find path compression.
+   *
+   * @returns Sorted list of MST edges in ascending weight order.
+   */
   kruskalMST(): { u: number; v: number; weight: number }[] {
     const parent = new Map<number, number>();
     const find = (i: number): number => {
@@ -31,6 +54,11 @@ export class Graph {
     return mst;
   }
 
+  /**
+   * Partition the graph into connected components using union-find.
+   *
+   * @returns Array of node-index sets, one per connected component.
+   */
   connectedComponents(): Set<number>[] {
     const parent = new Map<number, number>();
     for (const n of this.nodes) parent.set(n, n);
