@@ -458,7 +458,11 @@ export function putTextLines(
   const drawableLines = lines.filter((line) => line.trim());
   if (drawableLines.length === 0) return null;
 
-  const measure = makeMeasurer(ctx, fontSize);
+  // Sample-aware font spec: resolves the SAME font stack the fitting pass measured with
+  // (CJK-first when the translation contains CJK), so width validation transfers to draw.
+  const drawFont = fontSpec(fontSize, RENDER_FONT_FAMILY, drawableLines.join(''));
+  ctx.font = drawFont;
+  const measure = (s: string) => ctx.measureText(s).width;
   const widths = drawableLines.map(measure);
   const maxLineWidth = Math.max(...widths);
   const bgSize = bg ? Math.max(Math.trunc(fontSize * STROKE_WIDTH_RATIO), 1) : 0;
@@ -467,7 +471,7 @@ export function putTextLines(
   const canvasH = fontSize * drawableLines.length + spacingY * (drawableLines.length - 1) + (fontSize + bgSize) * 2;
   const tmp = makeCanvas(ctx, canvasW, canvasH);
   const textCtx = tmp.getContext('2d');
-  textCtx.font = fontSpec(fontSize, RENDER_FONT_FAMILY);
+  textCtx.font = drawFont;
   textCtx.textBaseline = 'top';
   textCtx.textAlign = 'left';
   textCtx.fillStyle = fg;

@@ -318,14 +318,19 @@ export default function App() {
 
       // If the user edited text after rendering, `lines` is empty — rewrap using the
       // shared typesetting engine so the export matches the pipeline's layout policy.
+      // fitFontSizeWithLines mutates ctx.font during its binary search, so re-set
+      // both the font and the derived line height from the fitted size afterwards.
       let lines: string[];
+      let drawFontSize = fontSize;
       if (block.lines && block.lines.length > 0) {
         lines = block.lines;
       } else {
         const fitted = fitFontSizeWithLines(ctx, block.translatedText, 'sans-serif', block.width, block.height, fontSize, Math.max(fontSize, 48), 0.05);
         lines = fitted.lines.length > 0 ? fitted.lines : [block.translatedText];
+        drawFontSize = fitted.size;
+        ctx.font = `bold ${drawFontSize}px sans-serif`;
       }
-      const lineHeight = fontSize * 1.2;
+      const lineHeight = drawFontSize * 1.2;
       const startY = cy - ((lines.length - 1) * lineHeight) / 2;
 
       for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {

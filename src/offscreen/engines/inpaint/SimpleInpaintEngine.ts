@@ -147,13 +147,13 @@ export class SimpleInpaintEngine implements IInpaintEngine {
       };
 
       // Strategy 1 (XianScan gate): the exterior ring is used ONLY when it is a confirmed
-      // white-bubble or flat-solid background. Kites' OCR polygons are tight per-line
-      // quads, so on dark art or dense vertical columns the ring hits neighboring ink —
-      // ungated ring sampling produced gray blocks (regression vs v1).
+      // white-bubble background. Kites' OCR polygons are tight per-line quads, so on dark
+      // art or dense vertical columns the ring hits neighboring ink — ungated ring
+      // sampling produced gray blocks (regression vs v1). A flat-but-dark ring must NOT
+      // pass: white paper under the text is still the correct fill source.
       collectSamples(false, 80);
       const ringStats = stats();
-      const ringIsSolid = (ringStats.mean >= WHITE_BUBBLE_LUMINANCE_MIN && ringStats.stdDev < WHITE_BUBBLE_STANDARD_DEVIATION_MAX)
-        || ringStats.stdDev < 4;
+      const ringIsSolid = ringStats.mean >= WHITE_BUBBLE_LUMINANCE_MIN && ringStats.stdDev < WHITE_BUBBLE_STANDARD_DEVIATION_MAX;
 
       // Strategy 2 (v1 behavior): bubble paper BETWEEN glyph strokes. White-bubble
       // interiors stay white regardless of the artwork outside the polygon.
@@ -178,9 +178,12 @@ export class SimpleInpaintEngine implements IInpaintEngine {
       };
       const { mean: meanLuminance, stdDev: standardDeviation } = stats();
 
-      let r = median(rSamples, 128);
-      let g = median(gSamples, 128);
-      let b = median(bSamples, 128);
+      // Empty-sample fallback MUST be white (main-branch behavior): when the dilated
+      // OCR mask swallows every interior pixel (dense/bold small text), all strategies
+      // return 0 samples and the masked region is pure glyph ink on bubble paper.
+      let r = median(rSamples, 255);
+      let g = median(gSamples, 255);
+      let b = median(bSamples, 255);
       if (rSamples.length > 0 && meanLuminance >= WHITE_BUBBLE_LUMINANCE_MIN && standardDeviation < WHITE_BUBBLE_STANDARD_DEVIATION_MAX) {
         r = 255;
         g = 255;

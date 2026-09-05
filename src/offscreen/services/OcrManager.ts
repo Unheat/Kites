@@ -334,11 +334,13 @@ export class OcrManager {
         const identical = textA === textB;
         if (!identical && !aContainsB && !bContainsA) continue;
 
-        // Keep the longer text; on equal content keep the higher OCR confidence.
+        // Keep the longer text (the nested slice is its partial read); on identical
+        // content keep the higher OCR confidence. Confidence never beats length —
+        // a high-confidence slice is still missing glyphs the longer line captured.
         if (aContainsB) {
-          duplicateIndices.add(scoreA >= scoreB ? j : i);
+          duplicateIndices.add(j);
         } else if (bContainsA) {
-          duplicateIndices.add(scoreB >= scoreA ? i : j);
+          duplicateIndices.add(i);
         } else {
           duplicateIndices.add(scoreA >= scoreB ? j : i);
         }
@@ -350,8 +352,13 @@ export class OcrManager {
     const scores = filteredScores.filter((_, index) => !duplicateIndices.has(index));
 
     if (texts.length === 0) {
-      // Nothing to translate, but inpainting still needs the surviving erase polygons.
-      const emptyMaskPolygons = validIndices.map(i => rawPolygons[i]);
+      // Nothing to translate, but inpainting still needs the surviving erase polygons:
+      // all noise-filtered lines (pre-dedup — dropped duplicates still have ink to erase)
+      // plus orphan punctuation merged into neighbors.
+      const emptyMaskPolygons = [...filteredPolygons];
+      for (const idx of claimedPunctuation) {
+        emptyMaskPolygons.push(rawPolygons[idx]);
+      }
       return {
         ...result,
         texts: [],
@@ -468,11 +475,16 @@ export class OcrManager {
       mergedLineCounts.push(groupIndices.length);
     }
 
-    // Cotrans sort_regions (textblock.py): order blocks top-to-bottom, right-to-left.
+    // Cotrans sort_regions (textblock.py:423): order blocks top-to-bottom, right-to-left.
     // Graph connected-component order is arbitrary; without this, translation receives
     // bubbles in random spatial order which breaks cross-bubble context quality.
+    // Candidates MUST be pre-sorted by centerY ascending (Cotrans line 426) — the
+    // insertion logic below is only correct under that precondition.
     const rows: number[] = []; // indices into mergedBoxes, in panel reading order
-    for (let cand = 0; cand < mergedBoxes.length; cand++) {
+    const candidates = mergedBoxes
+      .map((b, index) => ({ index, centerY: b.y + b.h / 2 }))
+      .sort((a, b) => a.centerY - b.centerY);
+    for (const { index: cand } of candidates) {
       const b = mergedBoxes[cand];
       const centerY = b.y + b.h / 2;
       const centerX = b.x + b.w / 2;
@@ -500,9 +512,10 @@ export class OcrManager {
     const pick = <T>(arr: T[]): T[] => rows.map(i => arr[i]);
 
     // rawPolygons retains the raw unmerged 4-point line quadrilaterals for inpainting.
-    // Includes noise-filtered text polygons AND orphan punctuation polygons that were
-    // merged into their neighbors' text — their ink must still be erased.
-    const maskPolygons = [...polygons];
+    // Built from PRE-dedup filtered polygons: a dedup-dropped duplicate still has ink
+    // (its non-overlapping part) that must be erased. Orphan punctuation polygons that
+    // were merged into neighbors' text are added too — their ink must also be erased.
+    const maskPolygons = [...filteredPolygons];
     for (const idx of claimedPunctuation) {
       maskPolygons.push(rawPolygons[idx]);
     }
@@ -515,6 +528,7 @@ export class OcrManager {
       fontSizes: pick(mergedFontSizes),
       angles: pick(mergedAngles),
       lineCounts: pick(mergedLineCounts),
+      detectionScores: result.detectionScores,
       rawPolygons: maskPolygons,
       maskRawCanvas: result.maskRawCanvas
     };

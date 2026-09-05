@@ -100,6 +100,8 @@ export class PipelineOrchestrator {
         await db.images.update(imageRecord.id!, {
           translatedImageBlob: imageRecord.rawImageBlob
         });
+        // Clear stale blocks from a prior run on this image (same dedup rule as the main path).
+        await db.textBlocks.where({ imageId: imageRecord.id! }).delete();
         await db.translationJobs.update(jobId, { status: 'completed' });
         
         // Convert to base64 to return
