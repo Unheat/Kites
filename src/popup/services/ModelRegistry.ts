@@ -35,6 +35,12 @@ export class ModelRegistry {
         type: 'api',
         isDownloaded: true,
       },
+      {
+        id: 'cloudflare-translate',
+        name: 'Cloudflare Shared Pool',
+        type: 'api',
+        isDownloaded: true,
+      },
       ...staticModels,
     ];
   }

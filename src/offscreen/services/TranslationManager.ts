@@ -2,6 +2,7 @@ import type { ITranslationEngine } from '../engines/translation/BaseEngine';
 import { WebLLMEngine } from '../engines/translation/WebLLMEngine';
 import { GoogleTranslateEngine } from '../engines/translation/GoogleTranslateEngine';
 import { CustomApiEngine } from '../engines/translation/CustomApiEngine';
+import { CloudflareTranslateEngine, CloudflarePoolExhaustedError } from '../engines/translation/CloudflareTranslateEngine';
 import type { CustomApiConfig, PopupState } from '../../shared/types';
 import modelsRegistryData from '../../shared/models-registry.json';
 
@@ -20,10 +21,10 @@ export class TranslationManager {
    * Preloads the active engine into memory to avoid cold-start delays.
    * Typically called on extension startup.
    */
-  async preload(engineId: string): Promise<void> {
+  async preload(engineId: string, customApi?: CustomApiConfig): Promise<void> {
     console.log(`[TranslationManager] Preloading engine: ${engineId}`);
     try {
-      await this.getOrLoadEngine(engineId);
+      await this.getOrLoadEngine(engineId, undefined, customApi);
       console.log(`[TranslationManager] Successfully preloaded engine: ${engineId}`);
     } catch (error) {
       console.warn(`[TranslationManager] Failed to preload engine ${engineId}: ${error instanceof Error ? error.message : String(error)}`);
@@ -65,7 +66,7 @@ export class TranslationManager {
     const fallbackChain: string[] = popupState.fallbackChain || [];
     
     // Combine primary and fallback into a single sequence
-    const engineSequence = [primaryEngineId, ...fallbackChain].filter(Boolean);
+    let engineSequence = [primaryEngineId, ...fallbackChain].filter(Boolean);
     
     console.log(`[TranslationManager] Engine waterfall sequence:`, engineSequence);
 
@@ -94,6 +95,17 @@ export class TranslationManager {
 
       } catch (error) {
         console.error(`[TranslationManager] Engine ${engineId} failed:`, error);
+
+        // When Cloudflare shared pool is exhausted or cooling down, prune any external/custom
+        // cloud engines from the remaining waterfall and fall back ONLY to local/on-device engines
+        if (error instanceof CloudflarePoolExhaustedError) {
+          console.warn(`[TranslationManager] Cloudflare shared pool exhausted (${error.code}). Pruning external cloud fallbacks to protect user.`);
+          const remainingLocalEngines = engineSequence.slice(i + 1).filter((id) => {
+            const isLocalWebLLM = modelsRegistryData.some((m) => m.id === id && m.engine === 'webllm');
+            return isLocalWebLLM || id === 'chrome-translator';
+          });
+          engineSequence = [...engineSequence.slice(0, i + 1), ...remainingLocalEngines];
+        }
         
         // 4. If it's the last engine in the chain, we fail completely
         if (i === engineSequence.length - 1) {
@@ -150,6 +162,8 @@ export class TranslationManager {
         engine = new CustomApiEngine(customApi);
       } else if (engineId === 'gg-translate') {
         engine = new GoogleTranslateEngine();
+      } else if (engineId === 'cloudflare-translate') {
+        engine = new CloudflareTranslateEngine();
       } else if (registryEntry?.engine === 'webllm') {
         engine = new WebLLMEngine(engineId);
       } else {
