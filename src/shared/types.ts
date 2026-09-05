@@ -87,6 +87,8 @@ export interface UserAccountInfo {
   picture?: string;
   sub: string;
   signedIn: boolean;
+  quotaRemaining?: number;
+  quotaResetsAt?: number;
 }
 
 export interface PopupState {

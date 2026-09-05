@@ -27,6 +27,7 @@ function corsHeaders(request: Request): Record<string, string> {
     'Access-Control-Allow-Origin': origin,
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With',
+    'Access-Control-Expose-Headers': 'X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset',
     'Access-Control-Max-Age': '86400',
   };
 }
@@ -168,7 +169,13 @@ export default {
 
       try {
         const result = await (poolStub as any).handleTranslation(userHash, body);
-        return jsonResponse(result.body, result.status, cors);
+        const headers: Record<string, string> = { ...cors };
+        if (result.quota) {
+          headers['X-RateLimit-Limit'] = String(result.quota.limit);
+          headers['X-RateLimit-Remaining'] = String(result.quota.remaining);
+          headers['X-RateLimit-Reset'] = String(result.quota.resetsAt);
+        }
+        return jsonResponse(result.body, result.status, headers);
       } catch (err: any) {
         return jsonResponse(
           {
@@ -176,6 +183,70 @@ export default {
               message: `Internal pool error: ${err.message || 'Unknown error'}`,
               type: 'api_error',
               code: 'internal_error',
+            },
+          },
+          500,
+          cors
+        );
+      }
+    }
+
+    // GET /v1/quota: Read-only check for user remaining quota
+    if (request.method === 'GET' && url.pathname === '/v1/quota') {
+      const authHeader = request.headers.get('Authorization') || '';
+      if (!authHeader.startsWith('Bearer ')) {
+        return jsonResponse(
+          {
+            error: {
+              message: 'Missing or invalid Authorization header. Expected Bearer <google_id_token>',
+              type: 'authentication_error',
+              code: 'missing_token',
+            },
+          },
+          401,
+          cors
+        );
+      }
+
+      const idToken = authHeader.slice(7).trim();
+      let userHash = '';
+
+      try {
+        const identity = await authManager.verifyToken(idToken, env);
+        userHash = await hashUserSubject(`${identity.provider}:${identity.sub}`, env.JWT_SALT || 'kites-salt');
+      } catch (err: any) {
+        return jsonResponse(
+          {
+            error: {
+              message: `Authentication failed: ${err.message || 'Invalid or unsupported ID token'}`,
+              type: 'authentication_error',
+              code: 'invalid_token',
+            },
+          },
+          401,
+          cors
+        );
+      }
+
+      const poolId = env.SHARED_POOL.idFromName('global-kites-pool');
+      const poolStub = env.SHARED_POOL.get(poolId);
+
+      try {
+        const quota = await (poolStub as any).getQuota(userHash);
+        const headers: Record<string, string> = {
+          ...cors,
+          'X-RateLimit-Limit': String(quota.limit),
+          'X-RateLimit-Remaining': String(quota.remaining),
+          'X-RateLimit-Reset': String(quota.resetsAt),
+        };
+        return jsonResponse(quota, 200, headers);
+      } catch (err: any) {
+        return jsonResponse(
+          {
+            error: {
+              message: `Failed querying quota: ${err.message || 'Unknown error'}`,
+              type: 'api_error',
+              code: 'quota_query_failed',
             },
           },
           500,

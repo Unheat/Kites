@@ -216,6 +216,49 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === 'REFRESH_CLOUD_QUOTA') {
+    (async () => {
+      try {
+        const token = await new Promise<string | undefined>((resolve) => {
+          chrome.identity.getAuthToken({ interactive: false }, (tok) => {
+            const strToken = typeof tok === 'string' ? tok : (tok as any)?.token;
+            resolve(strToken);
+          });
+        });
+
+        if (!token) {
+          return sendResponse({ success: false, error: 'No auth token available' });
+        }
+
+        const res = await fetch('https://kites-worker.dangtruongan2003.workers.dev/v1/quota', {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+
+        if (res.ok) {
+          const quota = await res.json() as any;
+          const currentData = await chrome.storage.local.get('popupState');
+          const current = currentData?.popupState as PopupState | undefined;
+          if (current?.userAccount) {
+            const updatedAccount = {
+              ...current.userAccount,
+              quotaRemaining: quota.remaining,
+              quotaResetsAt: quota.resetsAt
+            };
+            await chrome.storage.local.set({
+              popupState: { ...current, userAccount: updatedAccount }
+            });
+            sendResponse({ success: true, quota });
+            return;
+          }
+        }
+        sendResponse({ success: false });
+      } catch (err: any) {
+        sendResponse({ success: false, error: err?.message });
+      }
+    })();
+    return true;
+  }
+
   if (message.type === 'START_MODEL_DOWNLOAD' || message.type === 'CHECK_MODEL_STATUS' || message.type === 'GET_MODEL_STATUSES' || message.type === 'PRELOAD_ACTIVE_ENGINE' || message.type === 'GET_ACTIVE_DOWNLOADS' || message.type === 'VALIDATE_CUSTOM_API') {
     console.log(`[Background] Received ${message.type}. Forwarding to Offscreen...`);
     sendMessageToOffscreen(message)

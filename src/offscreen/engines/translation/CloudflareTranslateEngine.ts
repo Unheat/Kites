@@ -154,6 +154,29 @@ export class CloudflareTranslateEngine implements ITranslationEngine {
         throw new Error(`Cloudflare translate request failed (${response.status}): ${errMessage}`);
       }
 
+      // Capture live quota response headers and sync to extension state
+      const remainingHeader = response.headers.get('x-ratelimit-remaining');
+      const resetHeader = response.headers.get('x-ratelimit-reset');
+      if (remainingHeader !== null && typeof chrome !== 'undefined' && chrome?.storage?.local) {
+        const remaining = parseInt(remainingHeader, 10);
+        const resetsAt = resetHeader ? parseInt(resetHeader, 10) : undefined;
+        if (!isNaN(remaining)) {
+          chrome.storage.local.get('popupState').then((data) => {
+            const current = data?.popupState as any;
+            if (current?.userAccount) {
+              const updatedAccount = {
+                ...current.userAccount,
+                quotaRemaining: remaining,
+                quotaResetsAt: resetsAt
+              };
+              chrome.storage.local.set({
+                popupState: { ...current, userAccount: updatedAccount }
+              }).catch(() => {});
+            }
+          }).catch(() => {});
+        }
+      }
+
       const data = (await response.json()) as any;
       const content = data?.choices?.[0]?.message?.content || '';
 
