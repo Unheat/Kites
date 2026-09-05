@@ -5,10 +5,38 @@ import {
   isThoughtBubbleTailOrnament,
   isStandaloneDigitOrOrnamentNoise,
   cleanStrayOcrArtifacts,
+  isNonLatinSource,
+  hasNativeScriptForLang,
   CJK_SCRIPT_REGEX,
 } from './textCleaning';
 
 describe('textCleaning', () => {
+  describe('source-language routing (lang.rs port)', () => {
+    it('classifies non-Latin sources', () => {
+      expect(isNonLatinSource('ja')).toBe(true);
+      expect(isNonLatinSource('zh-CN')).toBe(true);
+      expect(isNonLatinSource('ko')).toBe(true);
+      expect(isNonLatinSource('ru')).toBe(true);
+      expect(isNonLatinSource('th')).toBe(true);
+      expect(isNonLatinSource('en')).toBe(false);
+      // Faithful to source: 'vi' is not in XianScan's Latin list -> classified non-Latin
+      expect(isNonLatinSource('vi')).toBe(true);
+      expect(isNonLatinSource(undefined)).toBe(true); // source default: auto -> CJK
+    });
+
+    it('detects native script per source language', () => {
+      expect(hasNativeScriptForLang('한국어', 'ko')).toBe(true);
+      expect(hasNativeScriptForLang('HOSPITAL', 'ko')).toBe(false);
+      expect(hasNativeScriptForLang('ひらがな', 'ja')).toBe(true);
+      expect(hasNativeScriptForLang('英雄', 'zh')).toBe(true);
+      expect(hasNativeScriptForLang('привет', 'ru')).toBe(true);
+      expect(hasNativeScriptForLang('hello', 'en')).toBe(true);
+      // Unknown/auto source: CJK counts as native, Latin does not
+      expect(hasNativeScriptForLang('待って', undefined)).toBe(true);
+      expect(hasNativeScriptForLang('hello', undefined)).toBe(false);
+    });
+  });
+
   describe('cleanStrayOcrArtifacts', () => {
     it('strips trailing digit runs after ellipsis', () => {
       expect(cleanStrayOcrArtifacts('ちょっと…200000')).toBe('ちょっと…');

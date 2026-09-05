@@ -73,6 +73,76 @@ export function cleanStrayOcrArtifacts(text: string): string {
   return t.trim();
 }
 
+// --- Source-language routing (XianScan lang.rs port) ---
+
+const CYRILLIC_CHAR_RE = /[\u0400-\u04ff\u0500-\u052f]/;
+const THAI_CHAR_RE = /[\u0e00-\u0e7f]/;
+const CHINESE_CHAR_RE = /[\u4e00-\u9fff\u3400-\u4dbf]/;
+const JAPANESE_KANA_RE = /[\u3040-\u309f\u30a0-\u30ff\u31f0-\u31ff]/;
+const KOREAN_HANGUL_RE = /[\uac00-\ud7af\u1100-\u11ff\u3130-\u318f]/;
+
+const CYRILLIC_SOURCE_IDS = ['ru', 'russian', 'cyrillic', 'uk', 'ukrainian', 'be', 'belarusian', 'bg', 'bulgarian'];
+const LATIN_SOURCE_IDS = ['en', 'eng', 'english', 'es', 'spanish', 'fr', 'french', 'de', 'german', 'pt', 'portuguese', 'it', 'italian', 'id', 'indonesian', 'nl', 'dutch', 'tr', 'turkish', 'pl', 'polish'];
+
+function matchesLangId(trimmed: string, id: string): boolean {
+  return trimmed === id || trimmed.startsWith(`${id}-`) || trimmed.startsWith(`${id}_`);
+}
+
+/** Cyrillic-script source (Russian, Ukrainian, ...). */
+export function isCyrillicSource(lang?: string): boolean {
+  if (!lang) return false;
+  const t = lang.trim().toLowerCase();
+  return CYRILLIC_SOURCE_IDS.some(id => matchesLangId(t, id));
+}
+
+/** Thai-script source. */
+export function isThaiSource(lang?: string): boolean {
+  if (!lang) return false;
+  const t = lang.trim().toLowerCase();
+  return t === 'th' || t === 'thai' || t.startsWith('th-') || t.startsWith('th_');
+}
+
+/** Latin/European alphanumeric source (English, Spanish, ...). */
+export function isLatinSource(lang?: string): boolean {
+  if (!lang) return false;
+  const t = lang.trim().toLowerCase();
+  return LATIN_SOURCE_IDS.some(id => matchesLangId(t, id));
+}
+
+/** CJK source. NOTE: source default is TRUE for unknown/auto (zh-Hans assumption). */
+export function isCjkSource(lang?: string): boolean {
+  if (!lang) return true;
+  const t = lang.trim().toLowerCase();
+  if (!t || t === 'auto') return true;
+  if (['zh', 'ja', 'ko'].some(prefix => t.startsWith(prefix))) return true;
+  if (isCyrillicSource(t) || isThaiSource(t)) return false;
+  return !isLatinSource(t);
+}
+
+/** Non-Latin primary script (CJK, Cyrillic, or Thai). */
+export function isNonLatinSource(lang?: string): boolean {
+  return isCjkSource(lang) || isCyrillicSource(lang) || isThaiSource(lang);
+}
+
+/**
+ * Whether text contains native script for the given non-Latin source language.
+ * Unknown/Latin languages return true (no routing applies).
+ */
+export function hasNativeScriptForLang(text: string, lang?: string): boolean {
+  if (isCyrillicSource(lang)) return CYRILLIC_CHAR_RE.test(text);
+  if (isThaiSource(lang)) return THAI_CHAR_RE.test(text);
+  if (lang) {
+    const t = lang.trim().toLowerCase();
+    if (t.startsWith('zh')) return CHINESE_CHAR_RE.test(text);
+    if (t.startsWith('ja')) return CHINESE_CHAR_RE.test(text) || JAPANESE_KANA_RE.test(text);
+    if (t.startsWith('ko')) return CHINESE_CHAR_RE.test(text) || KOREAN_HANGUL_RE.test(text);
+    if (isCjkSource(t)) return CJK_SCRIPT_REGEX.test(text);
+    return true;
+  }
+  if (isCjkSource(lang)) return CJK_SCRIPT_REGEX.test(text);
+  return true;
+}
+
 /**
  * Normalize translated text for comic typesetting.
  *

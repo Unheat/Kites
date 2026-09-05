@@ -77,8 +77,8 @@ describe('OcrManager', () => {
   });
 
   describe('low-confidence suppression (XianScan builder.rs:278, neighborhood-gated)', () => {
-    function mockEngineWithLines(lines: { texts: string[]; polygons: number[][][]; scores: number[] }): void {
-      (PaddleOcrEngine as unknown as vi.Mock).mockImplementation(function () {
+    function mockEngineWithLines(lines: { texts: string[]; polygons: { x: number; y: number }[][]; scores: number[] }): void {
+      (PaddleOcrEngine as any).mockImplementation(function () {
         return {
           preset: 'v6-small',
           init: vi.fn().mockResolvedValue(undefined),
@@ -101,7 +101,7 @@ describe('OcrManager', () => {
 
     afterEach(() => {
       // Restore the module-level default engine mock so later describes are unaffected
-      (PaddleOcrEngine as unknown as vi.Mock).mockImplementation(function (preset: string) {
+      (PaddleOcrEngine as any).mockImplementation(function (preset: string) {
         return {
           preset,
           init: vi.fn().mockResolvedValue(undefined),

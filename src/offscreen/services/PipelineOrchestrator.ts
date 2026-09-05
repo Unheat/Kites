@@ -87,10 +87,26 @@ export class PipelineOrchestrator {
       console.log(`[PipelineOrchestrator] Loaded image blob. Size: ${imageRecord.rawImageBlob.size} bytes`);
       const imageBuffer = await this.blobToArrayBuffer(imageRecord.rawImageBlob);
 
+      // Decode page dimensions once for the OCR pre-filter battery (geometry rules).
+      let pageWidth: number | undefined;
+      let pageHeight: number | undefined;
+      try {
+        const probe = await createImageBitmap(imageRecord.rawImageBlob);
+        pageWidth = probe.width;
+        pageHeight = probe.height;
+        probe.close();
+      } catch {
+        // Geometry battery simply stays inactive when dimensions are unavailable.
+      }
+
       // 3. OCR Detection
       const ocrStart = performance.now();
       console.log(`[PipelineOrchestrator] Running OCR with ${ocrTier}...`);
-      const ocrResult = await this.ocrManager.processImage(imageBuffer, ocrTier);
+      const ocrResult = await this.ocrManager.processImage(imageBuffer, ocrTier, {
+        sourceLang: sourceLang !== 'auto' ? sourceLang : undefined,
+        pageWidth,
+        pageHeight
+      });
       const ocrDuration = (performance.now() - ocrStart).toFixed(2);
       console.log(`[PipelineOrchestrator] OCR stage complete in ${ocrDuration}ms.`);
       

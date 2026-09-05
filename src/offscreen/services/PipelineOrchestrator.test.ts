@@ -167,7 +167,7 @@ describe('PipelineOrchestrator', () => {
 
     await pipelineOrchestrator.runPipeline(100);
 
-    expect(processImageMock).toHaveBeenCalledWith(expect.any(ArrayBuffer), 'v6-medium');
+    expect(processImageMock).toHaveBeenCalledWith(expect.any(ArrayBuffer), 'v6-medium', expect.any(Object));
     blobSpy.mockRestore();
   });
 

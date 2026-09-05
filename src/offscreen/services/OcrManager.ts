@@ -163,7 +163,10 @@ export class OcrManager {
    * Uses convex hull to generate accurate bounding polygons for merged blocks,
    * and concatenates text right-to-left.
    */
-  private mergeTextBlocks(result: OcrResult): OcrResult {
+  private mergeTextBlocks(
+    result: OcrResult,
+    _context?: { sourceLang?: string; pageWidth?: number; pageHeight?: number }
+  ): OcrResult {
     // Merge algorithm entry point
     const rawTexts = [...result.texts];
     const rawPolygons = [...(result.polygons || [])];
@@ -393,7 +396,6 @@ export class OcrManager {
     // a high-confidence line. A faint whisper bubble elsewhere on the page cannot
     // merge with the strong line and is untouched.
     let workingTexts = texts;
-    let workingPolygons = polygons;
     let workingScores = scores;
     let workingQuads = quads;
     const pageMaxScore = scores.reduce((m, s) => Math.max(m, s || 0), 0);
@@ -414,7 +416,6 @@ export class OcrManager {
       if (suppressed.size > 0) {
         const kept = texts.map((_, i) => i).filter(i => !suppressed.has(i));
         workingTexts = kept.map(i => texts[i]);
-        workingPolygons = kept.map(i => polygons[i]);
         workingScores = kept.map(i => scores[i]);
         workingQuads = kept.map(i => quads[i]);
       }
@@ -579,12 +580,20 @@ export class OcrManager {
    * Process the image buffer to extract text and bounding boxes.
    *
    * @param imageBuffer - The raw ArrayBuffer of the image.
+   * @param tier - OCR model tier.
+   * @param context - Optional pipeline context. `sourceLang` activates language-aware
+   * filters (XianScan lang.rs); `pageWidth`/`pageHeight` activate the geometry
+   * pre-filter battery. All undefined = legacy behavior (no language/geometry filters).
    * @returns A promise that resolves to the standardized OCR result.
    */
-  async processImage(imageBuffer: ArrayBuffer, tier: OcrTier = 'v6-small'): Promise<OcrResult> {
+  async processImage(
+    imageBuffer: ArrayBuffer,
+    tier: OcrTier = 'v6-small',
+    context?: { sourceLang?: string; pageWidth?: number; pageHeight?: number }
+  ): Promise<OcrResult> {
     const engine = await this.getOrLoadEngine(tier);
     const rawResult = await engine.recognize(imageBuffer);
-    return this.mergeTextBlocks(rawResult);
+    return this.mergeTextBlocks(rawResult, context);
   }
 
   /**

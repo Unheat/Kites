@@ -43,9 +43,13 @@ async function runPipelineVisualTest() {
 
     const buffer = fs.readFileSync(imagePath);
     const arrayBuffer = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) as ArrayBuffer;
+    // Decode dimensions first so the OCR geometry pre-filter battery is active.
+    const probeImage = await loadImage(buffer);
+    const pageWidth = probeImage.width;
+    const pageHeight = probeImage.height;
 
     console.log('[PipelineTest] Running OCR text detection...');
-    const ocrResult = await ocrManager.processImage(arrayBuffer);
+    const ocrResult = await ocrManager.processImage(arrayBuffer, 'v6-small', { sourceLang: 'ja', pageWidth, pageHeight });
     const polygons = ocrResult.polygons as Point2D[][];
     const texts = ocrResult.texts;
     
