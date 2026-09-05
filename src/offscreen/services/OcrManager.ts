@@ -7,6 +7,7 @@ import {
   isThoughtBubbleTailOrnament,
   isStandaloneDigitOrOrnamentNoise,
   cleanStrayOcrArtifacts,
+  isOnomatopoeiaOrShout,
 } from '../../shared/utils/textCleaning';
 
 /**
@@ -234,10 +235,12 @@ export class OcrManager {
 
       // XianScan noise rule: standalone 1-2 char Latin/digit noise (e.g. "er", "u", "N") on
       // speedlines and clothing folds with low score (< 0.65) is background artifact.
+      // SFX/shout exemption: real sound effects ("GO!", "KYAA") must survive.
       const trimmedTxt = txt.trim();
-      const isShortLatinNoise = trimmedTxt.length <= 2 
-        && /^[a-zA-Z0-9]+$/.test(trimmedTxt) 
-        && (rawScores[i] || 0) < 0.65;
+      const isShortLatinNoise = trimmedTxt.length <= 2
+        && /^[a-zA-Z0-9]+$/.test(trimmedTxt)
+        && (rawScores[i] || 0) < 0.65
+        && !isOnomatopoeiaOrShout(trimmedTxt);
       if (isShortLatinNoise) {
         console.log(`[OcrManager] Filtered out short Latin noise line "${trimmedTxt}" (score=${rawScores[i]})`);
         continue;

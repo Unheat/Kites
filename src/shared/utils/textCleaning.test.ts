@@ -5,12 +5,40 @@ import {
   isThoughtBubbleTailOrnament,
   isStandaloneDigitOrOrnamentNoise,
   cleanStrayOcrArtifacts,
+  isOnomatopoeiaOrShout,
   isNonLatinSource,
   hasNativeScriptForLang,
   CJK_SCRIPT_REGEX,
 } from './textCleaning';
 
 describe('textCleaning', () => {
+  describe('isOnomatopoeiaOrShout (text_clean.rs:148 port)', () => {
+    it('detects CJK action SFX and interjections', () => {
+      expect(isOnomatopoeiaOrShout('轰！')).toBe(true);
+      expect(isOnomatopoeiaOrShout('啪')).toBe(true);
+      expect(isOnomatopoeiaOrShout('啊！')).toBe(true);
+      // Plain 啊/哇 without ! is dialogue
+      expect(isOnomatopoeiaOrShout('啊')).toBe(false);
+    });
+
+    it('detects repeated sounds and Korean SFX', () => {
+      expect(isOnomatopoeiaOrShout('ゴゴゴ')).toBe(true);
+      expect(isOnomatopoeiaOrShout('두근두근')).toBe(true);
+      expect(isOnomatopoeiaOrShout('쾅!')).toBe(true);
+      // Conversational imperative guard
+      expect(isOnomatopoeiaOrShout('快走快走')).toBe(false);
+    });
+
+    it('detects Latin shouts and rejects dialogue', () => {
+      // unique letters <= 2, or H/O + all-O prolongation (faithful to source logic)
+      expect(isOnomatopoeiaOrShout('HOOO')).toBe(true);
+      expect(isOnomatopoeiaOrShout('WAAA!')).toBe(true);
+      expect(isOnomatopoeiaOrShout('OOOH')).toBe(true);
+      expect(isOnomatopoeiaOrShout('Hello')).toBe(false);
+      expect(isOnomatopoeiaOrShout('wait')).toBe(false);
+    });
+  });
+
   describe('source-language routing (lang.rs port)', () => {
     it('classifies non-Latin sources', () => {
       expect(isNonLatinSource('ja')).toBe(true);

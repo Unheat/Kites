@@ -143,6 +143,99 @@ export function hasNativeScriptForLang(text: string, lang?: string): boolean {
   return true;
 }
 
+// --- Onomatopoeia / shout detection (XianScan text_clean.rs:148 port) ---
+
+const CJK_ACTION_SFX_CHARS = new Set('哒嗒接啪轰噗砰咚嘶嗖刷咔呼嗤铛啐哈啧哼呃呀切嘟滋嗡哔滴嘭哐唰吼碌骨咕簌沙哗');
+const KOREAN_SFX_CHARS = new Set('촤콰쾅쿵띠띵찌쨍틱톡뚝팍탁철척홱휙쑥쏙또꾸꾹끼꽉콱털덜두벌웅후흡호');
+const CONVERSATIONAL_CJK_VERBS = ['快走', '快跑', '快点', '救命', '等等', '看看', '想想', '走吧', '来吧'];
+
+function hasCjk(text: string): boolean {
+  return CJK_SCRIPT_REGEX.test(text);
+}
+
+/**
+ * Whether a short OCR line is an onomatopoeia or action shout rather than dialogue.
+ * Used as an EXEMPTION by noise filters: real sound effects must survive filtering.
+ * Groups (faithful to source): CJK action char, 啊/哇+! interjection, Korean SFX char,
+ * repeated-sound patterns (with conversational-verb guard), Latin shout, Cyrillic SFX.
+ *
+ * @param text - Raw OCR line text.
+ * @returns True when the line is a sound effect / shout.
+ */
+export function isOnomatopoeiaOrShout(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+
+  // 1. Single CJK action onomatopoeia char ("轰！", "啪")
+  const firstChar = Array.from(t)[0];
+  const charCount = Array.from(t).length;
+  const isActionSfxChar = !!firstChar && CJK_ACTION_SFX_CHARS.has(firstChar)
+    && charCount <= 3
+    && (t.includes('！') || t.includes('!') || charCount <= 2);
+
+  // 2. Interjection + exclamation ("啊！", "哇!") — plain "啊"/"哇" is dialogue
+  const isExclamationShout = (t.startsWith('啊') || t.startsWith('哇'))
+    && (t.includes('！') || t.includes('!'))
+    && charCount <= 3;
+
+  // 3. Korean action SFX ("쾅!", "쿵")
+  const isKoreanSfxChar = !!firstChar && KOREAN_SFX_CHARS.has(firstChar)
+    && charCount <= 3
+    && (t.includes('!') || t.includes('~') || t.includes('-') || charCount <= 2);
+
+  // 4. Repeated-sound patterns ("嘟嘟", "轰隆隆", "두근두근") with CJK-only guard
+  const chars = Array.from(t).filter(c =>
+    !/\s/.test(c) && !/[\u0021-\u002F\u003A-\u0040\u005B-\u0060\u007B-\u007E]/.test(c)
+    && !['！', '？', "'", '"', '’', '‘'].includes(c)
+  );
+  let isRepeatedSound = false;
+  if (chars.length >= 2 && chars.length <= 6) {
+    const first = chars[0];
+    const allCjk = chars.every(c => hasCjk(c));
+    if (/[a-zA-Z0-9]/.test(first) || ['し', 'い', '一', '丨'].includes(first)) {
+      isRepeatedSound = false;
+    } else if (chars.every(c => c === first)) {
+      isRepeatedSound = true;
+    } else if (chars.length >= 3 && chars.slice(0, -1).every(c => c === first) && ['ㅇ', '…', '~'].includes(chars[chars.length - 1])) {
+      isRepeatedSound = true;
+    } else if (chars.length === 3 && chars[1] === chars[2] && allCjk) {
+      isRepeatedSound = true;
+    } else if (chars.length === 4 && chars[0] === chars[1] && chars[2] === chars[3] && allCjk) {
+      isRepeatedSound = true;
+    } else if (chars.length === 4 && chars[0] === chars[2] && chars[1] === chars[3] && chars[0] !== chars[1] && allCjk) {
+      // Guard: conversational imperatives ("快走快走", "等等等等") are dialogue, not SFX
+      const s = chars.join('');
+      isRepeatedSound = !CONVERSATIONAL_CJK_VERBS.some(verb => s.includes(verb));
+    }
+  }
+
+  // 5. Latin shouts ("HOOO", "WAAA!", "KYAAA") — digit/letter confusions normalized
+  let isLatinShout = false;
+  if (!hasCjk(t)) {
+    const upper = t.toUpperCase().replace(/0/g, 'O').replace(/1/g, 'I');
+    const letters = Array.from(upper).filter(c => /[A-Z]/.test(c));
+    const hasAsciiAlpha = /[a-zA-Z]/.test(t);
+    if (hasAsciiAlpha && letters.length >= 3 && letters.length <= 8) {
+      const uniqueCount = new Set(letters).size;
+      isLatinShout = uniqueCount <= 2
+        || ((letters[0] === 'H' || letters[0] === 'O') && letters.slice(1).every(c => c === 'O'));
+    }
+  }
+
+  // 6. Cyrillic SFX words ("хлоп", "бум", "ах")
+  let isCyrillicSfx = false;
+  if (!hasCjk(t)) {
+    const lower = t.toLowerCase();
+    const stripped = Array.from(lower)
+      .filter(c => !/\s/.test(c) && !/[!-/:-@[-`{-~]/.test(c) && !['—', '–', '…', '.'].includes(c))
+      .join('');
+    isCyrillicSfx = ['трог', 'вздрог', 'вздох', 'стук', 'шмяк', 'хлоп', 'чмок', 'скрип', 'треск', 'тяянь', 'тянь', 'ах', 'ох', 'ух', 'эй', 'хах', 'кх', 'псс', 'дзынь', 'бам', 'бум', 'бах'].includes(stripped)
+      || (lower.startsWith('тя-') && lower.includes('янь'));
+  }
+
+  return isActionSfxChar || isExclamationShout || isKoreanSfxChar || isRepeatedSound || isLatinShout || isCyrillicSfx;
+}
+
 /**
  * Normalize translated text for comic typesetting.
  *
