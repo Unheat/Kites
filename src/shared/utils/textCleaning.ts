@@ -252,6 +252,58 @@ export function isStandaloneDigitOrParticleNoise(text: string): boolean {
 }
 
 /**
+ * Strips trailing non-native scanlator/site watermark fragments attached to a native
+ * line ("别吵！colamanga.com" -> "别吵！") and reports how much of the line survived so
+ * the caller can rescale the OCR polygon (XianScan text_clean.rs:503).
+ * Only active for non-Latin sources with at least one native char — Latin sources
+ * have no "native vs debris" distinction.
+ *
+ * @param text - Raw OCR line text.
+ * @param lang - Source language (must be non-Latin for stripping to apply).
+ * @returns Cleaned text and keepRatio = keptChars / totalChars (1.0 when untouched).
+ */
+export function stripTrailingWatermarkDebris(text: string, lang?: string): { text: string; keepRatio: number } {
+  const t = text.trim();
+  if (!t || !isNonLatinSource(lang)) return { text, keepRatio: 1.0 };
+  const nativeCount = Array.from(t).filter(c => hasNativeScriptForLang(c, lang)).length;
+  if (nativeCount === 0) return { text, keepRatio: 1.0 };
+
+  const chars = Array.from(t);
+  const totalChars = chars.length;
+
+  // Two-line form where only the first line is native: keep line 1 whole
+  if (t.includes('\n')) {
+    const lines = t.split('\n');
+    if (lines.length === 2 && hasNativeScriptForLang(lines[0], lang) && !hasNativeScriptForLang(lines[1], lang)) {
+      const cleanPrefix = lines[0].trim();
+      return { text: cleanPrefix, keepRatio: Array.from(cleanPrefix).length / totalChars };
+    }
+  }
+
+  // Single line: find the last native/terminal-punctuation char; anything after it that
+  // is pure ASCII debris >= 2 chars (after separator trimming) is a watermark suffix.
+  const isNativeOrTerminal = (c: string): boolean =>
+    hasNativeScriptForLang(c, lang) || ['。', '！', '？', '，', '、', '…', '”', '’', '」', '』', '）', ')'].includes(c);
+  let lastIdx = -1;
+  for (let i = chars.length - 1; i >= 0; i--) {
+    if (isNativeOrTerminal(chars[i])) {
+      lastIdx = i;
+      break;
+    }
+  }
+  if (lastIdx >= 0 && lastIdx < chars.length - 1) {
+    let suffix = chars.slice(lastIdx + 1).join('');
+    suffix = suffix.replace(/^[·._\-| /\\:]+/, '').trim();
+    const isLatinDebris = suffix.length >= 2 && /^[\x00-\x7F]+$/.test(suffix);
+    if (isLatinDebris) {
+      return { text: chars.slice(0, lastIdx + 1).join(''), keepRatio: (lastIdx + 1) / totalChars };
+    }
+  }
+
+  return { text, keepRatio: 1.0 };
+}
+
+/**
  * Normalize translated text for comic typesetting.
  *
  * Converts CJK punctuation into rendering-safe ASCII punctuation where that is

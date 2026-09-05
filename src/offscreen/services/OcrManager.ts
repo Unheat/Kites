@@ -11,6 +11,7 @@ import {
   isOnomatopoeiaOrShout,
   isNonLatinSource,
   hasNativeScriptForLang,
+  stripTrailingWatermarkDebris,
 } from '../../shared/utils/textCleaning';
 
 /**
@@ -183,6 +184,7 @@ export class OcrManager {
     for (let i = 0; i < rawTexts.length; i++) {
       rawTexts[i] = cleanStrayOcrArtifacts(rawTexts[i]);
     }
+    const sourceLang = context?.sourceLang;
 
     // XianScan-style orphan punctuation recovery. Cotrans deliberately drops pure punctuation
     // as noise, but vertical manga often detects a terminal `!`/`?` in its own small quad.
@@ -226,7 +228,7 @@ export class OcrManager {
     const validIndices: number[] = [];
     for (let i = 0; i < rawTexts.length; i++) {
       const poly = rawPolygons[i];
-      const txt = rawTexts[i];
+      let txt = rawTexts[i];
       if (!poly || poly.length < 3) continue;
       if (!txt || !txt.trim()) continue;
       if (claimedPunctuation.has(i)) continue;
@@ -239,7 +241,7 @@ export class OcrManager {
       // XianScan noise rule: standalone 1-2 char Latin/digit noise (e.g. "er", "u", "N") on
       // speedlines and clothing folds with low score (< 0.65) is background artifact.
       // SFX/shout exemption: real sound effects ("GO!", "KYAA") must survive.
-      const trimmedTxt = txt.trim();
+      let trimmedTxt = txt.trim();
       const isShortLatinNoise = trimmedTxt.length <= 2
         && /^[a-zA-Z0-9]+$/.test(trimmedTxt)
         && (rawScores[i] || 0) < 0.65
@@ -247,6 +249,36 @@ export class OcrManager {
       if (isShortLatinNoise) {
         console.log(`[OcrManager] Filtered out short Latin noise line "${trimmedTxt}" (score=${rawScores[i]})`);
         continue;
+      }
+
+      // XianScan strip_trailing_watermark_debris: a watermark FUSED to the end of a
+      // dialogue line is cut (with polygon rescale) rather than dropping the whole line.
+      if (sourceLang) {
+        const debris = stripTrailingWatermarkDebris(trimmedTxt, sourceLang);
+        if (debris.keepRatio <= 0.10) {
+          console.log(`[OcrManager] Dropped line dominated by watermark debris "${trimmedTxt}"`);
+          continue;
+        }
+        if (debris.keepRatio < 0.99) {
+          rawTexts[i] = debris.text;
+          const poly = rawPolygons[i];
+          if (poly && poly.length === 4) {
+            const polyBox = calculateBoundingBox(poly);
+            if (polyBox.height > polyBox.width) {
+              // Vertical line: shrink the bottom edge (points 2,3) upward (analyzer.rs multiline variant)
+              poly[2] = { x: poly[2].x, y: poly[1].y + (poly[2].y - poly[1].y) * debris.keepRatio };
+              poly[3] = { x: poly[3].x, y: poly[0].y + (poly[3].y - poly[0].y) * debris.keepRatio };
+            } else {
+              // Horizontal line: shrink the right edge (points 1,2) leftward (analyzer.rs single-line variant)
+              poly[1] = { x: poly[0].x + (poly[1].x - poly[0].x) * debris.keepRatio, y: poly[1].y };
+              poly[2] = { x: poly[3].x + (poly[2].x - poly[3].x) * debris.keepRatio, y: poly[2].y };
+            }
+          }
+          console.log(`[OcrManager] Stripped trailing watermark debris "${trimmedTxt}" -> "${debris.text}" (keepRatio=${debris.keepRatio.toFixed(2)})`);
+          // Keep downstream checks (watermark, thought-tail, furigana) on the CLEANED text
+          txt = debris.text;
+          trimmedTxt = debris.text.trim();
+        }
       }
 
       // XianScan text_clean ports: scanlator watermark, thought-bubble tail, digit ornaments
@@ -324,7 +356,6 @@ export class OcrManager {
     // (the source applies it per-container; a page-level native anchor is the faithful
     // approximation without containers). Skips entirely for Latin sources / no context.
     let langPrunedIndices = validIndices;
-    const sourceLang = context?.sourceLang;
     if (sourceLang && isNonLatinSource(sourceLang)) {
       const anyNative = validIndices.some(idx => hasNativeScriptForLang(rawTexts[idx], sourceLang));
       if (anyNative) {

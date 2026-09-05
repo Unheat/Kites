@@ -4,10 +4,12 @@ import {
   isScanlatorWatermark,
   isThoughtBubbleTailOrnament,
   isStandaloneDigitOrOrnamentNoise,
+  isStandaloneDigitOrParticleNoise,
   cleanStrayOcrArtifacts,
   isOnomatopoeiaOrShout,
   isNonLatinSource,
   hasNativeScriptForLang,
+  stripTrailingWatermarkDebris,
   CJK_SCRIPT_REGEX,
 } from './textCleaning';
 
@@ -36,6 +38,34 @@ describe('textCleaning', () => {
       expect(isOnomatopoeiaOrShout('OOOH')).toBe(true);
       expect(isOnomatopoeiaOrShout('Hello')).toBe(false);
       expect(isOnomatopoeiaOrShout('wait')).toBe(false);
+    });
+  });
+
+  describe('isStandaloneDigitOrParticleNoise (lang.rs:85 port, any-length variant)', () => {
+    it('detects digit+particle strings of any length', () => {
+      expect(isStandaloneDigitOrParticleNoise('8.0')).toBe(true);
+      expect(isStandaloneDigitOrParticleNoise('500')).toBe(true);
+      expect(isStandaloneDigitOrParticleNoise('0°0')).toBe(true);
+      expect(isStandaloneDigitOrParticleNoise('HOSPITAL')).toBe(false);
+      expect(isStandaloneDigitOrParticleNoise('hello')).toBe(false);
+    });
+  });
+
+  describe('stripTrailingWatermarkDebris (text_clean.rs:503 port)', () => {
+    it('cuts fused Latin watermark suffix from a native line', () => {
+      const r = stripTrailingWatermarkDebris('别吵！colamanga.com', 'ja');
+      expect(r.text).toBe('别吵！');
+      expect(r.keepRatio).toBeLessThan(1.0);
+      expect(r.keepRatio).toBeGreaterThan(0.10);
+    });
+
+    it('inactive for Latin sources and pure-Latin lines', () => {
+      expect(stripTrailingWatermarkDebris('hello colamanga.com', 'en').keepRatio).toBe(1.0);
+      expect(stripTrailingWatermarkDebris('colamanga.com', 'ja').keepRatio).toBe(1.0);
+    });
+
+    it('keeps normal dialogue untouched', () => {
+      expect(stripTrailingWatermarkDebris('ここで待って…', 'ja')).toEqual({ text: 'ここで待って…', keepRatio: 1.0 });
     });
   });
 
