@@ -48,9 +48,15 @@ describe('textCleaning', () => {
       expect(isThoughtBubbleTailOrnament('Hello')).toBe(false);
     });
 
-    it('detects ornament and pure digit noise', () => {
+    it('detects ornament and circle-set digit noise, keeps meaningful numbers', () => {
       expect(isStandaloneDigitOrOrnamentNoise('……')).toBe(true);
-      expect(isStandaloneDigitOrOrnamentNoise('100')).toBe(true);
+      expect(isStandaloneDigitOrOrnamentNoise('0000')).toBe(true);
+      expect(isStandaloneDigitOrOrnamentNoise('23589')).toBe(true);
+      expect(isStandaloneDigitOrOrnamentNoise('0oO')).toBe(true);
+      // Meaningful numbers survive (per approved plan; pure digits still die later
+      // via Cotrans isValuableText when they are noise)
+      expect(isStandaloneDigitOrOrnamentNoise('365')).toBe(false);
+      expect(isStandaloneDigitOrOrnamentNoise('100')).toBe(false);
       expect(isStandaloneDigitOrOrnamentNoise('Ch 100')).toBe(false);
     });
   });

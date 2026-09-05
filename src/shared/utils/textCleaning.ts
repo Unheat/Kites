@@ -35,14 +35,17 @@ export function isThoughtBubbleTailOrnament(text: string): boolean {
   return false;
 }
 
-/** True for single-Greek-ish ornaments, fake seeds, and punctuation residue lines. */
+/** True for thought-bubble tail digit chains and circle/dot ornament rows. */
 export function isStandaloneDigitOrOrnamentNoise(text: string): boolean {
   const trimmed = text.trim();
   if (!trimmed) return true;
   if (PURE_ELLIPSIS_OR_DOT_REGEX.test(trimmed)) return true;
-  if (/^[.．。・⋅‥…·〜~()（）\s]*\d+$/.test(trimmed) && trimmed.replace(/\D/g, '').length <= 3) return true;
-  if (/^\d+[.．。・⋅‥…·〜~()（）\s]*$/.test(trimmed) && trimmed.length <= 8) return true;
-  if (/^[0oO○●⊙◯]{1,2}\s*[0oO○●⊙◯]{1,2}$/.test(trimmed)) return true;
+  // Thought-bubble tail digit chains: ONLY circle-like digits {0,2,3,5,8,9} up to 4 chars
+  // (is_pure_watermark_region). Meaningful numbers ("365", "15", page numbers) survive;
+  // leftover pure-digit lines still fall through to Cotrans isValuableText.
+  if (trimmed.length <= 4 && /^[023589]+$/.test(trimmed)) return true;
+  // Circle/half-circle ornament chains mixed with dot separators ("0oO", "○.○")
+  if (/^[.．。・⋅‥…·〜~()（）\s]*[0oO○●⊙◯]{2,}[.．。・⋅‥…·〜~()（）\s]*$/.test(trimmed)) return true;
   return false;
 }
 
