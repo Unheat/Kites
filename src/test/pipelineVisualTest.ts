@@ -84,8 +84,8 @@ async function runPipelineVisualTest() {
           text,
           polygon: poly,
           direction: ocrResult.directions ? ocrResult.directions[i] : 'h',
-          textColor: '#000000',
-          strokeColor: '#FFFFFF',
+          // No explicit colors: renderTextBlocksBatch samples the cleaned page and
+          // picks black/white text per background luminance (production path).
           fontSize: ocrResult.fontSizes ? ocrResult.fontSizes[i] : undefined,
           angle: ocrResult.angles ? ocrResult.angles[i] : undefined,
           originalText: texts[i],
