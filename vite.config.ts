@@ -35,6 +35,7 @@ export default defineConfig({
       input: {
         offscreen: resolve(__dirname, 'src/offscreen/offscreen.html'),
         popup: resolve(__dirname, 'popup.html'),
+        dashboard: resolve(__dirname, 'index.html'),
       },
     },
   },
