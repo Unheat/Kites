@@ -79,6 +79,7 @@ export class PaddleOcrEngine implements IOcrEngine {
   private service: any = null;
   private customDetector: CustomPaddleDetector | null = null;
   private isInitialized = false;
+  private isWebGpuActive = false;
   private modelPreset: string;
 
   constructor(modelPreset: string = 'v6-small') {
@@ -228,40 +229,19 @@ export class PaddleOcrEngine implements IOcrEngine {
 
       const activeEPs = this.service.options?.session?.executionProviders;
       console.log(`[PaddleOcrEngine] Active ONNX Execution Providers:`, JSON.stringify(activeEPs));
-      const hasWebGpu = Array.isArray(activeEPs) && activeEPs.some((ep: any) => (typeof ep === 'string' ? ep : ep?.name) === 'webgpu');
+      this.isWebGpuActive = Array.isArray(activeEPs) && activeEPs.some(
+        (ep: any) => (typeof ep === 'string' ? ep : ep?.name) === 'webgpu'
+      );
 
-      if (useWebGpu && Array.isArray(activeEPs) && activeEPs.length === 1 && activeEPs[0] === 'wasm') {
-        console.warn('[PaddleOcrEngine] ⚠️ WARNING: WebGPU requested but ONNX Runtime fell back silently to WASM CPU!');
+      if (useWebGpu && !this.isWebGpuActive) {
+        console.warn('[PaddleOcrEngine] ⚠️ WARNING: WebGPU requested but ONNX Runtime fell back to WASM CPU!');
       }
 
-      // PP-OCRv6 recognition (CRNN with dynamic sequence lengths) hits known WebGPU JSEP shader incompatibilities
-      // and buffer collisions in the browser. By contrast, detection (DBNet on a static 960px image) is 100% 
-      // convolutional and gets the full ~10x GPU speedup. Re-bind the recognition session to WASM CPU to guarantee
-      // 100% stability while retaining full GPU speed for detection.
-      if (!isNode && hasWebGpu && this.service.recognitionSession) {
-        try {
-          const ort = await import('onnxruntime-web');
-          await this.service.recognitionSession.release();
-
-          let recBuffer: ArrayBuffer;
-          if (modelConfig.recognition instanceof ArrayBuffer) {
-            recBuffer = modelConfig.recognition;
-          } else {
-            const entry = ocrRegistry[canonicalPreset] || ocrRegistry['v6-small'];
-            recBuffer = await OcrCacheManager.getModelBuffer(entry.recognitionUrl);
-          }
-
-          const wasmSession = await ort.InferenceSession.create(new Uint8Array(recBuffer), {
-            executionProviders: ['wasm'],
-            graphOptimizationLevel: 'basic'
-          });
-          this.service.recognitionSession = wasmSession;
-          this.service.recognitor.session = wasmSession;
-          console.log('[PaddleOcrEngine] Split acceleration configured: Detection -> WebGPU, Recognition -> WASM (SIMD)');
-        } catch (splitErr) {
-          console.warn('[PaddleOcrEngine] Failed to split recognition session to WASM:', splitErr);
-        }
-      }
+      console.log(
+        this.isWebGpuActive
+          ? '[PaddleOcrEngine] Unified acceleration configured: Detection -> WebGPU, Recognition -> WebGPU'
+          : '[PaddleOcrEngine] CPU execution configured: Detection -> WASM, Recognition -> WASM'
+      );
 
       this.customDetector = new CustomPaddleDetector(this.service);
       this.isInitialized = true;
@@ -331,9 +311,10 @@ export class PaddleOcrEngine implements IOcrEngine {
    * handling is an accuracy one, and accuracy wins here.
    *
    * Instead we call the lower-level `buildContext()` / `recognizeTextViaContext()` once per
-   * pre-warped crop, dispatched concurrently via Promise.all below. This is effectively the
-   * library's own `'per-box'` strategy (n inferences, its docs call it "most accurate"),
-   * with our own preprocessing in front of it.
+   * pre-warped crop. WebGPU runs its dynamic-width CRNN calls sequentially to avoid overlapping
+   * work on one ONNX session; WASM/CPU retains concurrent `Promise.all` processing. This is
+   * effectively the library's own `'per-box'` strategy (n inferences, its docs call it "most
+   * accurate"), with our own preprocessing in front of it.
    *
    * `buildContext` and `recognizeTextViaContext` are typed `private` on the service — this is
    * a deliberate internal-API dependency. Re-verify this path whenever `ppu-paddle-ocr` is
@@ -364,13 +345,32 @@ export class PaddleOcrEngine implements IOcrEngine {
     const ctx = recognitor.buildContext();
     const dictionary = this.service.options.recognition?.charactersDictionary;
 
+    if (this.isWebGpuActive) {
+      const results: { text: string; confidence: number }[] = [];
+
+      for (let idx = 0; idx < polygons.length; idx++) {
+        try {
+          const finalCropCanvas = cropAndWarp(this.service.platform, sourceCanvas, sourcePixels, srcW, srcH, polygons[idx]);
+          const { text, confidence } = await recognitor.recognizeTextViaContext(finalCropCanvas, ctx, dictionary);
+          results.push({ text, confidence });
+        } catch (err: any) {
+          console.error(`[PaddleOcrEngine] WebGPU recognition failed on crop ${idx}:`, err?.message || err, err);
+          throw err;
+        }
+      }
+
+      return {
+        texts: results.map(result => result.text),
+        scores: results.map(result => result.confidence)
+      };
+    }
+
     const promises = polygons.map(async (poly, idx) => {
       try {
         const finalCropCanvas = cropAndWarp(this.service.platform, sourceCanvas, sourcePixels, srcW, srcH, poly);
-        const { text, confidence } = await recognitor.recognizeTextViaContext(finalCropCanvas, ctx, dictionary);
-        return { text, confidence };
+        return await recognitor.recognizeTextViaContext(finalCropCanvas, ctx, dictionary);
       } catch (err: any) {
-        console.error(`[PaddleOcrEngine] Recognition failed on crop ${idx}:`, err?.message || err, err);
+        console.error(`[PaddleOcrEngine] WASM recognition failed on crop ${idx}:`, err?.message || err, err);
         throw err;
       }
     });
@@ -378,8 +378,8 @@ export class PaddleOcrEngine implements IOcrEngine {
     const results = await Promise.all(promises);
 
     return {
-      texts: results.map(r => r.text),
-      scores: results.map(r => r.confidence)
+      texts: results.map(result => result.text),
+      scores: results.map(result => result.confidence)
     };
   }
 
@@ -394,6 +394,7 @@ export class PaddleOcrEngine implements IOcrEngine {
       this.service = null;
     }
     this.isInitialized = false;
+    this.isWebGpuActive = false;
     console.log('[PaddleOcrEngine] Destroyed and memory freed.');
   }
 }
