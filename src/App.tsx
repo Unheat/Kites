@@ -312,7 +312,7 @@ export default function App() {
 
       // Draw stroke outline
       ctx.lineWidth = Math.max(1, fontSize * 0.1);
-      ctx.strokeStyle = '#FFFFFF';
+      ctx.strokeStyle = block.strokeColor || '#FFFFFF';
       const cx = block.posX + block.width / 2;
       const cy = block.posY + block.height / 2;
 

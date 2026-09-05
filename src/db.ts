@@ -36,6 +36,8 @@ export interface TextBlock {
   fontSize: number;
   fontFamily: string;
   color: string;
+  /** Outline color used by the renderer (background-sampled). */
+  strokeColor?: string;
   direction?: 'h' | 'v';
   /** Exact Canvas layout lines, persisted so Studio preview matches baked output. */
   lines?: string[];

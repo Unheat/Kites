@@ -5,7 +5,8 @@ import {
   renderRegionDefault,
   type DefaultRenderRegion
 } from './cotransDefaultRenderer';
-import { fitFontSizeWithLines } from './typesetLayout';
+import { fitFontSizeWithLines, decollideBoxes } from './typesetLayout';
+import { pickTextColor } from '../../shared/utils/textColor';
 
 /**
  * Batch driver for translated-text rendering.
@@ -337,6 +338,10 @@ export interface RenderedBlockInfo {
   lineCount: number;
   /** Exact validated lines drawn by the layout engine. */
   lines: string[];
+  /** Fill color actually used (may be background-sampled). */
+  textColor: string;
+  /** Stroke color actually used. */
+  strokeColor: string;
 }
 
 /** Page dimensions used to derive the Cotrans font-size minimum. */
@@ -373,9 +378,63 @@ export function drawTextInPolygon(
 }
 
 /**
+ * Samples the mean background color under a text quad on the already-drawn page.
+ * 1:1 port of XianScan `sampleBackground` (color.ts): insets to the 20%-80% window of
+ * the quad's AABB so glyph fringes at the edges don't skew the mean; falls back to the
+ * full box, then to white, when the inset region collapses.
+ *
+ * @param ctx - Canvas context with the clean (inpainted) page drawn and no text yet.
+ * @param quad - 4-point destination quad.
+ * @returns Mean background color of the inset window.
+ */
+function sampleQuadBackground(ctx: OffscreenCanvasRenderingContext2D, quad: Point2D[]): { r: number; g: number; b: number } {
+  const xs = quad.map(p => p.x);
+  const ys = quad.map(p => p.y);
+  const minX = Math.min(...xs);
+  const minY = Math.min(...ys);
+  const w = Math.max(0, Math.max(...xs) - minX);
+  const h = Math.max(0, Math.max(...ys) - minY);
+  const srcW = ctx.canvas.width;
+  const srcH = ctx.canvas.height;
+
+  let sx = Math.max(0, Math.floor(minX + w * 0.2));
+  let sy = Math.max(0, Math.floor(minY + h * 0.2));
+  let ex = Math.min(srcW, Math.ceil(minX + w * 0.8));
+  let ey = Math.min(srcH, Math.ceil(minY + h * 0.8));
+  let cw = ex - sx;
+  let ch = ey - sy;
+
+  if (cw < 1 || ch < 1) {
+    sx = Math.max(0, Math.floor(minX));
+    sy = Math.max(0, Math.floor(minY));
+    ex = Math.min(srcW, Math.ceil(minX + w));
+    ey = Math.min(srcH, Math.ceil(minY + h));
+    cw = ex - sx;
+    ch = ey - sy;
+    if (cw < 1 || ch < 1) return { r: 255, g: 255, b: 255 };
+  }
+
+  const data = ctx.getImageData(sx, sy, cw, ch).data;
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  const n = cw * ch;
+  for (let i = 0; i < data.length; i += 4) {
+    r += data[i];
+    g += data[i + 1];
+    b += data[i + 2];
+  }
+  return { r: Math.round(r / n), g: Math.round(g / n), b: Math.round(b / n) };
+}
+
+/**
  * Renders multiple translated text blocks onto the canvas at once.
  * Western targets (orientation 'h') use the 1:1 Cotrans default renderer; non-Western
  * targets keep the legacy polygon-fitting renderer.
+ *
+ * Blocks without an explicit textColor/strokeColor get background-adaptive colors
+ * (XianScan color.ts port): the cleaned page is sampled at the quad interior and
+ * black-or-white text is picked by WCAG luminance.
  *
  * @param ctx - Target canvas context with the clean (inpainted) page already drawn.
  * @param blocks - Translated text blocks.
@@ -393,13 +452,29 @@ export function renderTextBlocksBatch(
 
   const bounds = imageBounds || (ctx?.canvas ? { width: ctx.canvas.width, height: ctx.canvas.height } : { width: 2000, height: 2000 });
 
+  // Background-adaptive text color: sample the clean page under each quad. Blocks with
+  // explicit colors (user overrides / legacy callers) are respected untouched.
+  const coloredBlocks = blocks.map((b) => {
+    if (b.textColor || b.strokeColor) return b;
+    if (!b.polygon || b.polygon.length < 3) return b;
+    try {
+      const quad = b.polygon.slice(0, Math.min(4, b.polygon.length));
+      if (quad.length < 3) return b;
+      const bg = sampleQuadBackground(ctx, quad);
+      const choice = pickTextColor(bg);
+      return { ...b, textColor: choice.fill, strokeColor: choice.stroke };
+    } catch {
+      return b;
+    }
+  });
+
   const langKey = targetLang.toLowerCase().trim();
   const orientation = LANGUAGE_ORIENTATION_PRESETS[langKey] || 'h';
 
   if (orientation === 'h') {
-    return renderTextBlocksDefault(ctx, blocks, bounds.width, bounds.height);
+    return renderTextBlocksDefault(ctx, coloredBlocks, bounds.width, bounds.height);
   }
-  return renderTextBlocksLegacy(ctx, blocks, targetLang, bounds);
+  return renderTextBlocksLegacy(ctx, coloredBlocks, targetLang, bounds);
 }
 
 /**
@@ -485,6 +560,28 @@ function renderTextBlocksDefault(
     }
   }
 
+  // XianScan decollision (decollision.ts port): nudge overlapping destination quads
+  // apart before baseline + render. Translation only — quad dimensions are unchanged,
+  // so every font fit computed above remains valid. Nested boxes (>50% containment)
+  // are skipped by decollideBoxes itself, so bubbles-in-bubbles are not pushed.
+  if (planned.length > 1) {
+    const aabbs = planned.map(p => {
+      const xs = p.dstPoints.map(pt => pt.x);
+      const ys = p.dstPoints.map(pt => pt.y);
+      const x = Math.min(...xs);
+      const y = Math.min(...ys);
+      return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
+    });
+    const adjusted = decollideBoxes(aabbs);
+    planned.forEach((p, k) => {
+      const dx = adjusted[k].x - aabbs[k].x;
+      const dy = adjusted[k].y - aabbs[k].y;
+      if (dx !== 0 || dy !== 0) {
+        p.dstPoints = p.dstPoints.map(pt => ({ x: pt.x + dx, y: pt.y + dy }));
+      }
+    });
+  }
+
   dialogueSizes.sort((a, b) => a - b);
   const pageDialogueBaseline = dialogueSizes.length > 0
     ? dialogueSizes[Math.floor(dialogueSizes.length / 2)]
@@ -499,7 +596,7 @@ function renderTextBlocksDefault(
         ? Math.max(18, Math.round(pageDialogueBaseline * 1.25))
         : undefined;
       const info = renderRegionDefault(ctx, plan.region, plan.dstPoints, plan.targetFontSize, baselineCap);
-      if (info) results[plan.index] = { fontSize: info.fontSize, lineCount: info.lineCount, lines: info.lines };
+      if (info) results[plan.index] = { fontSize: info.fontSize, lineCount: info.lineCount, lines: info.lines, textColor: plan.region.textColor, strokeColor: plan.region.strokeColor };
     } catch (e) {
       console.error('[canvasTypesetting] Default renderer failed for block', plan.index, e);
     }
@@ -635,7 +732,7 @@ function renderTextBlocksLegacy(
     }
 
     ctx.restore();
-    results[meta.index] = { fontSize: meta.fontSize, lineCount: meta.lines.length, lines: meta.lines };
+    results[meta.index] = { fontSize: meta.fontSize, lineCount: meta.lines.length, lines: meta.lines, textColor: meta.block.textColor || '#000000', strokeColor: meta.block.strokeColor || '#FFFFFF' };
   }
 
   return results;

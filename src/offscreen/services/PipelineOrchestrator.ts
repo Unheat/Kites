@@ -177,8 +177,8 @@ export class PipelineOrchestrator {
             text,
             polygon: poly as any,
             direction: dir,
-            textColor: '#000000',
-            strokeColor: '#FFFFFF',
+            // Colors are decided at render time by background sampling (XianScan
+            // color.ts port) — black text on light paper, white on dark panels.
             fontSize: ocrResult.fontSizes ? ocrResult.fontSizes[i] : undefined,
             angle: ocrResult.angles ? ocrResult.angles[i] : undefined,
             // Default renderer inputs: original source text (length-ratio expansion) and merged
@@ -227,6 +227,9 @@ export class PipelineOrchestrator {
         const fontSize = renderInfoByOcrIndex.get(i)?.fontSize
           ?? (ocrResult.fontSizes ? ocrResult.fontSizes[i] : undefined)
           ?? Math.max(9, Math.floor(Math.min(box.w, box.h)));
+        // Persist the render-time colors (background-sampled) so the Studio overlay
+        // matches the baked image instead of assuming black-on-white.
+        const renderColors = renderInfoByOcrIndex.get(i);
 
         return {
           imageId: imageRecord.id!,
@@ -238,7 +241,8 @@ export class PipelineOrchestrator {
           height: box.h,
           fontSize,
           fontFamily: 'sans-serif',
-          color: '#000000',
+          color: renderColors?.textColor ?? '#000000',
+          strokeColor: renderColors?.strokeColor ?? '#FFFFFF',
           direction: dir,
           lines: renderInfoByOcrIndex.get(i)?.lines
         };
