@@ -54,10 +54,15 @@ export async function executeGemini(
     }
 
     const data = (await response.json()) as any;
-    // Extract text from candidates parts, ignoring thought parts if present
+    // Extract and concatenate all non-thought text parts per official Google docs
     const candidateParts = data?.candidates?.[0]?.content?.parts || [];
-    const textPart = candidateParts.find((p: any) => !p.thought && p.text) || candidateParts[candidateParts.length - 1];
-    const translatedText = textPart?.text || '';
+    const nonThoughtText = candidateParts
+      .filter((part: any) => !part.thought && typeof part.text === 'string')
+      .map((part: any) => part.text)
+      .join('');
+
+    // Fallback in the rare case where only thought parts exist
+    const translatedText = nonThoughtText || candidateParts[candidateParts.length - 1]?.text || '';
 
     const syntheticResponse: OpenAIChatResponse = {
       id: `gemini-${Date.now()}`,
