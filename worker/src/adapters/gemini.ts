@@ -54,7 +54,10 @@ export async function executeGemini(
     }
 
     const data = (await response.json()) as any;
-    const translatedText = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    // Extract text from candidates parts, ignoring thought parts if present
+    const candidateParts = data?.candidates?.[0]?.content?.parts || [];
+    const textPart = candidateParts.find((p: any) => !p.thought && p.text) || candidateParts[candidateParts.length - 1];
+    const translatedText = textPart?.text || '';
 
     const syntheticResponse: OpenAIChatResponse = {
       id: `gemini-${Date.now()}`,

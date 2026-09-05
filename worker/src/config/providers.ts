@@ -43,24 +43,12 @@ export interface ProviderRouteConfig {
 }
 
 export const PROVIDER_ROUTES: ProviderRouteConfig[] = [
-  // 1. Cloudflare Native Workers AI (Lowest token cost against 10k daily neurons)
-  {
-    id: 'cf-llama-3.2-1b',
-    name: 'Cloudflare Workers AI Llama 3.2 1B',
-    enabled: true,
-    priority: 1,
-    type: 'workers-ai',
-    modelName: '@cf/meta/llama-3.2-1b-instruct',
-    rpdLimit: 4500,
-    defaultTimeoutMs: 3000,
-  },
-
-  // 2. Mistral AI (Fast, high throughput, $10 free monthly credit)
+  // 1. Mistral AI (Fast, high throughput, $10 free monthly credit)
   {
     id: 'mistral-3b',
     name: 'Mistral Ministral 3B',
     enabled: true,
-    priority: 2,
+    priority: 1,
     type: 'openai-compatible',
     baseUrl: 'https://api.mistral.ai/v1',
     modelName: 'ministral-3b-2512',
@@ -68,13 +56,24 @@ export const PROVIDER_ROUTES: ProviderRouteConfig[] = [
     rpsLimit: 10,
     defaultTimeoutMs: 3500,
   },
+    // 2. Cloudflare Native Workers AI (Lowest token cost against 10k daily neurons)
+  {
+    id: 'cf-llama-3.2-1b',
+    name: 'Cloudflare Workers AI Llama 3.2 1B',
+    enabled: true,
+    priority: 9,
+    type: 'workers-ai',
+    modelName: '@cf/meta/llama-3.2-1b-instruct',
+    rpdLimit: 4500,
+    defaultTimeoutMs: 3000,
+  },
 
   // 3. Google AI Studio Gemma 4 26B (14.4k RPD, 30 RPM)
   {
     id: 'gemma-4-26b',
     name: 'Google Gemma 4 26B',
     enabled: true,
-    priority: 3,
+    priority: 2,
     type: 'gemini',
     modelName: 'gemma-4-26b-a4b-it',
     apiKeyEnvVar: 'GEMINI_API_KEY',
@@ -88,7 +87,7 @@ export const PROVIDER_ROUTES: ProviderRouteConfig[] = [
     id: 'gemma-4-31b',
     name: 'Google Gemma 4 31B',
     enabled: true,
-    priority: 4,
+    priority: 3,
     type: 'gemini',
     modelName: 'gemma-4-31b-it',
     apiKeyEnvVar: 'GEMINI_API_KEY',
@@ -102,7 +101,7 @@ export const PROVIDER_ROUTES: ProviderRouteConfig[] = [
     id: 'groq-qwen-3.8',
     name: 'Groq Qwen 3.8 27B',
     enabled: true,
-    priority: 5,
+    priority: 4,
     type: 'openai-compatible',
     baseUrl: 'https://api.groq.com/openai/v1',
     modelName: 'qwen/qwen3.8-27b',
@@ -117,7 +116,7 @@ export const PROVIDER_ROUTES: ProviderRouteConfig[] = [
     id: 'groq-gpt-oss-120b',
     name: 'Groq GPT OSS 120B',
     enabled: true,
-    priority: 6,
+    priority: 5,
     type: 'openai-compatible',
     baseUrl: 'https://api.groq.com/openai/v1',
     modelName: 'openai/gpt-oss-120b',
@@ -132,7 +131,7 @@ export const PROVIDER_ROUTES: ProviderRouteConfig[] = [
     id: 'groq-gpt-oss-20b',
     name: 'Groq GPT OSS 20B',
     enabled: true,
-    priority: 7,
+    priority: 6,
     type: 'openai-compatible',
     baseUrl: 'https://api.groq.com/openai/v1',
     modelName: 'openai/gpt-oss-20b',
@@ -147,7 +146,7 @@ export const PROVIDER_ROUTES: ProviderRouteConfig[] = [
     id: 'groq-qwen-3.6',
     name: 'Groq Qwen 3.6 27B',
     enabled: true,
-    priority: 8,
+    priority: 7,
     type: 'openai-compatible',
     baseUrl: 'https://api.groq.com/openai/v1',
     modelName: 'qwen/qwen3.6-27b',
@@ -162,7 +161,7 @@ export const PROVIDER_ROUTES: ProviderRouteConfig[] = [
     id: 'openrouter-free',
     name: 'OpenRouter Free Model',
     enabled: true,
-    priority: 9,
+    priority: 8,
     type: 'openai-compatible',
     baseUrl: 'https://openrouter.ai/api/v1',
     modelName: 'openrouter/free',
