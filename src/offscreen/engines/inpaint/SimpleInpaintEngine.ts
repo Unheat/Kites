@@ -80,7 +80,7 @@ export class SimpleInpaintEngine implements IInpaintEngine {
       const pixels = imgData.data;
 
       // 2. Sample average background color
-      let maskImgData;
+      let maskImgData: { data: Uint8ClampedArray } | undefined;
       if (strokeMaskCanvas) {
         try {
           const maskCtx = strokeMaskCanvas.getContext('2d', { willReadFrequently: true });
@@ -110,22 +110,37 @@ export class SimpleInpaintEngine implements IInpaintEngine {
       const gSamples: number[] = [];
       const bSamples: number[] = [];
       const luminances: number[] = [];
-      for (let i = 0; i < w * h; i++) {
-        const idx = i * 4;
-        const isInsideTextPolygon = polyData[idx] > 0;
-        const isStroke = maskImgData?.data[idx] > 127;
-        if (isInsideTextPolygon || isStroke) continue;
 
-        const rPixel = pixels[idx];
-        const gPixel = pixels[idx + 1];
-        const bPixel = pixels[idx + 2];
-        const luminance = 0.299 * rPixel + 0.587 * gPixel + 0.114 * bPixel;
-        // Skip dark outline ink while retaining nearby coloured bubble paper.
-        if (luminance < 80) continue;
-        rSamples.push(rPixel);
-        gSamples.push(gPixel);
-        bSamples.push(bPixel);
-        luminances.push(luminance);
+      // Collect background samples from outside the polygon with a light luminance floor
+      const sampleCollector = (luminanceFloor: number) => {
+        for (let i = 0; i < w * h; i++) {
+          const idx = i * 4;
+          const isInsideTextPolygon = polyData[idx] > 0;
+          const isStroke = (maskImgData?.data[idx] ?? 0) > 127;
+          if (isInsideTextPolygon || isStroke) continue;
+
+          const rPixel = pixels[idx];
+          const gPixel = pixels[idx + 1];
+          const bPixel = pixels[idx + 2];
+          const luminance = 0.299 * rPixel + 0.587 * gPixel + 0.114 * bPixel;
+          if (luminance < luminanceFloor) continue;
+          rSamples.push(rPixel);
+          gSamples.push(gPixel);
+          bSamples.push(bPixel);
+          luminances.push(luminance);
+        }
+      };
+
+      // Primary pass: skip dark ink outlines
+      sampleCollector(80);
+      // Fallback: dark/saturated pages have almost no pixels above 80 luminance; without
+      // this, median fallback would incorrectly snap to white on dark panels.
+      if (rSamples.length < 8) {
+        rSamples.length = 0;
+        gSamples.length = 0;
+        bSamples.length = 0;
+        luminances.length = 0;
+        sampleCollector(0);
       }
 
       const median = (samples: number[], fallback: number): number => {
@@ -135,14 +150,14 @@ export class SimpleInpaintEngine implements IInpaintEngine {
       };
       const meanLuminance = luminances.length > 0
         ? luminances.reduce((sum, value) => sum + value, 0) / luminances.length
-        : 255;
+        : 0;
       const standardDeviation = luminances.length > 0
         ? Math.sqrt(luminances.reduce((sum, value) => sum + (value - meanLuminance) ** 2, 0) / luminances.length)
         : 0;
 
-      let r = median(rSamples, 255);
-      let g = median(gSamples, 255);
-      let b = median(bSamples, 255);
+      let r = median(rSamples, 128);
+      let g = median(gSamples, 128);
+      let b = median(bSamples, 128);
       if (meanLuminance >= WHITE_BUBBLE_LUMINANCE_MIN && standardDeviation < WHITE_BUBBLE_STANDARD_DEVIATION_MAX) {
         r = 255;
         g = 255;

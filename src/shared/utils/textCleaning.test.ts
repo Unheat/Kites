@@ -1,0 +1,66 @@
+import { describe, it, expect } from 'vitest';
+import {
+  sanitizeTypesetText,
+  isScanlatorWatermark,
+  isThoughtBubbleTailOrnament,
+  isStandaloneDigitOrOrnamentNoise,
+  CJK_SCRIPT_REGEX,
+} from './textCleaning';
+
+describe('textCleaning', () => {
+  describe('sanitizeTypesetText', () => {
+    it('normalizes CJK quotes and tildes for Western text', () => {
+      expect(sanitizeTypesetText('「Hello there」')).toBe('"Hello there"');
+      expect(sanitizeTypesetText('It’s fine〜')).toBe("It's fine~");
+    });
+
+    it('collapses spaced OCR letters without touching contractions', () => {
+      expect(sanitizeTypesetText('H E L L O')).toBe('HELLO');
+      expect(sanitizeTypesetText("D O N ' T")).toContain("'");
+    });
+
+    it('does not uppercase content', () => {
+      expect(sanitizeTypesetText('wait here')).toBe('wait here');
+    });
+
+    it('cleans repeated punctuation artifacts', () => {
+      expect(sanitizeTypesetText('Wow, !')).toBe('Wow!');
+      expect(sanitizeTypesetText('Okay,, really')).toBe('Okay, really');
+    });
+
+    it('leaves real CJK text intact aside from whitespace/tilde', () => {
+      expect(sanitizeTypesetText('それはない～')).toBe('それはない~');
+    });
+  });
+
+  describe('noise predicates', () => {
+    it('detects scanlator watermarks', () => {
+      expect(isScanlatorWatermark('baozimh.com')).toBe(true);
+      expect(isScanlatorWatermark('Scanlated by Team X')).toBe(true);
+      expect(isScanlatorWatermark('公众号')).toBe(true);
+      expect(isScanlatorWatermark('I could not win!')).toBe(false);
+    });
+
+    it('detects thought bubble tail ornaments', () => {
+      expect(isThoughtBubbleTailOrnament('0OO')).toBe(true);
+      expect(isThoughtBubbleTailOrnament('ooo')).toBe(true);
+      expect(isThoughtBubbleTailOrnament('●●●')).toBe(true);
+      expect(isThoughtBubbleTailOrnament('Hello')).toBe(false);
+    });
+
+    it('detects ornament and pure digit noise', () => {
+      expect(isStandaloneDigitOrOrnamentNoise('……')).toBe(true);
+      expect(isStandaloneDigitOrOrnamentNoise('100')).toBe(true);
+      expect(isStandaloneDigitOrOrnamentNoise('Ch 100')).toBe(false);
+    });
+  });
+
+  describe('CJK_SCRIPT_REGEX', () => {
+    it('matches actual CJK scripts only, never ASCII punctuation', () => {
+      expect(CJK_SCRIPT_REGEX.test("There's no other way!")).toBe(false);
+      expect(CJK_SCRIPT_REGEX.test("don't…")).toBe(false);
+      expect(CJK_SCRIPT_REGEX.test('待って')).toBe(true);
+      expect(CJK_SCRIPT_REGEX.test('英雄')).toBe(true);
+    });
+  });
+});

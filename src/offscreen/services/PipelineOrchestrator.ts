@@ -242,6 +242,8 @@ export class PipelineOrchestrator {
         };
       });
 
+      // Clear stale text blocks from any prior run on this image to prevent duplicate rows.
+      await db.textBlocks.where({ imageId: imageRecord.id! }).delete();
       if (textBlocksToSave.length > 0) {
         await db.textBlocks.bulkAdd(textBlocksToSave);
       }

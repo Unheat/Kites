@@ -2,6 +2,11 @@ import type { IOcrEngine, OcrResult } from '../engines/ocr/BaseOcrEngine';
 import { PaddleOcrEngine } from '../engines/ocr/PaddleOcrEngine';
 import { resolveOcrTier } from '../engines/ocr/ocrRegistry';
 import { Quadrilateral, Graph, calculateBoundingBox, computeMinAreaRect, polygonArea, quadrilateralCanMergeRegion, splitTextRegion } from '../../shared/utils/geometry';
+import {
+  isScanlatorWatermark,
+  isThoughtBubbleTailOrnament,
+  isStandaloneDigitOrOrnamentNoise,
+} from '../../shared/utils/textCleaning';
 
 /**
  * 1:1 Cotrans is_valuable_char check (generic2.py).
@@ -227,6 +232,20 @@ export class OcrManager {
         continue;
       }
 
+      // XianScan text_clean ports: scanlator watermark, thought-bubble tail, digit ornaments
+      if (isScanlatorWatermark(trimmedTxt)) {
+        console.log(`[OcrManager] Filtered out scanlator watermark "${trimmedTxt}"`);
+        continue;
+      }
+      if (isThoughtBubbleTailOrnament(trimmedTxt)) {
+        console.log(`[OcrManager] Filtered out thought-bubble tail ornament "${trimmedTxt}"`);
+        continue;
+      }
+      if (isStandaloneDigitOrOrnamentNoise(trimmedTxt)) {
+        console.log(`[OcrManager] Filtered out ornament/digit noise "${trimmedTxt}"`);
+        continue;
+      }
+
       const area = polygonArea(poly);
       if (area < 16) continue; // Cotrans area filter (area > 16)
 
@@ -286,26 +305,43 @@ export class OcrManager {
     const filteredPolygons = validIndices.map(i => rawPolygons[i]);
     const filteredScores = validIndices.map(i => rawScores[i]);
 
-    // PaddleOCR can report a complete vertical line and a nested substring slice in the
-    // same column. Retain the longer, higher-confidence line before it reaches Cotrans MST.
+    // PaddleOCR can report a complete line plus a nested substring slice, or two identical
+    // quads for one physical glyph run. Drop the weaker duplicate before Cotrans MST.
+    // Handles both vertical columns (substring slices) and horizontal rows (partial lines).
     const duplicateIndices = new Set<number>();
     for (let i = 0; i < filteredTexts.length; i++) {
+      const textA = filteredTexts[i].trim();
+      const scoreA = filteredScores[i] || 0;
       const boxA = calculateBoundingBox(filteredPolygons[i]);
-      const isVerticalA = boxA.height > boxA.width * 1.2;
-      if (!isVerticalA) continue;
       for (let j = i + 1; j < filteredTexts.length; j++) {
+        const textB = filteredTexts[j].trim();
+        const scoreB = filteredScores[j] || 0;
         const boxB = calculateBoundingBox(filteredPolygons[j]);
-        const isVerticalB = boxB.height > boxB.width * 1.2;
-        if (!isVerticalB) continue;
-        const sameColumn = Math.abs((boxA.x + boxA.width / 2) - (boxB.x + boxB.width / 2))
-          <= Math.max(8, Math.min(boxA.width, boxB.width));
-        const yOverlap = Math.max(0, Math.min(boxA.y + boxA.height, boxB.y + boxB.height) - Math.max(boxA.y, boxB.y));
-        if (!sameColumn || yOverlap <= 0) continue;
 
-        const aContainsB = filteredTexts[i].includes(filteredTexts[j]) && filteredTexts[i].length > filteredTexts[j].length;
-        const bContainsA = filteredTexts[j].includes(filteredTexts[i]) && filteredTexts[j].length > filteredTexts[i].length;
-        if (aContainsB && (filteredScores[i] || 0) >= (filteredScores[j] || 0)) duplicateIndices.add(j);
-        if (bContainsA && (filteredScores[j] || 0) >= (filteredScores[i] || 0)) duplicateIndices.add(i);
+        // Geometric containment: intersection over the SMALLER box.
+        const interW = Math.max(0, Math.min(boxA.x + boxA.width, boxB.x + boxB.width) - Math.max(boxA.x, boxB.x));
+        const interH = Math.max(0, Math.min(boxA.y + boxA.height, boxB.y + boxB.height) - Math.max(boxA.y, boxB.y));
+        const interArea = interW * interH;
+        if (interArea <= 0) continue;
+        const areaA = Math.max(1, boxA.width * boxA.height);
+        const areaB = Math.max(1, boxB.width * boxB.height);
+        const coversSmaller = interArea / Math.min(areaA, areaB);
+        if (coversSmaller < 0.5) continue;
+
+        // Text relationship: exact duplicate, or one is a substring slice of the other.
+        const aContainsB = textA.length > textB.length && textA.includes(textB);
+        const bContainsA = textB.length > textA.length && textB.includes(textA);
+        const identical = textA === textB;
+        if (!identical && !aContainsB && !bContainsA) continue;
+
+        // Keep the longer text; on equal content keep the higher OCR confidence.
+        if (aContainsB) {
+          duplicateIndices.add(scoreA >= scoreB ? j : i);
+        } else if (bContainsA) {
+          duplicateIndices.add(scoreB >= scoreA ? i : j);
+        } else {
+          duplicateIndices.add(scoreA >= scoreB ? j : i);
+        }
       }
     }
 
@@ -313,7 +349,22 @@ export class OcrManager {
     const polygons = filteredPolygons.filter((_, index) => !duplicateIndices.has(index));
     const scores = filteredScores.filter((_, index) => !duplicateIndices.has(index));
 
-    if (texts.length === 0) return result;
+    if (texts.length === 0) {
+      // Nothing to translate, but inpainting still needs the surviving erase polygons.
+      const emptyMaskPolygons = validIndices.map(i => rawPolygons[i]);
+      return {
+        ...result,
+        texts: [],
+        polygons: [],
+        scores: [],
+        boxes: [],
+        directions: [],
+        fontSizes: [],
+        angles: [],
+        lineCounts: [],
+        rawPolygons: emptyMaskPolygons,
+      };
+    }
 
     const mergedPolygons: any[] = [];
     const mergedTexts: string[] = [];
@@ -417,19 +468,54 @@ export class OcrManager {
       mergedLineCounts.push(groupIndices.length);
     }
 
+    // Cotrans sort_regions (textblock.py): order blocks top-to-bottom, right-to-left.
+    // Graph connected-component order is arbitrary; without this, translation receives
+    // bubbles in random spatial order which breaks cross-bubble context quality.
+    const rows: number[] = []; // indices into mergedBoxes, in panel reading order
+    for (let cand = 0; cand < mergedBoxes.length; cand++) {
+      const b = mergedBoxes[cand];
+      const centerY = b.y + b.h / 2;
+      const centerX = b.x + b.w / 2;
+      let placed = false;
+      for (let i = 0; i < rows.length; i++) {
+        const r = mergedBoxes[rows[i]];
+        if (centerY > r.y + r.h) continue;
+        if (centerY < r.y) {
+          // pass the row: belongs after current row
+          rows.splice(i + 1, 0, cand);
+          placed = true;
+          break;
+        }
+        // Same row band: right-to-left for manga reading order
+        const rCenterX = r.x + r.w / 2;
+        if (centerX > rCenterX) {
+          rows.splice(i, 0, cand);
+          placed = true;
+          break;
+        }
+      }
+      if (!placed) rows.push(cand);
+    }
+
+    const pick = <T>(arr: T[]): T[] => rows.map(i => arr[i]);
+
     // rawPolygons retains the raw unmerged 4-point line quadrilaterals for inpainting.
-    // We use the noise-filtered polygons here (from validIndices) so that empty boxes
-    // and non-text noise are not sent to inpainting.
+    // Includes noise-filtered text polygons AND orphan punctuation polygons that were
+    // merged into their neighbors' text — their ink must still be erased.
+    const maskPolygons = [...polygons];
+    for (const idx of claimedPunctuation) {
+      maskPolygons.push(rawPolygons[idx]);
+    }
     return {
-      texts: mergedTexts,
-      polygons: mergedPolygons,
-      scores: mergedScores,
-      boxes: mergedBoxes,
-      directions: mergedDirections,
-      fontSizes: mergedFontSizes,
-      angles: mergedAngles,
-      lineCounts: mergedLineCounts,
-      rawPolygons: polygons,
+      texts: pick(mergedTexts),
+      polygons: pick(mergedPolygons),
+      scores: pick(mergedScores),
+      boxes: pick(mergedBoxes),
+      directions: pick(mergedDirections),
+      fontSizes: pick(mergedFontSizes),
+      angles: pick(mergedAngles),
+      lineCounts: pick(mergedLineCounts),
+      rawPolygons: maskPolygons,
       maskRawCanvas: result.maskRawCanvas
     };
   }

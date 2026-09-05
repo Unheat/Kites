@@ -18,6 +18,7 @@ import {
   Moon 
 } from 'lucide-react';
 import './index.css';
+import { fitFontSizeWithLines } from './offscreen/utils/typesetLayout';
 
 type ViewMode = 'final' | 'cleaned' | 'original';
 
@@ -270,12 +271,12 @@ export default function App() {
    * @param newText - Updated translated text content.
    */
   const handleTextChange = async (blockId: number, newText: string) => {
-    // When text is edited, clear cached static lines so the live preview updates immediately with newText
+    // Clearing lines signals both the DOM overlay and PNG exporter to re-wrap on next render.
     setTextBlocks((prev) =>
-      prev.map((b) => (b.id === blockId ? { ...b, translatedText: newText, lines: undefined } : b))
+      prev.map((b) => (b.id === blockId ? { ...b, translatedText: newText, lines: [] } : b))
     );
     try {
-      await db.textBlocks.update(blockId, { translatedText: newText, lines: undefined });
+      await db.textBlocks.update(blockId, { translatedText: newText, lines: [] });
     } catch (err) {
       console.error('[Dashboard] Failed updating text block:', err);
     }
@@ -314,7 +315,16 @@ export default function App() {
       ctx.strokeStyle = '#FFFFFF';
       const cx = block.posX + block.width / 2;
       const cy = block.posY + block.height / 2;
-      const lines = block.lines?.filter((line) => line.trim()) || [block.translatedText];
+
+      // If the user edited text after rendering, `lines` is empty — rewrap using the
+      // shared typesetting engine so the export matches the pipeline's layout policy.
+      let lines: string[];
+      if (block.lines && block.lines.length > 0) {
+        lines = block.lines;
+      } else {
+        const fitted = fitFontSizeWithLines(ctx, block.translatedText, 'sans-serif', block.width, block.height, fontSize, Math.max(fontSize, 48), 0.05);
+        lines = fitted.lines.length > 0 ? fitted.lines : [block.translatedText];
+      }
       const lineHeight = fontSize * 1.2;
       const startY = cy - ((lines.length - 1) * lineHeight) / 2;
 

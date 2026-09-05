@@ -1,6 +1,7 @@
 import type { Point2D } from '../../shared/utils/geometry';
 import { syllables } from './hyphenation';
 import { fitFontSizeWithLines, fontSpec } from './typesetLayout';
+import { sanitizeTypesetText } from '../../shared/utils/textCleaning';
 
 /**
  * 1:1 port of Cotrans's DEFAULT renderer (the one cotrans.touhou.ai uses): rendering/__init__.py
@@ -688,9 +689,10 @@ export function renderRegionDefault(
   // XianScan-style fit returns both the verified font size and exact wrapped lines.
   // Rendering those same lines prevents Cotrans's independent syllable pass from
   // turning English dialogue into narrow barcode columns.
+  const displayText = sanitizeTypesetText(compactSpecialSymbols(region.translation));
   const fitted = fitFontSizeWithLines(
     ctx,
-    compactSpecialSymbols(region.translation),
+    displayText,
     RENDER_FONT_FAMILY,
     normH,
     normV,

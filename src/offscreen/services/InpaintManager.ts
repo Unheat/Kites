@@ -96,7 +96,7 @@ export class InpaintManager {
     imageBuffer: ArrayBuffer,
     maskPolygons: Point2D[][],
     tier: InpaintTier = 'telea',
-    _maskRawCanvas?: any
+    maskRawCanvas?: any
   ): Promise<ArrayBuffer> {
     if (!maskPolygons || maskPolygons.length === 0) {
       return imageBuffer;
@@ -110,8 +110,9 @@ export class InpaintManager {
       return await engine.inpaint(imageBuffer, maskPolygons);
     }
 
-    // Cotrans 4-point polygon line mask: guarantees 100% clean text erasure with zero leftover smudges
-    return await engine.inpaint(imageBuffer, maskPolygons);
+    // Forward the raw stroke-detection mask when available so engines can use
+    // the precise ink mask (pixel-level) instead of the coarse polygon envelope.
+    return await engine.inpaint(imageBuffer, maskPolygons, maskRawCanvas);
   }
 
   /**

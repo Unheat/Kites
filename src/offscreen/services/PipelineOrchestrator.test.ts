@@ -36,6 +36,9 @@ vi.mock('../../db', () => ({
     textBlocks: {
       add: vi.fn(),
       bulkAdd: vi.fn(),
+      where: vi.fn().mockReturnValue({
+        delete: vi.fn(),
+      }),
     }
   }
 }));
