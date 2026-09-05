@@ -502,9 +502,10 @@ function renderTextBlocksLegacy(
     let finalText = text;
     if (isVertical) {
       finalText = convertCjkPunctuation(text);
-    } else if (isRtl) {
-      finalText = text.split('').reverse().join('');
     }
+    // RTL (Arabic/Hebrew/Persian/Urdu): keep logical character order. Canvas fillText
+    // applies the Unicode bidi algorithm + contextual shaping itself, so pre-reversing
+    // (Cotrans FreeType-era port) double-reversed the text and broke letter joining.
 
     const { fontSize, lines, lineHeight } = calculateOptimalFontSize(
       ctx,
@@ -564,6 +565,10 @@ function renderTextBlocksLegacy(
     ctx.save();
     ctx.translate(newCenterX, newCenterY);
     ctx.rotate((meta.angle * Math.PI) / 180);
+
+    // Canvas-native bidi direction: lets the browser handle RTL alignment and
+    // punctuation ordering (no manual string operations).
+    ctx.direction = isRtl ? 'rtl' : 'ltr';
 
     ctx.font = `bold ${meta.fontSize}px ${RENDER_FONT_FAMILY}`;
     ctx.textAlign = 'center';
