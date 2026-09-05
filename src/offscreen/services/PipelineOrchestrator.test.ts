@@ -172,7 +172,7 @@ describe('PipelineOrchestrator', () => {
     const mockImageRecord = { id: 1, jobId: 100, rawImageBlob: new Blob(['fake image data'], { type: 'image/png' }) };
     ((db.images as any).first as any).mockResolvedValue(mockImageRecord);
     vi.spyOn(chrome.runtime, 'sendMessage').mockImplementation((_message: any, callback: any) => {
-      callback({ activeInpaintId: 'lama-base', activeOcrId: 'v6-small', targetLang: 'en' });
+      callback({ activeInpaintId: 'lama-manga', activeOcrId: 'v6-small', targetLang: 'en' });
     });
     vi.mocked(InpaintCacheManager.isModelCached).mockResolvedValue(false);
     const eraseTextSpy = vi.spyOn((pipelineOrchestrator as any).inpaintManager, 'eraseText');

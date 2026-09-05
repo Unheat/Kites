@@ -127,7 +127,6 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
     { id: 'simple', name: 'Simple Fill', type: 'local', isDownloaded: true },
     { id: 'telea', name: 'Telea Diffusion', type: 'local', isDownloaded: true },
     { id: 'aotgan', name: 'AOT-GAN', type: 'local', isDownloaded: false },
-    { id: 'lama-base', name: 'LaMa Base', type: 'local', isDownloaded: false },
     { id: 'lama-manga', name: 'LaMa Manga', type: 'local', isDownloaded: false },
   ]);
 

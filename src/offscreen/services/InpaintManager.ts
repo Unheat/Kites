@@ -2,12 +2,11 @@ import type { IInpaintEngine, Point2D } from '../engines/inpaint/BaseInpaintEngi
 import { SimpleInpaintEngine } from '../engines/inpaint/SimpleInpaintEngine';
 import { TeleaInpaintEngine } from '../engines/inpaint/TeleaInpaintEngine';
 import { AotInpaintEngine } from '../engines/inpaint/AotInpaintEngine';
-import { LamaBaseInpaintEngine } from '../engines/inpaint/LamaBaseInpaintEngine';
 import { LamaMangaInpaintEngine } from '../engines/inpaint/LamaMangaInpaintEngine';
 import { NoneInpaintEngine } from '../engines/inpaint/NoneInpaintEngine';
 import { OriginalInpaintEngine } from '../engines/inpaint/OriginalInpaintEngine';
 
-export type InpaintTier = 'simple' | 'telea' | 'aot' | 'aotgan' | 'lama-base' | 'lama-manga' | 'none' | 'original';
+export type InpaintTier = 'simple' | 'telea' | 'aot' | 'aotgan' | 'lama-manga' | 'none' | 'original';
 
 /**
  * Orchestrator and single entry-point for the image inpainting / background erasing pipeline.
@@ -66,9 +65,7 @@ export class InpaintManager {
       case 'aotgan':
         engine = new AotInpaintEngine(this.platform);
         break;
-      case 'lama-base':
-        engine = new LamaBaseInpaintEngine(this.platform);
-        break;
+      case 'lama-base' as InpaintTier:
       case 'lama-manga':
         engine = new LamaMangaInpaintEngine(this.platform);
         break;

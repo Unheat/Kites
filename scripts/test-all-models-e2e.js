@@ -139,18 +139,7 @@ async function testModelConfig(browser, configName, popupState) {
   });
 
   try {
-    // 1. Inpainting Tier 1: LaMa Base
-    await testModelConfig(browser, 'Task 2: Inpaint LaMa Base', {
-      activeEngineId: 'gg-translate',
-      activeInpaintId: 'lama-base',
-      sourceLang: 'auto',
-      targetLang: 'en',
-      concurrency: 2,
-      isAuto: false,
-      manualMode: 'hover'
-    });
-
-    // 2. Inpainting Tier 2: LaMa Manga
+    // 1. Inpainting Tier 1: LaMa Manga
     await testModelConfig(browser, 'Task 2: Inpaint LaMa Manga', {
       activeEngineId: 'gg-translate',
       activeInpaintId: 'lama-manga',

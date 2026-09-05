@@ -14,7 +14,6 @@ const INPAINT_VRAM_MAP: Record<string, string> = {
   simple: 'Simple Fill • 0 MB',
   telea: 'Telea Diffusion • 0 MB',
   aotgan: 'AOT-GAN • ~50 MB',
-  'lama-base': 'LaMa Base • ~200 MB',
   'lama-manga': 'LaMa Manga • ~200 MB',
 };
 

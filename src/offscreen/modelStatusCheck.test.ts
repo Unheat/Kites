@@ -88,7 +88,7 @@ describe('handleCheckStatus model routing', () => {
     vi.mocked(hasModelInCache).mockResolvedValue(false);
 
     const llamaStatus = await checkStatus('Llama-3.2-1B-Instruct-q0f16-MLC');
-    const lamaInpaintStatus = await checkStatus('lama-base');
+    const lamaInpaintStatus = await checkStatus('lama-manga');
     const ocrStatus = await checkStatus('v6-small');
 
     expect(llamaStatus).toBe(false);

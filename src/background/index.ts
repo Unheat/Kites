@@ -61,9 +61,12 @@ function normalizePopupState(popupState: PopupState): { state: PopupState; chang
   const fallbackChain = fallbackSource.filter((engineId, index, chain) =>
     engineId !== activeEngineId && isSupportedEngine(engineId) && chain.indexOf(engineId) === index
   );
+  const rawInpaintId = popupState.activeInpaintId === 'lama-base'
+    ? 'lama-manga'
+    : (popupState.activeInpaintId === 'aot' ? 'aotgan' : popupState.activeInpaintId);
   const supportedInpaintIds = new Set(['none', 'simple', 'telea', ...Object.keys(inpaintRegistry)]);
-  const activeInpaintId = supportedInpaintIds.has(popupState.activeInpaintId)
-    ? popupState.activeInpaintId === 'aot' ? 'aotgan' : popupState.activeInpaintId
+  const activeInpaintId = supportedInpaintIds.has(rawInpaintId)
+    ? rawInpaintId
     : DEFAULT_POPUP_STATE.activeInpaintId;
   const activeOcrId = resolveOcrTier(popupState.activeOcrId);
   const changed = activeEngineId !== popupState.activeEngineId ||
