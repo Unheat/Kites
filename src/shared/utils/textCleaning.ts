@@ -237,6 +237,21 @@ export function isOnomatopoeiaOrShout(text: string): boolean {
 }
 
 /**
+ * Digit/particle noise of ANY length (XianScan lang.rs:85 faithful): every char is a
+ * digit, whitespace, or a particle symbol ("8.0", "500", "0°0"). Used inside the
+ * language-aware Latin prune where a native-script anchor line exists on the page.
+ */
+export function isStandaloneDigitOrParticleNoise(text: string): boolean {
+  const t = text.trim();
+  if (!t) return true;
+  const hasDigit = /\d/.test(t);
+  const allDigitOrParticle = Array.from(t).every(c =>
+    /\d/.test(c) || /\s/.test(c) || ['.', '°', '·', '●', '○', '•', '‥', '．', ',', ':', "'", '"', '`', '~', '–', '—', '-'].includes(c)
+  );
+  return hasDigit && allDigitOrParticle;
+}
+
+/**
  * Normalize translated text for comic typesetting.
  *
  * Converts CJK punctuation into rendering-safe ASCII punctuation where that is

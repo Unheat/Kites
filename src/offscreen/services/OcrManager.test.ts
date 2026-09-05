@@ -146,6 +146,78 @@ describe('OcrManager', () => {
     });
   });
 
+  describe('Latin-noise prune in non-Latin sources (XianScan builder.rs:189)', () => {
+    function mockLatinPruneEngine(lines: { texts: string[]; polygons: { x: number; y: number }[][]; scores: number[] }): void {
+      (PaddleOcrEngine as any).mockImplementation(function () {
+        return {
+          preset: 'v6-small',
+          init: vi.fn().mockResolvedValue(undefined),
+          recognize: vi.fn().mockResolvedValue({
+            texts: lines.texts,
+            polygons: lines.polygons,
+            scores: lines.scores,
+            detectionScores: lines.scores.map(() => 0.98),
+            boxes: lines.polygons.map(p => ({ x: p[0].x, y: p[0].y, w: p[1].x - p[0].x, h: p[2].y - p[0].y }))
+          }),
+          destroy: vi.fn().mockResolvedValue(undefined)
+        };
+      });
+    }
+
+    const nativeAndLatin = {
+      texts: ['こんにちは', 'HOSPITAL'],
+      polygons: [
+        [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 40 }, { x: 0, y: 40 }],
+        [{ x: 200, y: 500 }, { x: 300, y: 500 }, { x: 300, y: 530 }, { x: 200, y: 530 }]
+      ],
+      scores: [0.95, 0.80]
+    };
+
+    afterEach(() => {
+      (PaddleOcrEngine as any).mockImplementation(function (preset: string) {
+        return {
+          preset,
+          init: vi.fn().mockResolvedValue(undefined),
+          recognize: vi.fn().mockResolvedValue({
+            texts: ['Sample text'],
+            polygons: [[{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 50 }, { x: 0, y: 50 }]],
+            scores: [0.95],
+            detectionScores: [0.98],
+            boxes: [{ x: 0, y: 0, w: 100, h: 50 }]
+          }),
+          destroy: vi.fn().mockResolvedValue(undefined)
+        };
+      });
+    });
+
+    it('prunes pure-Latin noise when a native line exists and source is ja', async () => {
+      mockLatinPruneEngine(nativeAndLatin);
+      const result = await ocrManager.processImage(new ArrayBuffer(16), 'v6-small', { sourceLang: 'ja' });
+      expect(result.texts).toHaveLength(1);
+      expect(result.texts[0]).toContain('こんにちは');
+    });
+
+    it('keeps Latin line when no source context (filter inactive)', async () => {
+      mockLatinPruneEngine(nativeAndLatin);
+      const result = await ocrManager.processImage(new ArrayBuffer(16));
+      expect(result.texts).toHaveLength(2);
+    });
+
+    it('exempts SFX and dialogue punctuation from the Latin prune', async () => {
+      mockLatinPruneEngine({
+        texts: ['こんにちは', 'ゴゴゴ', 'OK!'],
+        polygons: [
+          [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 40 }, { x: 0, y: 40 }],
+          [{ x: 200, y: 300 }, { x: 260, y: 300 }, { x: 260, y: 360 }, { x: 200, y: 360 }],
+          [{ x: 400, y: 600 }, { x: 460, y: 600 }, { x: 460, y: 630 }, { x: 400, y: 630 }]
+        ],
+        scores: [0.95, 0.85, 0.85]
+      });
+      const result = await ocrManager.processImage(new ArrayBuffer(16), 'v6-small', { sourceLang: 'ja' });
+      expect(result.texts).toHaveLength(3);
+    });
+  });
+
   describe('processImage & cleanup', () => {
     it('processes image and returns OCR result with text block merging', async () => {
       const buffer = new ArrayBuffer(16);

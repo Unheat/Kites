@@ -6,8 +6,11 @@ import {
   isScanlatorWatermark,
   isThoughtBubbleTailOrnament,
   isStandaloneDigitOrOrnamentNoise,
+  isStandaloneDigitOrParticleNoise,
   cleanStrayOcrArtifacts,
   isOnomatopoeiaOrShout,
+  isNonLatinSource,
+  hasNativeScriptForLang,
 } from '../../shared/utils/textCleaning';
 
 /**
@@ -166,7 +169,7 @@ export class OcrManager {
    */
   private mergeTextBlocks(
     result: OcrResult,
-    _context?: { sourceLang?: string; pageWidth?: number; pageHeight?: number }
+    context?: { sourceLang?: string; pageWidth?: number; pageHeight?: number }
   ): OcrResult {
     // Merge algorithm entry point
     const rawTexts = [...result.texts];
@@ -315,9 +318,36 @@ export class OcrManager {
       validIndices.push(i);
     }
 
-    const filteredTexts = validIndices.map(i => rawTexts[i]);
-    const filteredPolygons = validIndices.map(i => rawPolygons[i]);
-    const filteredScores = validIndices.map(i => rawScores[i]);
+    // XianScan builder.rs:189-205: in non-Latin sources, once native-script lines exist
+    // on the page, pure-Latin words and digit/particle noise are clothing-fold/screentone
+    // artifacts. Dialogue punctuation and sound effects are exempt. Runs at page level
+    // (the source applies it per-container; a page-level native anchor is the faithful
+    // approximation without containers). Skips entirely for Latin sources / no context.
+    let langPrunedIndices = validIndices;
+    const sourceLang = context?.sourceLang;
+    if (sourceLang && isNonLatinSource(sourceLang)) {
+      const anyNative = validIndices.some(idx => hasNativeScriptForLang(rawTexts[idx], sourceLang));
+      if (anyNative) {
+        langPrunedIndices = validIndices.filter(idx => {
+          const t = rawTexts[idx].trim();
+          if (!t) return false;
+          if (hasNativeScriptForLang(t, sourceLang)) return true;
+          if (/[！？!?…]/.test(t)) return true;
+          if (isOnomatopoeiaOrShout(t)) return true;
+          const isPureLatinWord = /^[\x20-\x7E]+$/.test(t) && /[a-zA-Z]/.test(t);
+          const isNoiseOrDigit = isStandaloneDigitOrParticleNoise(t) || isThoughtBubbleTailOrnament(t);
+          if (isPureLatinWord || isNoiseOrDigit) {
+            console.log(`[OcrManager] Pruned non-native Latin noise "${t}" (source=${sourceLang})`);
+            return false;
+          }
+          return true;
+        });
+      }
+    }
+
+    const filteredTexts = langPrunedIndices.map(i => rawTexts[i]);
+    const filteredPolygons = langPrunedIndices.map(i => rawPolygons[i]);
+    const filteredScores = langPrunedIndices.map(i => rawScores[i]);
 
     // PaddleOCR can report a complete line plus a nested substring slice, or two identical
     // quads for one physical glyph run. Drop the weaker duplicate before Cotrans MST.
