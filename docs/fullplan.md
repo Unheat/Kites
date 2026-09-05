@@ -127,6 +127,8 @@ Because our architecture serves two different contexts—Live Web Translation vs
    - **Dynamic Width Expansion:** Matching Cotrans `text_render_pillow_eng.py`, target width expands for Western text: `targetWidth = Math.max(width * 0.85, maxWordWidth * 1.15)`, allowing English sentences to render cleanly without being squished into 8px single-word vertical columns.
    - **Kruskal MST Region Splitting:** Speech bubble merging uses Cotrans 1:1 Kruskal Minimum Spanning Tree splitting (`splitTextRegion` with `gamma = 0.5`, `sigma = 2.0`, and `getCotransDistance` top/bottom alignment distance), preventing separate adjacent speech bubbles from over-merging into double bubbles.
    - **PaddleOCR Tensor Padding Unscaling:** `extractPolygons.ts` and `extractRawMaskCanvas` unscale probability maps using exact PaddleOCR `1 / resizeRatio`, cropping out 32px tensor padding to ensure text bounding boxes and overlays align 1:1 with source pixels.
+   - **XianScan-Style Hybrid Typeset Engine (`typesetLayout.ts`):** Implements 6-stage morphological hyphenation (`findHyphenationPoints`) with stem protection (length >= 7), balanced diamond line envelope wrapping (`balancedWrapText`), 4-pass binary search font fitting with tall-narrow aspect ratio floor (`fitFontSizeWithLines`), logical paragraph detection, and box decollision (`decollideBoxes`).
+   - **1:1 Cotrans Default Affine-Warp Renderer (`cotransDefaultRenderer.ts`):** Matches the reference Cotrans Touhou renderer: expands detection regions via `resizeRegionToFontSize` (using the 2023 grid shrink model), computes wrapped lines via `calcHorizontal`, renders lines onto an intermediate canvas (`putTextLines`), and affine-warps the text canvas directly onto the destination quad.
 *Result:* The text will perfectly wrap and scale to fit inside speech bubbles. The live web remains 100% stable without DOM clipping bugs, and the Dashboard remains fully editable.
 
 ### F. Removing the Original Text Cleanly (Inpainting)
@@ -203,13 +205,15 @@ Because adding a completely new inpainting model architecture requires specific 
 *Result:* This provides the absolute best UX. The user gets a completely private, full-featured app via the extension, with quick access via the popup and deep editing via the dashboard tab.
 
 ## 5. Implementation Phases
-- **Phase 1 (Extension Core):** Basic Extension Setup (Manifest V3, Content Script, Popup) & Dexie.js Local DB integration for storing images/projects locally.
-- **Phase 2 (Canvas Editor):** React-Konva Canvas Dashboard implementation (draggable text boxes, editable text, rendering from IndexedDB).
-- **Phase 3 (Local AI Engine):** Offscreen document running PaddleOCR ONNX / MarianMT with Hugging Face CDN download progress bars.
-- **Phase 4 (Cloud Premium Compute):** Server-Hosted Compute API with JWT authentication middleware + Web App Stripe checkout, communicating Auth tokens back to the extension.
-- **Phase 5 (Future Improvements):** 
-  - *OCR Migration*: Migrate from PaddleOCR DBNet to `ComicTextDetector` (YOLOv5 ONNX ~90MB) on WebGPU. This will generate non-spiky, tight bounding boxes and allow us to use Cotrans's raw 1:1 typesetting math without any area-mask tweaks.
-  - *Layout Math*: Until Phase 5 is active, the typesetting math in `canvasTypesetting.ts` must use custom tweaks (like `maskArea / xyxyH` to estimate true speech bubble width) to prevent PaddleOCR's spiky boxes from causing text to spill out.
+- **Phase 1 (Extension Core):** Basic Extension Setup (Manifest V3, Content Script, Popup) & Dexie.js Local DB integration for storing images/projects locally. [Completed]
+- **Phase 2 (Canvas Editor & Studio Dashboard):** Dexie-backed Studio Dashboard (`src/App.tsx`) with left history sidebar, full pan/zoom interactive viewport, original/cleaned/final view modes, live inline text editing, local disk import, and baked PNG export. [Completed]
+- **Phase 3 (Local AI Engine):** Offscreen document running PaddleOCR ONNX (V6 detection & recognition), WebGPU/WASM acceleration, and local inpainting engines (Simple Fill, Telea Math, AOT-GAN, LaMa Manga). [Completed]
+- **Phase 4 (Cloud & Translation Providers):** Custom OpenAI-compatible / Gemini / DeepSeek / Claude translation endpoints, plus a zero-cost Cloudflare Worker translation backend (`worker/`) featuring Google OAuth ID token verification (RS256 with cached JWKS), Durable Object SQLite single-write rate limiting (100 translations/24hr window), adaptive latency circuit breakers, and multi-provider waterfall routing. [Completed]
+- **Phase 5 (Algorithmic Typesetting & Merge Improvements):** 
+  - *V2 Algorithmic Pipeline*: Upgraded `OcrManager` with Cotrans-aligned majority direction voting (`majorityDirection`), orphan punctuation recovery, Furigana Kana filtering, duplicate vertical column deduping, and Kruskal MST region splitting.
+  - *Hybrid Typesetting*: Implementation of 1:1 Cotrans DEFAULT affine-warp renderer (`cotransDefaultRenderer.ts`) and XianScan-style hybrid typeset layout engine (`typesetLayout.ts`) with morphological hyphenation, balanced diamond line envelope wrapping, 4-pass binary search fitting, and speech bubble decollision (`decollideBoxes`). [Completed]
+- **Phase 6 (Future Improvements):** 
+  - *OCR Migration*: Migrate from PaddleOCR DBNet to `ComicTextDetector` (YOLOv5 ONNX ~90MB) on WebGPU to generate non-spiky, tight bounding boxes and allow direct 1:1 typesetting without heuristic expansion.
 ## 3. Important References & Tool Links
 
 The following tools and libraries are critical references for the development of this project:

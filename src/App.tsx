@@ -146,7 +146,11 @@ export default function App() {
     };
   }, [imageRecord]);
 
-  // Handle Pan & Zoom
+  /**
+   * Adjusts canvas viewport zoom level via mouse wheel events.
+   *
+   * @param e - Wheel event triggered over the interactive canvas viewport.
+   */
   const handleWheel = (e: React.WheelEvent) => {
     e.preventDefault();
     const zoomFactor = 1.1;
@@ -157,12 +161,22 @@ export default function App() {
     }
   };
 
+  /**
+   * Begins viewport panning drag when primary mouse button is pressed.
+   *
+   * @param e - Mouse event from the viewport canvas container.
+   */
   const handleMouseDown = (e: React.MouseEvent) => {
     if (e.button !== 0) return;
     setIsDragging(true);
     dragStartRef.current = { x: e.clientX - pan.x, y: e.clientY - pan.y };
   };
 
+  /**
+   * Updates viewport pan offset during mouse drag.
+   *
+   * @param e - Mouse move event.
+   */
   const handleMouseMove = (e: React.MouseEvent) => {
     if (!isDragging) return;
     setPan({
@@ -171,16 +185,27 @@ export default function App() {
     });
   };
 
+  /**
+   * Concludes viewport panning drag on mouse release.
+   */
   const handleMouseUp = () => {
     setIsDragging(false);
   };
 
+  /**
+   * Resets viewport zoom and panning offsets back to default center (100% scale).
+   */
   const resetViewport = () => {
     setZoom(1);
     setPan({ x: 0, y: 0 });
   };
 
-  // Job operations
+  /**
+   * Deletes a translation job and its associated images and text blocks from IndexedDB.
+   *
+   * @param jobId - Numeric identifier of the TranslationJob to delete.
+   * @param e - React mouse click event.
+   */
   const handleDeleteJob = async (jobId: number, e: React.MouseEvent) => {
     e.stopPropagation();
     try {
@@ -195,7 +220,11 @@ export default function App() {
     }
   };
 
-  // Manual File Upload & Processing
+  /**
+   * Handles local image file upload, creates a new job record, and triggers offscreen processing.
+   *
+   * @param e - Form file input change event.
+   */
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -234,7 +263,12 @@ export default function App() {
     }
   };
 
-  // Live text block editing
+  /**
+   * Persists real-time inline text edits for a selected speech bubble block into Dexie.
+   *
+   * @param blockId - Numeric identifier of the edited TextBlock record.
+   * @param newText - Updated translated text content.
+   */
   const handleTextChange = async (blockId: number, newText: string) => {
     setTextBlocks((prev) =>
       prev.map((b) => (b.id === blockId ? { ...b, translatedText: newText } : b))
@@ -246,7 +280,9 @@ export default function App() {
     }
   };
 
-  // Export baked PNG with current text blocks
+  /**
+   * Bakes current text blocks over the cleaned/original image and triggers a PNG download.
+   */
   const handleExportPng = async () => {
     if (!imageDimensions.width || !imageDimensions.height) return;
     const baseBlob = imageRecord?.translatedImageBlob || imageRecord?.rawImageBlob;

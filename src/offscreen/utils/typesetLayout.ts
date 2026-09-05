@@ -15,6 +15,16 @@ export const CJK_REGEX = NON_LATIN_SCRIPT_REGEX;
 export const DEFAULT_FONT_FAMILY = 'CC Wild Words, "Comic Sans MS", "Bangers", sans-serif';
 export const CJK_FONT_STACK = '"Microsoft YaHei Bold", "Microsoft YaHei", "WenQuanYi Micro Hei", "Noto Sans CJK SC", "Noto Sans CJK JP", "Noto Sans CJK KR", "PingFang SC", "PingFang TC", sans-serif';
 
+/**
+ * Builds a CSS font specification string compatible with CanvasRenderingContext2D.
+ * Automatically switches priority between Latin comic fonts and CJK font stacks based on text script.
+ *
+ * @param size - Font size in pixels.
+ * @param fontFamily - Primary Latin font family stack.
+ * @param sampleText - Optional text sample used to detect non-Latin/CJK characters.
+ * @param customCjk - Optional custom CJK font stack override.
+ * @returns Formatted CSS font string, e.g. 'bold 16px "Comic Sans MS", sans-serif'.
+ */
 export function fontSpec(
   size: number,
   fontFamily: string = DEFAULT_FONT_FAMILY,
@@ -123,6 +133,16 @@ export function findHyphenationPoints(rawWord: string): number[] {
     .sort((a, b) => a - b);
 }
 
+/**
+ * Greedily wraps text into lines fitting within maxWidth using Canvas text measurements.
+ * Handles morphological hyphenation for long words, trailing punctuation clustering,
+ * and lone punctuation edge cases.
+ *
+ * @param ctx - Text measurement context providing `measureText(string)`.
+ * @param text - Single-line or whitespace-delimited paragraph to wrap.
+ * @param maxWidth - Maximum available horizontal pixel width for each line.
+ * @returns Array of wrapped line strings.
+ */
 export function wrapText(
   ctx: { measureText(t: string): { width: number } },
   text: string,
@@ -320,6 +340,13 @@ export function balancedWrapText(
   return wrapText(ctx, text, hi);
 }
 
+/**
+ * Detects whether the input text represents a structured list or key-value format
+ * (e.g., stats, menu choices, character profiles with colons or bullet markers).
+ *
+ * @param text - Raw multi-line text string.
+ * @returns True if the text has list/dialogue-list structure that should avoid paragraph reflow.
+ */
 export function isStructuredList(text: string): boolean {
   const rawLines = text.split('\n').map((l) => l.trim()).filter(Boolean);
   if (rawLines.length < 3) return false;
@@ -330,6 +357,14 @@ export function isStructuredList(text: string): boolean {
   return false;
 }
 
+/**
+ * Determines whether the transition between two adjacent lines constitutes a hard boundary
+ * (such as speaker changes, sentence endings, list items, or quotes).
+ *
+ * @param prevLine - The preceding line text.
+ * @param nextLine - The following line text.
+ * @returns True if a hard break should separate the lines into distinct paragraphs.
+ */
 export function isHardLineBreak(prevLine: string, nextLine: string): boolean {
   const prev = prevLine.trim();
   const next = nextLine.trim();
@@ -343,6 +378,13 @@ export function isHardLineBreak(prevLine: string, nextLine: string): boolean {
   return false;
 }
 
+/**
+ * Splits raw multi-line OCR or translated text into logical paragraphs based on
+ * punctuation and semantic break rules, preserving bulleted lists and dialogue boundaries.
+ *
+ * @param text - Raw source text with arbitrary newline breaks.
+ * @returns Array of grouped paragraph strings ready for reflow and layout.
+ */
 export function splitIntoLogicalParagraphs(text: string): string[] {
   const rawLines = text.split('\n');
   if (rawLines.length <= 1) return [text.trim()];
@@ -380,6 +422,16 @@ export function splitIntoLogicalParagraphs(text: string): string[] {
   return paragraphs;
 }
 
+/**
+ * Reflows text into balanced wrapped lines across logical paragraphs.
+ * For structured lists, wraps line-by-line to preserve layout; for dialogue,
+ * normalizes whitespace and applies balanced wrap.
+ *
+ * @param ctx - Canvas measurement context.
+ * @param text - Text content to reflow.
+ * @param maxWidth - Available bounding width.
+ * @returns Array of wrapped lines ready for canvas rendering.
+ */
 export function reflowText(
   ctx: { measureText(t: string): { width: number } },
   text: string,
@@ -584,13 +636,20 @@ export function fitFontSizeWithLines(
 }
 
 /**
+ * Minimum separation margin between decollided boxes in pixels.
+ */
+const DECOLLIDE_MARGIN_PX = 4;
+
+/**
  * Decollides overlapping bounding boxes to prevent neighboring speech bubbles
- * from clipping into each other.
+ * from clipping into each other, preserving nested bubbles while separating adjacent ones.
+ *
+ * @param boxes - Array of rectangular boxes with position and dimensions.
+ * @returns Array of adjusted bounding boxes with collisions resolved.
  */
 export function decollideBoxes<T extends { x: number; y: number; w: number; h: number }>(boxes: T[]): T[] {
   if (boxes.length <= 1) return boxes;
   const adjusted = boxes.map((b) => ({ ...b }));
-  const margin = 4;
 
   for (let i = 0; i < adjusted.length; i++) {
     for (let j = i + 1; j < adjusted.length; j++) {
@@ -614,14 +673,14 @@ export function decollideBoxes<T extends { x: number; y: number; w: number; h: n
         if (yOverlap <= xOverlap) {
           const top = a.y <= b.y ? a : b;
           const bot = a.y <= b.y ? b : a;
-          const shift = Math.ceil((yOverlap + margin) / 2);
+          const shift = Math.ceil((yOverlap + DECOLLIDE_MARGIN_PX) / 2);
           top.h = Math.max(10, top.h - shift);
           bot.y = bot.y + shift;
           bot.h = Math.max(10, bot.h - shift);
         } else {
           const left = a.x <= b.x ? a : b;
           const right = a.x <= b.x ? b : a;
-          const shift = Math.ceil((xOverlap + margin) / 2);
+          const shift = Math.ceil((xOverlap + DECOLLIDE_MARGIN_PX) / 2);
           left.w = Math.max(10, left.w - shift);
           right.x = right.x + shift;
           right.w = Math.max(10, right.w - shift);
