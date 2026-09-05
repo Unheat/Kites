@@ -7,6 +7,7 @@
 
 import { Env } from '../types';
 import { IAuthProviderVerifier, VerifiedIdentity } from './types';
+import { tokenCache } from './token-cache';
 
 interface GoogleJwksKey {
   kty: string;
@@ -223,43 +224,69 @@ export class GoogleAuthVerifier implements IAuthProviderVerifier {
    * @throws Error if the token verification fails or audience mismatches.
    */
   async verify(token: string, env: Env): Promise<VerifiedIdentity> {
+    // 0. Check in-memory token cache first (saves latency and Google subrequests)
+    const cached = tokenCache.get(token);
+    if (cached.hit) {
+      if (cached.identity) return cached.identity;
+      throw new Error(cached.error || 'Invalid Google access token (cached rejection)');
+    }
+
     // Handle Chrome Extension OAuth Access Token
     if (token.startsWith('ya29.')) {
-      const response = await fetch(`https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(token)}`, {
-        headers: { 'User-Agent': 'Kites-Translate-Worker' },
-      });
+      try {
+        const response = await fetch(`https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(token)}`, {
+          headers: { 'User-Agent': 'Kites-Translate-Worker' },
+        });
 
-      if (!response.ok) {
-        throw new Error(`Invalid Google access token (HTTP ${response.status})`);
+        if (!response.ok) {
+          const errMsg = `Invalid Google access token (HTTP ${response.status})`;
+          tokenCache.setInvalid(token, errMsg);
+          throw new Error(errMsg);
+        }
+
+        const info = (await response.json()) as any;
+
+        if (env.GOOGLE_CLIENT_ID && info.issued_to && info.issued_to !== env.GOOGLE_CLIENT_ID && info.audience !== env.GOOGLE_CLIENT_ID) {
+          const errMsg = `Token audience mismatch: expected ${env.GOOGLE_CLIENT_ID}`;
+          tokenCache.setInvalid(token, errMsg);
+          throw new Error(errMsg);
+        }
+
+        const sub = info.sub || info.user_id;
+        if (!sub) {
+          const errMsg = 'Google tokeninfo did not return a user identifier (sub/user_id)';
+          tokenCache.setInvalid(token, errMsg);
+          throw new Error(errMsg);
+        }
+
+        const identity: VerifiedIdentity = {
+          sub,
+          provider: this.provider,
+          email: info.email,
+          name: info.name,
+        };
+
+        // Cache valid token in memory (5 min)
+        tokenCache.setValid(token, identity);
+        return identity;
+      } catch (err: any) {
+        if (!cached.hit) {
+          tokenCache.setInvalid(token, err?.message || 'Invalid access token');
+        }
+        throw err;
       }
-
-      const info = (await response.json()) as any;
-
-      if (env.GOOGLE_CLIENT_ID && info.issued_to && info.issued_to !== env.GOOGLE_CLIENT_ID && info.audience !== env.GOOGLE_CLIENT_ID) {
-        throw new Error(`Token audience mismatch: expected ${env.GOOGLE_CLIENT_ID}`);
-      }
-
-      const sub = info.sub || info.user_id;
-      if (!sub) {
-        throw new Error('Google tokeninfo did not return a user identifier (sub/user_id)');
-      }
-
-      return {
-        sub,
-        provider: this.provider,
-        email: info.email,
-        name: info.name,
-      };
     }
 
     // Handle OIDC ID Token (JWT)
     const payload = await verifyGoogleIdToken(token, env.GOOGLE_CLIENT_ID);
-    return {
+    const identity: VerifiedIdentity = {
       sub: payload.sub,
       provider: this.provider,
       email: payload.email,
       name: payload.name,
     };
+    tokenCache.setValid(token, identity);
+    return identity;
   }
 }
 

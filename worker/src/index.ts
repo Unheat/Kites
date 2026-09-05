@@ -10,9 +10,11 @@
 import { Env, OpenAIChatRequest } from './types';
 import { authManager } from './auth/manager';
 import { hashUserSubject } from './auth/google';
+import { ipRateLimiter } from './security/rate-limiter';
 export { SharedPoolDO } from './durable/SharedPoolDO';
 
 const MAX_PAYLOAD_CHARS = 1000;
+const MAX_REQUEST_BYTES = 32 * 1024; // 32 KB maximum payload pre-check
 
 /**
  * Build CORS response headers based on the request's Origin.
@@ -78,9 +80,51 @@ export default {
 
     // 3. Translation Endpoint
     if (url.pathname === '/v1/chat/completions' && request.method === 'POST') {
+      const clientIp = request.headers.get('cf-connecting-ip') || 'unknown';
+
+      // Ring 0: Pre-parse Payload Size Guard (prevents memory exhaustion before JSON parsing)
+      const contentLengthHeader = request.headers.get('content-length');
+      if (contentLengthHeader) {
+        const contentLength = parseInt(contentLengthHeader, 10);
+        if (contentLength > MAX_REQUEST_BYTES) {
+          return jsonResponse(
+            {
+              error: {
+                message: `Request entity too large: max ${MAX_REQUEST_BYTES} bytes.`,
+                type: 'invalid_request_error',
+                code: 'payload_too_large',
+              },
+            },
+            413,
+            cors
+          );
+        }
+      }
+
+      // Ring 1: In-Memory Edge IP Rate Limiter & Bad-Actor Jail
+      const rateLimit = ipRateLimiter.checkRateLimit(clientIp);
+      if (!rateLimit.allowed) {
+        const headers: Record<string, string> = { ...cors };
+        if (rateLimit.retryAfterSeconds) {
+          headers['Retry-After'] = String(rateLimit.retryAfterSeconds);
+        }
+        return jsonResponse(
+          {
+            error: {
+              message: rateLimit.reason || 'Rate limit exceeded.',
+              type: rateLimit.statusCode === 403 ? 'access_denied' : 'rate_limit_error',
+              code: rateLimit.statusCode === 403 ? 'ip_suspended' : 'ip_rate_limited',
+            },
+          },
+          rateLimit.statusCode || 429,
+          headers
+        );
+      }
+
       // Check Authorization header
       const authHeader = request.headers.get('Authorization') || '';
       if (!authHeader.startsWith('Bearer ')) {
+        ipRateLimiter.recordAuthFailure(clientIp);
         return jsonResponse(
           {
             error: {
@@ -102,6 +146,7 @@ export default {
         // Namespaced provider:sub prevents collisions across multiple identity providers
         userHash = await hashUserSubject(`${identity.provider}:${identity.sub}`, env.JWT_SALT || 'kites-salt');
       } catch (err: any) {
+        ipRateLimiter.recordAuthFailure(clientIp);
         return jsonResponse(
           {
             error: {
