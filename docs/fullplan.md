@@ -142,6 +142,14 @@ To solve this, we implement a **6-Tier Hybrid Inpainting Pipeline** wrapped in a
 > **Architectural Note (Deliberate Exception to Cotrans Alignment):**
 > Inpainting is the **explicit architectural exception** where Kites does NOT strictly follow Cotrans Python. While Cotrans hardcodes a single heavy Python inpainting model, Kites provides a flexible 6-Tier hybrid engine where **Tier 1 (Direct 4-Point Polygon Patching & Dominant Edge Color Fill)** is used by default for 0MB download footprint and instant microsecond execution. Users can optionally select Tier 2 (Telea Math) or Tiers 3–4 (AOT-GAN / LaMa ONNX) depending on their device capabilities, balancing speed vs visual hallucination quality.
 
+> [!WARNING]
+> **LOCKED DECISION — Polygon-Only Engine Contract (do not change without user approval):**
+> Engines receive **only text polygons** and build their own masks from them. The DBNet probability-map canvas (`ocrResult.maskRawCanvas`) is deliberately **NOT forwarded** to engines. This exact design was tried and stripped twice: it existed in early v1, was cut because the neural blob-shaped fills looked worse than clean polygon fills, was accidentally re-revived during the v2 algorithm porting session (causing bubble-shaped gray fills), and was reverted again (`InpaintManager._maskRawCanvas` is an intentionally unused parameter — it is NOT a bug to fix). The reasons it keeps losing:
+> 1. For **flat fills** (simple tier), the polygon envelope is strictly better — it covers anti-aliased glyph fringes and produces clean straight text-box-shaped edges.
+> 2. Neural tiers (LaMa) synthesize their own dilated polygon masks tuned to the model's expectations.
+> 3. The DBNet raw mask is a per-detection segmentation blob, not a text box — filling it paints neural shapes, not text regions.
+> Tier responsibilities stay in their lanes: **simple = dumb and fast** (inside-polygon bright-pixel sampling, flat fill — it must never grow "smart" inpainting logic), **telea/aot/lama-manga = quality tiers** where all algorithmic work happens inside the engine. `maskRawCanvas` remains on `OcrResult` (a free DBNet byproduct) for diagnostics and visual tests only.
+
 ```mermaid
 graph TD
     ImageBuffer[Raw Image Buffer] --> InpaintManager
@@ -149,27 +157,22 @@ graph TD
     
     InpaintManager --> EngineRouter{Engine Selector}
     
-    EngineRouter -- Tier 1: Simple Fill --> SimpleEngine[SimpleInpaintEngine: Sample Edge & Fill Bbox]
-    EngineRouter -- Tier 2: Telea Math --> TeleaEngine[TeleaInpaintEngine: FMM Diffusion]
-    EngineRouter -- Tier 3: AOT-GAN --> AotEngine[AotInpaintEngine: Quantized ONNX Model]
-    EngineRouter -- Tier 4: LaMa AI --> LamaEngine[LamaInpaintEngine: Fourier CNN ONNX Model]
+    EngineRouter -- Tier 1: Simple Fill --> SimpleEngine[SimpleInpaintEngine: Inside-Polygon Bright-Pixel Median Fill]
+    EngineRouter -- Tier 2: Telea Math --> TeleaEngine[TeleaInpaintEngine: Synthesizes Dilated Polygon Mask + FMM Diffusion]
+    EngineRouter -- Tier 3: AOT-GAN --> AotEngine[AotInpaintEngine: Polygon Mask + Quantized ONNX Model]
+    EngineRouter -- Tier 4: LaMa AI --> LamaEngine[LamaInpaintEngine: Polygon Mask + Fourier CNN ONNX Model]
     EngineRouter -- Tier 5: None --> NoneEngine[NoneInpaintEngine: Bypass Erase]
     EngineRouter -- Tier 6: Original --> OriginalEngine[OriginalInpaintEngine: Bypass All]
     
-    InpaintManager --> Binarizer[Binarizer: Extract Text Stroke Mask]
-    Binarizer -.-> StrokeMask[Stroke-Level Mask Canvas]
-    
     ImageBuffer --> SimpleEngine
+    Polygons -.-> SimpleEngine
+    Polygons -.-> TeleaEngine
+    Polygons -.-> AotEngine
+    Polygons -.-> LamaEngine
     
     ImageBuffer --> TeleaEngine
-    StrokeMask -.-> TeleaEngine
-    
     ImageBuffer --> AotEngine
-    StrokeMask -.-> AotEngine
-    
     ImageBuffer --> LamaEngine
-    StrokeMask -.-> LamaEngine
-    
     ImageBuffer --> NoneEngine
     ImageBuffer --> OriginalEngine
     
@@ -184,8 +187,9 @@ graph TD
 #### The Binarizer (Handling the Border-Erase Problem)
 Instead of masking the entire blocky bounding box, we extract a **pixel-perfect mask of the exact text strokes**.
 * **Grayscale + Otsu's Adaptive Thresholding:** Runs on each cropped text box canvas to separate high-contrast text strokes from the bubble background.
+* **Contract note (locked):** Each engine synthesizes its own mask internally from the polygons it receives (e.g. Telea dilates the polygon; LaMa rasterizes polygon fills). The standalone `Binarizer` class and the DBNet raw mask (`maskRawCanvas`) remain available for diagnostics and visual tests, but are not part of the production fill path — see the LOCKED DECISION note above.
 #### The 6 Inpainting Tiers:
-1. **Tier 1: Simple Inpaint (Dominant Color Fill):** Samples pixel colors along the bounding box outer edges, determines the dominant color, and fills the bounding rectangle. Runs in microseconds (`0MB`).
+1. **Tier 1: Simple Inpaint (Dominant Color Fill):** Samples bright pixels (luminance >= 180, first-pixel fallback) strictly inside the OCR polygon — the bubble paper between glyph strokes — and fills the polygon with the sampled median color. Runs in microseconds (`0MB`). Deliberately kept at v1 logic: quality work belongs to the higher tiers.
 2. **Tier 2: Telea Math Inpaint (FMM Diffusion):** Applies Alexandru Telea's Fast Marching Method FMM algorithm on the stroke mask, propagating surrounding background colors inward to erase characters. Extremely fast (`0MB`), preserves outlines.
 3. **Tier 3: AOT-GAN Inpaint (Quantized ONNX):** Runs a lightweight generative adversarial network inpainting model. Learns manga textures and screentones to reconstruct backgrounds behind erased text. Fast (`~10MB`), runs via WebGPU when available.
 4. **Tier 4: LaMa Inpaint (Fourier CNN ONNX):** Runs the Large Mask Inpainting model using Fast Fourier Convolutions to hallucinate large or complex textures globally. Highly robust, larger download (`~30MB`).
@@ -212,6 +216,7 @@ Because adding a completely new inpainting model architecture requires specific 
 - **Phase 5 (Algorithmic Typesetting & Merge Improvements):** 
   - *V2 Algorithmic Pipeline*: Upgraded `OcrManager` with Cotrans-aligned majority direction voting (`majorityDirection`), orphan punctuation recovery, Furigana Kana filtering, duplicate vertical column deduping, and Kruskal MST region splitting.
   - *Hybrid Typesetting*: Implementation of 1:1 Cotrans DEFAULT affine-warp renderer (`cotransDefaultRenderer.ts`) and XianScan-style hybrid typeset layout engine (`typesetLayout.ts`) with morphological hyphenation, balanced diamond line envelope wrapping, 4-pass binary search fitting, and speech bubble decollision (`decollideBoxes`). [Completed]
+  - *Inpainting Contract (Locked)*: Engines receive polygons only and synthesize their own masks; DBNet raw-mask forwarding is a rejected design (tried and stripped twice — see the LOCKED DECISION warning in section F). Simple tier pinned to v1 logic; quality tiers own all algorithmic erasure work. [Completed]
 - **Phase 6 (Future Improvements):** 
   - *OCR Migration*: Migrate from PaddleOCR DBNet to `ComicTextDetector` (YOLOv5 ONNX ~90MB) on WebGPU to generate non-spiky, tight bounding boxes and allow direct 1:1 typesetting without heuristic expansion.
 ## 3. Important References & Tool Links

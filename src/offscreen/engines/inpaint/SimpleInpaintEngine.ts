@@ -4,6 +4,13 @@ import type { IInpaintEngine, Point2D } from './BaseInpaintEngine';
  * Tier 1 Inpainting Engine: Dominant Edge Color Fill.
  * Samples the border pixels around each text block and fills the polygon path with the average color.
  * Very fast, 0MB download footprint.
+ *
+ * LOCKED TO V1 LOGIC (see InpaintManager header): inside-polygon bright-pixel
+ * sampling (luminance >= 180, first-pixel fallback), median fill. Do NOT add ring
+ * sampling, background gating, white-snapping, or mask-forwarding here — all three
+ * were tried in the v2 session, each caused visible regressions (gray blocks,
+ * bubble-shaped blob fills), and each was reverted. Quality work belongs to the
+ * LaMa tier; this tier must stay dumb and fast.
  */
 export class SimpleInpaintEngine implements IInpaintEngine {
   private platform: any;

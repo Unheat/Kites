@@ -9,8 +9,30 @@ import { OriginalInpaintEngine } from '../engines/inpaint/OriginalInpaintEngine'
 export type InpaintTier = 'simple' | 'telea' | 'aot' | 'aotgan' | 'lama-manga' | 'none' | 'original';
 
 /**
- * Orchestrator and single entry-point for the image inpainting / background erasing pipeline.
- * Selects the requested engine, manages resource lifetimes, and executes the erasure.
+ * LOCKED ARCHITECTURE — DO NOT CHANGE WITHOUT USER APPROVAL (v2 decision, 2026-09).
+ *
+ * Engines receive ONLY text polygons and build their own masks from them.
+ * The DBNet probability-map canvas (`ocrResult.maskRawCanvas`) is deliberately NOT
+ * forwarded to engines. History: the forwarding existed, was deliberately stripped
+ * (v1 — the blob-shaped fills looked bad), was accidentally re-revived in the v2
+ * porting session, caused bubble-shaped gray fills, and was reverted again
+ * (`_maskRawCanvas` unused parameter is INTENTIONAL, not a bug).
+ *
+ * Why polygons only:
+ * - For FLAT fills (simple tier) the polygon envelope is strictly better: covers
+ *   anti-aliased glyph fringes and produces clean straight edges.
+ * - Neural tiers (LaMa) generate their own dilated polygon masks tuned to the model.
+ * - The DBNet raw mask is a per-detection blob, not a text-box — filling it paints
+ *   neural-segmentation shapes, not text regions.
+ *
+ * Tier responsibilities (the ladder — do not blur them):
+ * - 'simple': dumb and fast, 0MB. Inside-polygon bright-pixel sampling, flat fill.
+ *   Must NEVER grow inpainting logic — quality work belongs to the LaMa tier.
+ * - 'telea' / 'aot' / 'lama-manga': the quality tiers. All model/algorithm work
+ *   happens inside the engine, fed by polygons.
+ *
+ * `maskRawCanvas` remains available on OcrResult (free DBNet byproduct) for
+ * diagnostics/visual tests — but filling with it is a rejected design.
  */
 export class InpaintManager {
   private platform: any = null;
