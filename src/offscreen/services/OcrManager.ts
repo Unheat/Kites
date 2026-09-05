@@ -1,7 +1,7 @@
 import type { IOcrEngine, OcrResult } from '../engines/ocr/BaseOcrEngine';
 import { PaddleOcrEngine } from '../engines/ocr/PaddleOcrEngine';
 import { resolveOcrTier } from '../engines/ocr/ocrRegistry';
-import { Quadrilateral, Graph, calculateBoundingBox, computeMinAreaRect, polygonArea, quadrilateralCanMergeRegion, splitTextRegion } from '../../shared/utils/geometry';
+import { Quadrilateral, Graph, calculateBoundingBox, computeMinAreaRect, polygonArea, quadrilateralCanMergeRegion, splitTextRegion, calculateRotationAngle } from '../../shared/utils/geometry';
 import {
   isScanlatorWatermark,
   isThoughtBubbleTailOrnament,
@@ -186,11 +186,81 @@ export class OcrManager {
     }
     const sourceLang = context?.sourceLang;
 
+    // XianScan fusion.rs:72-146 line pre-filter battery (geometry + score only).
+    // Active only when page dimensions are provided. Drops: giant artwork
+    // hallucinations, high-tilt low-confidence lines, non-Latin slanted non-native
+    // lines, margin-flush architectural texture noise, and thin sliver subsegments.
+    const pageWidth = context?.pageWidth;
+    const pageHeight = context?.pageHeight;
+    const allLineIndices = rawTexts
+      .map((_, i) => i)
+      .filter(i => rawTexts[i].trim() && rawPolygons[i] && rawPolygons[i].length >= 3);
+    let universe = allLineIndices;
+    if (pageWidth && pageHeight) {
+      const survivors: number[] = [];
+      for (const i of allLineIndices) {
+        const poly = rawPolygons[i];
+        const box = calculateBoundingBox(poly);
+        const score = rawScores[i] || 0;
+        const t = rawTexts[i].trim();
+        const angleDeg = (Math.abs(calculateRotationAngle(poly)) * 180) / Math.PI;
+
+        // 1. Giant artwork hallucination
+        if (box.width >= pageWidth * 0.60 && box.height >= 120 && score < 0.75) {
+          console.log(`[OcrManager] Battery: dropped giant hallucination "${t}" (${Math.round(box.width)}x${Math.round(box.height)}, score=${score.toFixed(2)})`);
+          continue;
+        }
+        // 3. High-tilt non-dialogue with low confidence
+        if (angleDeg >= 12.0 && score < 0.60) {
+          console.log(`[OcrManager] Battery: dropped high-tilt line "${t}" (${angleDeg.toFixed(1)}deg, score=${score.toFixed(2)})`);
+          continue;
+        }
+        // 3b. Non-Latin source + slanted + no native script
+        if (sourceLang && isNonLatinSource(sourceLang) && angleDeg >= 10.0 && !hasNativeScriptForLang(t, sourceLang)) {
+          console.log(`[OcrManager] Battery: dropped slanted non-native line "${t}" (${angleDeg.toFixed(1)}deg)`);
+          continue;
+        }
+        // 4. Margin-flush architectural / border texture noise
+        if ((box.x <= 5 || box.x + box.width >= pageWidth - 5) && score < 0.75) {
+          console.log(`[OcrManager] Battery: dropped margin-flush line "${t}" (score=${score.toFixed(2)})`);
+          continue;
+        }
+        survivors.push(i);
+      }
+
+      // 4b. Thin sliver subsegments (h <= 25) overlapping a normal-height line
+      const normalIndices = survivors.filter(i => {
+        const b = calculateBoundingBox(rawPolygons[i]);
+        return b.height >= 28 && (rawScores[i] || 0) >= 0.65 && b.height <= b.width * 1.25;
+      });
+      universe = survivors.filter(i => {
+        const b = calculateBoundingBox(rawPolygons[i]);
+        if (b.height > b.width * 1.25 || b.height > 25) return true;
+        const t = rawTexts[i].trim();
+        const isSliver = normalIndices.some(ni => {
+          const nb = calculateBoundingBox(rawPolygons[ni]);
+          const ix = Math.min(b.x + b.width, nb.x + nb.width) - Math.max(b.x, nb.x);
+          const iy = Math.min(b.y + b.height, nb.y + nb.height) - Math.max(b.y, nb.y);
+          if (ix <= 0 || iy <= 0) return false;
+          const overlapY = iy / b.height;
+          const overlapX = ix / Math.min(b.width, nb.width);
+          const nt = rawTexts[ni].trim();
+          const isSub = nt.includes(t) && nt.length > t.length;
+          return (overlapY >= 0.60 && overlapX >= 0.50) || (overlapY >= 0.50 && isSub);
+        });
+        if (isSliver) {
+          console.log(`[OcrManager] Battery: dropped thin sliver "${rawTexts[i].trim()}" (h=${Math.round(b.height)})`);
+        }
+        return !isSliver;
+      });
+      console.log(`[OcrManager] Battery: ${allLineIndices.length} -> ${universe.length} lines after geometry pre-filter`);
+    }
+
     // XianScan-style orphan punctuation recovery. Cotrans deliberately drops pure punctuation
     // as noise, but vertical manga often detects a terminal `!`/`?` in its own small quad.
     const purePunctuation = /^[！!？?…~〜ー─―.]+$/;
     const claimedPunctuation = new Set<number>();
-    for (let punctuationIndex = 0; punctuationIndex < rawTexts.length; punctuationIndex++) {
+    for (const punctuationIndex of universe) {
       const punctuation = rawTexts[punctuationIndex]?.trim();
       const punctuationPolygon = rawPolygons[punctuationIndex];
       if (!punctuation || !purePunctuation.test(punctuation) || !punctuationPolygon || punctuationPolygon.length < 3) continue;
@@ -198,7 +268,7 @@ export class OcrManager {
       const punctuationBox = calculateBoundingBox(punctuationPolygon);
       let closestIndex = -1;
       let closestDistance = Number.POSITIVE_INFINITY;
-      for (let lineIndex = 0; lineIndex < rawTexts.length; lineIndex++) {
+      for (const lineIndex of universe) {
         if (lineIndex === punctuationIndex || !isValuableText(rawTexts[lineIndex] || '')) continue;
         const linePolygon = rawPolygons[lineIndex];
         if (!linePolygon || linePolygon.length < 3) continue;
@@ -226,7 +296,7 @@ export class OcrManager {
 
     // Stage 1: Cotrans Noise Filtering (area > 16, non-empty text, and isValuableText - manga_translator.py)
     const validIndices: number[] = [];
-    for (let i = 0; i < rawTexts.length; i++) {
+    for (const i of universe) {
       const poly = rawPolygons[i];
       let txt = rawTexts[i];
       if (!poly || poly.length < 3) continue;

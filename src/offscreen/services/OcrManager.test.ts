@@ -218,6 +218,85 @@ describe('OcrManager', () => {
     });
   });
 
+  describe('line pre-filter battery (XianScan fusion.rs:72)', () => {
+    function mockBatteryEngine(lines: { texts: string[]; polygons: { x: number; y: number }[][]; scores: number[] }): void {
+      (PaddleOcrEngine as any).mockImplementation(function () {
+        return {
+          preset: 'v6-small',
+          init: vi.fn().mockResolvedValue(undefined),
+          recognize: vi.fn().mockResolvedValue({
+            texts: lines.texts,
+            polygons: lines.polygons,
+            scores: lines.scores,
+            detectionScores: lines.scores.map(() => 0.98),
+            boxes: lines.polygons.map(p => ({ x: p[0].x, y: p[0].y, w: p[1].x - p[0].x, h: p[2].y - p[0].y }))
+          }),
+          destroy: vi.fn().mockResolvedValue(undefined)
+        };
+      });
+    }
+
+    afterEach(() => {
+      (PaddleOcrEngine as any).mockImplementation(function (preset: string) {
+        return {
+          preset,
+          init: vi.fn().mockResolvedValue(undefined),
+          recognize: vi.fn().mockResolvedValue({
+            texts: ['Sample text'],
+            polygons: [[{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 50 }, { x: 0, y: 50 }]],
+            scores: [0.95],
+            detectionScores: [0.98],
+            boxes: [{ x: 0, y: 0, w: 100, h: 50 }]
+          }),
+          destroy: vi.fn().mockResolvedValue(undefined)
+        };
+      });
+    });
+
+    it('drops giant low-confidence hallucinations when page dims are provided', async () => {
+      mockBatteryEngine({
+        texts: ['今日はいい天気', 'hallucinated artwork'],
+        polygons: [
+          [{ x: 50, y: 50 }, { x: 150, y: 50 }, { x: 150, y: 90 }, { x: 50, y: 90 }],
+          // Giant: w=640 >= 0.6*1000, h=200 >= 120, score 0.60 < 0.75
+          [{ x: 100, y: 300 }, { x: 740, y: 300 }, { x: 740, y: 500 }, { x: 100, y: 500 }]
+        ],
+        scores: [0.95, 0.60]
+      });
+      const result = await ocrManager.processImage(new ArrayBuffer(16), 'v6-small', { sourceLang: 'ja', pageWidth: 1000, pageHeight: 1400 });
+      expect(result.texts).toHaveLength(1);
+      expect(result.texts[0]).toContain('今日はいい天気');
+    });
+
+    it('is inactive without page dims', async () => {
+      mockBatteryEngine({
+        texts: ['今日はいい天気', 'hallucinated artwork'],
+        polygons: [
+          [{ x: 50, y: 50 }, { x: 150, y: 50 }, { x: 150, y: 90 }, { x: 50, y: 90 }],
+          [{ x: 100, y: 300 }, { x: 740, y: 300 }, { x: 740, y: 500 }, { x: 100, y: 500 }]
+        ],
+        scores: [0.95, 0.60]
+      });
+      const result = await ocrManager.processImage(new ArrayBuffer(16), 'v6-small', { sourceLang: 'ja' });
+      // No dims -> battery inactive; giant survives, but Latin prune (ja context) still applies
+      expect(result.texts).toHaveLength(1);
+      expect(result.texts[0]).toContain('今日はいい天気');
+    });
+
+    it('keeps high-confidence giants (rule is score-gated)', async () => {
+      mockBatteryEngine({
+        texts: ['今日はいい天気', '大きな看板の文字です'],
+        polygons: [
+          [{ x: 50, y: 50 }, { x: 150, y: 50 }, { x: 150, y: 90 }, { x: 50, y: 90 }],
+          [{ x: 100, y: 300 }, { x: 740, y: 300 }, { x: 740, y: 500 }, { x: 100, y: 500 }]
+        ],
+        scores: [0.95, 0.90]
+      });
+      const result = await ocrManager.processImage(new ArrayBuffer(16), 'v6-small', { sourceLang: 'ja', pageWidth: 1000, pageHeight: 1400 });
+      expect(result.texts).toHaveLength(2);
+    });
+  });
+
   describe('processImage & cleanup', () => {
     it('processes image and returns OCR result with text block merging', async () => {
       const buffer = new ArrayBuffer(16);
