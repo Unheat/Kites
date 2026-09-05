@@ -111,13 +111,21 @@ export class SimpleInpaintEngine implements IInpaintEngine {
       const bSamples: number[] = [];
       const luminances: number[] = [];
 
-      // Collect background samples from outside the polygon with a light luminance floor
-      const sampleCollector = (luminanceFloor: number) => {
+      const resetSamples = () => {
+        rSamples.length = 0;
+        gSamples.length = 0;
+        bSamples.length = 0;
+        luminances.length = 0;
+      };
+
+      // Samples pixels matching the `insidePolygon` filter above a luminance floor.
+      const collectSamples = (insidePolygon: boolean, luminanceFloor: number) => {
         for (let i = 0; i < w * h; i++) {
           const idx = i * 4;
           const isInsideTextPolygon = polyData[idx] > 0;
+          if (isInsideTextPolygon !== insidePolygon) continue;
           const isStroke = (maskImgData?.data[idx] ?? 0) > 127;
-          if (isInsideTextPolygon || isStroke) continue;
+          if (isStroke) continue;
 
           const rPixel = pixels[idx];
           const gPixel = pixels[idx + 1];
@@ -131,16 +139,36 @@ export class SimpleInpaintEngine implements IInpaintEngine {
         }
       };
 
-      // Primary pass: skip dark ink outlines
-      sampleCollector(80);
-      // Fallback: dark/saturated pages have almost no pixels above 80 luminance; without
-      // this, median fallback would incorrectly snap to white on dark panels.
-      if (rSamples.length < 8) {
-        rSamples.length = 0;
-        gSamples.length = 0;
-        bSamples.length = 0;
-        luminances.length = 0;
-        sampleCollector(0);
+      const stats = () => {
+        if (luminances.length === 0) return { mean: 0, stdDev: 255 };
+        const mean = luminances.reduce((sum, value) => sum + value, 0) / luminances.length;
+        const stdDev = Math.sqrt(luminances.reduce((sum, value) => sum + (value - mean) ** 2, 0) / luminances.length);
+        return { mean, stdDev };
+      };
+
+      // Strategy 1 (XianScan gate): the exterior ring is used ONLY when it is a confirmed
+      // white-bubble or flat-solid background. Kites' OCR polygons are tight per-line
+      // quads, so on dark art or dense vertical columns the ring hits neighboring ink —
+      // ungated ring sampling produced gray blocks (regression vs v1).
+      collectSamples(false, 80);
+      const ringStats = stats();
+      const ringIsSolid = (ringStats.mean >= WHITE_BUBBLE_LUMINANCE_MIN && ringStats.stdDev < WHITE_BUBBLE_STANDARD_DEVIATION_MAX)
+        || ringStats.stdDev < 4;
+
+      // Strategy 2 (v1 behavior): bubble paper BETWEEN glyph strokes. White-bubble
+      // interiors stay white regardless of the artwork outside the polygon.
+      if (!ringIsSolid) {
+        resetSamples();
+        collectSamples(true, 180);
+        if (rSamples.length < 8) {
+          resetSamples();
+          collectSamples(true, 120);
+        }
+        if (rSamples.length < 8) {
+          // Strategy 3: interior without floor — dark-art panels get an art-matched fill.
+          resetSamples();
+          collectSamples(true, 0);
+        }
       }
 
       const median = (samples: number[], fallback: number): number => {
@@ -148,17 +176,12 @@ export class SimpleInpaintEngine implements IInpaintEngine {
         samples.sort((a, b) => a - b);
         return samples[Math.floor(samples.length / 2)];
       };
-      const meanLuminance = luminances.length > 0
-        ? luminances.reduce((sum, value) => sum + value, 0) / luminances.length
-        : 0;
-      const standardDeviation = luminances.length > 0
-        ? Math.sqrt(luminances.reduce((sum, value) => sum + (value - meanLuminance) ** 2, 0) / luminances.length)
-        : 0;
+      const { mean: meanLuminance, stdDev: standardDeviation } = stats();
 
       let r = median(rSamples, 128);
       let g = median(gSamples, 128);
       let b = median(bSamples, 128);
-      if (meanLuminance >= WHITE_BUBBLE_LUMINANCE_MIN && standardDeviation < WHITE_BUBBLE_STANDARD_DEVIATION_MAX) {
+      if (rSamples.length > 0 && meanLuminance >= WHITE_BUBBLE_LUMINANCE_MIN && standardDeviation < WHITE_BUBBLE_STANDARD_DEVIATION_MAX) {
         r = 255;
         g = 255;
         b = 255;
