@@ -314,6 +314,17 @@ export function sanitizeTypesetText(text: string): string {
   if (!text) return '';
   let out = text.trim();
 
+  // Strip markdown formatting decorators defensively before font measurement and rendering
+  out = out
+    .replace(/\*\*\*(.*?)\*\*\*/g, '$1')
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/\*(.*?)\*/g, '$1')
+    .replace(/___(.*?)___/g, '$1')
+    .replace(/__(.*?)__/g, '$1')
+    .replace(/_(.*?)_/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
+    .trim();
+
   if (!CJK_SCRIPT_REGEX.test(out)) {
     out = out
       // CJK brackets/quotes to ASCII typography

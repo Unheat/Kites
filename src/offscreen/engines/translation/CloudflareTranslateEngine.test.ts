@@ -38,6 +38,44 @@ describe('CloudflareTranslateEngine', () => {
     expect(result).toEqual(['Hello world', 'Good morning']);
   });
 
+  it('strips markdown asterisks from model translation', async () => {
+    const mockResponse = {
+      choices: [
+        {
+          message: {
+            content: '<|1|> **Preface**\n<|2|> *whispering*',
+          },
+        },
+      ],
+    };
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(JSON.stringify(mockResponse), { status: 200 })
+    );
+
+    const result = await engine.translate(['序言', '晃'], 'zh', 'en');
+    expect(result).toEqual(['Preface', 'whispering']);
+  });
+
+  it('preserves alignment without shifting when upstream model drops a tag', async () => {
+    const mockResponse = {
+      choices: [
+        {
+          message: {
+            content: '<|1|> Kotoha\n<|3|> Welcome to our park',
+          },
+        },
+      ],
+    };
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(JSON.stringify(mockResponse), { status: 200 })
+    );
+
+    const result = await engine.translate(['琴叶', '姓名：', '欢迎光临'], 'zh', 'en');
+    expect(result).toEqual(['Kotoha', '姓名：', 'Welcome to our park']);
+  });
+
   it('throws CloudflarePoolExhaustedError when pool returns quota_exhausted', async () => {
     const errorResponse = {
       error: {

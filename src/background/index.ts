@@ -1,6 +1,7 @@
 import { db, cleanupOldJobs } from '../db';
 import type { ProcessJobMessage, PopupState, PreloadActiveEngineMessage } from '../shared/types';
 import { DEFAULT_POPUP_STATE } from '../shared/types';
+import { CLOUDFLARE_QUOTA_DEFAULT_ENDPOINT } from '../shared/constants';
 import modelsRegistryData from '../shared/models-registry.json';
 import { normalizeCustomApiConfig } from '../shared/customApi';
 import { inpaintRegistry } from '../offscreen/engines/inpaint/inpaintRegistry';
@@ -230,7 +231,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           return sendResponse({ success: false, error: 'No auth token available' });
         }
 
-        const res = await fetch('https://kites-worker.dangtruongan2003.workers.dev/v1/quota', {
+        const res = await fetch(CLOUDFLARE_QUOTA_DEFAULT_ENDPOINT, {
           headers: { Authorization: `Bearer ${token}` }
         });
 

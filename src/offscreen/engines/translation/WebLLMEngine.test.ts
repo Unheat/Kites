@@ -88,9 +88,9 @@ describe('WebLLMEngine Delimiter Batching', () => {
     const callArg = mockCreate.mock.calls[0][0];
     const prompt = callArg.messages[0].content;
     
-    expect(prompt).toContain('<|1|>Hello');
+    expect(prompt).toContain('<|1|> Hello');
     expect(prompt).not.toContain('<|2|>   ');
-    expect(prompt).toContain('<|2|>World');
+    expect(prompt).toContain('<|2|> World');
   });
 
   it('should fallback to splitting by newline if delimiters are omitted', async () => {

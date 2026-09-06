@@ -32,6 +32,26 @@ function PopupApp() {
       }
       setIsLoaded(true);
     });
+
+    // Listen to changes in chrome.storage.local to reactively reflect quota/state updates
+    const handleStorageChange = (
+      changes: { [key: string]: chrome.storage.StorageChange },
+      areaName: string
+    ) => {
+      if (areaName === 'local' && changes.popupState?.newValue) {
+        setState(prev => ({ ...prev, ...(changes.popupState.newValue as Partial<PopupState>) }));
+      }
+    };
+
+    if (typeof chrome !== 'undefined' && chrome.storage?.onChanged) {
+      chrome.storage.onChanged.addListener(handleStorageChange);
+    }
+
+    return () => {
+      if (typeof chrome !== 'undefined' && chrome.storage?.onChanged) {
+        chrome.storage.onChanged.removeListener(handleStorageChange);
+      }
+    };
   }, []);
 
   // Apply dark mode to HTML tag
@@ -46,7 +66,15 @@ function PopupApp() {
   const updateState = (updates: Partial<PopupState>) => {
     setState(prev => {
       const newState = { ...prev, ...updates };
-      chrome.storage.local.set({ popupState: newState });
+      // Atomically update storage with merged state
+      chrome.storage.local.get('popupState').then(data => {
+        const currentStored = (data?.popupState || {}) as PopupState;
+        chrome.storage.local.set({
+          popupState: { ...currentStored, ...updates }
+        }).catch(() => {});
+      }).catch(() => {
+        chrome.storage.local.set({ popupState: newState }).catch(() => {});
+      });
       return newState;
     });
   };

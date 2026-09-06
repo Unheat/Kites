@@ -118,6 +118,12 @@ describe('textCleaning', () => {
       expect(sanitizeTypesetText('It’s fine〜')).toBe("It's fine~");
     });
 
+    it('strips markdown bold, italic, and backticks defensively', () => {
+      expect(sanitizeTypesetText('**Preface**')).toBe('Preface');
+      expect(sanitizeTypesetText('**Welcome to "Sweet Garden"** *(designed for adult care)*')).toBe('Welcome to "Sweet Garden" (designed for adult care)');
+      expect(sanitizeTypesetText('`code` and *italic* and _text_')).toBe('code and italic and text');
+    });
+
     it('collapses spaced OCR letters without touching contractions', () => {
       expect(sanitizeTypesetText('H E L L O')).toBe('HELLO');
       expect(sanitizeTypesetText("D O N ' T")).toContain("'");
