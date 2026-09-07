@@ -1,4 +1,4 @@
-import { db, cleanupOldJobs } from '../db';
+import { db, cleanupOldJobs, deleteJobs } from '../db';
 import type { ProcessJobMessage, PopupState, PreloadActiveEngineMessage } from '../shared/types';
 import { DEFAULT_POPUP_STATE } from '../shared/types';
 import { CLOUDFLARE_QUOTA_DEFAULT_ENDPOINT } from '../shared/constants';
@@ -6,6 +6,7 @@ import modelsRegistryData from '../shared/models-registry.json';
 import { normalizeCustomApiConfig } from '../shared/customApi';
 import { inpaintRegistry } from '../offscreen/engines/inpaint/inpaintRegistry';
 import { resolveOcrTier } from '../offscreen/engines/ocr/ocrRegistry';
+import { normalizeRenderFontPresetId } from '../shared/renderFontPresets';
 import { oAuthManager } from './auth/OAuthManager';
 
 // Magic Number: Limit concurrency to avoid network/CPU throttling
@@ -70,14 +71,16 @@ function normalizePopupState(popupState: PopupState): { state: PopupState; chang
     ? rawInpaintId
     : DEFAULT_POPUP_STATE.activeInpaintId;
   const activeOcrId = resolveOcrTier(popupState.activeOcrId);
+  const renderFontPresetId = normalizeRenderFontPresetId(popupState.renderFontPresetId);
   const changed = activeEngineId !== popupState.activeEngineId ||
     activeInpaintId !== popupState.activeInpaintId ||
     activeOcrId !== popupState.activeOcrId ||
+    renderFontPresetId !== popupState.renderFontPresetId ||
     fallbackChain.length !== fallbackSource.length ||
     uniqueCustomApis.length !== (Array.isArray(popupState.customApis) ? popupState.customApis.length : 0);
 
   return {
-    state: changed ? { ...popupState, customApis: uniqueCustomApis, activeEngineId, activeInpaintId, activeOcrId, fallbackChain } : popupState,
+    state: changed ? { ...popupState, customApis: uniqueCustomApis, activeEngineId, activeInpaintId, activeOcrId, renderFontPresetId, fallbackChain } : popupState,
     changed,
   };
 }
@@ -104,6 +107,12 @@ function setupContextMenu(): void {
 
 chrome.contextMenus.onClicked.addListener(async (info: chrome.contextMenus.OnClickData, _tab?: chrome.tabs.Tab) => {
   if (info.menuItemId === 'translate-image' && info.srcUrl) {
+    const data = await chrome.storage.local.get('popupState');
+    const popupState = data.popupState as PopupState | undefined;
+    if (popupState && popupState.isExtensionEnabled === false) {
+      console.log('[Background] Context menu ignored: Kites extension is disabled.');
+      return;
+    }
     console.log('[Background] Context menu clicked. Target URL:', info.srcUrl);
     try {
       await queueTranslation(info.srcUrl, _tab?.id);
@@ -139,10 +148,20 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'TRANSLATE_IMAGE') {
     const srcUrl = message.payload?.srcUrl || message.url || message.srcUrl;
     if (srcUrl) {
-      console.log('[Background] Received TRANSLATE_IMAGE from content script. URL:', srcUrl);
-      queueTranslation(srcUrl, _sender.tab?.id)
-        .then(() => sendResponse({ status: 'queued' }))
-        .catch((err) => sendResponse({ status: 'error', error: err instanceof Error ? err.message : String(err) }));
+      chrome.storage.local.get('popupState').then((data) => {
+        const popupState = data.popupState as PopupState | undefined;
+        if (popupState && popupState.isExtensionEnabled === false) {
+          console.warn('[Background] Rejected TRANSLATE_IMAGE: Kites extension is disabled.');
+          sendResponse({ status: 'error', error: 'Extension is disabled' });
+          return;
+        }
+        console.log('[Background] Received TRANSLATE_IMAGE from content script. URL:', srcUrl);
+        queueTranslation(srcUrl, _sender.tab?.id)
+          .then(() => sendResponse({ status: 'queued' }))
+          .catch((err) => sendResponse({ status: 'error', error: err instanceof Error ? err.message : String(err) }));
+      }).catch((err) => {
+        sendResponse({ status: 'error', error: err instanceof Error ? err.message : String(err) });
+      });
       return true; // Keep message channel open for async response
     }
   }
@@ -275,7 +294,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 // Trigger preload and auto-download on extension boot
 chrome.runtime.onStartup.addListener(async () => {
   console.log('[Background] Extension startup. Preloading active engine & default OCR...');
-  cleanupOldJobs(7);
+  await cleanupOldJobs();
   try {
     await sendMessageToOffscreen({ type: 'PRELOAD_ACTIVE_ENGINE' } as PreloadActiveEngineMessage);
     await sendMessageToOffscreen({
@@ -290,7 +309,7 @@ chrome.runtime.onStartup.addListener(async () => {
 chrome.runtime.onInstalled.addListener(async () => {
   console.log('[Background] Extension installed/updated. Preloading active engine & default OCR...');
   setupContextMenu();
-  cleanupOldJobs(7);
+  await cleanupOldJobs();
   try {
     await sendMessageToOffscreen({
       type: 'START_MODEL_DOWNLOAD',
@@ -387,7 +406,7 @@ async function queueTranslation(srcUrl: string, tabId?: number) {
   }
 
   if (existingJob) {
-    await db.translationJobs.delete(existingJob.id!);
+    await deleteJobs([existingJob.id!]);
   }
 
   console.log('[Background] Queuing image URL:', srcUrl);

@@ -39,6 +39,7 @@
     "@vitejs/plugin-react": "^6.0.3",
     "autoprefixer": "^10.5.2",
     "canvas": "^3.2.3",
+    "fake-indexeddb": "^6.2.5",
     "jsdom": "^29.1.1",
     "onnxruntime-node": "^1.27.0",
     "oxlint": "^1.71.0",

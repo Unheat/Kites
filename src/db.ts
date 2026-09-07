@@ -1,5 +1,8 @@
 import Dexie, { type EntityTable } from 'dexie';
 
+const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
+export const JOB_RETENTION_DAYS = 7;
+
 export interface TranslationJob {
   id?: number;
   timestamp: number;
@@ -57,42 +60,42 @@ db.version(4).stores({
   textBlocks: '++id, imageId'
 });
 
-// Cascading Delete Hook for TranslationJob
-db.translationJobs.hook('deleting', function(jobId) {
-  // Use a transaction to ensure atomic deletion
-  return db.transaction('rw', db.images, db.textBlocks, async () => {
-    try {
-      console.log(`[Database] Triggering cascading delete for Job ID: ${jobId}`);
-      const images = await db.images.where({ jobId }).toArray();
-      for (const img of images) {
-        if (img.id) {
-          await db.textBlocks.where({ imageId: img.id }).delete();
-        }
-      }
-      await db.images.where({ jobId }).delete();
-      console.log(`[Database] Cascading delete complete for Job ID: ${jobId}`);
-    } catch (error) {
-      console.error(`[Database] Failed cascading delete for Job ID: ${jobId}`, error);
-      throw error;
+/**
+ * Deletes jobs and all associated image and text records in one transaction.
+ *
+ * @param jobIds - Translation job identifiers to remove.
+ * @returns Resolves after every parent and child record is deleted.
+ */
+export async function deleteJobs(jobIds: number[]): Promise<void> {
+  if (jobIds.length === 0) return;
+
+  await db.transaction('rw', db.translationJobs, db.images, db.textBlocks, async () => {
+    const images = await db.images.where('jobId').anyOf(jobIds).toArray();
+    const imageIds = images.flatMap((image) => image.id === undefined ? [] : [image.id]);
+
+    if (imageIds.length > 0) {
+      await db.textBlocks.where('imageId').anyOf(imageIds).delete();
     }
+    await db.images.where('jobId').anyOf(jobIds).delete();
+    await db.translationJobs.bulkDelete(jobIds);
   });
-});
+}
 
 /**
  * Deletes translation jobs older than the specified retention window.
- * Cascading delete hooks on the translationJobs table handle child image
- * and text block removal automatically.
+ * Associated image and text records are removed in the same transaction.
  *
  * @param daysToKeep - Number of days to retain jobs (default 7).
  * @returns Resolves when cleanup completes or logs an error on failure.
  */
-export async function cleanupOldJobs(daysToKeep: number = 7) {
-  const cutoffTime = Date.now() - (daysToKeep * 24 * 60 * 60 * 1000);
+export async function cleanupOldJobs(daysToKeep: number = JOB_RETENTION_DAYS): Promise<void> {
+  const cutoffTime = Date.now() - (daysToKeep * MILLISECONDS_PER_DAY);
   try {
     console.log(`[Database] Running cleanup for jobs older than ${daysToKeep} days...`);
-    const oldJobs = await db.translationJobs.where('timestamp').below(cutoffTime).primaryKeys();
+    const oldJobKeys = await db.translationJobs.where('timestamp').below(cutoffTime).primaryKeys();
+    const oldJobs = oldJobKeys.filter((jobId): jobId is number => jobId !== undefined);
     if (oldJobs.length > 0) {
-      await db.translationJobs.bulkDelete(oldJobs);
+      await deleteJobs(oldJobs);
       console.log(`[Database] Cleaned up ${oldJobs.length} old jobs.`);
     } else {
       console.log(`[Database] No old jobs to clean up.`);

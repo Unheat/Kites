@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { db, type TranslationJob, type ImageRecord, type TextBlock } from './db';
+import { cleanupOldJobs, db, deleteJobs, type TranslationJob, type ImageRecord, type TextBlock } from './db';
 import { 
   Upload, 
   Trash2, 
@@ -67,16 +67,34 @@ export default function App() {
     try {
       const allJobs = await db.translationJobs.orderBy('timestamp').reverse().toArray();
       setJobs(allJobs);
-      if (allJobs.length > 0 && !activeJobId) {
-        setActiveJobId(allJobs[0].id || null);
+      if (allJobs.length > 0) {
+        setActiveJobId((currentJobId) => currentJobId ?? allJobs[0].id ?? null);
       }
     } catch (err) {
       console.error('[Dashboard] Failed to load jobs:', err);
     }
-  }, [activeJobId]);
+  }, []);
 
   useEffect(() => {
-    loadJobs();
+    let isSubscribed = true;
+
+    /**
+     * Removes expired jobs before loading Studio history.
+     *
+     * @returns Resolves after cleanup and the initial history load complete.
+     */
+    async function initializeStudio(): Promise<void> {
+      await cleanupOldJobs();
+      if (isSubscribed) {
+        await loadJobs();
+      }
+    }
+
+    void initializeStudio();
+
+    return () => {
+      isSubscribed = false;
+    };
   }, [loadJobs]);
 
   // Load image & text blocks for activeJobId
@@ -202,19 +220,21 @@ export default function App() {
   };
 
   /**
-   * Deletes a translation job and its associated images and text blocks from IndexedDB.
+   * Confirms and deletes a translation job plus its associated image and text records.
    *
    * @param jobId - Numeric identifier of the TranslationJob to delete.
-   * @param e - React mouse click event.
+   * @returns Resolves after deletion, or immediately when the user cancels.
    */
-  const handleDeleteJob = async (jobId: number, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const deleteJob = async (jobId: number): Promise<void> => {
+    const shouldDelete = window.confirm('Delete this job, its stored image, and all text edits? This cannot be undone.');
+    if (!shouldDelete) return;
+
     try {
-      await db.translationJobs.delete(jobId);
-      const remaining = jobs.filter((j) => j.id !== jobId);
+      await deleteJobs([jobId]);
+      const remaining = jobs.filter((job) => job.id !== jobId);
       setJobs(remaining);
       if (activeJobId === jobId) {
-        setActiveJobId(remaining.length > 0 ? remaining[0].id || null : null);
+        setActiveJobId(remaining[0]?.id ?? null);
       }
     } catch (err) {
       console.error('[Dashboard] Failed deleting job:', err);
@@ -431,11 +451,15 @@ export default function App() {
                   </div>
 
                   <button
-                    onClick={(e) => handleDeleteJob(job.id!, e)}
-                    className={`opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-500 hover:text-white transition-opacity ${
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void deleteJob(job.id!);
+                    }}
+                    className={`opacity-0 group-hover:opacity-100 focus:opacity-100 p-1 rounded hover:bg-red-500 hover:text-white transition-opacity ${
                       isActive ? 'text-dust hover:text-white' : 'text-dust'
                     }`}
-                    title="Delete Job"
+                    title="Delete job"
+                    aria-label="Delete job"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
@@ -518,6 +542,15 @@ export default function App() {
                 <RotateCcw className="w-3.5 h-3.5" />
               </button>
             </div>
+
+            <button
+              onClick={() => activeJobId !== null && void deleteJob(activeJobId)}
+              disabled={activeJobId === null}
+              className="flex items-center gap-1.5 px-3 py-1 border border-red-500/40 text-red-600 dark:text-red-400 hover:bg-red-500 hover:text-white disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-red-600 dark:disabled:hover:text-red-400 text-xs font-medium rounded transition-colors cursor-pointer disabled:cursor-not-allowed"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Delete</span>
+            </button>
 
             <button
               onClick={handleExportPng}
