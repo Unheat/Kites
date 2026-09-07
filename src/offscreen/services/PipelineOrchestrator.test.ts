@@ -221,4 +221,32 @@ describe('PipelineOrchestrator', () => {
     ocrSpy.mockRestore();
     blobSpy.mockRestore();
   });
+
+  it('resolves font preset from popup state and persists resolved family in TextBlock', async () => {
+    const mockImageRecord = {
+      id: 2,
+      jobId: 200,
+      rawImageBlob: new Blob(['fake image data'], { type: 'image/png' })
+    };
+    ((db.images as any).first as any).mockResolvedValue(mockImageRecord);
+
+    vi.spyOn(chrome.runtime, 'sendMessage').mockImplementation((_message: any, callback: any) => {
+      callback({ activeInpaintId: 'simple', renderFontPresetId: 'comic', targetLang: 'en' });
+    });
+
+    const blobSpy = vi.spyOn(pipelineOrchestrator as any, 'blobToArrayBuffer').mockResolvedValue(new ArrayBuffer(8));
+
+    await pipelineOrchestrator.runPipeline(200);
+
+    expect(db.textBlocks.bulkAdd).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          imageId: 2,
+          fontFamily: '"Comic Sans MS", "Comic Sans", cursive'
+        })
+      ])
+    );
+
+    blobSpy.mockRestore();
+  });
 });

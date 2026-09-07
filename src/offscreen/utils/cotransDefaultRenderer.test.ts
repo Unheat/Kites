@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { calcHorizontal, compactSpecialSymbols, resizeRegionToFontSize } from './cotransDefaultRenderer';
+import { createCanvas } from 'canvas';
+import { calcHorizontal, compactSpecialSymbols, resizeRegionToFontSize, putTextLines } from './cotransDefaultRenderer';
 
 /** Minimal ctx: measureText returns 10px per character; font is a no-op setter. */
 function mockCtx() {
@@ -117,5 +118,24 @@ describe('resizeRegionToFontSize (hybrid layout semantics)', () => {
     const r = region(30, 150, 24, '先生', 'teacher');
     const { fontSize } = resizeRegionToFontSize(r, 1000, 1500);
     expect(fontSize).toBe(24);
+  });
+});
+
+describe('font family propagation', () => {
+  it('measures text with custom fontFamily in calcHorizontal', () => {
+    const ctx = mockCtx();
+    const customFont = '"Comic Sans MS", "Comic Sans", cursive';
+    calcHorizontal(ctx, 16, 'Hello world', 500, 500, true, customFont);
+    expect(ctx.font).toContain(customFont);
+  });
+
+  it('renders lines with custom fontFamily and CJK fontSpec fallback', () => {
+    const canvas = createCanvas(400, 200);
+    const ctx = canvas.getContext('2d');
+    const customFont = 'Georgia, "Times New Roman", serif';
+    const result = putTextLines(ctx, 16, ['日本語', 'テスト'], 'center', '#000000', '#ffffff', customFont);
+    expect(result).not.toBeNull();
+    expect(ctx.font).toContain(customFont);
+    expect(ctx.font).toContain('Microsoft YaHei');
   });
 });

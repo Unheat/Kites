@@ -5,7 +5,7 @@ import {
   renderRegionDefault,
   type DefaultRenderRegion
 } from './cotransDefaultRenderer';
-import { fitFontSizeWithLines, decollideBoxes } from './typesetLayout';
+import { fitFontSizeWithLines, decollideBoxes, fontSpec } from './typesetLayout';
 import { pickTextColor } from '../../shared/utils/textColor';
 
 /**
@@ -36,8 +36,8 @@ const PUNSET_RIGHT_ENG = new Set(['.', '?', '!', ':', ';', ')', '}', '"']);
  */
 const FONT_SIZE_MINIMUM_DIVISOR = 200;
 
-/** Font family used for rendered translations. */
-const RENDER_FONT_FAMILY = 'sans-serif';
+/** Default font family used for rendered translations. */
+export const DEFAULT_RENDER_FONT_FAMILY = 'sans-serif';
 
 /**
  * CJK Horizontal to Vertical Punctuation Conversion Table
@@ -257,7 +257,7 @@ export function calculateOptimalFontSize(
   width: number,
   height: number,
   isWestern: boolean = true,
-  fontFamily: string = RENDER_FONT_FAMILY
+  fontFamily: string = DEFAULT_RENDER_FONT_FAMILY
 ): { fontSize: number; lines: string[]; lineHeight: number } {
   const targetWidth = Math.max(10, width * 0.85);
   const targetHeight = Math.max(10, height * 0.85);
@@ -271,7 +271,7 @@ export function calculateOptimalFontSize(
 
   while (minSize <= maxSize) {
     const midSize = Math.floor((minSize + maxSize) / 2);
-    ctx.font = `bold ${midSize}px ${fontFamily}`;
+    ctx.font = fontSpec(midSize, fontFamily, text);
 
     const lines = wrapText(ctx, text, targetWidth, isWestern);
     const lineHeight = midSize * 1.15;
@@ -287,7 +287,7 @@ export function calculateOptimalFontSize(
     }
   }
 
-  ctx.font = `bold ${bestSize}px ${fontFamily}`;
+  ctx.font = fontSpec(bestSize, fontFamily, text);
   bestLines = wrapText(ctx, text, targetWidth, isWestern);
 
   return {
@@ -360,6 +360,7 @@ export interface RenderImageBounds {
  * @param strokeColor - Outline color.
  * @param targetLang - Target language code (decides renderer orientation).
  * @param sourceDirection - Source reading direction from OCR.
+ * @param fontFamily - CSS font-family stack to render and measure with.
  */
 export function drawTextInPolygon(
   ctx: OffscreenCanvasRenderingContext2D,
@@ -368,12 +369,15 @@ export function drawTextInPolygon(
   textColor: string = '#000000',
   strokeColor: string = '#FFFFFF',
   targetLang: string = 'en',
-  sourceDirection: 'h' | 'v' = 'h'
+  sourceDirection: 'h' | 'v' = 'h',
+  fontFamily: string = DEFAULT_RENDER_FONT_FAMILY
 ) {
   renderTextBlocksBatch(
     ctx,
     [{ text, polygon, direction: sourceDirection, textColor, strokeColor }],
-    targetLang
+    targetLang,
+    undefined,
+    fontFamily
   );
 }
 
@@ -440,13 +444,15 @@ function sampleQuadBackground(ctx: OffscreenCanvasRenderingContext2D, quad: Poin
  * @param blocks - Translated text blocks.
  * @param targetLang - Target language code (decides renderer orientation).
  * @param imageBounds - Page dimensions (defaults to the canvas size).
+ * @param fontFamily - CSS font-family stack to render and measure with.
  * @returns Per-block render info aligned with `blocks` (null for skipped blocks).
  */
 export function renderTextBlocksBatch(
   ctx: OffscreenCanvasRenderingContext2D,
   blocks: TextBlockItem[],
   targetLang: string = 'en',
-  imageBounds?: RenderImageBounds
+  imageBounds?: RenderImageBounds,
+  fontFamily: string = DEFAULT_RENDER_FONT_FAMILY
 ): (RenderedBlockInfo | null)[] {
   if (!blocks || blocks.length === 0) return [];
 
@@ -472,9 +478,9 @@ export function renderTextBlocksBatch(
   const orientation = LANGUAGE_ORIENTATION_PRESETS[langKey] || 'h';
 
   if (orientation === 'h') {
-    return renderTextBlocksDefault(ctx, coloredBlocks, bounds.width, bounds.height);
+    return renderTextBlocksDefault(ctx, coloredBlocks, bounds.width, bounds.height, fontFamily);
   }
-  return renderTextBlocksLegacy(ctx, coloredBlocks, targetLang, bounds);
+  return renderTextBlocksLegacy(ctx, coloredBlocks, targetLang, bounds, fontFamily);
 }
 
 /**
@@ -485,13 +491,15 @@ export function renderTextBlocksBatch(
  * @param blocks - Translated text blocks.
  * @param pageWidth - Page width.
  * @param pageHeight - Page height.
+ * @param fontFamily - CSS font-family stack to render and measure with.
  * @returns Per-block render info aligned with `blocks` (null for skipped blocks).
  */
 function renderTextBlocksDefault(
   ctx: OffscreenCanvasRenderingContext2D,
   blocks: TextBlockItem[],
   pageWidth: number,
-  pageHeight: number
+  pageHeight: number,
+  fontFamily: string = DEFAULT_RENDER_FONT_FAMILY
 ): (RenderedBlockInfo | null)[] {
   const results: (RenderedBlockInfo | null)[] = blocks.map(() => null);
   const fontSizeMinimum = Math.max(1, Math.round((pageWidth + pageHeight) / FONT_SIZE_MINIMUM_DIVISOR));
@@ -551,7 +559,7 @@ function renderTextBlocksDefault(
         const [tl, tr, br, bl] = dstPoints;
         const normH = Math.hypot((tr.x + br.x) / 2 - (tl.x + bl.x) / 2, (tr.y + br.y) / 2 - (tl.y + bl.y) / 2);
         const normV = Math.hypot((bl.x + br.x) / 2 - (tl.x + tr.x) / 2, (bl.y + br.y) / 2 - (tl.y + tr.y) / 2);
-        const fitted = fitFontSizeWithLines(ctx, translation, RENDER_FONT_FAMILY, normH, normV, targetFontSize, Math.max(targetFontSize, 48), 0.05);
+        const fitted = fitFontSizeWithLines(ctx, translation, fontFamily, normH, normV, targetFontSize, Math.max(targetFontSize, 48), 0.05);
         dialogueSizes.push(fitted.size);
       }
       planned.push({ index: i, region, dstPoints, targetFontSize, wordCount });
@@ -595,7 +603,7 @@ function renderTextBlocksDefault(
       const baselineCap = pageDialogueBaseline > 0 && isShortNonShout
         ? Math.max(18, Math.round(pageDialogueBaseline * 1.25))
         : undefined;
-      const info = renderRegionDefault(ctx, plan.region, plan.dstPoints, plan.targetFontSize, baselineCap);
+      const info = renderRegionDefault(ctx, plan.region, plan.dstPoints, plan.targetFontSize, baselineCap, fontFamily);
       if (info) results[plan.index] = { fontSize: info.fontSize, lineCount: info.lineCount, lines: info.lines, textColor: plan.region.textColor, strokeColor: plan.region.strokeColor };
     } catch (e) {
       console.error('[canvasTypesetting] Default renderer failed for block', plan.index, e);
@@ -613,13 +621,15 @@ function renderTextBlocksDefault(
  * @param blocks - Translated text blocks.
  * @param targetLang - Target language code (decides vertical vs RTL handling).
  * @param bounds - Page dimensions, used to keep blocks on-page during collision solving.
+ * @param fontFamily - CSS font-family stack to render and measure with.
  * @returns Per-block render info aligned with `blocks` (null for skipped blocks).
  */
 function renderTextBlocksLegacy(
   ctx: OffscreenCanvasRenderingContext2D,
   blocks: TextBlockItem[],
   targetLang: string,
-  bounds: { width: number; height: number }
+  bounds: { width: number; height: number },
+  fontFamily: string = DEFAULT_RENDER_FONT_FAMILY
 ): (RenderedBlockInfo | null)[] {
   const results: (RenderedBlockInfo | null)[] = blocks.map(() => null);
 
@@ -652,10 +662,11 @@ function renderTextBlocksLegacy(
       finalText,
       box.width,
       box.height,
-      false
+      false,
+      fontFamily
     );
 
-    ctx.font = `bold ${fontSize}px ${RENDER_FONT_FAMILY}`;
+    ctx.font = fontSpec(fontSize, fontFamily, finalText);
     let maxLineWidth = 0;
     for (const line of lines) {
       const w = ctx.measureText(line).width;
@@ -683,7 +694,8 @@ function renderTextBlocksLegacy(
       lineHeight,
       totalHeight,
       angle,
-      initialRect
+      initialRect,
+      finalText
     };
   });
 
@@ -710,7 +722,7 @@ function renderTextBlocksLegacy(
     // punctuation ordering (no manual string operations).
     ctx.direction = isRtl ? 'rtl' : 'ltr';
 
-    ctx.font = `bold ${meta.fontSize}px ${RENDER_FONT_FAMILY}`;
+    ctx.font = fontSpec(meta.fontSize, fontFamily, meta.finalText);
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 

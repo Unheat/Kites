@@ -8,6 +8,7 @@ import type { Point2D } from '../engines/inpaint/BaseInpaintEngine';
 import { inpaintRegistry } from '../engines/inpaint/inpaintRegistry';
 import { InpaintCacheManager } from './InpaintCacheManager';
 import { renderTextBlocksBatch, type TextBlockItem, type RenderedBlockInfo } from '../utils/canvasTypesetting';
+import { resolveRenderFontFamily } from '../../shared/renderFontPresets';
 
 export class PipelineOrchestrator {
   private ocrManager: OcrManager;
@@ -77,6 +78,7 @@ export class PipelineOrchestrator {
       const sourceLang = popupState?.sourceLang || 'auto';
       const targetLang = popupState?.targetLang || 'en';
       const ocrTier: OcrTier = popupState?.activeOcrId || 'v6-small';
+      const resolvedFontFamily = resolveRenderFontFamily(popupState?.renderFontPresetId);
 
       // 2. Fetch image from DB
       const imageRecord = await db.images.where('jobId').equals(jobId).first();
@@ -205,10 +207,16 @@ export class PipelineOrchestrator {
           itemOcrIndices.push(i);
         }
       }
-      const renderInfos = renderTextBlocksBatch(ctx, textBlockItems, targetLang, {
-        width: bitmap.width,
-        height: bitmap.height
-      });
+      const renderInfos = renderTextBlocksBatch(
+        ctx,
+        textBlockItems,
+        targetLang,
+        {
+          width: bitmap.width,
+          height: bitmap.height
+        },
+        resolvedFontFamily
+      );
 
       // Map render results (final font size actually drawn) back to OCR indices
       const renderInfoByOcrIndex = new Map<number, RenderedBlockInfo>();
@@ -256,7 +264,7 @@ export class PipelineOrchestrator {
           width: box.w,
           height: box.h,
           fontSize,
-          fontFamily: 'sans-serif',
+          fontFamily: resolvedFontFamily,
           color: renderColors?.textColor ?? '#000000',
           strokeColor: renderColors?.strokeColor ?? '#FFFFFF',
           direction: dir,

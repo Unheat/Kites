@@ -18,7 +18,7 @@ import {
   Moon 
 } from 'lucide-react';
 import './index.css';
-import { fitFontSizeWithLines } from './offscreen/utils/typesetLayout';
+import { fitFontSizeWithLines, fontSpec } from './offscreen/utils/typesetLayout';
 
 type ViewMode = 'final' | 'cleaned' | 'original';
 
@@ -325,7 +325,8 @@ export default function App() {
       if (!block.translatedText) return;
       ctx.save();
       const fontSize = block.fontSize || 16;
-      ctx.font = `bold ${fontSize}px sans-serif`;
+      const blockFontFamily = block.fontFamily || 'sans-serif';
+      ctx.font = fontSpec(fontSize, blockFontFamily, block.translatedText);
       ctx.fillStyle = block.color || '#000000';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
@@ -345,10 +346,10 @@ export default function App() {
       if (block.lines && block.lines.length > 0) {
         lines = block.lines;
       } else {
-        const fitted = fitFontSizeWithLines(ctx, block.translatedText, 'sans-serif', block.width, block.height, fontSize, Math.max(fontSize, 48), 0.05);
+        const fitted = fitFontSizeWithLines(ctx, block.translatedText, blockFontFamily, block.width, block.height, fontSize, Math.max(fontSize, 48), 0.05);
         lines = fitted.lines.length > 0 ? fitted.lines : [block.translatedText];
         drawFontSize = fitted.size;
-        ctx.font = `bold ${drawFontSize}px sans-serif`;
+        ctx.font = fontSpec(drawFontSize, blockFontFamily, block.translatedText);
       }
       const lineHeight = drawFontSize * 1.2;
       const startY = cy - ((lines.length - 1) * lineHeight) / 2;

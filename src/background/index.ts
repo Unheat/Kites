@@ -36,12 +36,13 @@ const SINGLE_JOB_TIMEOUT_MS = 60 * 1000;
 const OFFSCREEN_RETRY_INTERVAL_MS = 150;
 
 /**
- * Removes translation engines that are no longer supported from stored popup settings.
+ * Removes translation engines that are no longer supported from stored popup settings
+ * and normalizes render font presets to an allowlisted preset ID.
  *
  * @param popupState - The persisted popup state to validate.
  * @returns The normalized popup state and whether it needs to be saved.
  */
-function normalizePopupState(popupState: PopupState): { state: PopupState; changed: boolean } {
+export function normalizePopupState(popupState: PopupState): { state: PopupState; changed: boolean } {
   const customApis = Array.isArray(popupState.customApis)
     ? popupState.customApis.map(normalizeCustomApiConfig).filter((api): api is NonNullable<typeof api> => Boolean(api))
     : [];

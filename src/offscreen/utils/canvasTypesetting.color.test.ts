@@ -43,4 +43,21 @@ describe('background-adaptive text color (renderTextBlocksBatch)', () => {
     expect(info?.textColor).toBe('red');
     expect(info?.strokeColor).toBe('blue');
   });
+
+  it('renders Western target with custom fontFamily', () => {
+    const canvas = createCanvas(400, 200);
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, 400, 200);
+    const info = renderTextBlocksBatch(
+      ctx as any,
+      [{ ...block }],
+      'en',
+      { width: 400, height: 200 },
+      '"Comic Sans MS", "Comic Sans", cursive'
+    )[0];
+    expect(info).not.toBeNull();
+    expect(info?.fontSize).toBeGreaterThan(0);
+    expect(info?.lineCount).toBeGreaterThan(0);
+  });
 });

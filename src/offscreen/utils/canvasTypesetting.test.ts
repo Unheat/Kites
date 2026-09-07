@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import type { Point2D } from '../../shared/utils/geometry';
 import {
   renderTextBlocksBatch,
+  calculateOptimalFontSize,
   convertCjkPunctuation,
   segEng,
   calculatePolygonCentroid,
@@ -117,5 +118,45 @@ describe('Canvas Typesetting', () => {
     const [a, b] = solved;
     const stillOverlaps = !(a.x2 <= b.x1 || a.x1 >= b.x2 || a.y2 <= b.y1 || a.y1 >= b.y2);
     expect(stillOverlaps).toBe(false);
+  });
+
+  it('propagates custom fontFamily with CJK fallback in legacy renderer', () => {
+    const mockCtx = createMockCtx();
+    const customFont = 'Georgia, "Times New Roman", serif';
+    const straightBox: Point2D[] = [
+      { x: 0, y: 0 },
+      { x: 100, y: 0 },
+      { x: 100, y: 100 },
+      { x: 0, y: 100 }
+    ];
+
+    renderTextBlocksBatch(
+      mockCtx,
+      [{ text: '日本語テキスト', polygon: straightBox, direction: 'v' }],
+      'ja',
+      { width: 100, height: 100 },
+      customFont
+    );
+
+    // mockCtx.font should include both the custom font and CJK fallback fonts
+    expect(mockCtx.font).toContain(customFont);
+    expect(mockCtx.font).toContain('Microsoft YaHei');
+  });
+
+  it('uses custom fontFamily in calculateOptimalFontSize', () => {
+    const mockCtx = createMockCtx();
+    const customFont = '"Courier New", Courier, monospace';
+
+    const result = calculateOptimalFontSize(
+      mockCtx,
+      'Monospace test',
+      100,
+      100,
+      true,
+      customFont
+    );
+
+    expect(result.fontSize).toBeGreaterThanOrEqual(9);
+    expect(mockCtx.font).toContain(customFont);
   });
 });
