@@ -4,9 +4,10 @@ import { inpaintRegistry } from './inpaintRegistry';
 import { InpaintCacheManager } from '../../services/InpaintCacheManager';
 
 const LAMA_PATCH_SIZE = 512;
-const LAMA_MIN_PATCH_SOURCE_SIZE = 128;
-const LAMA_PATCH_PADDING = 64;
-const LAMA_CLUSTER_PADDING = 100;
+/** Maximum bounding box dimension to allow in one cluster before splitting (leaves at least 16px border context). */
+const LAMA_MAX_CLUSTER_DIM = 480;
+/** Extra stroke dilation (in pixels) applied to polygon mask edges to swallow glyph anti-aliasing. */
+const LAMA_POLYGON_STROKE_WIDTH = 4;
 const ONNX_WARNING_LOG_LEVEL = 2;
 const ONNX_ERROR_LOG_LEVEL = 3;
 
@@ -241,15 +242,214 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
     }
   }
 
+  /**
+   * Plans the minimal set of 512x512 windows needed to cover all text polygons using
+   * greedy max-fit agglomerative clustering with smart window shifting and absorption.
+   *
+   * @param polygons - Array of text polygon vertices in original image coordinates.
+   * @param imageWidth - Width of the source image in pixels.
+   * @param imageHeight - Height of the source image in pixels.
+   * @returns An array of planned 512x512 window placements with their assigned polygon indices.
+   */
+  private planWindows(
+    polygons: Point2D[][],
+    imageWidth: number,
+    imageHeight: number
+  ): Array<{ sx: number; sy: number; polyIndices: number[] }> {
+    if (!polygons || polygons.length === 0) return [];
+
+    interface Box {
+      minX: number;
+      minY: number;
+      maxX: number;
+      maxY: number;
+    }
+
+    interface Cluster {
+      polyIndices: number[];
+      box: Box;
+    }
+
+    const getPolyBox = (poly: Point2D[]): Box => {
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const pt of poly) {
+        if (pt.x < minX) minX = pt.x;
+        if (pt.x > maxX) maxX = pt.x;
+        if (pt.y < minY) minY = pt.y;
+        if (pt.y > maxY) maxY = pt.y;
+      }
+      return { minX, minY, maxX, maxY };
+    };
+
+    const unionBoxes = (a: Box, b: Box): Box => ({
+      minX: Math.min(a.minX, b.minX),
+      minY: Math.min(a.minY, b.minY),
+      maxX: Math.max(a.maxX, b.maxX),
+      maxY: Math.max(a.maxY, b.maxY),
+    });
+
+    const isBoxInside = (box: Box, sx: number, sy: number, w: number, h: number): boolean => {
+      return box.minX >= sx && box.maxX <= sx + w && box.minY >= sy && box.maxY <= sy + h;
+    };
+
+    // Step 1: Initialize clusters with individual polygon bounding boxes
+    const polyBoxes = polygons.map(getPolyBox);
+    const clusters: Cluster[] = polygons.map((_, i) => ({
+      polyIndices: [i],
+      box: { ...polyBoxes[i] },
+    }));
+
+    // Step 2: Greedy Agglomerative Clustering
+    // Merge cluster pairs whose combined bounding box fits within LAMA_MAX_CLUSTER_DIM (480px).
+    // Prioritize merges that maximize the number of combined polygons while minimizing union area.
+    while (true) {
+      let bestI = -1;
+      let bestJ = -1;
+      let bestScore = -Infinity;
+      let bestUnion: Box | null = null;
+
+      for (let i = 0; i < clusters.length; i++) {
+        for (let j = i + 1; j < clusters.length; j++) {
+          const u = unionBoxes(clusters[i].box, clusters[j].box);
+          const uw = u.maxX - u.minX;
+          const uh = u.maxY - u.minY;
+          if (uw <= LAMA_MAX_CLUSTER_DIM && uh <= LAMA_MAX_CLUSTER_DIM) {
+            const unionArea = uw * uh;
+            const score = (clusters[i].polyIndices.length + clusters[j].polyIndices.length) * 100000 - unionArea;
+            if (score > bestScore) {
+              bestScore = score;
+              bestI = i;
+              bestJ = j;
+              bestUnion = u;
+            }
+          }
+        }
+      }
+
+      if (bestI === -1 || bestJ === -1 || !bestUnion) break;
+
+      clusters[bestI].polyIndices.push(...clusters[bestJ].polyIndices);
+      clusters[bestI].box = bestUnion;
+      clusters.splice(bestJ, 1);
+    }
+
+    // Step 3: Window Placement & Greedy Absorption
+    // Sort clusters largest-first to anchor the densest clusters first.
+    clusters.sort((a, b) => b.polyIndices.length - a.polyIndices.length);
+
+    const processedPolys = new Set<number>();
+    const windows: Array<{ sx: number; sy: number; polyIndices: number[] }> = [];
+
+    for (const cluster of clusters) {
+      const remainingInCluster = cluster.polyIndices.filter((idx) => !processedPolys.has(idx));
+      if (remainingInCluster.length === 0) continue;
+
+      // Recompute bounding box for remaining polygons in this cluster
+      let b = polyBoxes[remainingInCluster[0]];
+      for (let k = 1; k < remainingInCluster.length; k++) {
+        b = unionBoxes(b, polyBoxes[remainingInCluster[k]]);
+      }
+
+      const bw = b.maxX - b.minX;
+      const bh = b.maxY - b.minY;
+
+      // Handle oversized boxes (> 512px in width or height) by tiling along long axis with overlap
+      if (bw > LAMA_PATCH_SIZE || bh > LAMA_PATCH_SIZE) {
+        const stepX = bw > LAMA_PATCH_SIZE ? LAMA_PATCH_SIZE - 64 : LAMA_PATCH_SIZE;
+        const stepY = bh > LAMA_PATCH_SIZE ? LAMA_PATCH_SIZE - 64 : LAMA_PATCH_SIZE;
+        const startX = Math.max(0, Math.floor(b.minX));
+        const endX = Math.min(imageWidth, Math.ceil(b.maxX));
+        const startY = Math.max(0, Math.floor(b.minY));
+        const endY = Math.min(imageHeight, Math.ceil(b.maxY));
+
+        for (let wy = startY; wy < endY; wy += stepY) {
+          for (let wx = startX; wx < endX; wx += stepX) {
+            const sx = Math.max(0, Math.min(Math.max(0, imageWidth - LAMA_PATCH_SIZE), wx));
+            const sy = Math.max(0, Math.min(Math.max(0, imageHeight - LAMA_PATCH_SIZE), wy));
+            const coveredIndices: number[] = [];
+            for (let i = 0; i < polygons.length; i++) {
+              if (isBoxInside(polyBoxes[i], sx, sy, LAMA_PATCH_SIZE, LAMA_PATCH_SIZE)) {
+                coveredIndices.push(i);
+                processedPolys.add(i);
+              }
+            }
+            if (coveredIndices.length > 0) {
+              windows.push({ sx, sy, polyIndices: coveredIndices });
+            }
+          }
+        }
+        continue;
+      }
+
+      // Normal cluster: fits within 512x512. Determine legal window coordinate ranges.
+      let minSx = Math.max(0, Math.ceil(b.maxX - LAMA_PATCH_SIZE));
+      let maxSx = Math.min(Math.max(0, imageWidth - LAMA_PATCH_SIZE), Math.floor(b.minX));
+      let minSy = Math.max(0, Math.ceil(b.maxY - LAMA_PATCH_SIZE));
+      let maxSy = Math.min(Math.max(0, imageHeight - LAMA_PATCH_SIZE), Math.floor(b.minY));
+
+      if (minSx > maxSx) {
+        minSx = Math.max(0, Math.min(Math.max(0, imageWidth - LAMA_PATCH_SIZE), Math.floor((b.minX + b.maxX) / 2 - LAMA_PATCH_SIZE / 2)));
+        maxSx = minSx;
+      }
+      if (minSy > maxSy) {
+        minSy = Math.max(0, Math.min(Math.max(0, imageHeight - LAMA_PATCH_SIZE), Math.floor((b.minY + b.maxY) / 2 - LAMA_PATCH_SIZE / 2)));
+        maxSy = minSy;
+      }
+
+      // Greedy absorption: check all unprocessed polygons outside this cluster.
+      // If we can shift the legal [minSx, maxSx] x [minSy, maxSy] window to encompass them, absorb them.
+      for (let candIdx = 0; candIdx < polygons.length; candIdx++) {
+        if (processedPolys.has(candIdx) || remainingInCluster.includes(candIdx)) continue;
+        const candBox = polyBoxes[candIdx];
+        const testUnion = unionBoxes(b, candBox);
+        if (testUnion.maxX - testUnion.minX <= LAMA_PATCH_SIZE && testUnion.maxY - testUnion.minY <= LAMA_PATCH_SIZE) {
+          const testMinSx = Math.max(minSx, Math.ceil(testUnion.maxX - LAMA_PATCH_SIZE));
+          const testMaxSx = Math.min(maxSx, Math.floor(testUnion.minX));
+          const testMinSy = Math.max(minSy, Math.ceil(testUnion.maxY - LAMA_PATCH_SIZE));
+          const testMaxSy = Math.min(maxSy, Math.floor(testUnion.minY));
+          if (testMinSx <= testMaxSx && testMinSy <= testMaxSy) {
+            minSx = testMinSx;
+            maxSx = testMaxSx;
+            minSy = testMinSy;
+            maxSy = testMaxSy;
+            b = testUnion;
+            remainingInCluster.push(candIdx);
+          }
+        }
+      }
+
+      // Center the window within the refined legal range
+      let sx = Math.round((minSx + maxSx) / 2);
+      let sy = Math.round((minSy + maxSy) / 2);
+      sx = Math.max(0, Math.min(Math.max(0, imageWidth - LAMA_PATCH_SIZE), sx));
+      sy = Math.max(0, Math.min(Math.max(0, imageHeight - LAMA_PATCH_SIZE), sy));
+
+      // Mark all polygons that fall inside this window as covered
+      const assignedIndices: number[] = [];
+      for (let i = 0; i < polygons.length; i++) {
+        if (!processedPolys.has(i) && isBoxInside(polyBoxes[i], sx, sy, LAMA_PATCH_SIZE, LAMA_PATCH_SIZE)) {
+          assignedIndices.push(i);
+          processedPolys.add(i);
+        }
+      }
+
+      if (assignedIndices.length > 0) {
+        windows.push({ sx, sy, polyIndices: assignedIndices });
+      }
+    }
+
+    return windows;
+  }
+
   // NOTE TO FUTURE AI AGENTS: DO NOT TOUCH or port Cotrans logic for INPAINTING.
   // We intentionally skip Cotrans's complex mask expansion/inpainting logic and
   // strictly use the raw polygon patches directly. Do not attempt to synchronize
   // this engine with Cotrans.
   /**
-   * Erases text from the source image by running the LaMa neural network model.
-   * Clusters nearby text bounding boxes into square patches (min 128px), crops each patch,
-   * runs sequential ONNX inference at 512x512 resolution, and composites the inpainted results
-   * back onto the full canvas masked by the polygon/stroke areas.
+   * Erases text from the source image by running the LaMa neural network model at 1:1 native resolution.
+   * Plans optimal 512x512 windows using greedy max-fit clustering to cover all text polygons with
+   * minimal ONNX inference passes, crops patches without downscaling, dilates polygon mask edges
+   * to swallow anti-aliased character boundaries, and pastes results back with zero upscaling blur.
    *
    * @param imageBuffer - Raw ArrayBuffer of the input image.
    * @param polygons - Array of polygon vertex arrays defining text regions to erase.
@@ -265,173 +465,145 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
       throw new Error('[LamaBaseInpaintEngine] Model not initialized');
     }
 
+    if ((!polygons || polygons.length === 0) && !strokeMaskCanvas) {
+      return imageBuffer;
+    }
+
     // 1. Prepare image canvas
     const rawCanvas = await this.platform.canvas.prepareCanvas(imageBuffer);
     const width = rawCanvas.width;
     const height = rawCanvas.height;
 
-    // Copy to CPU-backed canvas
-    const imgCanvas = await this.createCanvas(width, height);
-    const ctx = imgCanvas.getContext('2d', { willReadFrequently: true });
-    ctx.drawImage(rawCanvas, 0, 0);
-
-    // 2. Prepare mask
-    const maskCanvas = await this.createCanvas(width, height);
-    const maskCtx = maskCanvas.getContext('2d', { willReadFrequently: true });
-
-    if (strokeMaskCanvas) {
-      try {
-        maskCtx.drawImage(strokeMaskCanvas, 0, 0);
-      } catch (e) {
-        // Fallback: If strokeMaskCanvas is a wrapper (e.g. CanvasElement from ppu-paddle-ocr)
-        // or node-canvas rejects it, use ImageData instead.
-        const w = strokeMaskCanvas.width || width;
-        const h = strokeMaskCanvas.height || height;
-        const strokeCtx = strokeMaskCanvas.getContext('2d', { willReadFrequently: true });
-        const imgData = strokeCtx.getImageData(0, 0, w, h);
-        
-        // Ensure it's a native ImageData object to avoid TypeError in node-canvas
-        const nativeImgData = maskCtx.createImageData(w, h);
-        nativeImgData.data.set(imgData.data);
-        maskCtx.putImageData(nativeImgData, 0, 0);
-      }
-    } else {
-      maskCtx.fillStyle = 'black';
-      maskCtx.fillRect(0, 0, width, height);
-      maskCtx.fillStyle = 'white';
-      for (const poly of polygons) {
-        maskCtx.beginPath();
-        maskCtx.moveTo(poly[0].x, poly[0].y);
-        for (let i = 1; i < poly.length; i++) {
-          maskCtx.lineTo(poly[i].x, poly[i].y);
-        }
-        maskCtx.closePath();
-        maskCtx.fill();
-      }
+    // 2. Plan optimal 512x512 native resolution windows
+    const windows = this.planWindows(polygons, width, height);
+    if (windows.length === 0 && strokeMaskCanvas) {
+      windows.push({ sx: 0, sy: 0, polyIndices: [] });
     }
-
-    // 3. Cluster bounding boxes for patch cropping
-    class BoundingBox {
-      minX: number;
-      minY: number;
-      maxX: number;
-      maxY: number;
-      constructor(minX: number, minY: number, maxX: number, maxY: number) {
-        this.minX = minX;
-        this.minY = minY;
-        this.maxX = maxX;
-        this.maxY = maxY;
-      }
-      intersects(other: BoundingBox, padding: number): boolean {
-        return !(this.maxX + padding < other.minX - padding || 
-                 this.minX - padding > other.maxX + padding || 
-                 this.maxY + padding < other.minY - padding || 
-                 this.minY - padding > other.maxY + padding);
-      }
-      merge(other: BoundingBox) {
-        this.minX = Math.min(this.minX, other.minX);
-        this.minY = Math.min(this.minY, other.minY);
-        this.maxX = Math.max(this.maxX, other.maxX);
-        this.maxY = Math.max(this.maxY, other.maxY);
-      }
-    }
-
-    const boxes: BoundingBox[] = [];
-    if (!strokeMaskCanvas && polygons && polygons.length > 0) {
-      for (const poly of polygons) {
-        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-        for (const pt of poly) {
-           minX = Math.min(minX, pt.x); minY = Math.min(minY, pt.y);
-           maxX = Math.max(maxX, pt.x); maxY = Math.max(maxY, pt.y);
-        }
-        boxes.push(new BoundingBox(minX, minY, maxX, maxY));
-      }
-    } else {
-       boxes.push(new BoundingBox(0, 0, width, height)); // fallback to whole image
-    }
-
-    let merged = true;
-    while (merged) {
-      merged = false;
-      for (let i = 0; i < boxes.length; i++) {
-        for (let j = i + 1; j < boxes.length; j++) {
-          if (boxes[i].intersects(boxes[j], LAMA_CLUSTER_PADDING)) {
-            boxes[i].merge(boxes[j]);
-            boxes.splice(j, 1);
-            merged = true;
-            break;
-          }
-        }
-        if (merged) break;
-      }
+    if (windows.length === 0) {
+      return imageBuffer;
     }
 
     const finalCanvas = await this.createCanvas(width, height);
     const finalCtx = finalCanvas.getContext('2d', { willReadFrequently: true });
-    const tempFinalData = finalCtx.createImageData(width, height);
-    tempFinalData.data.set(ctx.getImageData(0, 0, width, height).data);
-    finalCtx.putImageData(tempFinalData, 0, 0);
-    
-    const cropW = LAMA_PATCH_SIZE;
-    const cropH = LAMA_PATCH_SIZE;
+    try {
+      finalCtx.drawImage(rawCanvas, 0, 0);
+    } catch {
+      // Workaround for mismatched node-canvas instances (ppu-paddle-ocr vs ours)
+      const rawCtx = rawCanvas.getContext?.('2d', { willReadFrequently: true }) || rawCanvas.ctx;
+      const rawImgData = rawCtx.getImageData(0, 0, width, height);
+      const finalImgData = finalCtx.createImageData(width, height);
+      finalImgData.data.set(rawImgData.data);
+      finalCtx.putImageData(finalImgData, 0, 0);
+    }
 
-    const startTime = import.meta.env.DEV ? performance.now() : 0;
-    console.log(`[LamaBaseInpaintEngine] Starting Phase 1 inference for ${boxes.length} patches using ${this.activeProvider}.`);
+    const startTime = (import.meta as any).env?.DEV ? performance.now() : 0;
+    console.log(`[LamaBaseInpaintEngine] Starting 1:1 inference for ${windows.length} windows using ${this.activeProvider}.`);
 
-    // Phase 1: Prepare all patches and run all ONNX inferences sequentially.
-    // ONNX Runtime Web does NOT support concurrent session.run() calls on the same
-    // session instance. Using Promise.all here triggers a "Session already started" error.
-    // We capture all geometry (sx, sy, size) in the job result so Phase 2 can apply
-    // results back without re-computing patch positions.
-    const patchJobs = [];
-    for (const box of boxes) {
-      const boxW = box.maxX - box.minX;
-      const boxH = box.maxY - box.minY;
-      const size = Math.max(boxW, boxH, LAMA_MIN_PATCH_SOURCE_SIZE) + LAMA_PATCH_PADDING;
-      const cx = box.minX + boxW / 2;
-      const cy = box.minY + boxH / 2;
-      const sx = Math.max(0, cx - size / 2);
-      const sy = Math.max(0, cy - size / 2);
+    // Sequential ONNX inference on 512x512 windows at 1:1 scale (no downscaling or upscaling)
+    for (const win of windows) {
+      const sx = win.sx;
+      const sy = win.sy;
+      const patchW = Math.min(LAMA_PATCH_SIZE, width - sx);
+      const patchH = Math.min(LAMA_PATCH_SIZE, height - sy);
 
-      // Draw 512×512 patches directly from source canvases (no throwaway copies)
-      const patchImgCanvas = await this.createCanvas(cropW, cropH);
+      // 1:1 native crop from finalCanvas (reflecting any earlier window updates)
+      const patchImgCanvas = await this.createCanvas(LAMA_PATCH_SIZE, LAMA_PATCH_SIZE);
       const patchImgCtx = patchImgCanvas.getContext('2d', { willReadFrequently: true });
-      patchImgCtx.drawImage(finalCanvas, sx, sy, size, size, 0, 0, cropW, cropH);
+      patchImgCtx.drawImage(finalCanvas, sx, sy, patchW, patchH, 0, 0, patchW, patchH);
 
-      const patchMaskCanvas = await this.createCanvas(cropW, cropH);
+      // Prepare 512x512 mask at 1:1 scale
+      const patchMaskCanvas = await this.createCanvas(LAMA_PATCH_SIZE, LAMA_PATCH_SIZE);
       const patchMaskCtx = patchMaskCanvas.getContext('2d', { willReadFrequently: true });
-      patchMaskCtx.drawImage(maskCanvas, sx, sy, size, size, 0, 0, cropW, cropH);
+      patchMaskCtx.fillStyle = 'black';
+      patchMaskCtx.fillRect(0, 0, LAMA_PATCH_SIZE, LAMA_PATCH_SIZE);
 
-      const imgData = patchImgCtx.getImageData(0, 0, cropW, cropH).data;
-      const patchMaskImgData = patchMaskCtx.getImageData(0, 0, cropW, cropH).data;
+      if (strokeMaskCanvas) {
+        patchMaskCtx.drawImage(strokeMaskCanvas, sx, sy, patchW, patchH, 0, 0, patchW, patchH);
+      } else {
+        patchMaskCtx.fillStyle = 'white';
+        patchMaskCtx.strokeStyle = 'white';
+        patchMaskCtx.lineWidth = LAMA_POLYGON_STROKE_WIDTH;
+        patchMaskCtx.lineJoin = 'round';
+        patchMaskCtx.lineCap = 'round';
 
-      const imgFloat = new Float32Array(1 * 3 * cropH * cropW);
-      const maskFloat = new Float32Array(1 * 1 * cropH * cropW);
-
-      for (let y = 0; y < cropH; y++) {
-        for (let x = 0; x < cropW; x++) {
-          const offset = (y * cropW + x) * 4;
-          const outOffset = y * cropW + x;
-          const maskVal = patchMaskImgData[offset] / 255.0;
-          const m = maskVal >= 0.5 ? 1.0 : 0.0;
-          maskFloat[outOffset] = m;
-          imgFloat[0 * (cropH * cropW) + outOffset] = this.normalizeImagePixel(imgData[offset]) * (1.0 - m);
-          imgFloat[1 * (cropH * cropW) + outOffset] = this.normalizeImagePixel(imgData[offset + 1]) * (1.0 - m);
-          imgFloat[2 * (cropH * cropW) + outOffset] = this.normalizeImagePixel(imgData[offset + 2]) * (1.0 - m);
+        for (const polyIdx of win.polyIndices) {
+          const poly = polygons[polyIdx];
+          if (!poly || poly.length < 3) continue;
+          patchMaskCtx.beginPath();
+          patchMaskCtx.moveTo(poly[0].x - sx, poly[0].y - sy);
+          for (let i = 1; i < poly.length; i++) {
+            patchMaskCtx.lineTo(poly[i].x - sx, poly[i].y - sy);
+          }
+          patchMaskCtx.closePath();
+          patchMaskCtx.fill();
+          patchMaskCtx.stroke();
         }
       }
 
-      const imageTensor = new this.ort.Tensor('float32', imgFloat, [1, 3, cropH, cropW]);
-      const maskTensor = new this.ort.Tensor('float32', maskFloat, [1, 1, cropH, cropW]);
+      const imgData = patchImgCtx.getImageData(0, 0, LAMA_PATCH_SIZE, LAMA_PATCH_SIZE).data;
+      const patchMaskImgData = patchMaskCtx.getImageData(0, 0, LAMA_PATCH_SIZE, LAMA_PATCH_SIZE).data;
+
+      const imgFloat = new Float32Array(1 * 3 * LAMA_PATCH_SIZE * LAMA_PATCH_SIZE);
+      const maskFloat = new Float32Array(1 * 1 * LAMA_PATCH_SIZE * LAMA_PATCH_SIZE);
+
+      for (let y = 0; y < LAMA_PATCH_SIZE; y++) {
+        for (let x = 0; x < LAMA_PATCH_SIZE; x++) {
+          const offset = (y * LAMA_PATCH_SIZE + x) * 4;
+          const outOffset = y * LAMA_PATCH_SIZE + x;
+          const maskVal = patchMaskImgData[offset] / 255.0;
+          const m = maskVal >= 0.5 ? 1.0 : 0.0;
+          maskFloat[outOffset] = m;
+          imgFloat[0 * (LAMA_PATCH_SIZE * LAMA_PATCH_SIZE) + outOffset] = this.normalizeImagePixel(imgData[offset]) * (1.0 - m);
+          imgFloat[1 * (LAMA_PATCH_SIZE * LAMA_PATCH_SIZE) + outOffset] = this.normalizeImagePixel(imgData[offset + 1]) * (1.0 - m);
+          imgFloat[2 * (LAMA_PATCH_SIZE * LAMA_PATCH_SIZE) + outOffset] = this.normalizeImagePixel(imgData[offset + 2]) * (1.0 - m);
+        }
+      }
+
+      const imageTensor = new this.ort.Tensor('float32', imgFloat, [1, 3, LAMA_PATCH_SIZE, LAMA_PATCH_SIZE]);
+      const maskTensor = new this.ort.Tensor('float32', maskFloat, [1, 1, LAMA_PATCH_SIZE, LAMA_PATCH_SIZE]);
       const feeds = { image: imageTensor, mask: maskTensor };
 
-      // ONNX inference runs strictly sequentially; every tensor is disposed on success or failure.
       let results: any;
       try {
         results = await this.runPatch(feeds);
         const outName = this.session.outputNames[0];
-        const outData = new Float32Array(results[outName].data as Float32Array);
-        patchJobs.push({ outData, sx, sy, size });
+        const outData = results[outName].data as Float32Array;
+
+        const outCanvas = await this.createCanvas(LAMA_PATCH_SIZE, LAMA_PATCH_SIZE);
+        const outCtx = outCanvas.getContext('2d', { willReadFrequently: true });
+        const outImgData = outCtx.createImageData(LAMA_PATCH_SIZE, LAMA_PATCH_SIZE);
+
+        for (let y = 0; y < LAMA_PATCH_SIZE; y++) {
+          for (let x = 0; x < LAMA_PATCH_SIZE; x++) {
+            const outOffset = y * LAMA_PATCH_SIZE + x;
+            const i = outOffset * 4;
+            let r = this.denormalizeImagePixel(outData[0 * (LAMA_PATCH_SIZE * LAMA_PATCH_SIZE) + outOffset]);
+            let g = this.denormalizeImagePixel(outData[1 * (LAMA_PATCH_SIZE * LAMA_PATCH_SIZE) + outOffset]);
+            let b = this.denormalizeImagePixel(outData[2 * (LAMA_PATCH_SIZE * LAMA_PATCH_SIZE) + outOffset]);
+            outImgData.data[i] = Math.max(0, Math.min(255, r));
+            outImgData.data[i + 1] = Math.max(0, Math.min(255, g));
+            outImgData.data[i + 2] = Math.max(0, Math.min(255, b));
+            outImgData.data[i + 3] = 255;
+          }
+        }
+        outCtx.putImageData(outImgData, 0, 0);
+
+        // 1:1 Scale Blend-Back: directly paste pixels where the dilated polygon mask was active
+        if (patchW > 0 && patchH > 0) {
+          const currentData = finalCtx.getImageData(sx, sy, patchW, patchH);
+          const currentMaskData = patchMaskCtx.getImageData(0, 0, patchW, patchH);
+          const outPatchData = outCtx.getImageData(0, 0, patchW, patchH);
+
+          for (let i = 0; i < currentData.data.length; i += 4) {
+            const m = currentMaskData.data[i] >= 127 ? 1.0 : 0.0;
+            if (m > 0) {
+              currentData.data[i] = outPatchData.data[i];
+              currentData.data[i + 1] = outPatchData.data[i + 1];
+              currentData.data[i + 2] = outPatchData.data[i + 2];
+            }
+          }
+          finalCtx.putImageData(currentData, sx, sy);
+        }
       } finally {
         imageTensor.dispose();
         maskTensor.dispose();
@@ -443,69 +615,9 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
       }
     }
 
-    if (import.meta.env.DEV) {
+    if ((import.meta as any).env?.DEV) {
       const endTime = performance.now();
-      console.log(`[LamaBaseInpaintEngine] Inference finished in ${(endTime - startTime).toFixed(2)}ms for ${boxes.length} patches.`);
-    }
-
-    // Phase 2: Apply all inference results back to finalCtx sequentially.
-    // Sequential application is required because patches may overlap — a later patch
-    // reads from pixels that an earlier patch may have modified.
-    for (const { outData, sx, sy, size } of patchJobs) {
-      const outCanvas = await this.createCanvas(cropW, cropH);
-      const outCtx = outCanvas.getContext('2d', { willReadFrequently: true });
-      const outImgData = outCtx.createImageData(cropW, cropH);
-
-      for (let y = 0; y < cropH; y++) {
-        for (let x = 0; x < cropW; x++) {
-          const outOffset = y * cropW + x;
-          const i = (y * cropW + x) * 4;
-          let r = this.denormalizeImagePixel(outData[0 * (cropH * cropW) + outOffset]);
-          let g = this.denormalizeImagePixel(outData[1 * (cropH * cropW) + outOffset]);
-          let b = this.denormalizeImagePixel(outData[2 * (cropH * cropW) + outOffset]);
-          outImgData.data[i] = Math.max(0, Math.min(255, r));
-          outImgData.data[i+1] = Math.max(0, Math.min(255, g));
-          outImgData.data[i+2] = Math.max(0, Math.min(255, b));
-          outImgData.data[i+3] = 255;
-        }
-      }
-      outCtx.putImageData(outImgData, 0, 0);
-
-      const scaledBackCanvas = await this.createCanvas(Math.ceil(size), Math.ceil(size));
-      const scaledBackCtx = scaledBackCanvas.getContext('2d', { willReadFrequently: true });
-      scaledBackCtx.drawImage(outCanvas, 0, 0, cropW, cropH, 0, 0, Math.ceil(size), Math.ceil(size));
-      const scaledBackData = scaledBackCtx.getImageData(0, 0, Math.ceil(size), Math.ceil(size));
-
-      const rx = Math.round(sx);
-      const ry = Math.round(sy);
-      const rSize = Math.ceil(size);
-
-      const startX = Math.max(0, rx);
-      const startY = Math.max(0, ry);
-      const endX = Math.min(width, rx + rSize);
-      const endY = Math.min(height, ry + rSize);
-
-      if (endX <= startX || endY <= startY) continue;
-
-      const currentData = finalCtx.getImageData(startX, startY, endX - startX, endY - startY);
-      const currentMaskData = maskCtx.getImageData(startX, startY, endX - startX, endY - startY);
-
-      for (let cy = 0; cy < endY - startY; cy++) {
-          for (let cx = 0; cx < endX - startX; cx++) {
-              const patchX = (startX - rx) + cx;
-              const patchY = (startY - ry) + cy;
-
-              const currentIdx = (cy * (endX - startX) + cx) * 4;
-              const patchIdx = (patchY * rSize + patchX) * 4;
-
-              const m = currentMaskData.data[currentIdx] >= 127 ? 1.0 : 0.0;
-
-              currentData.data[currentIdx] = currentData.data[currentIdx] * (1.0 - m) + scaledBackData.data[patchIdx] * m;
-              currentData.data[currentIdx+1] = currentData.data[currentIdx+1] * (1.0 - m) + scaledBackData.data[patchIdx+1] * m;
-              currentData.data[currentIdx+2] = currentData.data[currentIdx+2] * (1.0 - m) + scaledBackData.data[patchIdx+2] * m;
-          }
-      }
-      finalCtx.putImageData(currentData, startX, startY);
+      console.log(`[LamaBaseInpaintEngine] Inference finished in ${(endTime - startTime).toFixed(2)}ms for ${windows.length} windows.`);
     }
 
     return await this.canvasToArrayBuffer(finalCanvas);

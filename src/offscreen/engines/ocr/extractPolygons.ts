@@ -331,7 +331,7 @@ export function extractPolygons(
           y: Math.max(0, Math.min(originalHeight, Math.round(p.y * scale)))
         }));
 
-        if (import.meta.env.DEV) {
+        if ((import.meta as any).env?.DEV) {
           if (scaledRect[0].x < 20 && scaledRect[0].y > 1000) {
             // Dump stats of the empty bottom-left box
             let maxVal = -1, minVal = 2;

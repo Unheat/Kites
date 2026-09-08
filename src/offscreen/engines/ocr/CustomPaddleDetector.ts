@@ -3,11 +3,10 @@ import { extractPolygons, extractRawMaskCanvas, type Point2D } from './extractPo
 /**
  * DBNet polygon expansion factor (PaddleOCR `--det_db_unclip_ratio`). Controls how far the
  * raw segmentation contour is pushed outward via a Clipper polygon offset before becoming
- * the final box — lower values hug the text more tightly.
- *
- * Matches the PaddleOCR online API (PP-OCRv6) `text_det_params.unclip_ratio = 1.5`.
+ * the final box — 1.8 ensures anti-aliased character edges and kanji radicals are swallowed
+ * without truncating at the quad boundary.
  */
-const UNCLIP_RATIO = 1.5;
+const UNCLIP_RATIO = 1.8;
 
 export interface DetectionOutput {
   /** 4-point text quadrilaterals in original image coordinates. */
