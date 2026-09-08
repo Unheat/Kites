@@ -1,7 +1,18 @@
 import type { IOcrEngine, OcrResult } from '../engines/ocr/BaseOcrEngine';
 import { PaddleOcrEngine } from '../engines/ocr/PaddleOcrEngine';
 import { resolveOcrTier } from '../engines/ocr/ocrRegistry';
-import { Quadrilateral, Graph, calculateBoundingBox, computeMinAreaRect, polygonArea, quadrilateralCanMergeRegion, splitTextRegion } from '../../shared/utils/geometry';
+import { Quadrilateral, Graph, calculateBoundingBox, computeMinAreaRect, polygonArea, quadrilateralCanMergeRegion, splitTextRegion, calculateRotationAngle } from '../../shared/utils/geometry';
+import {
+  isScanlatorWatermark,
+  isThoughtBubbleTailOrnament,
+  isStandaloneDigitOrOrnamentNoise,
+  isStandaloneDigitOrParticleNoise,
+  cleanStrayOcrArtifacts,
+  isOnomatopoeiaOrShout,
+  isNonLatinSource,
+  hasNativeScriptForLang,
+  stripTrailingWatermarkDebris,
+} from '../../shared/utils/textCleaning';
 
 /**
  * 1:1 Cotrans is_valuable_char check (generic2.py).
@@ -157,21 +168,200 @@ export class OcrManager {
    * Uses convex hull to generate accurate bounding polygons for merged blocks,
    * and concatenates text right-to-left.
    */
-  private mergeTextBlocks(result: OcrResult): OcrResult {
+  private mergeTextBlocks(
+    result: OcrResult,
+    context?: { sourceLang?: string; pageWidth?: number; pageHeight?: number }
+  ): OcrResult {
     // Merge algorithm entry point
-    const { texts: rawTexts, polygons: rawPolygons = [], scores: rawScores = [] } = result;
+    const rawTexts = [...result.texts];
+    const rawPolygons = [...(result.polygons || [])];
+    const rawScores = [...(result.scores || [])];
     if (rawTexts.length <= 1 || rawPolygons.length === 0) return { ...result, rawPolygons };
+
+    // XianScan clean_stray_ocr_artifacts: per-line rewrite BEFORE any filtering so
+    // trailing digit runs after ellipsis ("ちょっと…200000") and slash debris are
+    // cleaned once and every downstream filter sees the cleaned text.
+    for (let i = 0; i < rawTexts.length; i++) {
+      rawTexts[i] = cleanStrayOcrArtifacts(rawTexts[i]);
+    }
+    const sourceLang = context?.sourceLang;
+
+    // XianScan fusion.rs:72-146 line pre-filter battery (geometry + score only).
+    // Active only when page dimensions are provided. Drops: giant artwork
+    // hallucinations, high-tilt low-confidence lines, non-Latin slanted non-native
+    // lines, margin-flush architectural texture noise, and thin sliver subsegments.
+    const pageWidth = context?.pageWidth;
+    const pageHeight = context?.pageHeight;
+    const allLineIndices = rawTexts
+      .map((_, i) => i)
+      .filter(i => rawTexts[i].trim() && rawPolygons[i] && rawPolygons[i].length >= 3);
+    let universe = allLineIndices;
+    if (pageWidth && pageHeight) {
+      const survivors: number[] = [];
+      for (const i of allLineIndices) {
+        const poly = rawPolygons[i];
+        const box = calculateBoundingBox(poly);
+        const score = rawScores[i] || 0;
+        const t = rawTexts[i].trim();
+        const angleDeg = (Math.abs(calculateRotationAngle(poly)) * 180) / Math.PI;
+
+        // 1. Giant artwork hallucination
+        if (box.width >= pageWidth * 0.60 && box.height >= 120 && score < 0.75) {
+          console.log(`[OcrManager] Battery: dropped giant hallucination "${t}" (${Math.round(box.width)}x${Math.round(box.height)}, score=${score.toFixed(2)})`);
+          continue;
+        }
+        // 3. High-tilt non-dialogue with low confidence
+        if (angleDeg >= 12.0 && score < 0.60) {
+          console.log(`[OcrManager] Battery: dropped high-tilt line "${t}" (${angleDeg.toFixed(1)}deg, score=${score.toFixed(2)})`);
+          continue;
+        }
+        // 3b. Non-Latin source + slanted + no native script
+        if (sourceLang && isNonLatinSource(sourceLang) && angleDeg >= 10.0 && !hasNativeScriptForLang(t, sourceLang)) {
+          console.log(`[OcrManager] Battery: dropped slanted non-native line "${t}" (${angleDeg.toFixed(1)}deg)`);
+          continue;
+        }
+        // 4. Margin-flush architectural / border texture noise
+        if ((box.x <= 5 || box.x + box.width >= pageWidth - 5) && score < 0.75) {
+          console.log(`[OcrManager] Battery: dropped margin-flush line "${t}" (score=${score.toFixed(2)})`);
+          continue;
+        }
+        survivors.push(i);
+      }
+
+      // 4b. Thin sliver subsegments (h <= 25) overlapping a normal-height line
+      const normalIndices = survivors.filter(i => {
+        const b = calculateBoundingBox(rawPolygons[i]);
+        return b.height >= 28 && (rawScores[i] || 0) >= 0.65 && b.height <= b.width * 1.25;
+      });
+      universe = survivors.filter(i => {
+        const b = calculateBoundingBox(rawPolygons[i]);
+        if (b.height > b.width * 1.25 || b.height > 25) return true;
+        const t = rawTexts[i].trim();
+        const isSliver = normalIndices.some(ni => {
+          const nb = calculateBoundingBox(rawPolygons[ni]);
+          const ix = Math.min(b.x + b.width, nb.x + nb.width) - Math.max(b.x, nb.x);
+          const iy = Math.min(b.y + b.height, nb.y + nb.height) - Math.max(b.y, nb.y);
+          if (ix <= 0 || iy <= 0) return false;
+          const overlapY = iy / b.height;
+          const overlapX = ix / Math.min(b.width, nb.width);
+          const nt = rawTexts[ni].trim();
+          const isSub = nt.includes(t) && nt.length > t.length;
+          return (overlapY >= 0.60 && overlapX >= 0.50) || (overlapY >= 0.50 && isSub);
+        });
+        if (isSliver) {
+          console.log(`[OcrManager] Battery: dropped thin sliver "${rawTexts[i].trim()}" (h=${Math.round(b.height)})`);
+        }
+        return !isSliver;
+      });
+      console.log(`[OcrManager] Battery: ${allLineIndices.length} -> ${universe.length} lines after geometry pre-filter`);
+    }
+
+    // XianScan-style orphan punctuation recovery. Cotrans deliberately drops pure punctuation
+    // as noise, but vertical manga often detects a terminal `!`/`?` in its own small quad.
+    const purePunctuation = /^[！!？?…~〜ー─―.]+$/;
+    const claimedPunctuation = new Set<number>();
+    for (const punctuationIndex of universe) {
+      const punctuation = rawTexts[punctuationIndex]?.trim();
+      const punctuationPolygon = rawPolygons[punctuationIndex];
+      if (!punctuation || !purePunctuation.test(punctuation) || !punctuationPolygon || punctuationPolygon.length < 3) continue;
+
+      const punctuationBox = calculateBoundingBox(punctuationPolygon);
+      let closestIndex = -1;
+      let closestDistance = Number.POSITIVE_INFINITY;
+      for (const lineIndex of universe) {
+        if (lineIndex === punctuationIndex || !isValuableText(rawTexts[lineIndex] || '')) continue;
+        const linePolygon = rawPolygons[lineIndex];
+        if (!linePolygon || linePolygon.length < 3) continue;
+        const lineBox = calculateBoundingBox(linePolygon);
+        const horizontalGap = Math.max(lineBox.x - (punctuationBox.x + punctuationBox.width), punctuationBox.x - (lineBox.x + lineBox.width), 0);
+        const verticalGap = Math.max(lineBox.y - (punctuationBox.y + punctuationBox.height), punctuationBox.y - (lineBox.y + lineBox.height), 0);
+        const characterSize = Math.max(8, Math.min(lineBox.width, lineBox.height));
+        const distance = Math.hypot(horizontalGap, verticalGap);
+        if (distance <= characterSize * 1.5 && distance < closestDistance) {
+          closestIndex = lineIndex;
+          closestDistance = distance;
+        }
+      }
+
+      if (closestIndex >= 0) {
+        const lineBox = calculateBoundingBox(rawPolygons[closestIndex]);
+        const append = punctuationBox.y >= lineBox.y || punctuationBox.x >= lineBox.x;
+        rawTexts[closestIndex] = append
+          ? `${rawTexts[closestIndex]}${punctuation}`
+          : `${punctuation}${rawTexts[closestIndex]}`;
+        claimedPunctuation.add(punctuationIndex);
+        console.log(`[OcrManager] Attached orphan punctuation "${punctuation}" to "${rawTexts[closestIndex]}"`);
+      }
+    }
 
     // Stage 1: Cotrans Noise Filtering (area > 16, non-empty text, and isValuableText - manga_translator.py)
     const validIndices: number[] = [];
-    for (let i = 0; i < rawTexts.length; i++) {
+    for (const i of universe) {
       const poly = rawPolygons[i];
-      const txt = rawTexts[i];
+      let txt = rawTexts[i];
       if (!poly || poly.length < 3) continue;
       if (!txt || !txt.trim()) continue;
+      if (claimedPunctuation.has(i)) continue;
 
       if (!isValuableText(txt)) {
         console.log(`[OcrManager] Filtered out non-valuable noise line "${txt}"`);
+        continue;
+      }
+
+      // XianScan noise rule: standalone 1-2 char Latin/digit noise (e.g. "er", "u", "N") on
+      // speedlines and clothing folds with low score (< 0.65) is background artifact.
+      // SFX/shout exemption: real sound effects ("GO!", "KYAA") must survive.
+      let trimmedTxt = txt.trim();
+      const isShortLatinNoise = trimmedTxt.length <= 2
+        && /^[a-zA-Z0-9]+$/.test(trimmedTxt)
+        && (rawScores[i] || 0) < 0.65
+        && !isOnomatopoeiaOrShout(trimmedTxt);
+      if (isShortLatinNoise) {
+        console.log(`[OcrManager] Filtered out short Latin noise line "${trimmedTxt}" (score=${rawScores[i]})`);
+        continue;
+      }
+
+      // XianScan strip_trailing_watermark_debris: a watermark FUSED to the end of a
+      // dialogue line is cut (with polygon rescale) rather than dropping the whole line.
+      if (sourceLang) {
+        const debris = stripTrailingWatermarkDebris(trimmedTxt, sourceLang);
+        if (debris.keepRatio <= 0.10) {
+          console.log(`[OcrManager] Dropped line dominated by watermark debris "${trimmedTxt}"`);
+          continue;
+        }
+        if (debris.keepRatio < 0.99) {
+          rawTexts[i] = debris.text;
+          const poly = rawPolygons[i];
+          if (poly && poly.length === 4) {
+            const polyBox = calculateBoundingBox(poly);
+            if (polyBox.height > polyBox.width) {
+              // Vertical line: shrink the bottom edge (points 2,3) upward (analyzer.rs multiline variant)
+              poly[2] = { x: poly[2].x, y: poly[1].y + (poly[2].y - poly[1].y) * debris.keepRatio };
+              poly[3] = { x: poly[3].x, y: poly[0].y + (poly[3].y - poly[0].y) * debris.keepRatio };
+            } else {
+              // Horizontal line: shrink the right edge (points 1,2) leftward (analyzer.rs single-line variant)
+              poly[1] = { x: poly[0].x + (poly[1].x - poly[0].x) * debris.keepRatio, y: poly[1].y };
+              poly[2] = { x: poly[3].x + (poly[2].x - poly[3].x) * debris.keepRatio, y: poly[2].y };
+            }
+          }
+          console.log(`[OcrManager] Stripped trailing watermark debris "${trimmedTxt}" -> "${debris.text}" (keepRatio=${debris.keepRatio.toFixed(2)})`);
+          // Keep downstream checks (watermark, thought-tail, furigana) on the CLEANED text
+          txt = debris.text;
+          trimmedTxt = debris.text.trim();
+        }
+      }
+
+      // XianScan text_clean ports: scanlator watermark, thought-bubble tail, digit ornaments
+      if (isScanlatorWatermark(trimmedTxt)) {
+        console.log(`[OcrManager] Filtered out scanlator watermark "${trimmedTxt}"`);
+        continue;
+      }
+      if (isThoughtBubbleTailOrnament(trimmedTxt)) {
+        console.log(`[OcrManager] Filtered out thought-bubble tail ornament "${trimmedTxt}"`);
+        continue;
+      }
+      if (isStandaloneDigitOrOrnamentNoise(trimmedTxt)) {
+        console.log(`[OcrManager] Filtered out ornament/digit noise "${trimmedTxt}"`);
         continue;
       }
 
@@ -230,11 +420,140 @@ export class OcrManager {
       validIndices.push(i);
     }
 
-    const texts = validIndices.map(i => rawTexts[i]);
-    const polygons = validIndices.map(i => rawPolygons[i]);
-    const scores = validIndices.map(i => rawScores[i]);
+    // XianScan builder.rs:189-205: in non-Latin sources, once native-script lines exist
+    // on the page, pure-Latin words and digit/particle noise are clothing-fold/screentone
+    // artifacts. Dialogue punctuation and sound effects are exempt. Runs at page level
+    // (the source applies it per-container; a page-level native anchor is the faithful
+    // approximation without containers). Skips entirely for Latin sources / no context.
+    let langPrunedIndices = validIndices;
+    if (sourceLang && isNonLatinSource(sourceLang)) {
+      const anyNative = validIndices.some(idx => hasNativeScriptForLang(rawTexts[idx], sourceLang));
+      if (anyNative) {
+        langPrunedIndices = validIndices.filter(idx => {
+          const t = rawTexts[idx].trim();
+          if (!t) return false;
+          if (hasNativeScriptForLang(t, sourceLang)) return true;
+          if (/[！？!?…]/.test(t)) return true;
+          if (isOnomatopoeiaOrShout(t)) return true;
+          const isPureLatinWord = /^[\x20-\x7E]+$/.test(t) && /[a-zA-Z]/.test(t);
+          const isNoiseOrDigit = isStandaloneDigitOrParticleNoise(t) || isThoughtBubbleTailOrnament(t);
+          if (isPureLatinWord || isNoiseOrDigit) {
+            console.log(`[OcrManager] Pruned non-native Latin noise "${t}" (source=${sourceLang})`);
+            return false;
+          }
+          return true;
+        });
+      }
+    }
 
-    if (texts.length === 0) return result;
+    const filteredTexts = langPrunedIndices.map(i => rawTexts[i]);
+    const filteredPolygons = langPrunedIndices.map(i => rawPolygons[i]);
+    const filteredScores = langPrunedIndices.map(i => rawScores[i]);
+
+    // PaddleOCR can report a complete line plus a nested substring slice, or two identical
+    // quads for one physical glyph run. Drop the weaker duplicate before Cotrans MST.
+    // Handles both vertical columns (substring slices) and horizontal rows (partial lines).
+    const duplicateIndices = new Set<number>();
+    for (let i = 0; i < filteredTexts.length; i++) {
+      const textA = filteredTexts[i].trim();
+      const scoreA = filteredScores[i] || 0;
+      const boxA = calculateBoundingBox(filteredPolygons[i]);
+      for (let j = i + 1; j < filteredTexts.length; j++) {
+        const textB = filteredTexts[j].trim();
+        const scoreB = filteredScores[j] || 0;
+        const boxB = calculateBoundingBox(filteredPolygons[j]);
+
+        // Geometric containment: intersection over the SMALLER box.
+        const interW = Math.max(0, Math.min(boxA.x + boxA.width, boxB.x + boxB.width) - Math.max(boxA.x, boxB.x));
+        const interH = Math.max(0, Math.min(boxA.y + boxA.height, boxB.y + boxB.height) - Math.max(boxA.y, boxB.y));
+        const interArea = interW * interH;
+        if (interArea <= 0) continue;
+        const areaA = Math.max(1, boxA.width * boxA.height);
+        const areaB = Math.max(1, boxB.width * boxB.height);
+        const coversSmaller = interArea / Math.min(areaA, areaB);
+        if (coversSmaller < 0.5) continue;
+
+        // Text relationship: exact duplicate, or one is a substring slice of the other.
+        const aContainsB = textA.length > textB.length && textA.includes(textB);
+        const bContainsA = textB.length > textA.length && textB.includes(textA);
+        const identical = textA === textB;
+        if (!identical && !aContainsB && !bContainsA) continue;
+
+        // Keep the longer text (the nested slice is its partial read); on identical
+        // content keep the higher OCR confidence. Confidence never beats length —
+        // a high-confidence slice is still missing glyphs the longer line captured.
+        if (aContainsB) {
+          duplicateIndices.add(j);
+        } else if (bContainsA) {
+          duplicateIndices.add(i);
+        } else {
+          duplicateIndices.add(scoreA >= scoreB ? j : i);
+        }
+      }
+    }
+
+    const texts = filteredTexts.filter((_, index) => !duplicateIndices.has(index));
+    const polygons = filteredPolygons.filter((_, index) => !duplicateIndices.has(index));
+    const scores = filteredScores.filter((_, index) => !duplicateIndices.has(index));
+
+    if (texts.length === 0) {
+      // Nothing to translate, but inpainting still needs the surviving erase polygons:
+      // all noise-filtered lines (pre-dedup — dropped duplicates still have ink to erase)
+      // plus orphan punctuation merged into neighbors.
+      const emptyMaskPolygons = [...filteredPolygons];
+      for (const idx of claimedPunctuation) {
+        emptyMaskPolygons.push(rawPolygons[idx]);
+      }
+      return {
+        ...result,
+        texts: [],
+        polygons: [],
+        scores: [],
+        boxes: [],
+        directions: [],
+        fontSizes: [],
+        angles: [],
+        lineCounts: [],
+        rawPolygons: emptyMaskPolygons,
+      };
+    }
+
+    // Build Cotrans Quadrilateral objects once (sorts points, derives direction/font_size)
+    const quads = polygons.map(p => new Quadrilateral(p));
+
+    // Stage 1.5: assign per-line reading direction (Cotrans _generate_text_direction)
+    this.assignTextDirections(quads);
+
+    // XianScan low-confidence suppression (builder.rs:278-282), NEIGHBORHOOD-GATED:
+    // the source suppresses weak lines inside a container that also holds a strong
+    // line. We have no containers pre-merge, so the gate is "can actually merge with"
+    // a high-confidence line. A faint whisper bubble elsewhere on the page cannot
+    // merge with the strong line and is untouched.
+    let workingTexts = texts;
+    let workingScores = scores;
+    let workingQuads = quads;
+    const pageMaxScore = scores.reduce((m, s) => Math.max(m, s || 0), 0);
+    if (pageMaxScore >= 0.70) {
+      const suppressed = new Set<number>();
+      for (let i = 0; i < texts.length; i++) {
+        const scoreI = scores[i] || 0;
+        if (scoreI >= 0.60 || scoreI >= pageMaxScore * 0.85) continue;
+        for (let j = 0; j < texts.length; j++) {
+          if (i === j || (scores[j] || 0) < 0.70) continue;
+          if (quadrilateralCanMergeRegion(quads[i], quads[j], 1.9, 2, 1, 3, 2, 1.3)) {
+            suppressed.add(i);
+            console.log(`[OcrManager] Suppressed low-confidence line "${texts[i].trim()}" (score=${scoreI.toFixed(2)}) near high-confidence line (score=${(scores[j] || 0).toFixed(2)})`);
+            break;
+          }
+        }
+      }
+      if (suppressed.size > 0) {
+        const kept = texts.map((_, i) => i).filter(i => !suppressed.has(i));
+        workingTexts = kept.map(i => texts[i]);
+        workingScores = kept.map(i => scores[i]);
+        workingQuads = kept.map(i => quads[i]);
+      }
+    }
 
     const mergedPolygons: any[] = [];
     const mergedTexts: string[] = [];
@@ -245,20 +564,14 @@ export class OcrManager {
     const mergedAngles: number[] = [];
     const mergedLineCounts: number[] = [];
 
-    // Build Cotrans Quadrilateral objects once (sorts points, derives direction/font_size)
-    const quads = polygons.map(p => new Quadrilateral(p));
-
-    // Stage 1.5: assign per-line reading direction (Cotrans _generate_text_direction)
-    this.assignTextDirections(quads);
-
     // Step 1: divide into text region candidates (textline_merge/__init__.py merge graph).
     // Cotrans call: quadrilateral_can_merge_region(ubox, vbox, aspect_ratio_tol=1.3,
     // font_size_ratio_tol=2, char_gap_tolerance=1, char_gap_tolerance2=3)
     const mergeGraph = new Graph();
-    for (let i = 0; i < quads.length; i++) mergeGraph.addNode(i);
-    for (let i = 0; i < quads.length; i++) {
-      for (let j = i + 1; j < quads.length; j++) {
-        if (quadrilateralCanMergeRegion(quads[i], quads[j], 1.9, 2, 1, 3, 2, 1.3)) {
+    for (let i = 0; i < workingQuads.length; i++) mergeGraph.addNode(i);
+    for (let i = 0; i < workingQuads.length; i++) {
+      for (let j = i + 1; j < workingQuads.length; j++) {
+        if (quadrilateralCanMergeRegion(workingQuads[i], workingQuads[j], 1.9, 2, 1, 3, 2, 1.3)) {
           mergeGraph.addEdge(i, j);
         }
       }
@@ -267,7 +580,7 @@ export class OcrManager {
     // Step 2: postprocess - further split each region using Cotrans Kruskal MST statistics
     const finalGroups: number[][] = [];
     for (const component of mergeGraph.connectedComponents()) {
-      const splitSets = splitTextRegion(quads, component);
+      const splitSets = splitTextRegion(workingQuads, component);
       for (const set of splitSets) {
         finalGroups.push(Array.from(set));
       }
@@ -275,7 +588,7 @@ export class OcrManager {
 
     // Step 3: emit one merged region per final group
     for (const groupIndices of finalGroups) {
-      const groupQuads = groupIndices.map(idx => quads[idx]);
+      const groupQuads = groupIndices.map(idx => workingQuads[idx]);
 
       // Majority direction vote with Cotrans top-2 tie-break
       const majorityDir = this.majorityDirection(groupQuads);
@@ -283,18 +596,18 @@ export class OcrManager {
       // Sort textlines in reading order (1:1 textline_merge/__init__.py)
       if (majorityDir === 'h') {
         // Horizontal text: sort top-to-bottom (Y ascending)
-        groupIndices.sort((a, b) => quads[a].centroid.y - quads[b].centroid.y);
+        groupIndices.sort((a, b) => workingQuads[a].centroid.y - workingQuads[b].centroid.y);
       } else {
         // Vertical manga: sort right-to-left (X descending)
-        groupIndices.sort((a, b) => quads[b].centroid.x - quads[a].centroid.x);
+        groupIndices.sort((a, b) => workingQuads[b].centroid.x - workingQuads[a].centroid.x);
       }
 
       // 1:1 Cotrans CJK aware text concatenation (textblock.py)
       let groupText = '';
       if (groupIndices.length > 0) {
-        groupText = texts[groupIndices[0]] || '';
+        groupText = workingTexts[groupIndices[0]] || '';
         for (let k = 1; k < groupIndices.length; k++) {
-          const txt = texts[groupIndices[k]] || '';
+          const txt = workingTexts[groupIndices[k]] || '';
           const lastChar = groupText.slice(-1);
           const firstChar = txt.slice(0, 1);
           const isLastCJK = lastChar >= '\u3000' && lastChar <= '\u9fff';
@@ -309,21 +622,21 @@ export class OcrManager {
       }
 
       console.log(`[OcrManager] Merged Speech Bubble: "${groupText}" (${majorityDir}) from ${groupIndices.length} lines`);
-      const groupScore = groupIndices.reduce((sum, idx) => sum + (scores[idx] || 1), 0) / groupIndices.length;
+      const groupScore = groupIndices.reduce((sum, idx) => sum + (workingScores[idx] || 1), 0) / groupIndices.length;
 
       // 1:1 Cotrans block font size: int(min(textline font sizes)) (textline_merge dispatch)
-      const groupFontSize = Math.floor(Math.min(...groupIndices.map(idx => quads[idx].font_size)));
+      const groupFontSize = Math.floor(Math.min(...groupIndices.map(idx => workingQuads[idx].font_size)));
 
       // 1:1 Cotrans average angle calculation and threshold snapping (textline_merge/__init__.py):
       // angle = rad2deg(mean(line angles)) - 90, snapped to 0 below 3 degrees
-      const meanAngleRad = groupIndices.reduce((sum, idx) => sum + quads[idx].angle, 0) / groupIndices.length;
+      const meanAngleRad = groupIndices.reduce((sum, idx) => sum + workingQuads[idx].angle, 0) / groupIndices.length;
       let angleDeg = (meanAngleRad * 180) / Math.PI - 90;
       if (Math.abs(angleDeg) < 3) {
         angleDeg = 0;
       }
 
       // 1:1 Cotrans min_rect computation (textblock.py min_rect property - ALWAYS 4 points)
-      const groupPolygons = groupIndices.map(idx => quads[idx].pts);
+      const groupPolygons = groupIndices.map(idx => workingQuads[idx].pts);
       const minRect = computeMinAreaRect(groupPolygons, angleDeg);
       const minBox = calculateBoundingBox(minRect);
 
@@ -338,19 +651,61 @@ export class OcrManager {
       mergedLineCounts.push(groupIndices.length);
     }
 
+    // Cotrans sort_regions (textblock.py:423): order blocks top-to-bottom, right-to-left.
+    // Graph connected-component order is arbitrary; without this, translation receives
+    // bubbles in random spatial order which breaks cross-bubble context quality.
+    // Candidates MUST be pre-sorted by centerY ascending (Cotrans line 426) — the
+    // insertion logic below is only correct under that precondition.
+    const rows: number[] = []; // indices into mergedBoxes, in panel reading order
+    const candidates = mergedBoxes
+      .map((b, index) => ({ index, centerY: b.y + b.h / 2 }))
+      .sort((a, b) => a.centerY - b.centerY);
+    for (const { index: cand } of candidates) {
+      const b = mergedBoxes[cand];
+      const centerY = b.y + b.h / 2;
+      const centerX = b.x + b.w / 2;
+      let placed = false;
+      for (let i = 0; i < rows.length; i++) {
+        const r = mergedBoxes[rows[i]];
+        if (centerY > r.y + r.h) continue;
+        if (centerY < r.y) {
+          // pass the row: belongs after current row
+          rows.splice(i + 1, 0, cand);
+          placed = true;
+          break;
+        }
+        // Same row band: right-to-left for manga reading order
+        const rCenterX = r.x + r.w / 2;
+        if (centerX > rCenterX) {
+          rows.splice(i, 0, cand);
+          placed = true;
+          break;
+        }
+      }
+      if (!placed) rows.push(cand);
+    }
+
+    const pick = <T>(arr: T[]): T[] => rows.map(i => arr[i]);
+
     // rawPolygons retains the raw unmerged 4-point line quadrilaterals for inpainting.
-    // We use the noise-filtered polygons here (from validIndices) so that empty boxes
-    // and non-text noise are not sent to inpainting.
+    // Built from PRE-dedup filtered polygons: a dedup-dropped duplicate still has ink
+    // (its non-overlapping part) that must be erased. Orphan punctuation polygons that
+    // were merged into neighbors' text are added too — their ink must also be erased.
+    const maskPolygons = [...filteredPolygons];
+    for (const idx of claimedPunctuation) {
+      maskPolygons.push(rawPolygons[idx]);
+    }
     return {
-      texts: mergedTexts,
-      polygons: mergedPolygons,
-      scores: mergedScores,
-      boxes: mergedBoxes,
-      directions: mergedDirections,
-      fontSizes: mergedFontSizes,
-      angles: mergedAngles,
-      lineCounts: mergedLineCounts,
-      rawPolygons: polygons,
+      texts: pick(mergedTexts),
+      polygons: pick(mergedPolygons),
+      scores: pick(mergedScores),
+      boxes: pick(mergedBoxes),
+      directions: pick(mergedDirections),
+      fontSizes: pick(mergedFontSizes),
+      angles: pick(mergedAngles),
+      lineCounts: pick(mergedLineCounts),
+      detectionScores: result.detectionScores,
+      rawPolygons: maskPolygons,
       maskRawCanvas: result.maskRawCanvas
     };
   }
@@ -359,12 +714,20 @@ export class OcrManager {
    * Process the image buffer to extract text and bounding boxes.
    *
    * @param imageBuffer - The raw ArrayBuffer of the image.
+   * @param tier - OCR model tier.
+   * @param context - Optional pipeline context. `sourceLang` activates language-aware
+   * filters (XianScan lang.rs); `pageWidth`/`pageHeight` activate the geometry
+   * pre-filter battery. All undefined = legacy behavior (no language/geometry filters).
    * @returns A promise that resolves to the standardized OCR result.
    */
-  async processImage(imageBuffer: ArrayBuffer, tier: OcrTier = 'v6-small'): Promise<OcrResult> {
+  async processImage(
+    imageBuffer: ArrayBuffer,
+    tier: OcrTier = 'v6-small',
+    context?: { sourceLang?: string; pageWidth?: number; pageHeight?: number }
+  ): Promise<OcrResult> {
     const engine = await this.getOrLoadEngine(tier);
     const rawResult = await engine.recognize(imageBuffer);
-    return this.mergeTextBlocks(rawResult);
+    return this.mergeTextBlocks(rawResult, context);
   }
 
   /**

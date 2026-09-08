@@ -4,6 +4,13 @@ import type { IInpaintEngine, Point2D } from './BaseInpaintEngine';
  * Tier 1 Inpainting Engine: Dominant Edge Color Fill.
  * Samples the border pixels around each text block and fills the polygon path with the average color.
  * Very fast, 0MB download footprint.
+ *
+ * LOCKED TO V1 LOGIC (see InpaintManager header): inside-polygon bright-pixel
+ * sampling (luminance >= 180, first-pixel fallback), median fill. Do NOT add ring
+ * sampling, background gating, white-snapping, or mask-forwarding here — all three
+ * were tried in the v2 session, each caused visible regressions (gray blocks,
+ * bubble-shaped blob fills), and each was reverted. Quality work belongs to the
+ * LaMa tier; this tier must stay dumb and fast.
  */
 export class SimpleInpaintEngine implements IInpaintEngine {
   private platform: any;
@@ -12,11 +19,26 @@ export class SimpleInpaintEngine implements IInpaintEngine {
     this.platform = platform;
   }
 
+  /**
+   * Initializes the engine. This is a no-op as the simple color-fill engine requires no models or external dependencies.
+   *
+   * @returns A promise that resolves immediately.
+   */
   async init(): Promise<void> {
     // Zero dependencies to initialize
     return Promise.resolve();
   }
 
+  /**
+   * Erases text by sampling boundary pixels around each text block and filling
+   * the polygon with the sampled dominant/median background color.
+   * Detects white speech bubbles to avoid ink contamination from nearby outlines.
+   *
+   * @param imageBuffer - Raw ArrayBuffer of the input image.
+   * @param maskPolygons - Array of polygon vertex arrays defining text regions to erase.
+   * @param strokeMaskCanvas - Optional pre-rendered stroke mask canvas to fill only the text strokes.
+   * @returns A promise resolving to the inpainted image as an ArrayBuffer.
+   */
   async inpaint(imageBuffer: ArrayBuffer, maskPolygons: Point2D[][], strokeMaskCanvas?: any): Promise<ArrayBuffer> {
     // 1. Prepare canvas containing the source image
     const rawCanvas = await this.platform.canvas.prepareCanvas(imageBuffer);
@@ -57,7 +79,7 @@ export class SimpleInpaintEngine implements IInpaintEngine {
       const pixels = imgData.data;
 
       // 2. Sample average background color
-      let maskImgData;
+      let maskImgData: { data: Uint8ClampedArray } | undefined;
       if (strokeMaskCanvas) {
         try {
           const maskCtx = strokeMaskCanvas.getContext('2d', { willReadFrequently: true });
@@ -83,33 +105,43 @@ export class SimpleInpaintEngine implements IInpaintEngine {
       polyCtx.fill();
       const polyData = polyCtx.getImageData(0, 0, w, h).data;
 
-      let rSum = 0, gSum = 0, bSum = 0, count = 0;
+      const rSamples: number[] = [];
+      const gSamples: number[] = [];
+      const bSamples: number[] = [];
+
+      // v1 contract: simple fill is DUMB and FAST. Sample the paper BETWEEN glyph
+      // strokes inside the polygon (luminance >= 180), fill with the median. Quality
+      // work belongs to the LaMa tier — this tier must never grow inpainting logic.
+      // The v1 first-pixel fallback (take any pixel when nothing is bright) is kept
+      // verbatim so dark-art panels behave exactly as v1 did.
+      let count = 0;
       for (let i = 0; i < w * h; i++) {
         const idx = i * 4;
-        
-        // Pixel must be strictly inside the OCR polygon
-        if (polyData[idx] > 0) {
-          const rPixel = pixels[idx];
-          const gPixel = pixels[idx + 1];
-          const bPixel = pixels[idx + 2];
-          const luminance = 0.299 * rPixel + 0.587 * gPixel + 0.114 * bPixel;
-
-          // Exclude dark text ink pixels (luminance < 180) to get pure background color
-          if (!maskImgData || maskImgData.data[idx] === 0) {
-            if (luminance >= 180 || count === 0) {
-              rSum += rPixel;
-              gSum += gPixel;
-              bSum += bPixel;
-              count++;
-            }
-          }
+        // Pixel must be strictly inside the OCR polygon (bubble paper between strokes)
+        if (polyData[idx] === 0) continue;
+        const rPixel = pixels[idx];
+        const gPixel = pixels[idx + 1];
+        const bPixel = pixels[idx + 2];
+        const luminance = 0.299 * rPixel + 0.587 * gPixel + 0.114 * bPixel;
+        if (luminance >= 180 || count === 0) {
+          rSamples.push(rPixel);
+          gSamples.push(gPixel);
+          bSamples.push(bPixel);
+          count++;
         }
       }
 
-      // Compute average background color
-      const r = count > 0 ? Math.round(rSum / count) : 255;
-      const g = count > 0 ? Math.round(gSum / count) : 255;
-      const b = count > 0 ? Math.round(bSum / count) : 255;
+      const median = (samples: number[], fallback: number): number => {
+        if (samples.length === 0) return fallback;
+        samples.sort((a, b) => a - b);
+        return samples[Math.floor(samples.length / 2)];
+      };
+
+      // Empty-sample fallback is white (v1 behavior): no bright interior pixel means
+      // the bubble paper is the fallback.
+      const r = median(rSamples, 255);
+      const g = median(gSamples, 255);
+      const b = median(bSamples, 255);
 
       // 3. Fill the polygon path with the sampled color
       if (maskImgData) {
@@ -163,6 +195,11 @@ export class SimpleInpaintEngine implements IInpaintEngine {
     }
   }
 
+  /**
+   * Cleans up engine resources. This is a no-op since no resources are held.
+   *
+   * @returns A promise that resolves immediately.
+   */
   async destroy(): Promise<void> {
     return Promise.resolve();
   }

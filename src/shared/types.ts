@@ -87,7 +87,11 @@ export interface UserAccountInfo {
   picture?: string;
   sub: string;
   signedIn: boolean;
+  quotaRemaining?: number;
+  quotaResetsAt?: number;
 }
+
+import type { RenderFontPresetId } from './renderFontPresets';
 
 export interface PopupState {
   isExtensionEnabled: boolean;
@@ -100,6 +104,7 @@ export interface PopupState {
   activeEngineId: string;
   activeInpaintId: string;
   activeOcrId: string;
+  renderFontPresetId: RenderFontPresetId;
   fallbackChain: string[];
   customApis: CustomApiConfig[];
   webgpuSupported: boolean | null;
@@ -123,6 +128,7 @@ export const DEFAULT_POPUP_STATE: PopupState = {
   activeEngineId: 'gg-translate',
   activeInpaintId: 'simple',
   activeOcrId: 'v6-small',
+  renderFontPresetId: 'standard',
   fallbackChain: [],
   customApis: [],
   webgpuSupported: null,

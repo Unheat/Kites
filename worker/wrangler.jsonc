@@ -9,6 +9,13 @@
   "compatibility_date": "2024-09-23",
   "compatibility_flags": ["nodejs_compat"],
 
+  "routes": [
+    {
+      "pattern": "api.12094852.xyz",
+      "custom_domain": true
+    }
+  ],
+
   "durable_objects": {
     "bindings": [
       {

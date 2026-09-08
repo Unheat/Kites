@@ -161,12 +161,6 @@ async function testModelConfig(browser, configName, popupState) {
       manualMode: 'hover'
     });
 
-      targetLang: 'en',
-      concurrency: 1,
-      isAuto: false,
-      manualMode: 'hover'
-    });
-
     // 5. Task 3: WebLLM Model (SmolLM2-135M-Instruct-q0f16-MLC) + Simple Fill
     await testModelConfig(browser, 'Task 3: MLC WebLLM Model', {
       activeEngineId: 'SmolLM2-135M-Instruct-q0f16-MLC',

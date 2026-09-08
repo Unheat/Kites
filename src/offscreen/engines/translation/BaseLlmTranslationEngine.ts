@@ -1,0 +1,218 @@
+import type { ITranslationEngine } from './BaseEngine';
+import { getLanguageName } from '../../../shared/utils/LanguageRegistry';
+
+export interface LlmTranslationSegment {
+  originalIndex: number;
+  text: string;
+}
+
+/**
+ * Strips common LLM markdown formatting (bold, italic, backticks, fences) from a text string.
+ *
+ * @param text - The raw text potentially containing markdown decorators.
+ * @returns Cleaned text with markdown syntax stripped.
+ */
+export function stripMarkdownFormatting(text: string): string {
+  if (!text) return '';
+  let out = text
+    // Strip bold/italic asterisks: ***both***, **bold**, *italic*
+    .replace(/\*\*\*(.*?)\*\*\*/g, '$1')
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/\*(.*?)\*/g, '$1')
+    // Strip bold/italic underscores: ___both___, __bold__, _italic_
+    .replace(/___(.*?)___/g, '$1')
+    .replace(/__(.*?)__/g, '$1')
+    .replace(/_(.*?)_/g, '$1')
+    // Strip inline backticks: `code`
+    .replace(/`([^`]+)`/g, '$1');
+
+  // Strip any lingering markdown fence or dangling asterisks/underscores
+  out = out.replace(/^[*_~`#]+\s*/, '').replace(/\s*[*_~`#]+$/, '');
+  return out.trim();
+}
+
+/**
+ * Maximum segments per translation prompt. Keeps prompts small enough that lightweight
+ * models (1B-3B) do not drop short dialogue tags or hallucinate tag counts.
+ */
+export const DEFAULT_LLM_BATCH_SIZE = 15;
+
+/**
+ * Abstract base class for all LLM-based translation engines (WebLLM, CustomApi, Cloudflare).
+ * Encapsulates blank line pre-filtering, batching, prompt assembly, delimiter parsing,
+ * index alignment protection, and markdown stripping.
+ */
+export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
+  /**
+   * Maximum segments per translation prompt.
+   */
+  protected batchSize = DEFAULT_LLM_BATCH_SIZE;
+
+  /**
+   * Whether to throw an Error when the response line count does not match the chunk length.
+   * Defaults to false to allow 1 or 2 dropped lines to fall back gracefully to original text
+   * without incurring costly resend overhead or aborting the full translation.
+   */
+  protected throwOnCountMismatch = false;
+
+  /**
+   * Translates an array of text segments from source language to target language.
+   * Preserves exact 1:1 positional indexing with the input array.
+   *
+   * @param texts - Array of source text strings.
+   * @param sourceLangId - BCP-47 language code or natural name (default 'auto').
+   * @param targetLangId - BCP-47 language code or natural name (default 'en').
+   * @returns Array of translated strings aligned with the input array.
+   */
+  async translate(texts: string[], sourceLangId = 'auto', targetLangId = 'en'): Promise<string[]> {
+    if (!texts || texts.length === 0) return [];
+
+    // 1. Filter out empty or whitespace-only strings to save tokens
+    const nonEmptyInputs: LlmTranslationSegment[] = [];
+    texts.forEach((text, i) => {
+      if (text && text.trim()) {
+        nonEmptyInputs.push({ originalIndex: i, text: text.trim() });
+      }
+    });
+
+    const results: string[] = new Array(texts.length).fill('');
+    if (nonEmptyInputs.length === 0) return results;
+
+    const sourceLang = this.resolveLanguage(sourceLangId, 'source');
+    const targetLang = this.resolveLanguage(targetLangId, 'target');
+
+    // 2. Process in bounded batches
+    for (let offset = 0; offset < nonEmptyInputs.length; offset += this.batchSize) {
+      const chunk = nonEmptyInputs.slice(offset, offset + this.batchSize);
+      const prompt = this.buildPrompt(chunk, sourceLang, targetLang);
+      const rawOutput = await this.requestLlm(prompt);
+      const parsedChunk = this.parseDelimitedOutput(rawOutput, chunk);
+
+      for (let j = 0; j < chunk.length; j++) {
+        const cleaned = stripMarkdownFormatting(parsedChunk[j] || '');
+        results[chunk[j].originalIndex] = cleaned;
+      }
+    }
+
+    return results;
+  }
+
+  /**
+   * Abstract method implemented by subclasses to perform the actual model or API inference.
+   *
+   * @param prompt - The assembled batch prompt.
+   * @param signal - Optional AbortSignal.
+   * @returns Raw string response from the LLM.
+   */
+  protected abstract requestLlm(prompt: string, signal?: AbortSignal): Promise<string>;
+
+  /**
+   * Resolves language identifiers or codes to human-readable names for LLM prompting.
+   *
+   * @param lang - Language code or name.
+   * @param role - Whether this is source or target language.
+   * @returns Human-readable language name.
+   */
+  protected resolveLanguage(lang: string | undefined, role: 'source' | 'target'): string {
+    if (!lang || lang === 'auto') {
+      return role === 'source' ? 'the detected source language' : 'English';
+    }
+    const mapped = getLanguageName(lang);
+    return mapped || lang;
+  }
+
+  /**
+   * Constructs the structured batch prompt with strict line delimiters and anti-markdown rules.
+   *
+   * @param chunk - The current chunk of segments to translate.
+   * @param sourceLang - Resolved source language name.
+   * @param targetLang - Resolved target language name.
+   * @returns Formatted prompt string.
+   */
+  protected buildPrompt(chunk: LlmTranslationSegment[], sourceLang: string, targetLang: string): string {
+    const combinedText = chunk.map((item, index) => `<|${index + 1}|> ${item.text}`).join('\n');
+
+    return (
+      `Translate the following manga text lines from ${sourceLang} to ${targetLang}.\n` +
+      `Rules:\n` +
+      `- Keep the exact line number format (e.g. <|1|>, <|2|>) for every line.\n` +
+      `- Provide an exact 1:1 translation for each numbered line. Never skip, omit, or merge lines.\n` +
+      `- Output raw plain text only. Do NOT use markdown styling (no asterisks **, *, no backticks, no bold or italic tags).\n` +
+      `- Do not add any conversational filler, explanations, or notes. Only output the translated lines with their tags.\n\n` +
+      `${combinedText}`
+    );
+  }
+
+  /**
+   * Parses raw delimited output using tag regex matching, with fallbacks to split and newline matching.
+   * Guarantees index stability: if the LLM drops a tag, that slot falls back to its original source text
+   * rather than shifting subsequent translations.
+   *
+   * @param rawOutput - Raw response string from the LLM.
+   * @param chunk - The expected chunk items for count and fallback verification.
+   * @returns Array of translated strings with length equal to chunk.length.
+   */
+  protected parseDelimitedOutput(rawOutput: string, chunk: LlmTranslationSegment[]): string[] {
+    const expectedCount = chunk.length;
+    const parsed: (string | undefined)[] = new Array(expectedCount).fill(undefined);
+
+    // Primary strategy: Match tagged responses like `<|1|> translation`
+    const tagRegex = /<\|(\d+)\|>\s*(.*?)(?=(?:<\|\d+\|>|$))/gs;
+    let match: RegExpExecArray | null;
+    let matchedCount = 0;
+
+    while ((match = tagRegex.exec(rawOutput)) !== null) {
+      const tagIndex = parseInt(match[1], 10) - 1;
+      if (tagIndex >= 0 && tagIndex < expectedCount) {
+        parsed[tagIndex] = match[2].trim();
+        matchedCount++;
+      }
+    }
+
+    // Secondary strategy: Delimiter split if tag matching found nothing
+    if (matchedCount === 0) {
+      let splitParts = rawOutput.split(/<\|\d+\|>/);
+      if (splitParts.length > 0 && !splitParts[0].trim()) {
+        splitParts = splitParts.slice(1);
+      }
+      splitParts = splitParts.map((t) => t.trim());
+
+      // Tertiary strategy: Newline split if delimiters were completely omitted
+      if (splitParts.length <= 1 && expectedCount > 1) {
+        splitParts = rawOutput
+          .split('\n')
+          .map((t) => t.trim())
+          .filter(Boolean);
+      }
+
+      if (splitParts.length > 0) {
+        for (let i = 0; i < Math.min(splitParts.length, expectedCount); i++) {
+          parsed[i] = splitParts[i];
+          matchedCount++;
+        }
+      }
+    }
+
+    if (this.throwOnCountMismatch && matchedCount < expectedCount) {
+      throw new Error(
+        `Delimiter parsing failed for chunk. Expected ${expectedCount} lines, got ${matchedCount}. Model hallucinated.`
+      );
+    }
+
+    // Fill any missing or dropped slots with the original text to prevent cascading alignment shifts
+    return chunk.map((item, idx) => {
+      const translated = parsed[idx];
+      return translated !== undefined && translated.length > 0 ? translated : item.text;
+    });
+  }
+
+  /**
+   * Optional engine initialization. Subclasses can override.
+   */
+  async init?(progressCallback?: (info: any) => void): Promise<void>;
+
+  /**
+   * Optional engine teardown. Subclasses can override.
+   */
+  async destroy?(): Promise<void>;
+}

@@ -1,10 +1,12 @@
-import { db, cleanupOldJobs } from '../db';
+import { db, cleanupOldJobs, deleteJobs } from '../db';
 import type { ProcessJobMessage, PopupState, PreloadActiveEngineMessage } from '../shared/types';
 import { DEFAULT_POPUP_STATE } from '../shared/types';
+import { CLOUDFLARE_QUOTA_DEFAULT_ENDPOINT } from '../shared/constants';
 import modelsRegistryData from '../shared/models-registry.json';
 import { normalizeCustomApiConfig } from '../shared/customApi';
 import { inpaintRegistry } from '../offscreen/engines/inpaint/inpaintRegistry';
 import { resolveOcrTier } from '../offscreen/engines/ocr/ocrRegistry';
+import { normalizeRenderFontPresetId } from '../shared/renderFontPresets';
 import { oAuthManager } from './auth/OAuthManager';
 
 // Magic Number: Limit concurrency to avoid network/CPU throttling
@@ -15,11 +17,10 @@ import { oAuthManager } from './auth/OAuthManager';
  * How long a job may stay in an in-flight status ('processing'/'downloading') before the
  * queue assumes its owning offscreen document died and reclaims the concurrency slot.
  *
- * Sized well above a realistic worst-case first run (cold-start model downloads for OCR and a
- * local LLM over a slow connection can legitimately take several minutes) so genuinely slow
- * work is never cancelled -- this only catches jobs whose owner is provably gone.
+ * Sized at 2 minutes (twice SINGLE_JOB_TIMEOUT_MS of 60s) to guard against dead slots
+ * when an offscreen task is terminated or crashes.
  */
-const STALE_JOB_TIMEOUT_MS = 20 * 60 * 1000;
+const STALE_JOB_TIMEOUT_MS = 2 * 60 * 1000;
 
 /**
  * Maximum time in milliseconds to wait for a single translation job to complete
@@ -34,12 +35,13 @@ const SINGLE_JOB_TIMEOUT_MS = 60 * 1000;
 const OFFSCREEN_RETRY_INTERVAL_MS = 150;
 
 /**
- * Removes translation engines that are no longer supported from stored popup settings.
+ * Removes translation engines that are no longer supported from stored popup settings
+ * and normalizes render font presets to an allowlisted preset ID.
  *
  * @param popupState - The persisted popup state to validate.
  * @returns The normalized popup state and whether it needs to be saved.
  */
-function normalizePopupState(popupState: PopupState): { state: PopupState; changed: boolean } {
+export function normalizePopupState(popupState: PopupState): { state: PopupState; changed: boolean } {
   const customApis = Array.isArray(popupState.customApis)
     ? popupState.customApis.map(normalizeCustomApiConfig).filter((api): api is NonNullable<typeof api> => Boolean(api))
     : [];
@@ -69,14 +71,16 @@ function normalizePopupState(popupState: PopupState): { state: PopupState; chang
     ? rawInpaintId
     : DEFAULT_POPUP_STATE.activeInpaintId;
   const activeOcrId = resolveOcrTier(popupState.activeOcrId);
+  const renderFontPresetId = normalizeRenderFontPresetId(popupState.renderFontPresetId);
   const changed = activeEngineId !== popupState.activeEngineId ||
     activeInpaintId !== popupState.activeInpaintId ||
     activeOcrId !== popupState.activeOcrId ||
+    renderFontPresetId !== popupState.renderFontPresetId ||
     fallbackChain.length !== fallbackSource.length ||
     uniqueCustomApis.length !== (Array.isArray(popupState.customApis) ? popupState.customApis.length : 0);
 
   return {
-    state: changed ? { ...popupState, customApis: uniqueCustomApis, activeEngineId, activeInpaintId, activeOcrId, fallbackChain } : popupState,
+    state: changed ? { ...popupState, customApis: uniqueCustomApis, activeEngineId, activeInpaintId, activeOcrId, renderFontPresetId, fallbackChain } : popupState,
     changed,
   };
 }
@@ -103,6 +107,12 @@ function setupContextMenu(): void {
 
 chrome.contextMenus.onClicked.addListener(async (info: chrome.contextMenus.OnClickData, _tab?: chrome.tabs.Tab) => {
   if (info.menuItemId === 'translate-image' && info.srcUrl) {
+    const data = await chrome.storage.local.get('popupState');
+    const popupState = data.popupState as PopupState | undefined;
+    if (popupState && popupState.isExtensionEnabled === false) {
+      console.log('[Background] Context menu ignored: Kites extension is disabled.');
+      return;
+    }
     console.log('[Background] Context menu clicked. Target URL:', info.srcUrl);
     try {
       await queueTranslation(info.srcUrl, _tab?.id);
@@ -138,10 +148,20 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'TRANSLATE_IMAGE') {
     const srcUrl = message.payload?.srcUrl || message.url || message.srcUrl;
     if (srcUrl) {
-      console.log('[Background] Received TRANSLATE_IMAGE from content script. URL:', srcUrl);
-      queueTranslation(srcUrl, _sender.tab?.id)
-        .then(() => sendResponse({ status: 'queued' }))
-        .catch((err) => sendResponse({ status: 'error', error: err instanceof Error ? err.message : String(err) }));
+      chrome.storage.local.get('popupState').then((data) => {
+        const popupState = data.popupState as PopupState | undefined;
+        if (popupState && popupState.isExtensionEnabled === false) {
+          console.warn('[Background] Rejected TRANSLATE_IMAGE: Kites extension is disabled.');
+          sendResponse({ status: 'error', error: 'Extension is disabled' });
+          return;
+        }
+        console.log('[Background] Received TRANSLATE_IMAGE from content script. URL:', srcUrl);
+        queueTranslation(srcUrl, _sender.tab?.id)
+          .then(() => sendResponse({ status: 'queued' }))
+          .catch((err) => sendResponse({ status: 'error', error: err instanceof Error ? err.message : String(err) }));
+      }).catch((err) => {
+        sendResponse({ status: 'error', error: err instanceof Error ? err.message : String(err) });
+      });
       return true; // Keep message channel open for async response
     }
   }
@@ -216,6 +236,49 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === 'REFRESH_CLOUD_QUOTA') {
+    (async () => {
+      try {
+        const token = await new Promise<string | undefined>((resolve) => {
+          chrome.identity.getAuthToken({ interactive: false }, (tok) => {
+            const strToken = typeof tok === 'string' ? tok : (tok as any)?.token;
+            resolve(strToken);
+          });
+        });
+
+        if (!token) {
+          return sendResponse({ success: false, error: 'No auth token available' });
+        }
+
+        const res = await fetch(CLOUDFLARE_QUOTA_DEFAULT_ENDPOINT, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+
+        if (res.ok) {
+          const quota = await res.json() as any;
+          const currentData = await chrome.storage.local.get('popupState');
+          const current = currentData?.popupState as PopupState | undefined;
+          if (current?.userAccount) {
+            const updatedAccount = {
+              ...current.userAccount,
+              quotaRemaining: quota.remaining,
+              quotaResetsAt: quota.resetsAt
+            };
+            await chrome.storage.local.set({
+              popupState: { ...current, userAccount: updatedAccount }
+            });
+            sendResponse({ success: true, quota });
+            return;
+          }
+        }
+        sendResponse({ success: false });
+      } catch (err: any) {
+        sendResponse({ success: false, error: err?.message });
+      }
+    })();
+    return true;
+  }
+
   if (message.type === 'START_MODEL_DOWNLOAD' || message.type === 'CHECK_MODEL_STATUS' || message.type === 'GET_MODEL_STATUSES' || message.type === 'PRELOAD_ACTIVE_ENGINE' || message.type === 'GET_ACTIVE_DOWNLOADS' || message.type === 'VALIDATE_CUSTOM_API') {
     console.log(`[Background] Received ${message.type}. Forwarding to Offscreen...`);
     sendMessageToOffscreen(message)
@@ -228,10 +291,39 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 });
 
+/**
+ * Fails any jobs left in-flight ('processing'/'downloading') from a previous
+ * browser session, extension reload, or service worker restart.
+ *
+ * When the service worker boots fresh, no previous in-memory offscreen processing
+ * promise exists, so any job marked in-flight is guaranteed orphaned.
+ */
+async function resetOrphanedInFlightJobs(): Promise<void> {
+  if (typeof indexedDB === 'undefined') return;
+  try {
+    const inFlight = await db.translationJobs
+      .where('status')
+      .anyOf(['processing', 'downloading'])
+      .toArray();
+    for (const job of inFlight) {
+      console.warn(
+        `[Background] Failing orphaned in-flight job ${job.id} (was '${job.status}') from previous session.`
+      );
+      await db.translationJobs.update(job.id!, { status: 'error' });
+    }
+  } catch (err) {
+    console.error('[Background] Failed to reset orphaned in-flight jobs:', err);
+  }
+}
+
+// Clean up any orphaned in-flight jobs immediately when service worker starts
+resetOrphanedInFlightJobs().catch(() => {});
+
 // Trigger preload and auto-download on extension boot
 chrome.runtime.onStartup.addListener(async () => {
   console.log('[Background] Extension startup. Preloading active engine & default OCR...');
-  cleanupOldJobs(7);
+  await resetOrphanedInFlightJobs();
+  await cleanupOldJobs();
   try {
     await sendMessageToOffscreen({ type: 'PRELOAD_ACTIVE_ENGINE' } as PreloadActiveEngineMessage);
     await sendMessageToOffscreen({
@@ -246,7 +338,8 @@ chrome.runtime.onStartup.addListener(async () => {
 chrome.runtime.onInstalled.addListener(async () => {
   console.log('[Background] Extension installed/updated. Preloading active engine & default OCR...');
   setupContextMenu();
-  cleanupOldJobs(7);
+  await resetOrphanedInFlightJobs();
+  await cleanupOldJobs();
   try {
     await sendMessageToOffscreen({
       type: 'START_MODEL_DOWNLOAD',
@@ -343,7 +436,7 @@ async function queueTranslation(srcUrl: string, tabId?: number) {
   }
 
   if (existingJob) {
-    await db.translationJobs.delete(existingJob.id!);
+    await deleteJobs([existingJob.id!]);
   }
 
   console.log('[Background] Queuing image URL:', srcUrl);

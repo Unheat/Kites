@@ -36,6 +36,9 @@ vi.mock('../../db', () => ({
     textBlocks: {
       add: vi.fn(),
       bulkAdd: vi.fn(),
+      where: vi.fn().mockReturnValue({
+        delete: vi.fn(),
+      }),
     }
   }
 }));
@@ -164,7 +167,7 @@ describe('PipelineOrchestrator', () => {
 
     await pipelineOrchestrator.runPipeline(100);
 
-    expect(processImageMock).toHaveBeenCalledWith(expect.any(ArrayBuffer), 'v6-medium');
+    expect(processImageMock).toHaveBeenCalledWith(expect.any(ArrayBuffer), 'v6-medium', expect.any(Object));
     blobSpy.mockRestore();
   });
 
@@ -216,6 +219,34 @@ describe('PipelineOrchestrator', () => {
     expect(db.translationJobs.update).toHaveBeenCalledWith(100, { status: 'completed' });
 
     ocrSpy.mockRestore();
+    blobSpy.mockRestore();
+  });
+
+  it('resolves font preset from popup state and persists resolved family in TextBlock', async () => {
+    const mockImageRecord = {
+      id: 2,
+      jobId: 200,
+      rawImageBlob: new Blob(['fake image data'], { type: 'image/png' })
+    };
+    ((db.images as any).first as any).mockResolvedValue(mockImageRecord);
+
+    vi.spyOn(chrome.runtime, 'sendMessage').mockImplementation((_message: any, callback: any) => {
+      callback({ activeInpaintId: 'simple', renderFontPresetId: 'comic', targetLang: 'en' });
+    });
+
+    const blobSpy = vi.spyOn(pipelineOrchestrator as any, 'blobToArrayBuffer').mockResolvedValue(new ArrayBuffer(8));
+
+    await pipelineOrchestrator.runPipeline(200);
+
+    expect(db.textBlocks.bulkAdd).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          imageId: 2,
+          fontFamily: '"Comic Sans MS", "Comic Sans", cursive'
+        })
+      ])
+    );
+
     blobSpy.mockRestore();
   });
 });

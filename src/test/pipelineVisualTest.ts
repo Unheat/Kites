@@ -43,9 +43,13 @@ async function runPipelineVisualTest() {
 
     const buffer = fs.readFileSync(imagePath);
     const arrayBuffer = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) as ArrayBuffer;
+    // Decode dimensions first so the OCR geometry pre-filter battery is active.
+    const probeImage = await loadImage(buffer);
+    const pageWidth = probeImage.width;
+    const pageHeight = probeImage.height;
 
     console.log('[PipelineTest] Running OCR text detection...');
-    const ocrResult = await ocrManager.processImage(arrayBuffer);
+    const ocrResult = await ocrManager.processImage(arrayBuffer, 'v6-small', { sourceLang: 'ja', pageWidth, pageHeight });
     const polygons = ocrResult.polygons as Point2D[][];
     const texts = ocrResult.texts;
     
@@ -62,42 +66,63 @@ async function runPipelineVisualTest() {
     const inpaintPolygons = ocrResult.rawPolygons || polygons;
     const cleanedBuffer = await inpaintManager.eraseText(arrayBuffer, inpaintPolygons, 'simple');
 
-    console.log(`[PipelineTest] Running Translation with GoogleTranslateEngine...`);
-    const translatedTexts = await translator.translate(texts, 'auto', 'en');
-    console.log(`[PipelineTest] Baking translated text into Canvas...`);
-    
-    // Load the cleaned buffer into node-canvas
-    const img = await loadImage(Buffer.from(cleanedBuffer));
-    const canvas = createCanvas(img.width, img.height);
-    const ctx = canvas.getContext('2d');
-    
-    // Draw the clean inpainted image
-    ctx.drawImage(img, 0, 0);
-    
-    // Draw all translated text blocks in one batch through the Cotrans default renderer.
-    const textBlockItems: TextBlockItem[] = [];
-    for (let i = 0; i < translatedTexts.length; i++) {
-      const text = translatedTexts[i];
-      const poly = polygons[i];
-      if (text && poly) {
-        textBlockItems.push({
-          text,
-          polygon: poly,
-          direction: ocrResult.directions ? ocrResult.directions[i] : 'h',
-          textColor: '#000000',
-          strokeColor: '#FFFFFF',
-          fontSize: ocrResult.fontSizes ? ocrResult.fontSizes[i] : undefined,
-          angle: ocrResult.angles ? ocrResult.angles[i] : undefined,
-          originalText: texts[i],
-          sourceLineCount: ocrResult.lineCounts ? ocrResult.lineCounts[i] : undefined
-        });
+    // Single bake pass through the production 'en' path — covers every algorithm added
+    // since v1: XianScan 4-pass fit, diamond wrap, page font baseline, background-adaptive
+    // color sampling, decollision, sanitize. (The legacy vertical/RTL branches have their
+    // own unit tests; add extra passes here only if you need visual coverage for them.)
+    const bakePasses: { lang: string; suffix: string }[] = [
+      { lang: 'en', suffix: '' },
+    ];
+
+    for (const pass of bakePasses) {
+      console.log(`[PipelineTest] Pass '${pass.lang}': translating...`);
+      let translatedTexts: string[];
+      try {
+        translatedTexts = await translator.translate(texts, 'auto', pass.lang);
+      } catch (err) {
+        console.warn(`[PipelineTest] Pass '${pass.lang}' translation failed, skipping bake:`, err);
+        continue;
       }
+
+      // Load the cleaned buffer into node-canvas
+      const img = await loadImage(Buffer.from(cleanedBuffer));
+      const canvas = createCanvas(img.width, img.height);
+      const ctx = canvas.getContext('2d');
+
+      // Draw the clean inpainted image
+      ctx.drawImage(img, 0, 0);
+
+      // Draw all translated text blocks in one batch through the production renderer.
+      const textBlockItems: TextBlockItem[] = [];
+      for (let i = 0; i < translatedTexts.length; i++) {
+        const text = translatedTexts[i];
+        const poly = polygons[i];
+        if (text && poly) {
+          textBlockItems.push({
+            text,
+            polygon: poly,
+            direction: ocrResult.directions ? ocrResult.directions[i] : 'h',
+            // No explicit colors: renderTextBlocksBatch samples the cleaned page and
+            // picks black/white text per background luminance (production path).
+            fontSize: ocrResult.fontSizes ? ocrResult.fontSizes[i] : undefined,
+            angle: ocrResult.angles ? ocrResult.angles[i] : undefined,
+            originalText: texts[i],
+            sourceLineCount: ocrResult.lineCounts ? ocrResult.lineCounts[i] : undefined
+          });
+        }
+      }
+      const renderInfos = renderTextBlocksBatch(ctx as any, textBlockItems, pass.lang, { width: img.width, height: img.height });
+
+      // Make color sampling visible: summarize the picked text colors per pass.
+      const rendered = renderInfos.filter(i => i !== null);
+      const whiteTextCount = rendered.filter(i => i!.textColor === 'white').length;
+      console.log(`[PipelineTest] Pass '${pass.lang}': ${rendered.length} blocks rendered, ${whiteTextCount} on dark backgrounds (white text).`);
+
+      const outName = testFile.replace(/(\.\w+)$/, `${pass.suffix}$1`);
+      const outPath = path.join(resultBaseDir, outName);
+      fs.writeFileSync(outPath, canvas.toBuffer('image/png'));
+      console.log(`[PipelineTest] Saved baked image to: result/pipeline/${outName}`);
     }
-    renderTextBlocksBatch(ctx as any, textBlockItems, 'en', { width: img.width, height: img.height });
-    
-    const outPath = path.join(resultBaseDir, testFile);
-    fs.writeFileSync(outPath, canvas.toBuffer('image/png'));
-    console.log(`[PipelineTest] Saved final baked image to: result/pipeline/${testFile}`);
   }
 
   await ocrManager.cleanup();

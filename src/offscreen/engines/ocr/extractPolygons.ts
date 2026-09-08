@@ -331,17 +331,19 @@ export function extractPolygons(
           y: Math.max(0, Math.min(originalHeight, Math.round(p.y * scale)))
         }));
 
-        if (scaledRect[0].x < 20 && scaledRect[0].y > 1000) {
-          // Dump stats of the empty bottom-left box
-          let maxVal = -1, minVal = 2;
-          for (const p of blobPoints) {
-            const val = probMap[p.y * width + p.x];
-            if (val > maxVal) maxVal = val;
-            if (val < minVal) minVal = val;
+        if (import.meta.env.DEV) {
+          if (scaledRect[0].x < 20 && scaledRect[0].y > 1000) {
+            // Dump stats of the empty bottom-left box
+            let maxVal = -1, minVal = 2;
+            for (const p of blobPoints) {
+              const val = probMap[p.y * width + p.x];
+              if (val > maxVal) maxVal = val;
+              if (val < minVal) minVal = val;
+            }
+            console.log(`[extractPolygons] DEBUG Empty box x0=${scaledRect[0].x}, y0=${scaledRect[0].y}: size=${blobPoints.length}, score=${score.toFixed(4)}, minProb=${minVal.toFixed(4)}, maxProb=${maxVal.toFixed(4)}`);
+          } else {
+            console.log(`[extractPolygons] Kept box at x0=${scaledRect[0].x}, y0=${scaledRect[0].y} score=${score.toFixed(4)}`);
           }
-          console.log(`[extractPolygons] DEBUG Empty box x0=${scaledRect[0].x}, y0=${scaledRect[0].y}: size=${blobPoints.length}, score=${score.toFixed(4)}, minProb=${minVal.toFixed(4)}, maxProb=${maxVal.toFixed(4)}`);
-        } else {
-          console.log(`[extractPolygons] Kept box at x0=${scaledRect[0].x}, y0=${scaledRect[0].y} score=${score.toFixed(4)}`);
         }
 
         polygons.push({ points: scaledRect, score });
@@ -357,6 +359,13 @@ export function extractPolygons(
   return polygons;
 }
 
+/**
+ * Compute the convex hull of a set of 2D points using Andrew's
+ * monotone chain algorithm (O(n log n)).
+ *
+ * @param points - Array of points (will be sorted in place).
+ * @returns Vertices of the convex hull in counter-clockwise order.
+ */
 function convexHull(points: Point2D[]): Point2D[] {
   points.sort((a, b) => a.x === b.x ? a.y - b.y : a.x - b.x);
 
@@ -382,10 +391,26 @@ function convexHull(points: Point2D[]): Point2D[] {
   return lower.concat(upper);
 }
 
+/**
+ * 2D cross-product of vectors OA and OB.
+ *
+ * @param o - Common origin point.
+ * @param a - First point.
+ * @param b - Second point.
+ * @returns Positive if OAB makes a counter-clockwise turn, negative for clockwise.
+ */
 function crossProduct(o: Point2D, a: Point2D, b: Point2D): number {
   return (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
 }
 
+/**
+ * Expand a convex polygon outward using clipper-lib offsetting
+ * (PaddleOCR's `unclip` post-processing).
+ *
+ * @param hull - Convex hull vertices in CCW order.
+ * @param unclipRatio - Expansion factor (PaddleOCR default ~1.5).
+ * @returns Expanded polygon vertices, or original hull on degenerate input.
+ */
 function unclipPolygon(hull: Point2D[], unclipRatio: number): Point2D[] {
   const Clipper = ClipperLib;
   const scaledHull = hull.map(p => ({ X: Math.round(p.x * 100), Y: Math.round(p.y * 100) }));
@@ -460,6 +485,12 @@ function orderRectCorners(rect: Point2D[]): Point2D[] {
   return [topLeft, topRight, bottomRight, bottomLeft];
 }
 
+/**
+ * Finds the minimum-area bounding box of a convex hull using rotating calipers.
+ *
+ * @param points - Convex hull points in CCW order.
+ * @returns 4 rectangle corners ordered as [topLeft, topRight, bottomRight, bottomLeft].
+ */
 function minAreaRect(points: Point2D[]): Point2D[] {
   let minArea = Infinity;
   let bestRect: Point2D[] = [];
@@ -505,6 +536,12 @@ function minAreaRect(points: Point2D[]): Point2D[] {
   return bestRect.length === 4 ? orderRectCorners(bestRect) : hullBoundingBox(points);
 }
 
+/**
+ * Computes an axis-aligned bounding box for a point cloud as a 4-point rectangle fallback.
+ *
+ * @param points - Array of 2D points.
+ * @returns 4-point rectangle corners [topLeft, topRight, bottomRight, bottomLeft].
+ */
 function hullBoundingBox(points: Point2D[]): Point2D[] {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const p of points) {

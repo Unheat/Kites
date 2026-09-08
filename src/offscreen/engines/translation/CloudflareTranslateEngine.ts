@@ -5,14 +5,25 @@
  * Cloudflare Worker translation microservice.
  * 
  * Uses Google OAuth token via chrome.identity for per-user quota attribution.
+ * Extends BaseLlmTranslationEngine for unified prompting, batching, parsing, and markdown stripping.
  */
 
-import type { ITranslationEngine } from './BaseEngine';
+import { BaseLlmTranslationEngine } from './BaseLlmTranslationEngine';
+import {
+  CLOUDFLARE_TRANSLATE_DEFAULT_ENDPOINT,
+  CLOUDFLARE_TRANSLATE_MODEL,
+} from '../../../shared/constants';
 
-export const CLOUDFLARE_TRANSLATE_DEFAULT_ENDPOINT = 'https://kites-translate-pool.andangtruong085.workers.dev/v1/chat/completions';
-export const CLOUDFLARE_TRANSLATE_MODEL = 'kites-translation';
+export { CLOUDFLARE_TRANSLATE_DEFAULT_ENDPOINT, CLOUDFLARE_TRANSLATE_MODEL };
+
+/** Timeout for Cloudflare Worker translate completions request */
 const REQUEST_TIMEOUT_MS = 15_000;
-const MAX_SEGMENTS_PER_BATCH = 30;
+
+/** Default batch size for Cloudflare worker translation */
+const DEFAULT_CLOUDFLARE_BATCH_SIZE = 15;
+
+/** LLM generation sampling temperature */
+const DEFAULT_TEMPERATURE = 0.1;
 
 export class CloudflarePoolExhaustedError extends Error {
   readonly code: string;
@@ -24,19 +35,14 @@ export class CloudflarePoolExhaustedError extends Error {
   }
 }
 
-export class CloudflareTranslateEngine implements ITranslationEngine {
+export class CloudflareTranslateEngine extends BaseLlmTranslationEngine {
   private endpoint: string;
 
   constructor(endpoint = CLOUDFLARE_TRANSLATE_DEFAULT_ENDPOINT) {
+    super();
     this.endpoint = endpoint;
-  }
-
-  async init(): Promise<void> {
-    // Stateless HTTP engine; no initialization needed
-  }
-
-  async destroy(): Promise<void> {
-    // Stateless; nothing to clean up
+    this.batchSize = DEFAULT_CLOUDFLARE_BATCH_SIZE;
+    this.throwOnCountMismatch = false; // Graceful fallback to original text if upstream LLM drops tags
   }
 
   /**
@@ -60,35 +66,23 @@ export class CloudflareTranslateEngine implements ITranslationEngine {
     return (globalThis as any).__KITES_TEST_ID_TOKEN__ || '';
   }
 
-  async translate(texts: string[], sourceLang?: string, targetLang?: string): Promise<string[]> {
-    if (!texts || texts.length === 0) return [];
-
-    const results: string[] = [];
-
-    // Process in batches
-    for (let i = 0; i < texts.length; i += MAX_SEGMENTS_PER_BATCH) {
-      const batch = texts.slice(i, i + MAX_SEGMENTS_PER_BATCH);
-      const translatedBatch = await this.translateBatch(batch, sourceLang, targetLang);
-      results.push(...translatedBatch);
-    }
-
-    return results;
-  }
-
-  private async translateBatch(texts: string[], sourceLang?: string, targetLang?: string): Promise<string[]> {
-    const src = sourceLang || 'auto';
-    const tgt = targetLang || 'en';
-
-    // Format prompt matching CustomApiEngine batch delimiter pattern
-    const promptLines = texts.map((t, idx) => `<|${idx + 1}|> ${t}`);
-    const prompt = `Translate the following text segments from ${src} to ${tgt}.\n` +
-      `Keep the exact tags <|number|> for each line. Only output the translations with tags, no explanation.\n\n` +
-      promptLines.join('\n');
-
+  /**
+   * Dispatches the assembled prompt to the Cloudflare Worker chat completions endpoint.
+   *
+   * @param prompt - The assembled batch prompt.
+   * @param signal - Optional AbortSignal.
+   * @returns Raw completion content from the LLM.
+   */
+  protected async requestLlm(prompt: string, signal?: AbortSignal): Promise<string> {
     const token = await this.getAuthToken();
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+    // If caller provided an external signal, propagate abort
+    if (signal) {
+      signal.addEventListener('abort', () => controller.abort());
+    }
 
     try {
       const response = await fetch(this.endpoint, {
@@ -102,7 +96,7 @@ export class CloudflareTranslateEngine implements ITranslationEngine {
         body: JSON.stringify({
           model: CLOUDFLARE_TRANSLATE_MODEL,
           messages: [{ role: 'user', content: prompt }],
-          temperature: 0.1,
+          temperature: DEFAULT_TEMPERATURE,
           stream: false,
         }),
         signal: controller.signal,
@@ -126,29 +120,36 @@ export class CloudflareTranslateEngine implements ITranslationEngine {
         throw new Error(`Cloudflare translate request failed (${response.status}): ${errMessage}`);
       }
 
+      // Capture live quota response headers and sync to extension state
+      const remainingHeader = response.headers.get('x-ratelimit-remaining');
+      const resetHeader = response.headers.get('x-ratelimit-reset');
+      if (remainingHeader !== null && typeof chrome !== 'undefined' && chrome?.storage?.local) {
+        const remaining = parseInt(remainingHeader, 10);
+        const resetsAt = resetHeader ? parseInt(resetHeader, 10) : undefined;
+        if (!isNaN(remaining)) {
+          chrome.storage.local
+            .get('popupState')
+            .then((data) => {
+              const current = data?.popupState as any;
+              if (current?.userAccount) {
+                const updatedAccount = {
+                  ...current.userAccount,
+                  quotaRemaining: remaining,
+                  quotaResetsAt: resetsAt,
+                };
+                chrome.storage.local
+                  .set({
+                    popupState: { ...current, userAccount: updatedAccount },
+                  })
+                  .catch(() => {});
+              }
+            })
+            .catch(() => {});
+        }
+      }
+
       const data = (await response.json()) as any;
-      const content = data?.choices?.[0]?.message?.content || '';
-
-      // Parse tagged responses <|1|> Translation
-      const parsedTranslations: string[] = [];
-      const tagRegex = /<\|(\d+)\|>\s*(.*?)(?=(?:<\|\d+\|>|$))/gs;
-      let match: RegExpExecArray | null;
-
-      while ((match = tagRegex.exec(content)) !== null) {
-        const index = parseInt(match[1], 10) - 1;
-        if (index >= 0 && index < texts.length) {
-          parsedTranslations[index] = match[2].trim();
-        }
-      }
-
-      // Fall back to 1:1 line matching if delimiter parsing is incomplete
-      for (let idx = 0; idx < texts.length; idx++) {
-        if (!parsedTranslations[idx]) {
-          parsedTranslations[idx] = texts[idx]; // Preserve text if tag dropped
-        }
-      }
-
-      return parsedTranslations;
+      return data?.choices?.[0]?.message?.content || '';
     } catch (err: any) {
       clearTimeout(timer);
       throw err;

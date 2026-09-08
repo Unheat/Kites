@@ -1,8 +1,6 @@
 import type { CustomApiConfig } from '../../../shared/types';
-import { getLanguageName } from '../../../shared/utils/LanguageRegistry';
-import type { ITranslationEngine } from './BaseEngine';
+import { BaseLlmTranslationEngine } from './BaseLlmTranslationEngine';
 
-const MAX_SEGMENTS_PER_BATCH = 30;
 const REQUEST_TIMEOUT_MS = 45_000;
 const MAX_ATTEMPTS = 2;
 const ANTHROPIC_VERSION = '2023-06-01';
@@ -10,19 +8,23 @@ const GEMINI_API_ROOT = 'https://generativelanguage.googleapis.com/v1beta';
 const OPENAI_API_ROOT = 'https://api.openai.com/v1';
 const ANTHROPIC_API_ROOT = 'https://api.anthropic.com/v1';
 
-interface TranslationSegment {
-  id: string;
-  originalIndex: number;
-  text: string;
-}
+/** Default batch size for custom API requests */
+const DEFAULT_CUSTOM_API_BATCH_SIZE = 15;
+
+/** Sampling temperature for translation fidelity */
+const DEFAULT_TEMPERATURE = 0.1;
+
+/** Max completion tokens for Claude requests */
+const CLAUDE_MAX_TOKENS = 2048;
 
 /**
  * Translates OCR text through one configured remote API provider using delimiter line tagging.
+ * Extends BaseLlmTranslationEngine for shared prompt assembly, batching, and parsing.
  *
  * @param config - The saved provider, model, credential, and optional compatible API root.
  * @returns An engine that preserves the positional ITranslationEngine translation contract.
  */
-export class CustomApiEngine implements ITranslationEngine {
+export class CustomApiEngine extends BaseLlmTranslationEngine {
   private initialized = false;
   private readonly config: CustomApiConfig;
 
@@ -32,7 +34,10 @@ export class CustomApiEngine implements ITranslationEngine {
    * @param config - The provider configuration used for all engine requests.
    */
   constructor(config: CustomApiConfig) {
+    super();
     this.config = config;
+    this.batchSize = DEFAULT_CUSTOM_API_BATCH_SIZE;
+    this.throwOnCountMismatch = true; // Preserve strict delimiter verification for custom API tests
   }
 
   /**
@@ -48,35 +53,11 @@ export class CustomApiEngine implements ITranslationEngine {
 
   /**
    * Translates nonblank texts in bounded batches using numbered delimiter format.
-   *
-   * @param texts - OCR strings whose output positions must be preserved.
-   * @param sourceLangId - Source language identifier or auto.
-   * @param targetLangId - Target language identifier.
-   * @returns The translated strings aligned with the supplied texts.
+   * Ensures the engine has been initialized before proceeding.
    */
-  async translate(texts: string[], sourceLangId = 'auto', targetLangId = 'en'): Promise<string[]> {
+  override async translate(texts: string[], sourceLangId = 'auto', targetLangId = 'en'): Promise<string[]> {
     if (!this.initialized) throw new Error('CustomApiEngine is not initialized. Call init() first.');
-    if (!texts || texts.length === 0) return [];
-
-    const segments: TranslationSegment[] = texts.flatMap((text, index) => text.trim()
-      ? [{ id: String(index), originalIndex: index, text: text.trim() }]
-      : []);
-    const results = new Array<string>(texts.length).fill('');
-    if (segments.length === 0) return results;
-
-    const sourceLang = sourceLangId === 'auto' ? 'the detected source language' : getLanguageName(sourceLangId);
-    const targetLang = getLanguageName(targetLangId);
-    console.log(`[CustomApiEngine] Translating ${segments.length} blocks with ${this.config.provider}.`);
-
-    for (let offset = 0; offset < segments.length; offset += MAX_SEGMENTS_PER_BATCH) {
-      const chunk = segments.slice(offset, offset + MAX_SEGMENTS_PER_BATCH);
-      const translatedChunk = await this.translateChunk(chunk, sourceLang, targetLang);
-      for (let j = 0; j < chunk.length; j++) {
-        results[chunk[j].originalIndex] = translatedChunk[j] || '';
-      }
-    }
-
-    return results;
+    return super.translate(texts, sourceLangId, targetLangId);
   }
 
   /**
@@ -121,28 +102,23 @@ export class CustomApiEngine implements ITranslationEngine {
   }
 
   /**
-   * Formats a batch into tagged lines, sends to provider, and extracts aligned results.
+   * Implements the abstract requestLlm method with retry logic for transient errors.
    *
-   * @param chunk - Batch of items to translate.
-   * @param sourceLang - Human-readable source language.
-   * @param targetLang - Human-readable target language.
-   * @returns Translated strings aligned with the chunk.
+   * @param prompt - The assembled batch prompt.
+   * @param signal - Optional AbortSignal.
+   * @returns Raw response content from the remote provider.
    */
-  private async translateChunk(chunk: TranslationSegment[], sourceLang: string, targetLang: string): Promise<string[]> {
-    let combinedText = '';
-    chunk.forEach((item, index) => {
-      combinedText += `<|${index + 1}|>${item.text}\n`;
-    });
-
-    const prompt = `Translate the following manga text lines from ${sourceLang} to ${targetLang}. Keep the exact line number format (e.g. <|1|>, <|2|>) for every line. Do not add any conversational filler. Only output the translated lines.\n\n${combinedText}`;
-
+  protected async requestLlm(prompt: string, signal?: AbortSignal): Promise<string> {
     let lastError: unknown;
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+      if (signal) {
+        signal.addEventListener('abort', () => controller.abort());
+      }
+
       try {
-        const rawOutput = await this.requestProvider(prompt, controller.signal);
-        return this.parseDelimitedOutput(rawOutput, chunk.length);
+        return await this.requestProvider(prompt, controller.signal);
       } catch (error) {
         lastError = error;
         if (attempt === MAX_ATTEMPTS || !this.isTransientFailure(error)) throw error;
@@ -178,7 +154,7 @@ export class CustomApiEngine implements ITranslationEngine {
     const root = this.config.provider === 'openai' ? OPENAI_API_ROOT : this.getCompatibleApiRoot();
     const body = {
       model: this.config.modelName,
-      temperature: 0.1,
+      temperature: DEFAULT_TEMPERATURE,
       messages: [{ role: 'user', content: prompt }],
     };
 
@@ -225,7 +201,7 @@ export class CustomApiEngine implements ITranslationEngine {
       },
       body: JSON.stringify({
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.1 },
+        generationConfig: { temperature: DEFAULT_TEMPERATURE },
       }),
     }));
 
@@ -259,8 +235,8 @@ export class CustomApiEngine implements ITranslationEngine {
       },
       body: JSON.stringify({
         model: this.config.modelName,
-        max_tokens: 2048,
-        temperature: 0.1,
+        max_tokens: CLAUDE_MAX_TOKENS,
+        temperature: DEFAULT_TEMPERATURE,
         messages: [{ role: 'user', content: prompt }],
       }),
     }));
@@ -300,30 +276,6 @@ export class CustomApiEngine implements ITranslationEngine {
     const error = new Error(`Provider request failed (${response.status}): ${String(rawMsg)}`) as Error & { status?: number };
     error.status = response.status;
     return Promise.reject(error);
-  }
-
-  /**
-   * Parses raw delimited output using regex matching and newline fallback.
-   *
-   * @param rawOutput - Raw model response.
-   * @param expectedCount - Expected number of lines.
-   * @returns Array of translated strings.
-   */
-  private parseDelimitedOutput(rawOutput: string, expectedCount: number): string[] {
-    let translations = rawOutput.split(/<\|\d+\|>/);
-    if (translations.length > 0 && !translations[0].trim()) {
-      translations = translations.slice(1);
-    }
-    translations = translations.map(t => t.trim());
-
-    if (translations.length <= 1 && expectedCount > 1) {
-      translations = rawOutput.split('\n').map(t => t.trim()).filter(Boolean);
-    }
-
-    if (translations.length !== expectedCount) {
-      throw new Error(`Delimiter parsing failed. Expected ${expectedCount} lines, got ${translations.length}.`);
-    }
-    return translations;
   }
 
   /**

@@ -1,0 +1,696 @@
+/**
+ * Typeset Layout Engine for Comic / Manga Speech Bubbles
+ * 
+ * Ported from XianScan (web/src/lib/server/typeset/layout.ts) for pure TypeScript execution in browser & node.
+ * Provides:
+ * 1. 6-stage morphological hyphenation (findHyphenationPoints) with strict stem protection (len >= 7).
+ * 2. Balanced diamond line envelope wrapping (balancedWrapText).
+ * 3. 4-pass binary search font fitting with tall-narrow aspect ratio floor (fitFontSizeWithLines).
+ * 4. Logical paragraph splitting & text reflow (reflowText).
+ */
+
+// STRICTLY matches East Asian CJK ideograms and Hangul glyphs.
+// Must NEVER match punctuation like curly apostrophe ('\u2019'), quotes ('\u2018'..'\u201F'),
+// or ellipsis ('\u2026'), which caused English dialogue ("There's", "don't") to be chopped as Kanji!
+export const CJK_REGEX = /[\u3040-\u30ff\u31f0-\u31ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af\u1100-\u11ff\u3130-\u318f\u3001-\u3003\u3008-\u3011\u3014-\u301f]/;
+export const NON_LATIN_SCRIPT_REGEX = CJK_REGEX;
+
+export const DEFAULT_FONT_FAMILY = 'CC Wild Words, "Comic Sans MS", "Bangers", sans-serif';
+export const CJK_FONT_STACK = '"Microsoft YaHei Bold", "Microsoft YaHei", "WenQuanYi Micro Hei", "Noto Sans CJK SC", "Noto Sans CJK JP", "Noto Sans CJK KR", "PingFang SC", "PingFang TC", sans-serif';
+
+/**
+ * Builds a CSS font specification string compatible with CanvasRenderingContext2D.
+ * Automatically switches priority between Latin comic fonts and CJK font stacks based on text script.
+ *
+ * @param size - Font size in pixels.
+ * @param fontFamily - Primary Latin font family stack.
+ * @param sampleText - Optional text sample used to detect non-Latin/CJK characters.
+ * @param customCjk - Optional custom CJK font stack override.
+ * @returns Formatted CSS font string, e.g. 'bold 16px "Comic Sans MS", sans-serif'.
+ */
+export function fontSpec(
+  size: number,
+  fontFamily: string = DEFAULT_FONT_FAMILY,
+  sampleText?: string,
+  customCjk?: string
+): string {
+  const isCjk = sampleText ? CJK_REGEX.test(sampleText) : false;
+  const cjkStack = customCjk || CJK_FONT_STACK;
+  const family = isCjk ? `${cjkStack}, ${fontFamily}` : `${fontFamily}, ${cjkStack}`;
+  return `bold ${size}px ${family}`;
+}
+
+const BOX_INSET = 0.05;
+const MIN_FONT_SIZE = 6;
+const LINE_HEIGHT = 1.2;
+const LONE_PUNCT = /^[.．…·!！?？,，;；:：~～)"'']{1,10}$/;
+const TALL_FILL_MIN_ASPECT = 1.5;
+
+// Common English prefixes and suffixes for syllable hyphenation
+const HYPHEN_PREFIXES = [
+  'under', 'super', 'inter', 'intra', 'trans', 'multi',
+  'over', 'some', 'with', 'fore', 'back', 'down', 'post',
+  'anti', 'semi', 'auto', 'para', 'self', 'dis', 'mis', 'out', 'pre', 'pro', 'sub', 'non', 'un',
+  'con', 'com', 'per', 'for', 'tra', 'tri'
+];
+
+const HYPHEN_SUFFIXES = [
+  'ization', 'isation', 'ational',
+  'action', 'ection', 'iction', 'uction', 'ation', 'ition', 'ution', 'sion', 'tion',
+  'ement', 'iment', 'nment', 'ment',
+  'able', 'ible', 'ness', 'less', 'ful', 'est', 'ity', 'ive', 'ous', 'ish', 'ize', 'ise', 'ism', 'ist', 'tor', 'ter'
+];
+
+/**
+ * 6-stage morphological hyphenation point finder.
+ * Strict comic rule: Never hyphenate words shorter than 7 letters.
+ */
+export function findHyphenationPoints(rawWord: string): number[] {
+  const word = rawWord.toLowerCase();
+  const len = word.length;
+  if (len < 7) return [];
+
+  const points = new Set<number>();
+
+  // 1. Explicit internal hyphen
+  for (let i = 1; i < len - 1; i++) {
+    if (word[i] === '-') {
+      points.add(i + 1);
+    }
+  }
+
+  // 2. Common prefixes
+  for (const p of HYPHEN_PREFIXES) {
+    if (word.startsWith(p) && len - p.length >= 3 && p.length >= 2) {
+      points.add(p.length);
+    }
+  }
+
+  // 3. Common suffixes
+  for (const s of HYPHEN_SUFFIXES) {
+    if (word.endsWith(s) && len - s.length >= 3) {
+      points.add(len - s.length);
+    }
+  }
+
+  // 4. Double consonants: tt, ll, pp, nn, ss, rr, dd, bb, gg, ff, mm, cc, ck
+  for (let i = 2; i < len - 2; i++) {
+    const c1 = word[i - 1];
+    const c2 = word[i];
+    if (c1 === c2 && 'bcdfghjklmnpqrstvwxz'.includes(c1)) {
+      points.add(i);
+    } else if (c1 === 'c' && c2 === 'k') {
+      points.add(i);
+    }
+  }
+
+  // 5. Vowel-Consonant-Consonant-Vowel (VC-CV)
+  const vowels = 'aeiouy';
+  for (let i = 2; i < len - 2; i++) {
+    const v1 = vowels.includes(word[i - 2]);
+    const c1 = !vowels.includes(word[i - 1]) && word[i - 1] !== '-';
+    const c2 = !vowels.includes(word[i]) && word[i] !== '-';
+    const v2 = vowels.includes(word[i + 1]);
+    if (v1 && c1 && c2 && v2) {
+      const pair = word.slice(i - 1, i + 1);
+      if (!['th', 'sh', 'ch', 'ph', 'wh', 'qu', 'gh', 'ng'].includes(pair)) {
+        points.add(i);
+      }
+    }
+  }
+
+  // 6. Vowel-Consonant-Vowel (V-CV) fallback when no other rule matched
+  if (points.size === 0) {
+    for (let i = 2; i < len - 1; i++) {
+      const prev = word[i - 1];
+      const curr = word[i];
+      const next = word[i + 1];
+      if (vowels.includes(prev) && !vowels.includes(curr) && curr !== '-' && vowels.includes(next)) {
+        points.add(i);
+      }
+    }
+  }
+
+  return Array.from(points)
+    .filter((p) => p >= 3 && len - p >= 3)
+    .sort((a, b) => a - b);
+}
+
+/**
+ * Greedily wraps text into lines fitting within maxWidth using Canvas text measurements.
+ * Handles morphological hyphenation for long words, trailing punctuation clustering,
+ * and lone punctuation edge cases.
+ *
+ * @param ctx - Text measurement context providing `measureText(string)`.
+ * @param text - Single-line or whitespace-delimited paragraph to wrap.
+ * @param maxWidth - Maximum available horizontal pixel width for each line.
+ * @returns Array of wrapped line strings.
+ */
+export function wrapText(
+  ctx: { measureText(t: string): { width: number } },
+  text: string,
+  maxWidth: number
+): string[] {
+  const lines: string[] = [];
+
+  function breakLongWord(word: string): { head: string[]; tail: string } {
+    let current = word;
+    const heads: string[] = [];
+
+    const punctMatch = current.match(/^(.*?)([.!?,:;~…"']+)?$/);
+    const stem = punctMatch && punctMatch[1] ? punctMatch[1] : current;
+    const trailingPunct = punctMatch && punctMatch[2] ? punctMatch[2] : '';
+
+    if (ctx.measureText(current).width > maxWidth && trailingPunct) {
+      const stemWidth = ctx.measureText(stem).width;
+      if (stemWidth <= maxWidth && ctx.measureText(current).width <= maxWidth * 1.15) {
+        return { head: [], tail: current };
+      }
+      if (stemWidth <= maxWidth) {
+        return { head: [stem], tail: trailingPunct };
+      }
+    }
+
+    if (stem.length < 7) {
+      if (trailingPunct && ctx.measureText(stem).width <= maxWidth) {
+        return { head: [stem], tail: trailingPunct };
+      }
+      return { head: [], tail: word };
+    }
+
+    while (ctx.measureText(current).width > maxWidth && current.length > 1) {
+      const curPunctMatch = current.match(/^(.*?)([.!?,:;~…"']+)?$/);
+      const curStem = curPunctMatch && curPunctMatch[1] ? curPunctMatch[1] : current;
+      const curPunct = curPunctMatch && curPunctMatch[2] ? curPunctMatch[2] : '';
+
+      if (curStem.length < 7) {
+        break;
+      }
+
+      // Try natural syllable points first
+      const points = findHyphenationPoints(curStem);
+      let chosenSplit = -1;
+      for (let i = points.length - 1; i >= 0; i--) {
+        const p = points[i];
+        const candHead = curStem[p - 1] === '-' ? curStem.slice(0, p) : `${curStem.slice(0, p)}-`;
+        if (ctx.measureText(candHead).width <= maxWidth) {
+          chosenSplit = p;
+          break;
+        }
+      }
+
+      if (chosenSplit > 0) {
+        const candHead = curStem[chosenSplit - 1] === '-' ? curStem.slice(0, chosenSplit) : `${curStem.slice(0, chosenSplit)}-`;
+        heads.push(candHead);
+        current = curStem.slice(chosenSplit) + curPunct;
+        continue;
+      }
+
+      // Character fallback only for long words (>= 7 letters)
+      let kRaw = current.length - 1;
+      while (kRaw > 0 && ctx.measureText(current.slice(0, kRaw)).width > maxWidth) {
+        kRaw--;
+      }
+      const overflowLetters = current.length - kRaw;
+      if (overflowLetters <= 1) {
+        break;
+      }
+
+      let k = current.length - 2;
+      while (k >= 3 && ctx.measureText(current.slice(0, k) + '-').width > maxWidth) {
+        k--;
+      }
+      if (k < 3 || current.length - k < 3) {
+        break;
+      }
+      const prefix = current.slice(0, k);
+      heads.push(prefix.endsWith('-') ? prefix : `${prefix}-`);
+      current = current.slice(k);
+    }
+    return { head: heads, tail: current };
+  }
+
+  for (const paragraph of text.split('\n')) {
+    let current = '';
+    if (CJK_REGEX.test(paragraph)) {
+      for (let i = 0; i < paragraph.length; i++) {
+        const char = paragraph[i];
+        const candidate = `${current}${char}`;
+        if (ctx.measureText(candidate).width <= maxWidth) {
+          current = candidate;
+        } else {
+          if (current) lines.push(current);
+          current = char;
+        }
+      }
+      if (current) lines.push(current);
+      continue;
+    }
+
+    const rawWords = paragraph.split(/\s+/).filter(Boolean);
+    const expandedWords: string[] = [];
+    for (const w of rawWords) {
+      if (w.includes('-') && !w.startsWith('-') && !w.endsWith('-') && w.length >= 5) {
+        const sub = w.split('-');
+        for (let i = 0; i < sub.length; i++) {
+          if (i < sub.length - 1) {
+            expandedWords.push(`${sub[i]}-`);
+          } else {
+            expandedWords.push(sub[i]);
+          }
+        }
+      } else {
+        const m = w.match(/^(.*?)([.!?,:;~…"']{2,})$/);
+        if (m && m[1] && m[2]) {
+          expandedWords.push(m[1], m[2]);
+        } else {
+          expandedWords.push(w);
+        }
+      }
+    }
+
+    for (const word of expandedWords) {
+      if (!word) continue;
+      if (!current) {
+        if (ctx.measureText(word).width <= maxWidth) {
+          current = word;
+        } else {
+          const { head, tail } = breakLongWord(word);
+          if (head.length > 0) {
+            lines.push(...head);
+            current = tail;
+          } else {
+            current = word;
+          }
+        }
+      } else {
+        const isPurePunct = LONE_PUNCT.test(word);
+        const candidate = current.endsWith('-') || isPurePunct ? `${current}${word}` : `${current} ${word}`;
+        if (ctx.measureText(candidate).width <= (isPurePunct ? maxWidth * 1.15 : maxWidth)) {
+          current = candidate;
+        } else {
+          lines.push(current);
+          if (ctx.measureText(word).width <= maxWidth) {
+            current = word;
+          } else {
+            const { head, tail } = breakLongWord(word);
+            if (head.length > 0) {
+              lines.push(...head);
+              current = tail;
+            } else {
+              current = word;
+            }
+          }
+        }
+      }
+    }
+    if (current) {
+      if (LONE_PUNCT.test(current) && lines.length > 0) {
+        const candidate = `${lines[lines.length - 1]}${current}`;
+        if (ctx.measureText(candidate).width <= maxWidth * 1.15) {
+          lines[lines.length - 1] = candidate;
+        } else {
+          lines.push(current);
+        }
+      } else {
+        lines.push(current);
+      }
+    }
+  }
+  return lines;
+}
+
+/**
+ * Binary searches for minimal line width that preserves line count N,
+ * forming a balanced diamond / inverted pyramid comic wrap.
+ */
+export function balancedWrapText(
+  ctx: { measureText(t: string): { width: number } },
+  text: string,
+  maxWidth: number
+): string[] {
+  const greedy = wrapText(ctx, text, maxWidth);
+  const N = greedy.length;
+  if (N <= 1) return greedy;
+
+  let lo = Math.max(10, Math.floor(maxWidth / N));
+  let hi = maxWidth;
+  while (lo < hi - 1) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (wrapText(ctx, text, mid).length <= N) hi = mid;
+    else lo = mid + 1;
+  }
+  return wrapText(ctx, text, hi);
+}
+
+/**
+ * Detects whether the input text represents a structured list or key-value format
+ * (e.g., stats, menu choices, character profiles with colons or bullet markers).
+ *
+ * @param text - Raw multi-line text string.
+ * @returns True if the text has list/dialogue-list structure that should avoid paragraph reflow.
+ */
+export function isStructuredList(text: string): boolean {
+  const rawLines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+  if (rawLines.length < 3) return false;
+  const colonCount = rawLines.filter((l) => /^[a-zA-Z\u4e00-\u9fa5\s]+[:：]/.test(l) || l.endsWith(':') || l.endsWith('：')).length;
+  if (colonCount >= 2) return true;
+  const bulletCount = rawLines.filter((l) => /^[-*•\d+.]\s+/.test(l)).length;
+  if (bulletCount >= 2 && bulletCount >= rawLines.length / 2) return true;
+  return false;
+}
+
+/**
+ * Determines whether the transition between two adjacent lines constitutes a hard boundary
+ * (such as speaker changes, sentence endings, list items, or quotes).
+ *
+ * @param prevLine - The preceding line text.
+ * @param nextLine - The following line text.
+ * @returns True if a hard break should separate the lines into distinct paragraphs.
+ */
+export function isHardLineBreak(prevLine: string, nextLine: string): boolean {
+  const prev = prevLine.trim();
+  const next = nextLine.trim();
+  if (!prev || !next) return true;
+
+  if (/[:：)）\]】>》!！?？"”'’]$/.test(prev)) return true;
+  if (/[.．]$/.test(prev) && /^([A-Z\u4e00-\u9fa5\uac00-\ud7af\u3040-\u30ff\[<("'\d#-]|\b)/.test(next)) return true;
+  const prevWords = prev.split(/\s+/);
+  if (prevWords.length <= 4 && prev.length <= 30 && !/[,，;；\-\/]$/.test(prev)) return true;
+  if (/^(\[|<|\(|【|《|[-*•]\s+|\d+[.)]\s+|[a-zA-Z\u4e00-\u9fa5\uac00-\ud7af\s]{1,20}[:：])/.test(next)) return true;
+  return false;
+}
+
+/**
+ * Splits raw multi-line OCR or translated text into logical paragraphs based on
+ * punctuation and semantic break rules, preserving bulleted lists and dialogue boundaries.
+ *
+ * @param text - Raw source text with arbitrary newline breaks.
+ * @returns Array of grouped paragraph strings ready for reflow and layout.
+ */
+export function splitIntoLogicalParagraphs(text: string): string[] {
+  const rawLines = text.split('\n');
+  if (rawLines.length <= 1) return [text.trim()];
+
+  const paragraphs: string[] = [];
+  let current = '';
+
+  for (let i = 0; i < rawLines.length; i++) {
+    const line = rawLines[i].trim();
+    if (!line) {
+      if (current) {
+        paragraphs.push(current);
+        current = '';
+      }
+      continue;
+    }
+
+    if (!current) {
+      current = line;
+    } else {
+      const prevLine = rawLines[i - 1]?.trim() || '';
+      if (isHardLineBreak(prevLine, line)) {
+        paragraphs.push(current);
+        current = line;
+      } else {
+        current = `${current} ${line}`;
+      }
+    }
+  }
+
+  if (current) {
+    paragraphs.push(current);
+  }
+
+  return paragraphs;
+}
+
+/**
+ * Reflows text into balanced wrapped lines across logical paragraphs.
+ * For structured lists, wraps line-by-line to preserve layout; for dialogue,
+ * normalizes whitespace and applies balanced wrap.
+ *
+ * @param ctx - Canvas measurement context.
+ * @param text - Text content to reflow.
+ * @param maxWidth - Available bounding width.
+ * @returns Array of wrapped lines ready for canvas rendering.
+ */
+export function reflowText(
+  ctx: { measureText(t: string): { width: number } },
+  text: string,
+  maxWidth: number
+): string[] {
+  if (isStructuredList(text)) {
+    const rawLines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+    const out: string[] = [];
+    for (const line of rawLines) {
+      const wrapped = wrapText(ctx, line, maxWidth);
+      out.push(...wrapped);
+    }
+    return out;
+  }
+
+  const paragraphs = splitIntoLogicalParagraphs(text);
+  const out: string[] = [];
+  for (const p of paragraphs) {
+    const cleanedParagraph = p.replace(/\s+/g, ' ').trim();
+    if (!cleanedParagraph) continue;
+    const wrapped = balancedWrapText(ctx, cleanedParagraph, maxWidth);
+    out.push(...wrapped);
+  }
+  return out;
+}
+
+export interface FitFontSizeLayout {
+  size: number;
+  lines: string[];
+}
+
+/**
+ * 4-Pass Binary Search font fitting:
+ * Pass 1: Clean binary search (whole words, no hyphens).
+ * Pass 2: Tall-narrow floor (aspect ratio >= 2.0) prevents collapse into unreadable micro-text.
+ * Pass 3: Vertical-fill hyphenation for tall boxes (aspect ratio >= 1.5).
+ * Pass 4: Fallback.
+ */
+export function fitFontSizeWithLines(
+  ctx: { font: string; measureText(t: string): { width: number } },
+  text: string,
+  fontFamily: string,
+  boxW: number,
+  boxH: number,
+  startSize: number,
+  maxSize?: number,
+  boxInset?: number,
+  customCjk?: string
+): FitFontSizeLayout {
+  const inset = boxInset ?? BOX_INSET;
+  const maxW = Math.max(10, boxW * (1 - 2 * inset));
+  const maxH = Math.max(10, boxH * (1 - 2 * inset));
+
+  const rawWords = text.split(/[\s\n]+/).filter(Boolean);
+  const words: string[] = [];
+  for (const w of rawWords) {
+    if (w.includes('-') && !w.startsWith('-') && !w.endsWith('-') && w.length >= 5) {
+      const sub = w.split('-');
+      for (let i = 0; i < sub.length; i++) {
+        words.push(i < sub.length - 1 ? `${sub[i]}-` : sub[i]);
+      }
+    } else {
+      const m = w.match(/^(.*?)([.!?,:;~…"']{2,})$/);
+      if (m && m[1] && m[2]) {
+        words.push(m[1], m[2]);
+      } else {
+        words.push(w);
+      }
+    }
+  }
+
+  let finalSize = MIN_FONT_SIZE;
+  ctx.font = fontSpec(MIN_FONT_SIZE, fontFamily, text, customCjk);
+  let finalLines: string[] = wrapText(ctx, text, maxW);
+  const consider = (size: number, lines: string[]): void => {
+    if (size > finalSize && lines.length > 0) {
+      finalSize = size;
+      finalLines = lines;
+    }
+  };
+
+  let lo = MIN_FONT_SIZE;
+  let hi = Math.max(lo, maxSize ?? startSize);
+  let cleanBest = MIN_FONT_SIZE;
+  let foundClean = false;
+
+  // Pass 1: Clean binary search with whole words only
+  while (lo <= hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (mid === 0) break;
+    ctx.font = fontSpec(mid, fontFamily, text, customCjk);
+
+    const maxWordWidth = Math.max(
+      0,
+      ...words.map((w) => {
+        const punctMatch = w.match(/^(.*?)([.!?,:;~…"']+)?$/);
+        const stem = punctMatch && punctMatch[1] ? punctMatch[1] : w;
+        const trailingPunct = punctMatch?.[2] ?? '';
+        const stemW = ctx.measureText(stem).width;
+        if (stemW <= maxW) return stemW;
+        const points = findHyphenationPoints(stem);
+        if (points.length > 0) {
+          let segMax = 0;
+          let prev = 0;
+          for (const p of points) {
+            const seg = stem[p - 1] === '-' ? stem.slice(prev, p) : `${stem.slice(prev, p)}-`;
+            segMax = Math.max(segMax, ctx.measureText(seg).width);
+            prev = p;
+          }
+          segMax = Math.max(segMax, ctx.measureText(stem.slice(prev) + trailingPunct).width);
+          return segMax;
+        }
+        return ctx.measureText(w).width;
+      })
+    );
+
+    if (maxWordWidth <= maxW) {
+      const lines = reflowText(ctx, text, maxW);
+      const lineH = mid * LINE_HEIGHT;
+      const allLinesFitW = lines.every((l) => ctx.measureText(l).width <= maxW + 0.5);
+      const hasNoHyphenBreaks = lines.every((l) => !l.endsWith('-') || text.includes(l));
+      if (allLinesFitW && lines.length * lineH <= maxH && hasNoHyphenBreaks) {
+        cleanBest = mid;
+        foundClean = true;
+        consider(mid, lines);
+        lo = mid + 1;
+        continue;
+      }
+    }
+    hi = mid - 1;
+  }
+
+  // Pass 2: Tall-narrow typeset floor when H/W >= 2.0
+  const aspectRatio = maxH / Math.max(maxW, 1);
+  const effectiveCap = Math.max(MIN_FONT_SIZE, maxSize ?? startSize);
+  if (aspectRatio >= 2.0) {
+    const geometricCandidate = Math.min(
+      effectiveCap,
+      Math.max(
+        MIN_FONT_SIZE,
+        Math.round(maxW * 0.28),
+        Math.round(Math.sqrt(maxW * maxH) * 0.10)
+      )
+    );
+    let floorLo = MIN_FONT_SIZE;
+    let floorHi = geometricCandidate;
+    while (floorLo <= floorHi) {
+      const mid = Math.floor((floorLo + floorHi) / 2);
+      if (mid === 0) break;
+      ctx.font = fontSpec(mid, fontFamily, text, customCjk);
+      const lines = reflowText(ctx, text, maxW);
+      const lineH = mid * LINE_HEIGHT;
+      const allFitW = lines.every((l) => ctx.measureText(l).width <= maxW + 0.5);
+      const totalH = lines.length * lineH;
+      if (allFitW && totalH <= maxH) {
+        consider(mid, lines);
+        floorLo = mid + 1;
+      } else {
+        floorHi = mid - 1;
+      }
+    }
+  }
+
+  // Pass 3: Vertical-fill hyphenation for tall boxes (aspect ratio >= 1.5)
+  if (aspectRatio >= TALL_FILL_MIN_ASPECT) {
+    for (let mid = effectiveCap; mid >= MIN_FONT_SIZE; mid--) {
+      ctx.font = fontSpec(mid, fontFamily, text, customCjk);
+      const lines = wrapText(ctx, text, maxW);
+      const allLinesFitW = lines.every((l) => ctx.measureText(l).width <= maxW + 0.5);
+      if (allLinesFitW && lines.length * mid * LINE_HEIGHT <= maxH) {
+        consider(mid, lines);
+        break;
+      }
+    }
+  }
+
+  const isNarrowVertical = (boxH / boxW >= 1.15 || boxH >= 120) && boxH >= 65;
+  if (foundClean && (cleanBest >= 14 || !isNarrowVertical)) {
+    return { size: finalSize, lines: finalLines };
+  }
+
+  // Pass 4: Fallback
+  lo = Math.max(cleanBest, MIN_FONT_SIZE);
+  hi = Math.max(lo, maxSize ?? startSize);
+  while (lo <= hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (mid === 0) break;
+    ctx.font = fontSpec(mid, fontFamily, text, customCjk);
+    const lines = reflowText(ctx, text, maxW);
+    const lineH = mid * LINE_HEIGHT;
+    const allLinesFitW = lines.every((l) => ctx.measureText(l).width <= maxW + 0.5);
+    const hasNoHyphenBreaks = lines.every((l) => !l.endsWith('-') || text.includes(l));
+    if (allLinesFitW && lines.length * lineH <= maxH && hasNoHyphenBreaks) {
+      consider(mid, lines);
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+
+  return { size: finalSize, lines: finalLines };
+}
+
+/**
+ * Minimum separation margin between decollided boxes in pixels.
+ */
+const DECOLLIDE_MARGIN_PX = 4;
+
+/**
+ * Decollides overlapping bounding boxes to prevent neighboring speech bubbles
+ * from clipping into each other, preserving nested bubbles while separating adjacent ones.
+ *
+ * @param boxes - Array of rectangular boxes with position and dimensions.
+ * @returns Array of adjusted bounding boxes with collisions resolved.
+ */
+export function decollideBoxes<T extends { x: number; y: number; w: number; h: number }>(boxes: T[]): T[] {
+  if (boxes.length <= 1) return boxes;
+  const adjusted = boxes.map((b) => ({ ...b }));
+
+  for (let i = 0; i < adjusted.length; i++) {
+    for (let j = i + 1; j < adjusted.length; j++) {
+      const a = adjusted[i];
+      const b = adjusted[j];
+
+      const xOverlap = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+      const yOverlap = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+
+      if (xOverlap > 0 && yOverlap > 0) {
+        const areaA = a.w * a.h;
+        const areaB = b.w * b.h;
+        const overlapArea = xOverlap * yOverlap;
+        const minArea = Math.min(areaA, areaB);
+
+        // Nested boxes (e.g. bubble inside bubble) are not pushed
+        if (minArea > 0 && overlapArea / minArea > 0.50) {
+          continue;
+        }
+
+        if (yOverlap <= xOverlap) {
+          const top = a.y <= b.y ? a : b;
+          const bot = a.y <= b.y ? b : a;
+          const shift = Math.ceil((yOverlap + DECOLLIDE_MARGIN_PX) / 2);
+          top.h = Math.max(10, top.h - shift);
+          bot.y = bot.y + shift;
+          bot.h = Math.max(10, bot.h - shift);
+        } else {
+          const left = a.x <= b.x ? a : b;
+          const right = a.x <= b.x ? b : a;
+          const shift = Math.ceil((xOverlap + DECOLLIDE_MARGIN_PX) / 2);
+          left.w = Math.max(10, left.w - shift);
+          right.x = right.x + shift;
+          right.w = Math.max(10, right.w - shift);
+        }
+      }
+    }
+  }
+
+  return adjusted;
+}

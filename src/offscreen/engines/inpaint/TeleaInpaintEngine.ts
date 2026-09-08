@@ -13,11 +13,26 @@ export class TeleaInpaintEngine implements IInpaintEngine {
     this.platform = platform;
   }
 
+  /**
+   * Initializes the engine. This is a no-op as the FMM diffusion algorithm is purely mathematical and requires no external weights.
+   *
+   * @returns A promise that resolves immediately.
+   */
   async init(): Promise<void> {
     // Math-based, no weights to download
     return Promise.resolve();
   }
 
+  /**
+   * Erases text using the Fast Marching Method (FMM) image inpainting algorithm.
+   * Generates a slightly dilated mask around each text polygon to swallow anti-aliased edges,
+   * crops bounding boxes with extra padding, and diffuses surrounding colors inward via inverse-distance weighting.
+   *
+   * @param imageBuffer - Raw ArrayBuffer of the input image.
+   * @param maskPolygons - Array of polygon vertex arrays bounding the text regions.
+   * @param _strokeMaskCanvas - Unused; an inflated polygon mask is synthesized instead.
+   * @returns A promise resolving to the inpainted image as an ArrayBuffer.
+   */
   async inpaint(imageBuffer: ArrayBuffer, maskPolygons: Point2D[][], _strokeMaskCanvas?: any): Promise<ArrayBuffer> {
     // 1. Prepare canvases
     const rawCanvas = await this.platform.canvas.prepareCanvas(imageBuffer);
@@ -224,6 +239,11 @@ export class TeleaInpaintEngine implements IInpaintEngine {
     }
   }
 
+  /**
+   * Cleans up engine resources. This is a no-op since no resources are held.
+   *
+   * @returns A promise that resolves immediately.
+   */
   async destroy(): Promise<void> {
     return Promise.resolve();
   }

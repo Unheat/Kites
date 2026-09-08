@@ -1,5 +1,7 @@
 import type { Point2D } from '../../shared/utils/geometry';
 import { syllables } from './hyphenation';
+import { fitFontSizeWithLines, fontSpec } from './typesetLayout';
+import { sanitizeTypesetText } from '../../shared/utils/textCleaning';
 
 /**
  * 1:1 port of Cotrans's DEFAULT renderer (the one cotrans.touhou.ai uses): rendering/__init__.py
@@ -18,8 +20,8 @@ import { syllables } from './hyphenation';
  * - English output always renders horizontally (source `direction` only affects the OCR/merge stage).
  */
 
-/** Font family used for rendered translations (must match canvasTypesetting.ts RENDER_FONT_FAMILY). */
-const RENDER_FONT_FAMILY = 'sans-serif';
+/** Default font family used for rendered translations (must match canvasTypesetting.ts DEFAULT_RENDER_FONT_FAMILY). */
+export const DEFAULT_RENDER_FONT_FAMILY = 'sans-serif';
 
 /** Cotrans default stroke width relative to font size (put_text_horizontal: max(font_size*0.07, 1)). */
 const STROKE_WIDTH_RATIO = 0.07;
@@ -59,6 +61,8 @@ export interface DefaultRenderRegion {
 export interface DefaultRenderResult {
   fontSize: number;
   lineCount: number;
+  /** Exact validated lines rendered onto the page. */
+  lines: string[];
 }
 
 type AnyCanvas = { getContext(type: '2d', options?: { willReadFrequently?: boolean }): any; width: number; height: number };
@@ -78,18 +82,23 @@ function makeCanvas(ctx: any, w: number, h: number): AnyCanvas {
 }
 
 /**
- * 1:1 port of Cotrans `compact_special_symbols`: collapses ellipses and strips spaces after punctuation.
+ * Collapses ellipses; strips FULL-WIDTH spaces after punctuation only.
+ *
+ * Deliberate divergence from Cotrans upstream master (which also strips ASCII spaces
+ * after punctuation): fusing "Teacher, please" into "Teacher,please" glues two words
+ * into one oversized token, forcing the wrap fallback to slice English mid-word
+ * ("Teacher,p-" / "lease"). ASCII spacing is meaningful for Western word-wrap.
  */
 export function compactSpecialSymbols(text: string): string {
   text = text.replace(/\.\.\./g, '…').replace(/\.\./g, '…');
-  // Remove half/full-width spaces immediately after a punctuation mark.
-  text = text.replace(/([^\w\s])[ 　]+/g, '$1');
+  // Remove full-width spaces immediately after a punctuation mark (ASCII space kept).
+  text = text.replace(/([^\w\s])[　]+/g, '$1');
   return text;
 }
 
 /** Sets the measurement font and returns a memo-free width measurer for the current font size. */
-function makeMeasurer(ctx: any, fontSize: number): (s: string) => number {
-  ctx.font = `bold ${Math.trunc(fontSize)}px ${RENDER_FONT_FAMILY}`;
+function makeMeasurer(ctx: any, fontSize: number, fontFamily: string = DEFAULT_RENDER_FONT_FAMILY, sampleText?: string): (s: string) => number {
+  ctx.font = fontSpec(Math.trunc(fontSize), fontFamily, sampleText);
   return (s: string) => ctx.measureText(s).width;
 }
 
@@ -103,6 +112,7 @@ function makeMeasurer(ctx: any, fontSize: number): (s: string) => number {
  * @param maxWidth - Target line width in pixels.
  * @param maxHeight - Target block height in pixels (drives width auto-expansion on overflow).
  * @param hyphenate - Whether to insert hyphen characters at forced breaks.
+ * @param fontFamily - CSS font-family stack to measure against.
  * @returns Laid-out lines and their pixel widths.
  */
 export function calcHorizontal(
@@ -111,10 +121,11 @@ export function calcHorizontal(
   text: string,
   maxWidth: number,
   maxHeight: number,
-  hyphenate = true
+  hyphenate = true,
+  fontFamily: string = DEFAULT_RENDER_FONT_FAMILY
 ): { lineTexts: string[]; lineWidths: number[] } {
   fontSize = Math.trunc(fontSize);
-  const measure = makeMeasurer(ctx, fontSize);
+  const measure = makeMeasurer(ctx, fontSize, fontFamily, text);
   const stringWidth = (s: string) => measure(s);
 
   maxWidth = Math.max(maxWidth, 2 * fontSize);
@@ -384,13 +395,14 @@ export function putTextHorizontal(
   alignment: 'left' | 'center' | 'right',
   fg: string,
   bg: string | null,
-  lineSpacing = 0
+  lineSpacing = 0,
+  fontFamily: string = DEFAULT_RENDER_FONT_FAMILY
 ): { canvas: AnyCanvas; width: number; height: number } | null {
   fontSize = Math.trunc(fontSize);
   text = compactSpecialSymbols(text);
   if (!text.trim()) return null;
 
-  const { lineTexts, lineWidths } = calcHorizontal(ctx, fontSize, text, width, height, true);
+  const { lineTexts, lineWidths } = calcHorizontal(ctx, fontSize, text, width, height, true, fontFamily);
   if (lineTexts.length === 0) return null;
 
   const bgSize = bg ? Math.max(Math.trunc(fontSize * STROKE_WIDTH_RATIO), 1) : 0;
@@ -403,7 +415,7 @@ export function putTextHorizontal(
 
   const tmp = makeCanvas(ctx, canvasW, canvasH);
   const tctx = tmp.getContext('2d');
-  tctx.font = `bold ${fontSize}px ${RENDER_FONT_FAMILY}`;
+  tctx.font = fontSpec(fontSize, fontFamily, text);
   tctx.textBaseline = 'top';
   tctx.textAlign = 'left';
   tctx.fillStyle = fg;
@@ -428,6 +440,68 @@ export function putTextHorizontal(
   }
 
   // Crop to the content bounding box (Cotrans crops to cv2.boundingRect(canvas_border)).
+  const cropped = cropToContent(ctx, tmp);
+  return cropped ?? { canvas: tmp, width: tmp.width, height: tmp.height };
+}
+
+/**
+ * Renders already-validated layout lines so drawing cannot drift from the fitting pass.
+ *
+ * @param ctx - Parent canvas context, used to create a compatible intermediate canvas.
+ * @param fontSize - Fitted font size in pixels.
+ * @param lines - Layout-engine output in reading order.
+ * @param alignment - Horizontal alignment for each line.
+ * @param fg - Fill color.
+ * @param bg - Optional outline color.
+ * @param fontFamily - CSS font-family stack to render and measure with.
+ * @returns Cropped transparent text canvas, or null when no lines are drawable.
+ */
+export function putTextLines(
+  ctx: any,
+  fontSize: number,
+  lines: string[],
+  alignment: 'left' | 'center' | 'right',
+  fg: string,
+  bg: string | null,
+  fontFamily: string = DEFAULT_RENDER_FONT_FAMILY
+): { canvas: AnyCanvas; width: number; height: number } | null {
+  const drawableLines = lines.filter((line) => line.trim());
+  if (drawableLines.length === 0) return null;
+
+  // Sample-aware font spec: resolves the SAME font stack the fitting pass measured with
+  // (CJK-first when the translation contains CJK), so width validation transfers to draw.
+  const drawFont = fontSpec(fontSize, fontFamily, drawableLines.join(''));
+  ctx.font = drawFont;
+  const measure = (s: string) => ctx.measureText(s).width;
+  const widths = drawableLines.map(measure);
+  const maxLineWidth = Math.max(...widths);
+  const bgSize = bg ? Math.max(Math.trunc(fontSize * STROKE_WIDTH_RATIO), 1) : 0;
+  const spacingY = Math.trunc(fontSize * LINE_SPACING_RATIO);
+  const canvasW = maxLineWidth + (fontSize + bgSize) * 2;
+  const canvasH = fontSize * drawableLines.length + spacingY * (drawableLines.length - 1) + (fontSize + bgSize) * 2;
+  const tmp = makeCanvas(ctx, canvasW, canvasH);
+  const textCtx = tmp.getContext('2d');
+  textCtx.font = drawFont;
+  textCtx.textBaseline = 'top';
+  textCtx.textAlign = 'left';
+  textCtx.fillStyle = fg;
+  textCtx.lineJoin = 'round';
+  if (bg) {
+    textCtx.strokeStyle = bg;
+    textCtx.lineWidth = Math.max(1, bgSize * 2);
+  }
+
+  const originX = fontSize + bgSize;
+  const originY = fontSize + bgSize;
+  for (let i = 0; i < drawableLines.length; i++) {
+    let x = originX;
+    if (alignment === 'center') x += (maxLineWidth - widths[i]) / 2;
+    else if (alignment === 'right') x += maxLineWidth - widths[i];
+    const y = originY + i * (fontSize + spacingY);
+    if (bg) textCtx.strokeText(drawableLines[i], x, y);
+    textCtx.fillText(drawableLines[i], x, y);
+  }
+
   const cropped = cropToContent(ctx, tmp);
   return cropped ?? { canvas: tmp, width: tmp.width, height: tmp.height };
 }
@@ -519,32 +593,12 @@ export function resizeRegionToFontSize(
   const minY = Math.min(...unrotated.map(p => p.y));
   const maxX = Math.max(...unrotated.map(p => p.x));
   const maxY = Math.max(...unrotated.map(p => p.y));
-  const boxW = maxX - minX;
-  const boxH = maxY - minY;
-
   let fontSize = region.fontSize > 0 ? Math.trunc(region.fontSize) : fontSizeMinimum;
 
-  // Step 1: more characters were added, so reduce the font size to fit the allotted area.
-  // Cotrans counts raw string length here (not count_text_length), and leaves font_size
-  // untouched if the loop bottoms out at zero without ever fitting.
-  const charCountOrig = (region.originalText || '').length;
-  const charCountTrans = region.translation.trim().length;
-  if (charCountTrans > charCountOrig) {
-    // Use actual dimensions directly (YAGNI / Cotrans 2023 math).
-    // ponytail: no dimension swap. Swapping layoutW/H makes vertical block text sizes huge.
-    const layoutW = boxW;
-    const layoutH = boxH;
-    let rescaled = fontSize;
-    while (rescaled > 0) {
-      const rows = Math.floor(layoutW / rescaled);
-      const cols = Math.floor(layoutH / rescaled);
-      if (rows * cols >= charCountTrans) {
-        fontSize = rescaled;
-        break;
-      }
-      rescaled -= 1;
-    }
-  }
+  // The 2023 Cotrans grid shrink loop reduced English translations to 5px inside
+  // Japanese vertical columns. The layout engine now measures real Canvas word widths,
+  // so preserve the detected size here and let its validated multi-line fit choose a
+  // readable size without treating Latin characters as square glyph cells.
 
   // Step 2: infer the target font size (font_size_offset is 0 for us).
   let targetFontSize = fontSize;
@@ -627,7 +681,8 @@ function warpBoxOntoQuad(ctx: any, boxCanvas: AnyCanvas, boxW: number, boxH: num
  * @param region - Region metadata.
  * @param dstPoints - Destination quad from resizeRegionToFontSize ([tl, tr, br, bl]).
  * @param fontSize - Font size from resizeRegionToFontSize.
- * @param lineSpacing - Extra inter-line spacing.
+ * @param maxFontSizeCap - Optional ceiling on fitted font size.
+ * @param fontFamily - CSS font-family stack to render and measure with.
  * @returns Render info, or null if nothing was drawn.
  */
 export function renderRegionDefault(
@@ -635,7 +690,8 @@ export function renderRegionDefault(
   region: DefaultRenderRegion,
   dstPoints: Point2D[],
   fontSize: number,
-  lineSpacing = 0
+  maxFontSizeCap?: number,
+  fontFamily: string = DEFAULT_RENDER_FONT_FAMILY
 ): DefaultRenderResult | null {
   const [tl, tr, br, bl] = dstPoints;
   // Layout and aspect padding must use the resized destination dimensions. Using the
@@ -648,7 +704,21 @@ export function renderRegionDefault(
   const fg = region.textColor || '#000000';
   const bg = region.strokeColor && region.strokeColor !== 'transparent' ? region.strokeColor : null;
 
-  const temp = putTextHorizontal(ctx, fontSize, region.translation, Math.round(normH), Math.round(normV), region.alignment, fg, bg, lineSpacing);
+  // XianScan-style fit returns both the verified font size and exact wrapped lines.
+  // Rendering those same lines prevents Cotrans's independent syllable pass from
+  // turning English dialogue into narrow barcode columns.
+  const displayText = sanitizeTypesetText(compactSpecialSymbols(region.translation));
+  const fitted = fitFontSizeWithLines(
+    ctx,
+    displayText,
+    fontFamily,
+    normH,
+    normV,
+    fontSize,
+    Math.min(Math.max(fontSize, 48), maxFontSizeCap ?? Number.POSITIVE_INFINITY),
+    0.05
+  );
+  const temp = putTextLines(ctx, fitted.size, fitted.lines, region.alignment, fg, bg, fontFamily);
   if (!temp) return null;
 
   // Extend the text box to the destination aspect ratio (Cotrans render horizontal branch).
@@ -677,7 +747,5 @@ export function renderRegionDefault(
   // Warp the text box onto the destination quad and alpha-composite over the page.
   warpBoxOntoQuad(ctx, boxCanvas, boxW, boxH, [tl, tr, br, bl]);
 
-  // Count rendered lines for reporting.
-  const lineInfo = calcHorizontal(ctx, fontSize, compactSpecialSymbols(region.translation), Math.round(normH), Math.round(normV), true);
-  return { fontSize, lineCount: lineInfo.lineTexts.length };
+  return { fontSize: fitted.size, lineCount: fitted.lines.length, lines: fitted.lines };
 }

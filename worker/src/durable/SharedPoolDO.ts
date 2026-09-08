@@ -56,10 +56,21 @@ export class SharedPoolDO extends DurableObject {
     `);
   }
 
+  /**
+   * Initialize the in-memory UTC day tracker to current date (YYYY-MM-DD).
+   *
+   * @returns void
+   */
   private initDayCounter() {
     this.currentUtcDay = new Date().toISOString().slice(0, 10);
   }
 
+  /**
+   * Check if the UTC calendar day has changed since the last request,
+   * and reset the in-memory global daily count to zero when rotating days.
+   *
+   * @returns void
+   */
   private checkAndRotateDay() {
     const today = new Date().toISOString().slice(0, 10);
     if (today !== this.currentUtcDay) {
@@ -91,6 +102,26 @@ export class SharedPoolDO extends DurableObject {
     }
 
     return null;
+  }
+
+  /**
+   * Read-only user quota query without consuming quota.
+   */
+  async getQuota(userHash: string): Promise<{ remaining: number; limit: number; resetsAt: number }> {
+    const now = Date.now();
+    const record = this.getUserQuota(userHash);
+    if (!record || now >= record.windowStart + USER_WINDOW_DURATION_MS) {
+      return {
+        remaining: MAX_USER_QUOTA,
+        limit: MAX_USER_QUOTA,
+        resetsAt: now + USER_WINDOW_DURATION_MS,
+      };
+    }
+    return {
+      remaining: Math.max(0, MAX_USER_QUOTA - record.usedCount),
+      limit: MAX_USER_QUOTA,
+      resetsAt: record.windowStart + USER_WINDOW_DURATION_MS,
+    };
   }
 
   /**
@@ -304,7 +335,7 @@ export class SharedPoolDO extends DurableObject {
   async handleTranslation(
     userHash: string,
     request: OpenAIChatRequest
-  ): Promise<{ status: number; body: any }> {
+  ): Promise<{ status: number; body: any; quota?: { remaining: number; limit: number; resetsAt: number } }> {
     const now = Date.now();
     this.checkAndRotateDay();
 
@@ -324,6 +355,12 @@ export class SharedPoolDO extends DurableObject {
 
     // 2. User Rolling 24-Hour Quota Check
     const quotaResult = this.checkAndConsumeQuota(userHash, now);
+    const userQuota = {
+      remaining: quotaResult.remaining,
+      limit: MAX_USER_QUOTA,
+      resetsAt: quotaResult.resetsAt,
+    };
+
     if (!quotaResult.allowed) {
       return {
         status: 429,
@@ -335,6 +372,7 @@ export class SharedPoolDO extends DurableObject {
             resetsAt: quotaResult.resetsAt,
           },
         },
+        quota: userQuota,
       };
     }
 
@@ -398,6 +436,7 @@ export class SharedPoolDO extends DurableObject {
         return {
           status: 200,
           body: result.data,
+          quota: userQuota,
         };
       }
 
@@ -423,6 +462,7 @@ export class SharedPoolDO extends DurableObject {
           code: 'all_providers_cooling_down',
         },
       },
+      quota: userQuota,
     };
   }
 }

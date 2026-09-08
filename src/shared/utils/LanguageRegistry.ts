@@ -65,10 +65,23 @@ export const LANGUAGES: LanguageMap[] = [
   { id: 'cy', name: 'Welsh' },
 ];
 
+/**
+ * Look up a language entry by its canonical two-letter ID.
+ *
+ * @param id - ISO 639-1 language code (e.g. 'ja', 'en').
+ * @returns The matching LanguageMap entry, or undefined if not found.
+ */
 export function getLanguageMap(id: string): LanguageMap | undefined {
   return LANGUAGES.find(lang => lang.id === id);
 }
 
+/**
+ * Resolve a language code to its human-readable display name.
+ * Falls back to the raw ID string when the code is not in the registry.
+ *
+ * @param id - ISO 639-1 language code.
+ * @returns Display name (e.g. 'Japanese') or the raw code if unrecognised.
+ */
 export function getLanguageName(id: string): string {
   return getLanguageMap(id)?.name || id;
 }

@@ -11,6 +11,21 @@ export const AccountCard: React.FC<AccountCardProps> = ({ userAccount, onAccount
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Automatically refresh live quota from worker on mount when signed in
+  React.useEffect(() => {
+    if (userAccount?.signedIn && typeof chrome !== 'undefined' && chrome?.runtime?.sendMessage) {
+      chrome.runtime.sendMessage({ type: 'REFRESH_CLOUD_QUOTA' }, (res) => {
+        if (res?.success && res.quota && userAccount) {
+          onAccountChange({
+            ...userAccount,
+            quotaRemaining: res.quota.remaining,
+            quotaResetsAt: res.quota.resetsAt
+          });
+        }
+      });
+    }
+  }, [userAccount?.signedIn]);
+
   const handleSignIn = () => {
     setIsLoading(true);
     setError(null);
@@ -82,8 +97,8 @@ export const AccountCard: React.FC<AccountCardProps> = ({ userAccount, onAccount
         </div>
 
         <div className="pt-1 border-t border-[var(--color-dust)]/20 flex items-center justify-between">
-          <span className="text-[10px] text-[var(--color-dust)]">
-            100 free translations / 24h
+          <span className="text-[10px] text-[var(--color-dust)] font-medium">
+            {userAccount.quotaRemaining !== undefined ? userAccount.quotaRemaining : 100} / 100 translations left
           </span>
           <button
             type="button"

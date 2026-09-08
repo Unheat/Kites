@@ -11,23 +11,26 @@ Edge WAF rules run at Cloudflare's network perimeter **before** the Worker runti
 Cloudflare Free includes **1 Rate Limiting Rule**.
 
 ### Configuration Steps:
-1. Open your domain or `workers.dev` zone in the [Cloudflare Dashboard](https://dash.cloudflare.com/).
+1. Open the `12094852.xyz` zone in the [Cloudflare Dashboard](https://dash.cloudflare.com/).
 2. Navigate to **Security** $\to$ **WAF** $\to$ **Rate limiting rules**.
 3. Click **Create rule**:
    * **Rule name**: `Limit Translation Endpoint Bursts`
    * **When incoming requests match**:
-     * Field: `URI Path`
-     * Operator: `equals`
-     * Value: `/v1/chat/completions`
+     * Hostname equals `api.12094852.xyz`
+     * URI Path equals `/v1/chat/completions`
+     * Method equals `POST`
    * **With the same characteristics**:
      * Count by: `IP`
    * **Requests**:
-     * Greater than: `20` requests
+     * Greater than: `15` requests
      * Period: `10 seconds`
+     * This is the Cloudflare Free-plan equivalent of the Worker's `5 requests / 3 seconds` limit because Free WAF requires a 10-second measurement window.
    * **Action**:
      * Choose: `Block`
      * Duration: `10 seconds` (or custom response: `HTTP 429 Too Many Requests`)
 4. Click **Deploy**.
+
+After the custom-domain endpoint passes an authenticated translation test, disable the production and preview `workers.dev` URLs under **Workers & Pages** $\to$ **kites-translate-pool** $\to$ **Domains**. Leaving the production `workers.dev` URL enabled allows callers to bypass this zone-level WAF rule.
 
 ---
 

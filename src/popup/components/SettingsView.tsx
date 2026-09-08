@@ -12,6 +12,12 @@ interface SettingsViewProps {
   updateState: (updates: Partial<PopupState>) => void;
 }
 
+/**
+ * Settings configuration view rendered in the extension popup.
+ *
+ * @param props - Component props containing current popup state and mutation callback.
+ * @returns The rendered settings management panel.
+ */
 export default function SettingsView({ state, updateState }: SettingsViewProps) {
   const [showApiManager, setShowApiManager] = useState(false);
   const [showFallbackConfig, setShowFallbackConfig] = useState(false);

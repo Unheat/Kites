@@ -8,6 +8,17 @@ import { ProviderRouteConfig } from '../config/providers';
 import { OpenAIChatRequest, OpenAIChatResponse } from '../types';
 import { AdapterExecutionResult } from './openai-compatible';
 
+/**
+ * Execute a translation or text generation request against Cloudflare Workers AI binding.
+ * Supports both dedicated translation models (e.g., m2m100) and general LLM text models,
+ * wrapping the output into an OpenAI-compatible chat response structure.
+ *
+ * @param route - Provider route configuration containing the Workers AI model name.
+ * @param request - OpenAI-compatible chat request with messages and sampling parameters.
+ * @param aiBinding - The Cloudflare Workers AI binding instance (env.AI).
+ * @param timeoutMs - Maximum allowed duration for the AI model inference in milliseconds.
+ * @returns An AdapterExecutionResult containing success status, status code, and parsed response or error.
+ */
 export async function executeWorkersAI(
   route: ProviderRouteConfig,
   request: OpenAIChatRequest,

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { OcrManager, isValuableChar, isValuableText } from './OcrManager';
 import { PaddleOcrEngine } from '../engines/ocr/PaddleOcrEngine';
 
@@ -73,6 +73,227 @@ describe('OcrManager', () => {
       const engine2 = await ocrManager.getOrLoadEngine('v6-tiny');
       expect(engine1).toBe(engine2);
       expect(PaddleOcrEngine).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('low-confidence suppression (XianScan builder.rs:278, neighborhood-gated)', () => {
+    function mockEngineWithLines(lines: { texts: string[]; polygons: { x: number; y: number }[][]; scores: number[] }): void {
+      (PaddleOcrEngine as any).mockImplementation(function () {
+        return {
+          preset: 'v6-small',
+          init: vi.fn().mockResolvedValue(undefined),
+          recognize: vi.fn().mockResolvedValue({
+            texts: lines.texts,
+            polygons: lines.polygons,
+            scores: lines.scores,
+            detectionScores: lines.scores.map(() => 0.98),
+            boxes: lines.polygons.map(p => ({ x: p[0].x, y: p[0].y, w: p[1].x - p[0].x, h: p[2].y - p[0].y }))
+          }),
+          destroy: vi.fn().mockResolvedValue(undefined)
+        };
+      });
+    }
+
+    beforeEach(() => {
+      // Fresh manager per test so the engine cache does not reuse a previous mock
+      ocrManager = new OcrManager();
+    });
+
+    afterEach(() => {
+      // Restore the module-level default engine mock so later describes are unaffected
+      (PaddleOcrEngine as any).mockImplementation(function (preset: string) {
+        return {
+          preset,
+          init: vi.fn().mockResolvedValue(undefined),
+          recognize: vi.fn().mockResolvedValue({
+            texts: ['Sample text'],
+            polygons: [[{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 50 }, { x: 0, y: 50 }]],
+            scores: [0.95],
+            detectionScores: [0.98],
+            boxes: [{ x: 0, y: 0, w: 100, h: 50 }]
+          }),
+          destroy: vi.fn().mockResolvedValue(undefined)
+        };
+      });
+    });
+
+    it('drops a low-confidence line that can merge with a high-confidence neighbor', async () => {
+      mockEngineWithLines({
+        texts: ['こんにちは', 'あ'],
+        polygons: [
+          [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 40 }, { x: 0, y: 40 }],
+          [{ x: 0, y: 45 }, { x: 100, y: 45 }, { x: 100, y: 80 }, { x: 0, y: 80 }]
+        ],
+        scores: [0.95, 0.50]
+      });
+      const result = await ocrManager.processImage(new ArrayBuffer(16));
+      expect(result.texts).toHaveLength(1);
+      expect(result.texts[0]).toContain('こんにちは');
+    });
+
+    it('keeps a faint line when no high-confidence line can merge with it (whisper bubble)', async () => {
+      mockEngineWithLines({
+        texts: ['こんにちは', 'ひそひそ'],
+        polygons: [
+          [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 40 }, { x: 0, y: 40 }],
+          // Far below on the page: never mergeable with the strong line above
+          [{ x: 600, y: 1200 }, { x: 700, y: 1200 }, { x: 700, y: 1260 }, { x: 600, y: 1260 }]
+        ],
+        scores: [0.95, 0.55]
+      });
+      const result = await ocrManager.processImage(new ArrayBuffer(16));
+      expect(result.texts).toHaveLength(2);
+    });
+  });
+
+  describe('Latin-noise prune in non-Latin sources (XianScan builder.rs:189)', () => {
+    function mockLatinPruneEngine(lines: { texts: string[]; polygons: { x: number; y: number }[][]; scores: number[] }): void {
+      (PaddleOcrEngine as any).mockImplementation(function () {
+        return {
+          preset: 'v6-small',
+          init: vi.fn().mockResolvedValue(undefined),
+          recognize: vi.fn().mockResolvedValue({
+            texts: lines.texts,
+            polygons: lines.polygons,
+            scores: lines.scores,
+            detectionScores: lines.scores.map(() => 0.98),
+            boxes: lines.polygons.map(p => ({ x: p[0].x, y: p[0].y, w: p[1].x - p[0].x, h: p[2].y - p[0].y }))
+          }),
+          destroy: vi.fn().mockResolvedValue(undefined)
+        };
+      });
+    }
+
+    const nativeAndLatin = {
+      texts: ['こんにちは', 'HOSPITAL'],
+      polygons: [
+        [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 40 }, { x: 0, y: 40 }],
+        [{ x: 200, y: 500 }, { x: 300, y: 500 }, { x: 300, y: 530 }, { x: 200, y: 530 }]
+      ],
+      scores: [0.95, 0.80]
+    };
+
+    afterEach(() => {
+      (PaddleOcrEngine as any).mockImplementation(function (preset: string) {
+        return {
+          preset,
+          init: vi.fn().mockResolvedValue(undefined),
+          recognize: vi.fn().mockResolvedValue({
+            texts: ['Sample text'],
+            polygons: [[{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 50 }, { x: 0, y: 50 }]],
+            scores: [0.95],
+            detectionScores: [0.98],
+            boxes: [{ x: 0, y: 0, w: 100, h: 50 }]
+          }),
+          destroy: vi.fn().mockResolvedValue(undefined)
+        };
+      });
+    });
+
+    it('prunes pure-Latin noise when a native line exists and source is ja', async () => {
+      mockLatinPruneEngine(nativeAndLatin);
+      const result = await ocrManager.processImage(new ArrayBuffer(16), 'v6-small', { sourceLang: 'ja' });
+      expect(result.texts).toHaveLength(1);
+      expect(result.texts[0]).toContain('こんにちは');
+    });
+
+    it('keeps Latin line when no source context (filter inactive)', async () => {
+      mockLatinPruneEngine(nativeAndLatin);
+      const result = await ocrManager.processImage(new ArrayBuffer(16));
+      expect(result.texts).toHaveLength(2);
+    });
+
+    it('exempts SFX and dialogue punctuation from the Latin prune', async () => {
+      mockLatinPruneEngine({
+        texts: ['こんにちは', 'ゴゴゴ', 'OK!'],
+        polygons: [
+          [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 40 }, { x: 0, y: 40 }],
+          [{ x: 200, y: 300 }, { x: 260, y: 300 }, { x: 260, y: 360 }, { x: 200, y: 360 }],
+          [{ x: 400, y: 600 }, { x: 460, y: 600 }, { x: 460, y: 630 }, { x: 400, y: 630 }]
+        ],
+        scores: [0.95, 0.85, 0.85]
+      });
+      const result = await ocrManager.processImage(new ArrayBuffer(16), 'v6-small', { sourceLang: 'ja' });
+      expect(result.texts).toHaveLength(3);
+    });
+  });
+
+  describe('line pre-filter battery (XianScan fusion.rs:72)', () => {
+    function mockBatteryEngine(lines: { texts: string[]; polygons: { x: number; y: number }[][]; scores: number[] }): void {
+      (PaddleOcrEngine as any).mockImplementation(function () {
+        return {
+          preset: 'v6-small',
+          init: vi.fn().mockResolvedValue(undefined),
+          recognize: vi.fn().mockResolvedValue({
+            texts: lines.texts,
+            polygons: lines.polygons,
+            scores: lines.scores,
+            detectionScores: lines.scores.map(() => 0.98),
+            boxes: lines.polygons.map(p => ({ x: p[0].x, y: p[0].y, w: p[1].x - p[0].x, h: p[2].y - p[0].y }))
+          }),
+          destroy: vi.fn().mockResolvedValue(undefined)
+        };
+      });
+    }
+
+    afterEach(() => {
+      (PaddleOcrEngine as any).mockImplementation(function (preset: string) {
+        return {
+          preset,
+          init: vi.fn().mockResolvedValue(undefined),
+          recognize: vi.fn().mockResolvedValue({
+            texts: ['Sample text'],
+            polygons: [[{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 50 }, { x: 0, y: 50 }]],
+            scores: [0.95],
+            detectionScores: [0.98],
+            boxes: [{ x: 0, y: 0, w: 100, h: 50 }]
+          }),
+          destroy: vi.fn().mockResolvedValue(undefined)
+        };
+      });
+    });
+
+    it('drops giant low-confidence hallucinations when page dims are provided', async () => {
+      mockBatteryEngine({
+        texts: ['今日はいい天気', 'hallucinated artwork'],
+        polygons: [
+          [{ x: 50, y: 50 }, { x: 150, y: 50 }, { x: 150, y: 90 }, { x: 50, y: 90 }],
+          // Giant: w=640 >= 0.6*1000, h=200 >= 120, score 0.60 < 0.75
+          [{ x: 100, y: 300 }, { x: 740, y: 300 }, { x: 740, y: 500 }, { x: 100, y: 500 }]
+        ],
+        scores: [0.95, 0.60]
+      });
+      const result = await ocrManager.processImage(new ArrayBuffer(16), 'v6-small', { sourceLang: 'ja', pageWidth: 1000, pageHeight: 1400 });
+      expect(result.texts).toHaveLength(1);
+      expect(result.texts[0]).toContain('今日はいい天気');
+    });
+
+    it('is inactive without page dims', async () => {
+      mockBatteryEngine({
+        texts: ['今日はいい天気', 'hallucinated artwork'],
+        polygons: [
+          [{ x: 50, y: 50 }, { x: 150, y: 50 }, { x: 150, y: 90 }, { x: 50, y: 90 }],
+          [{ x: 100, y: 300 }, { x: 740, y: 300 }, { x: 740, y: 500 }, { x: 100, y: 500 }]
+        ],
+        scores: [0.95, 0.60]
+      });
+      const result = await ocrManager.processImage(new ArrayBuffer(16), 'v6-small', { sourceLang: 'ja' });
+      // No dims -> battery inactive; giant survives, but Latin prune (ja context) still applies
+      expect(result.texts).toHaveLength(1);
+      expect(result.texts[0]).toContain('今日はいい天気');
+    });
+
+    it('keeps high-confidence giants (rule is score-gated)', async () => {
+      mockBatteryEngine({
+        texts: ['今日はいい天気', '大きな看板の文字です'],
+        polygons: [
+          [{ x: 50, y: 50 }, { x: 150, y: 50 }, { x: 150, y: 90 }, { x: 50, y: 90 }],
+          [{ x: 100, y: 300 }, { x: 740, y: 300 }, { x: 740, y: 500 }, { x: 100, y: 500 }]
+        ],
+        scores: [0.95, 0.90]
+      });
+      const result = await ocrManager.processImage(new ArrayBuffer(16), 'v6-small', { sourceLang: 'ja', pageWidth: 1000, pageHeight: 1400 });
+      expect(result.texts).toHaveLength(2);
     });
   });
 

@@ -8,6 +8,7 @@ import type { Point2D } from '../engines/inpaint/BaseInpaintEngine';
 import { inpaintRegistry } from '../engines/inpaint/inpaintRegistry';
 import { InpaintCacheManager } from './InpaintCacheManager';
 import { renderTextBlocksBatch, type TextBlockItem, type RenderedBlockInfo } from '../utils/canvasTypesetting';
+import { resolveRenderFontFamily } from '../../shared/renderFontPresets';
 
 export class PipelineOrchestrator {
   private ocrManager: OcrManager;
@@ -77,6 +78,7 @@ export class PipelineOrchestrator {
       const sourceLang = popupState?.sourceLang || 'auto';
       const targetLang = popupState?.targetLang || 'en';
       const ocrTier: OcrTier = popupState?.activeOcrId || 'v6-small';
+      const resolvedFontFamily = resolveRenderFontFamily(popupState?.renderFontPresetId);
 
       // 2. Fetch image from DB
       const imageRecord = await db.images.where('jobId').equals(jobId).first();
@@ -87,12 +89,30 @@ export class PipelineOrchestrator {
       console.log(`[PipelineOrchestrator] Loaded image blob. Size: ${imageRecord.rawImageBlob.size} bytes`);
       const imageBuffer = await this.blobToArrayBuffer(imageRecord.rawImageBlob);
 
+      // Decode page dimensions once for the OCR pre-filter battery (geometry rules).
+      let pageWidth: number | undefined;
+      let pageHeight: number | undefined;
+      try {
+        const probe = await createImageBitmap(imageRecord.rawImageBlob);
+        pageWidth = probe.width;
+        pageHeight = probe.height;
+        probe.close();
+      } catch {
+        // Geometry battery simply stays inactive when dimensions are unavailable.
+      }
+
       // 3. OCR Detection
-      const ocrStart = performance.now();
+      const ocrStart = import.meta.env.DEV ? performance.now() : 0;
       console.log(`[PipelineOrchestrator] Running OCR with ${ocrTier}...`);
-      const ocrResult = await this.ocrManager.processImage(imageBuffer, ocrTier);
-      const ocrDuration = (performance.now() - ocrStart).toFixed(2);
-      console.log(`[PipelineOrchestrator] OCR stage complete in ${ocrDuration}ms.`);
+      const ocrResult = await this.ocrManager.processImage(imageBuffer, ocrTier, {
+        sourceLang: sourceLang !== 'auto' ? sourceLang : undefined,
+        pageWidth,
+        pageHeight
+      });
+      if (import.meta.env.DEV) {
+        const ocrDuration = (performance.now() - ocrStart).toFixed(2);
+        console.log(`[PipelineOrchestrator] OCR stage complete in ${ocrDuration}ms.`);
+      }
       
       if (!ocrResult.texts || ocrResult.texts.length === 0) {
         console.log(`[PipelineOrchestrator] No text detected in image.`);
@@ -100,6 +120,8 @@ export class PipelineOrchestrator {
         await db.images.update(imageRecord.id!, {
           translatedImageBlob: imageRecord.rawImageBlob
         });
+        // Clear stale blocks from a prior run on this image (same dedup rule as the main path).
+        await db.textBlocks.where({ imageId: imageRecord.id! }).delete();
         await db.translationJobs.update(jobId, { status: 'completed' });
         
         // Convert to base64 to return
@@ -117,18 +139,22 @@ export class PipelineOrchestrator {
       let translatedTexts: string[];
       let cleanedImageBuffer: ArrayBuffer = imageBuffer;
 
-      const stage2Start = performance.now();
+      const stage2Start = import.meta.env.DEV ? performance.now() : 0;
       if (shouldInpaint) {
         console.log(`[PipelineOrchestrator] Running translation and inpainting in parallel (tier: ${inpaintTier}).`);
         
         const translationPromise = translationManager
           .processTranslation(ocrResult.texts, sourceLang, targetLang)
           .then((r) => {
-            console.log(`[PipelineOrchestrator] Translation branch finished in ${(performance.now() - stage2Start).toFixed(2)}ms.`);
+            if (import.meta.env.DEV) {
+              console.log(`[PipelineOrchestrator] Translation branch finished in ${(performance.now() - stage2Start).toFixed(2)}ms.`);
+            }
             return r;
           });
         const inpaintPromise = this.inpaintManager.eraseText(imageBuffer, inpaintPolygons, inpaintTier as InpaintTier, ocrResult.maskRawCanvas).then((r) => {
-          console.log(`[PipelineOrchestrator] Inpaint branch (${inpaintTier}) finished in ${(performance.now() - stage2Start).toFixed(2)}ms.`);
+          if (import.meta.env.DEV) {
+            console.log(`[PipelineOrchestrator] Inpaint branch (${inpaintTier}) finished in ${(performance.now() - stage2Start).toFixed(2)}ms.`);
+          }
           return r;
         }).catch(err => {
           console.warn(`[PipelineOrchestrator] Inpainting failed (likely WebGPU shape mismatch). Falling back to original image. Error:`, err);
@@ -136,19 +162,25 @@ export class PipelineOrchestrator {
         });
 
         [translatedTexts, cleanedImageBuffer] = await Promise.all([translationPromise, inpaintPromise]);
-        const stage2Duration = (performance.now() - stage2Start).toFixed(2);
-        console.log(`[PipelineOrchestrator] Parallel Inpainting (${inpaintTier}) & Translation complete in ${stage2Duration}ms (= the slower of the two branches above).`);
+        if (import.meta.env.DEV) {
+          const stage2Duration = (performance.now() - stage2Start).toFixed(2);
+          console.log(`[PipelineOrchestrator] Parallel Inpainting (${inpaintTier}) & Translation complete in ${stage2Duration}ms (= the slower of the two branches above).`);
+        }
       } else {
         // No inpainting — just translate
         console.log(`[PipelineOrchestrator] Translating ${ocrResult.texts.length} text blocks (no inpainting)...`);
         translatedTexts = await translationManager.processTranslation(ocrResult.texts, sourceLang, targetLang);
-        const stage2Duration = (performance.now() - stage2Start).toFixed(2);
-        console.log(`[PipelineOrchestrator] Translation complete in ${stage2Duration}ms.`);
+        if (import.meta.env.DEV) {
+          const stage2Duration = (performance.now() - stage2Start).toFixed(2);
+          console.log(`[PipelineOrchestrator] Translation complete in ${stage2Duration}ms.`);
+        }
       }
 
-      console.log(`[PipelineOrchestrator] Translation pairs (source -> translated):`);
-      for (let i = 0; i < ocrResult.texts.length; i++) {
-        console.log(`  [${i}] "${ocrResult.texts[i]}" -> "${translatedTexts[i] ?? ''}"`);
+      if (import.meta.env.DEV) {
+        console.log(`[PipelineOrchestrator] Translation pairs (source -> translated):`);
+        for (let i = 0; i < ocrResult.texts.length; i++) {
+          console.log(`  [${i}] "${ocrResult.texts[i]}" -> "${translatedTexts[i] ?? ''}"`);
+        }
       }
 
       // 6. Bake the translated text into the image for the Live Web return
@@ -175,8 +207,8 @@ export class PipelineOrchestrator {
             text,
             polygon: poly as any,
             direction: dir,
-            textColor: '#000000',
-            strokeColor: '#FFFFFF',
+            // Colors are decided at render time by background sampling (XianScan
+            // color.ts port) — black text on light paper, white on dark panels.
             fontSize: ocrResult.fontSizes ? ocrResult.fontSizes[i] : undefined,
             angle: ocrResult.angles ? ocrResult.angles[i] : undefined,
             // Default renderer inputs: original source text (length-ratio expansion) and merged
@@ -187,10 +219,16 @@ export class PipelineOrchestrator {
           itemOcrIndices.push(i);
         }
       }
-      const renderInfos = renderTextBlocksBatch(ctx, textBlockItems, targetLang, {
-        width: bitmap.width,
-        height: bitmap.height
-      });
+      const renderInfos = renderTextBlocksBatch(
+        ctx,
+        textBlockItems,
+        targetLang,
+        {
+          width: bitmap.width,
+          height: bitmap.height
+        },
+        resolvedFontFamily
+      );
 
       // Map render results (final font size actually drawn) back to OCR indices
       const renderInfoByOcrIndex = new Map<number, RenderedBlockInfo>();
@@ -225,6 +263,9 @@ export class PipelineOrchestrator {
         const fontSize = renderInfoByOcrIndex.get(i)?.fontSize
           ?? (ocrResult.fontSizes ? ocrResult.fontSizes[i] : undefined)
           ?? Math.max(9, Math.floor(Math.min(box.w, box.h)));
+        // Persist the render-time colors (background-sampled) so the Studio overlay
+        // matches the baked image instead of assuming black-on-white.
+        const renderColors = renderInfoByOcrIndex.get(i);
 
         return {
           imageId: imageRecord.id!,
@@ -235,12 +276,16 @@ export class PipelineOrchestrator {
           width: box.w,
           height: box.h,
           fontSize,
-          fontFamily: 'sans-serif',
-          color: '#000000',
-          direction: dir
+          fontFamily: resolvedFontFamily,
+          color: renderColors?.textColor ?? '#000000',
+          strokeColor: renderColors?.strokeColor ?? '#FFFFFF',
+          direction: dir,
+          lines: renderInfoByOcrIndex.get(i)?.lines
         };
       });
 
+      // Clear stale text blocks from any prior run on this image to prevent duplicate rows.
+      await db.textBlocks.where({ imageId: imageRecord.id! }).delete();
       if (textBlocksToSave.length > 0) {
         await db.textBlocks.bulkAdd(textBlocksToSave);
       }

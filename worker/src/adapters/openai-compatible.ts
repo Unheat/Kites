@@ -15,6 +15,16 @@ export interface AdapterExecutionResult {
   retryAfterSeconds?: number;
 }
 
+/**
+ * Execute a chat completion request against any OpenAI-compatible HTTP endpoint
+ * (such as NVIDIA Build, OpenRouter, Groq, or OpenAI).
+ *
+ * @param route - Provider route configuration containing baseUrl, modelName, and customHeaders.
+ * @param request - OpenAI-compatible chat completion request payload.
+ * @param apiKey - Upstream API authentication bearer token.
+ * @param timeoutMs - Maximum allowed duration for the HTTP call in milliseconds before aborting.
+ * @returns An AdapterExecutionResult containing success status, HTTP status, and parsed response or error.
+ */
 export async function executeOpenAICompatible(
   route: ProviderRouteConfig,
   request: OpenAIChatRequest,
