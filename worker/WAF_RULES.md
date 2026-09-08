@@ -22,8 +22,9 @@ Cloudflare Free includes **1 Rate Limiting Rule**.
    * **With the same characteristics**:
      * Count by: `IP`
    * **Requests**:
-     * Greater than: `20` requests
+     * Greater than: `15` requests
      * Period: `10 seconds`
+     * This is the Cloudflare Free-plan equivalent of the Worker's `5 requests / 3 seconds` limit because Free WAF requires a 10-second measurement window.
    * **Action**:
      * Choose: `Block`
      * Duration: `10 seconds` (or custom response: `HTTP 429 Too Many Requests`)

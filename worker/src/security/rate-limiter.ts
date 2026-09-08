@@ -5,7 +5,7 @@
  * Costs $0.00 and consumes 0 SQLite writes.
  * 
  * Rules:
- * - Burst Limit: Max 5 requests / second per IP
+ * - Burst Limit: Max 5 requests / 3 seconds per IP
  * - Window Limit: Max 100 requests / minute per IP
  * - Bad-Actor Jail: 5 auth failures in 60s -> 10-minute ban
  */
@@ -27,7 +27,8 @@ export interface RateLimitResult {
   retryAfterSeconds?: number;
 }
 
-const BURST_LIMIT_PER_SEC = 5;
+const BURST_LIMIT = 5;
+const BURST_WINDOW_MS = 3_000;
 const WINDOW_LIMIT_PER_MIN = 100;
 const MAX_AUTH_FAILURES = 5;
 const JAIL_DURATION_MS = 10 * 60 * 1000; // 10 minutes
@@ -39,7 +40,7 @@ export class IpRateLimiter {
     let state = this.ipStates.get(ip);
     if (!state) {
       state = {
-        secondWindow: Math.floor(now / 1000),
+        secondWindow: Math.floor(now / BURST_WINDOW_MS),
         secondCount: 0,
         minuteWindow: Math.floor(now / 60000),
         minuteCount: 0,
@@ -69,10 +70,10 @@ export class IpRateLimiter {
       };
     }
 
-    // 2. Rotate second window (burst limit)
-    const currentSec = Math.floor(now / 1000);
-    if (state.secondWindow !== currentSec) {
-      state.secondWindow = currentSec;
+    // 2. Rotate fixed three-second window (burst limit)
+    const currentBurstWindow = Math.floor(now / BURST_WINDOW_MS);
+    if (state.secondWindow !== currentBurstWindow) {
+      state.secondWindow = currentBurstWindow;
       state.secondCount = 0;
     }
 
@@ -83,23 +84,24 @@ export class IpRateLimiter {
       state.minuteCount = 0;
     }
 
-    // 4. Check Burst Limit (5 req / sec)
-    if (state.secondCount >= BURST_LIMIT_PER_SEC) {
-      return {
-        allowed: false,
-        statusCode: 429,
-        reason: `Burst rate limit exceeded: max ${BURST_LIMIT_PER_SEC} requests/second.`,
-        retryAfterSeconds: 1,
-      };
-    }
-
-    // 5. Check Window Limit (100 req / min)
+    // 4. Check Window Limit (100 req / min) first so macro quota takes precedence
     if (state.minuteCount >= WINDOW_LIMIT_PER_MIN) {
       return {
         allowed: false,
         statusCode: 429,
         reason: `Rate limit exceeded: max ${WINDOW_LIMIT_PER_MIN} requests/minute.`,
         retryAfterSeconds: 30,
+      };
+    }
+
+    // 5. Check Burst Limit (5 requests / 3 seconds)
+    if (state.secondCount >= BURST_LIMIT) {
+      const nextWindowAt = (currentBurstWindow + 1) * BURST_WINDOW_MS;
+      return {
+        allowed: false,
+        statusCode: 429,
+        reason: `Burst rate limit exceeded: max ${BURST_LIMIT} requests/${BURST_WINDOW_MS / 1000} seconds.`,
+        retryAfterSeconds: Math.max(1, Math.ceil((nextWindowAt - now) / 1000)),
       };
     }
 

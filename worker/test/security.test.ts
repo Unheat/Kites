@@ -12,7 +12,7 @@ describe('Edge Security & Anti-Abuse Controls', () => {
   });
 
   describe('IP Rate Limiter & Burst Defense', () => {
-    it('allows requests within burst limit (5 req/sec)', () => {
+    it('allows five requests within a three-second burst window', () => {
       const now = 1700000000000;
       const ip = '192.168.1.1';
 
@@ -21,40 +21,42 @@ describe('Edge Security & Anti-Abuse Controls', () => {
         expect(res.allowed).toBe(true);
       }
 
-      // 6th request in the exact same second should be throttled
+      // 6th request in the same three-second window should be throttled
       const res6 = limiter.checkRateLimit(ip, now);
       expect(res6.allowed).toBe(false);
       expect(res6.statusCode).toBe(429);
       expect(res6.reason).toContain('Burst rate limit exceeded');
     });
 
-    it('resets burst count in the next second', () => {
-      const now = 1700000000000;
+    it('keeps the burst blocked until the next three-second window', () => {
+      const now = 1_700_000_001_000;
       const ip = '192.168.1.1';
 
       for (let i = 0; i < 5; i++) {
         limiter.checkRateLimit(ip, now);
       }
-      expect(limiter.checkRateLimit(ip, now).allowed).toBe(false);
+      expect(limiter.checkRateLimit(ip, now + 1_000).allowed).toBe(false);
 
-      // 1 second later
-      const nextSec = now + 1000;
-      expect(limiter.checkRateLimit(ip, nextSec).allowed).toBe(true);
+      const nextBurstWindow = now + 3_000;
+      expect(limiter.checkRateLimit(ip, nextBurstWindow).allowed).toBe(true);
     });
 
-    it('throttles when window limit (100 req/min) is exceeded', () => {
-      const now = 1700000000000;
+    it('throttles when window limit (100 req/min) is exceeded across burst windows', () => {
+      // Align to an exact minute boundary so the 100 requests fall in the same minute window
+      const now = Math.floor(1_700_000_000_000 / 60_000) * 60_000;
       const ip = '192.168.1.2';
 
-      // Distribute 100 requests across 30 seconds (staying under 5/sec)
-      for (let i = 0; i < 100; i++) {
-        const timeOffset = Math.floor(i / 3) * 1000; // 3 req per sec
-        const res = limiter.checkRateLimit(ip, now + timeOffset);
-        expect(res.allowed).toBe(true);
+      // Send 5 requests per 3-second window across 20 distinct 3-second windows = 100 requests
+      for (let windowIdx = 0; windowIdx < 20; windowIdx++) {
+        const windowTime = now + windowIdx * 3_000;
+        for (let r = 0; r < 5; r++) {
+          const res = limiter.checkRateLimit(ip, windowTime + r * 10);
+          expect(res.allowed).toBe(true);
+        }
       }
 
-      // 101st request within the same minute should be rejected
-      const res101 = limiter.checkRateLimit(ip, now + 35000);
+      // 101st request within that same minute (at +58 seconds) should be throttled
+      const res101 = limiter.checkRateLimit(ip, now + 58_000);
       expect(res101.allowed).toBe(false);
       expect(res101.statusCode).toBe(429);
       expect(res101.reason).toContain('100 requests/minute');
