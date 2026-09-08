@@ -27,7 +27,9 @@ function PopupApp() {
       }
       setIsLoaded(true);
 
-      // Probe after hydration so stale persisted capability can never overwrite this result.
+      // WORKAROUND: Probe through offscreen after hydration. Popup WebGPU capability can
+      // differ from the inference document, and the stale persisted result must not win
+      // this race or LaMa will silently run on WASM. See devlog 015.
       chrome.runtime.sendMessage({ type: 'CHECK_WEBGPU_SUPPORT' }, (response) => {
         if (!isMounted) return;
         if (chrome.runtime.lastError || response?.status !== 'success') {

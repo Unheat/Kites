@@ -73,6 +73,9 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
       this.browserExternalData = [{ data, path: `${modelId}.data` }];
     }
 
+    // WORKAROUND: ORT WebGPU can pass adapter validation but fail during LaMa graph
+    // compilation. Try the user-requested GPU provider first, then recreate the session
+    // explicitly on WASM so the image job survives. See devlog 015.
     try {
       await this.createBrowserSession(requestedProvider);
     } catch (error) {
@@ -119,6 +122,9 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
    * @returns ONNX inference outputs from the active provider.
    */
   private async runPatch(feeds: Record<string, any>): Promise<any> {
+    // WORKAROUND: Device loss can occur after a WebGPU session initializes. Permit one
+    // provider transition for the engine instance; repeated retries would loop forever
+    // on malformed models or persistent WASM failures. See devlog 015.
     try {
       return await this.session.run(feeds);
     } catch (error) {

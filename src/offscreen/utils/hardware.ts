@@ -3,6 +3,9 @@
  */
 
 const WEBGPU_CACHE_KEY = 'hardware_webgpu_supported';
+// WORKAROUND: Chrome may assign an unusable low-power/software adapter to extension
+// offscreen documents when this preference is omitted, freezing LaMa inference. Do not
+// replace this with an unqualified requestAdapter() fallback. See devlog 015.
 const HIGH_PERFORMANCE_ADAPTER_OPTIONS: GPURequestAdapterOptions = { powerPreference: 'high-performance' };
 
 let webgpuSupported: boolean | null = null;
@@ -23,6 +26,9 @@ export async function checkWebGPUAvailability(force = false): Promise<boolean> {
   }
 
   if (!force && typeof chrome !== 'undefined' && chrome.storage?.local) {
+    // WORKAROUND: A historical popup-context probe persisted false globally. Because
+    // chrome.storage.local survives Git checkouts and extension reloads, accepting that
+    // value permanently forced offscreen inference onto WASM. Cache verified success only.
     const data = await chrome.storage.local.get(WEBGPU_CACHE_KEY);
     if (data[WEBGPU_CACHE_KEY] === true) {
       webgpuSupported = true;
