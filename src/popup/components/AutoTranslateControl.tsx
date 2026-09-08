@@ -55,8 +55,8 @@ export default function AutoTranslateControl({ state, updateState }: AutoTransla
           {/* Dynamic Helper Text */}
           <p className="text-xs text-[var(--color-dust)] px-1 leading-relaxed">
             {state.manualMode === 'hover' 
-              ? 'A subtle button fades in when you hover over images.' 
-              : 'A persistent button is pinned to every detectable image.'}
+              ? 'translate button appears when hovering over images' 
+              : 'translate button is pinned to every detectable image'}
           </p>
         </div>
       )}

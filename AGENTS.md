@@ -76,7 +76,8 @@ Follow these mapping rules only when do porting ... if possible:
 warning: because chrome cdn not allow to import code, library like opencv-js can not be use due to it internally import code 
 *   **Library -> Custom JS:** If Cotrans uses a heavy library function that is either missing in our WASM builds (e.g., `cv2.findNonZero`) or too bloated to import, and it is easy to implement efficiently in JavaScript, write the custom JS logic from scratch.
 
-
+# 9. Altering exist code
+When making change to exist code or reposition, restructure exist code, keep/migrate the explanation docstring, commnent along with it, only delete the docstrings and comment if we want to clear entire that code block from our codebase (no need anymore, changing with strictly another different logic that those comment/doctrings have no use)
 ## Workarounds & Upstream Library Mitigations
 
 - **Preserve Existing Workarounds:** Never refactor, simplify, or "clean up" non-standard patterns, weird type casts, or unconventional file handling marked with `WORKAROUND`, `HACK`, or upstream issue links. They exist to bypass library-level bugs.
