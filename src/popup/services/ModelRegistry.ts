@@ -37,7 +37,7 @@ export class ModelRegistry {
       },
       {
         id: 'cloudflare-translate',
-        name: 'Cloudflare Shared Pool',
+        name: 'Cloud Shared Pool',
         type: 'api',
         isDownloaded: true,
       },
