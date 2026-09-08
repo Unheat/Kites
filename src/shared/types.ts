@@ -12,6 +12,7 @@ export type MessageType =
   | 'GET_ACTIVE_DOWNLOADS' // Popup -> Background -> Offscreen
   | 'CHECK_MODEL_STATUS'   // Popup -> Background -> Offscreen
   | 'GET_MODEL_STATUSES'   // Popup -> Background -> Offscreen
+  | 'CHECK_WEBGPU_SUPPORT' // Popup -> Background -> Offscreen
   | 'PRELOAD_ACTIVE_ENGINE'; // Background -> Offscreen
 
 export interface TranslateImageMessage {

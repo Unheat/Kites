@@ -7,6 +7,7 @@ import { ocrRegistry, resolveOcrTier } from './engines/ocr/ocrRegistry';
 import { InpaintCacheManager } from './services/InpaintCacheManager';
 import { OcrCacheManager } from './services/OcrCacheManager';
 import { hasModelInCache } from '@mlc-ai/web-llm';
+import { checkWebGPUAvailability } from './utils/hardware';
 
 chrome.runtime.onMessage.addListener((message: ProcessJobMessage | any, _sender: chrome.runtime.MessageSender, sendResponse: (response?: any) => void) => {
   if (message.type === 'PROCESS_JOB' && message.payload?.jobId) {
@@ -77,6 +78,13 @@ chrome.runtime.onMessage.addListener((message: ProcessJobMessage | any, _sender:
     handleGetModelStatuses(message.payload.modelIds)
       .then(({ statuses, downloads }) => sendResponse({ status: 'success', statuses, downloads }))
       .catch((err) => sendResponse({ status: 'error', error: err.message }));
+    return true;
+  }
+
+  if (message.type === 'CHECK_WEBGPU_SUPPORT') {
+    checkWebGPUAvailability(message.payload?.force === true)
+      .then((supported) => sendResponse({ status: 'success', supported }))
+      .catch((err) => sendResponse({ status: 'error', error: err instanceof Error ? err.message : String(err) }));
     return true;
   }
 

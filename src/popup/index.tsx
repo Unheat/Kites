@@ -16,21 +16,26 @@ function PopupApp() {
   const [state, setState] = useState<PopupState>(DEFAULT_POPUP_STATE);
 
   useEffect(() => {
-    // Also trigger hardware check on mount to ensure we have it if it's missing from storage
-    import('../offscreen/utils/hardware').then(({ checkWebGPUAvailability }) => {
-      checkWebGPUAvailability().then(supported => {
-        setState(prev => ({ ...prev, webgpuSupported: supported }));
-      });
-    }).catch(err => {
-      console.warn("Failed to load hardware util in popup", err);
-    });
+    let isMounted = true;
+
     chrome.runtime.sendMessage({ type: 'GET_POPUP_STATE' }, (popupState) => {
+      if (!isMounted) return;
       if (chrome.runtime.lastError) {
         console.warn('[Popup] Failed to load normalized popup state:', chrome.runtime.lastError.message);
       } else if (popupState && typeof popupState === 'object') {
         setState(prev => ({ ...prev, ...(popupState as Partial<PopupState>) }));
       }
       setIsLoaded(true);
+
+      // Probe after hydration so stale persisted capability can never overwrite this result.
+      chrome.runtime.sendMessage({ type: 'CHECK_WEBGPU_SUPPORT' }, (response) => {
+        if (!isMounted) return;
+        if (chrome.runtime.lastError || response?.status !== 'success') {
+          console.warn('[Popup] WebGPU support check failed:', chrome.runtime.lastError?.message || response?.error);
+          return;
+        }
+        setState(prev => ({ ...prev, webgpuSupported: response.supported === true }));
+      });
     });
 
     // Listen to changes in chrome.storage.local to reactively reflect quota/state updates
@@ -48,6 +53,7 @@ function PopupApp() {
     }
 
     return () => {
+      isMounted = false;
       if (typeof chrome !== 'undefined' && chrome.storage?.onChanged) {
         chrome.storage.onChanged.removeListener(handleStorageChange);
       }

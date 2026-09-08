@@ -73,10 +73,17 @@ export default function GpuAccelerationPanel({ state, updateState }: GpuAccelera
               <button 
                 onClick={async (e) => {
                   e.stopPropagation();
-                  const { checkWebGPUAvailability } = await import('../../offscreen/utils/hardware');
                   updateState({ webgpuSupported: null });
-                  const supported = await checkWebGPUAvailability();
-                  updateState({ webgpuSupported: supported });
+                  chrome.runtime.sendMessage(
+                    { type: 'CHECK_WEBGPU_SUPPORT', payload: { force: true } },
+                    (response) => {
+                      if (chrome.runtime.lastError || response?.status !== 'success') {
+                        console.error('[GpuAccelerationPanel] WebGPU re-check failed:', chrome.runtime.lastError?.message || response?.error);
+                        return;
+                      }
+                      updateState({ webgpuSupported: response.supported === true });
+                    }
+                  );
                 }}
                 className="px-2 py-0.5 border border-[var(--color-dust)] hover:border-[var(--color-ink)] text-[10px] text-[var(--color-dust)] hover:text-[var(--color-ink)] font-medium rounded transition-colors cursor-pointer"
               >

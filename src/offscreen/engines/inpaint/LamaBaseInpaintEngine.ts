@@ -3,6 +3,15 @@ import { checkWebGPUAvailability } from '../../utils/hardware';
 import { inpaintRegistry } from './inpaintRegistry';
 import { InpaintCacheManager } from '../../services/InpaintCacheManager';
 
+const LAMA_PATCH_SIZE = 512;
+const LAMA_MIN_PATCH_SOURCE_SIZE = 128;
+const LAMA_PATCH_PADDING = 64;
+const LAMA_CLUSTER_PADDING = 100;
+const ONNX_WARNING_LOG_LEVEL = 2;
+const ONNX_ERROR_LOG_LEVEL = 3;
+
+type LamaProvider = 'cpu' | 'webgpu' | 'wasm';
+
 /**
  * Tier 4 Inpainting Engine: LaMa (Large Mask Inpainting).
  * Uses Fast Fourier Convolutions for excellent global structure hallucination.
@@ -12,6 +21,9 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
   private platform: any;
   private session: any = null;
   private ort: any = null;
+  private activeProvider: LamaProvider | null = null;
+  private browserModelBuffer: ArrayBuffer | null = null;
+  private browserExternalData: Array<{ data: ArrayBuffer; path: string }> | undefined;
 
   constructor(platform: any) {
     this.platform = platform;
@@ -29,81 +41,91 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
     if (this.session) return;
     
     const isNode = typeof window === 'undefined';
-    let isWebGpuSupported = false;
-    if (!isNode) {
-      isWebGpuSupported = await checkWebGPUAvailability();
-      
-      if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
-        const popupState = await new Promise<any>((resolve) => {
-          chrome.runtime.sendMessage({ type: 'GET_POPUP_STATE' }, (response) => {
-            resolve(response || {});
-          });
-        });
-        const masterOn = popupState.webgpuMaster === true;
-        const inpaintOn = popupState.webgpuOverrides?.inpaint !== false;
-        if (!masterOn || !inpaintOn) {
-          isWebGpuSupported = false;
-        }
-      }
-    }
-    
-    // Attempting WebGPU Revival with 1.27.0 + high-performance powerPreference
-    const providers = isNode ? ['cpu'] : (isWebGpuSupported ? ['webgpu'] : ['wasm']);
-    console.log(`[LamaBaseInpaintEngine] Hardware checks complete. Selected provider: ${providers[0]}`);
-
     if (isNode) {
       this.ort = await import('onnxruntime-node');
-      const modelPath = this.getModelPath();
-      try {
-        console.log(`[LamaBaseInpaintEngine] Loading model from ${modelPath} using ${providers[0]}...`);
-        this.session = await this.ort.InferenceSession.create(modelPath, { 
-          executionProviders: providers,
-          logSeverityLevel: 3 // Silence unused initializer warnings
-        });
-        console.log(`[LamaBaseInpaintEngine] Model loaded successfully.`);
-      } catch (e) {
-        console.warn(`[LamaBaseInpaintEngine] Failed to load ONNX model:`, e);
-      }
-    } else {
-      // Bypass Vite's bundler and load the raw ort.webgpu.mjs file to avoid collision
-      // with ppu-paddle-ocr's standard onnxruntime-web import.
-      const ortUrl = chrome.runtime.getURL('/ort-wasm/ort.webgpu.mjs');
-      this.ort = await import(/* @vite-ignore */ ortUrl);
-      
-      // Explicitly demand the high-performance GPU to bypass Chrome's background throttling
-      if (this.ort.env.webgpu) {
-        this.ort.env.webgpu.powerPreference = 'high-performance';
-      }
-      this.ort.env.wasm.wasmPaths = chrome.runtime.getURL('/ort-wasm/');
-      
-      const modelId = this.getModelId();
-      const registryEntry = inpaintRegistry[modelId];
-      if (!registryEntry) {
-        throw new Error(`[LamaBaseInpaintEngine] Model ID ${modelId} not found in registry.`);
-      }
+      this.activeProvider = 'cpu';
+      this.session = await this.ort.InferenceSession.create(this.getModelPath(), {
+        executionProviders: [this.activeProvider],
+        logSeverityLevel: ONNX_ERROR_LOG_LEVEL,
+      });
+      console.log(`[LamaBaseInpaintEngine] Model loaded with provider: ${this.activeProvider}.`);
+      return;
+    }
 
-      console.log(`[LamaBaseInpaintEngine] Fetching model ${modelId} from ${registryEntry.onnxUrl}`);
-      
-      try {
-        const onnxBuffer = await InpaintCacheManager.getModelBuffer(registryEntry.onnxUrl);
+    const popupState = await new Promise<any>((resolve) => {
+      chrome.runtime.sendMessage({ type: 'GET_POPUP_STATE' }, (response) => resolve(response || {}));
+    });
+    const gpuEnabled = popupState.webgpuMaster === true && popupState.webgpuOverrides?.inpaint !== false;
+    const requestedProvider: LamaProvider = gpuEnabled && await checkWebGPUAvailability() ? 'webgpu' : 'wasm';
 
-        const sessionOptions: any = { 
-          executionProviders: providers,
-          logSeverityLevel: (import.meta as any).env?.DEV ? 2 : 3 // 2 = Warnings only, so it won't flood verbose logs
-        };
+    const ortUrl = chrome.runtime.getURL('/ort-wasm/ort.webgpu.mjs');
+    this.ort = await import(/* @vite-ignore */ ortUrl);
+    if (this.ort.env.webgpu) this.ort.env.webgpu.powerPreference = 'high-performance';
+    this.ort.env.wasm.wasmPaths = chrome.runtime.getURL('/ort-wasm/');
 
-        if (registryEntry.dataUrl) {
-          console.log(`[LamaBaseInpaintEngine] Fetching external data for ${modelId} from ${registryEntry.dataUrl}`);
-          const dataBuffer = await InpaintCacheManager.getModelBuffer(registryEntry.dataUrl);
-          sessionOptions.externalData = [{ data: dataBuffer, path: `${modelId}.data` }];
-        }
+    const modelId = this.getModelId();
+    const registryEntry = inpaintRegistry[modelId];
+    if (!registryEntry) throw new Error(`[LamaBaseInpaintEngine] Model ID ${modelId} not found in registry.`);
 
-        this.session = await this.ort.InferenceSession.create(onnxBuffer, sessionOptions);
-        console.log(`[LamaBaseInpaintEngine] Browser model ${modelId} loaded successfully with ${providers[0]}.`);
-      } catch (e) {
-        console.error(`[LamaBaseInpaintEngine] Failed to load browser ONNX model:`, e);
-        throw e;
-      }
+    this.browserModelBuffer = await InpaintCacheManager.getModelBuffer(registryEntry.onnxUrl);
+    if (registryEntry.dataUrl) {
+      const data = await InpaintCacheManager.getModelBuffer(registryEntry.dataUrl);
+      this.browserExternalData = [{ data, path: `${modelId}.data` }];
+    }
+
+    try {
+      await this.createBrowserSession(requestedProvider);
+    } catch (error) {
+      if (requestedProvider !== 'webgpu') throw error;
+      console.error('[LamaBaseInpaintEngine] WebGPU session creation failed; falling back to WASM:', error);
+      await this.createBrowserSession('wasm');
+    }
+  }
+
+  /**
+   * Creates a browser inference session for one explicit execution provider.
+   *
+   * @param provider - WebGPU or WASM provider to activate.
+   * @returns A promise that resolves when the provider session is ready.
+   */
+  private async createBrowserSession(provider: Exclude<LamaProvider, 'cpu'>): Promise<void> {
+    if (!this.browserModelBuffer) throw new Error('[LamaBaseInpaintEngine] Browser model is not loaded.');
+    this.session = await this.ort.InferenceSession.create(this.browserModelBuffer, {
+      executionProviders: [provider],
+      logSeverityLevel: (import.meta as any).env?.DEV ? ONNX_WARNING_LOG_LEVEL : ONNX_ERROR_LOG_LEVEL,
+      externalData: this.browserExternalData,
+    });
+    this.activeProvider = provider;
+    console.log(`[LamaBaseInpaintEngine] Browser model loaded with provider: ${this.activeProvider}.`);
+  }
+
+  /**
+   * Permanently switches this engine instance from WebGPU to WASM.
+   *
+   * @returns A promise that resolves when the WASM replacement session is ready.
+   */
+  private async fallbackToWasm(): Promise<void> {
+    if (this.activeProvider !== 'webgpu') return;
+    const failedSession = this.session;
+    this.session = null;
+    if (typeof failedSession?.release === 'function') await failedSession.release();
+    await this.createBrowserSession('wasm');
+  }
+
+  /**
+   * Runs one patch and retries it once on WASM after a WebGPU runtime failure.
+   *
+   * @param feeds - ONNX input tensors for one 512x512 patch.
+   * @returns ONNX inference outputs from the active provider.
+   */
+  private async runPatch(feeds: Record<string, any>): Promise<any> {
+    try {
+      return await this.session.run(feeds);
+    } catch (error) {
+      if (this.activeProvider !== 'webgpu') throw error;
+      console.error('[LamaBaseInpaintEngine] WebGPU patch failed; switching permanently to WASM and retrying once:', error);
+      await this.fallbackToWasm();
+      return this.session.run(feeds);
     }
   }
 
@@ -305,7 +327,7 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
       merged = false;
       for (let i = 0; i < boxes.length; i++) {
         for (let j = i + 1; j < boxes.length; j++) {
-          if (boxes[i].intersects(boxes[j], 100)) { // 100px padding for clustering
+          if (boxes[i].intersects(boxes[j], LAMA_CLUSTER_PADDING)) {
             boxes[i].merge(boxes[j]);
             boxes.splice(j, 1);
             merged = true;
@@ -322,11 +344,11 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
     tempFinalData.data.set(ctx.getImageData(0, 0, width, height).data);
     finalCtx.putImageData(tempFinalData, 0, 0);
     
-    const cropW = 512;
-    const cropH = 512;
+    const cropW = LAMA_PATCH_SIZE;
+    const cropH = LAMA_PATCH_SIZE;
 
-    let startTime = import.meta.env.DEV ? performance.now() : 0;
-    console.log(`[LamaBaseInpaintEngine] Starting Phase 1 inference for ${boxes.length} patches using ${this.session.options?.executionProviders?.[0] || 'unknown'}...`);
+    const startTime = import.meta.env.DEV ? performance.now() : 0;
+    console.log(`[LamaBaseInpaintEngine] Starting Phase 1 inference for ${boxes.length} patches using ${this.activeProvider}.`);
 
     // Phase 1: Prepare all patches and run all ONNX inferences sequentially.
     // ONNX Runtime Web does NOT support concurrent session.run() calls on the same
@@ -337,7 +359,7 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
     for (const box of boxes) {
       const boxW = box.maxX - box.minX;
       const boxH = box.maxY - box.minY;
-      const size = Math.max(boxW, boxH, 128) + 64; // Force square, min 128px + 64px extra padding around text
+      const size = Math.max(boxW, boxH, LAMA_MIN_PATCH_SOURCE_SIZE) + LAMA_PATCH_PADDING;
       const cx = box.minX + boxW / 2;
       const cy = box.minY + boxH / 2;
       const sx = Math.max(0, cx - size / 2);
@@ -375,18 +397,22 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
       const maskTensor = new this.ort.Tensor('float32', maskFloat, [1, 1, cropH, cropW]);
       const feeds = { image: imageTensor, mask: maskTensor };
 
-      // ONNX inference — runs strictly sequentially to avoid concurrent session crashes
-      const results = await this.session.run(feeds);
-      const outName = this.session.outputNames[0];
-      const outData = results[outName].data as Float32Array;
-
-      // 2. Explicit Memory Management: Dispose of tensors to prevent WebGPU VRAM leaks!
-      imageTensor.dispose();
-      maskTensor.dispose();
-      // Dispose of the result tensor as well once we've copied/referenced its data array
-      results[outName].dispose();
-
-      patchJobs.push({ outData, sx, sy, size });
+      // ONNX inference runs strictly sequentially; every tensor is disposed on success or failure.
+      let results: any;
+      try {
+        results = await this.runPatch(feeds);
+        const outName = this.session.outputNames[0];
+        const outData = new Float32Array(results[outName].data as Float32Array);
+        patchJobs.push({ outData, sx, sy, size });
+      } finally {
+        imageTensor.dispose();
+        maskTensor.dispose();
+        if (results) {
+          for (const tensor of Object.values(results) as any[]) {
+            if (typeof tensor?.dispose === 'function') tensor.dispose();
+          }
+        }
+      }
     }
 
     if (import.meta.env.DEV) {
@@ -467,5 +493,8 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
       await this.session.release();
     }
     this.session = null;
+    this.activeProvider = null;
+    this.browserModelBuffer = null;
+    this.browserExternalData = undefined;
   }
 }
