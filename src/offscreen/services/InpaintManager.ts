@@ -3,10 +3,12 @@ import { SimpleInpaintEngine } from '../engines/inpaint/SimpleInpaintEngine';
 import { TeleaInpaintEngine } from '../engines/inpaint/TeleaInpaintEngine';
 import { AotInpaintEngine } from '../engines/inpaint/AotInpaintEngine';
 import { LamaMangaInpaintEngine } from '../engines/inpaint/LamaMangaInpaintEngine';
+import { LamaScaledInpaintEngine } from '../engines/inpaint/LamaScaledInpaintEngine';
+import { LamaBaseInpaintEngine } from '../engines/inpaint/LamaBaseInpaintEngine';
 import { NoneInpaintEngine } from '../engines/inpaint/NoneInpaintEngine';
 import { OriginalInpaintEngine } from '../engines/inpaint/OriginalInpaintEngine';
 
-export type InpaintTier = 'simple' | 'telea' | 'aot' | 'aotgan' | 'lama-manga' | 'none' | 'original';
+export type InpaintTier = 'simple' | 'telea' | 'aot' | 'aotgan' | 'lama-manga' | 'lama-manga-fast' | 'none' | 'original';
 
 /**
  * LOCKED ARCHITECTURE — DO NOT CHANGE WITHOUT USER APPROVAL (v2 decision, 2026-09).
@@ -75,7 +77,7 @@ export class InpaintManager {
     // WORKAROUND: LaMa sessions bind their execution provider at initialization. Reusing
     // a tier-only cache after GPU settings change leaves a WASM session permanently active
     // even when the popup later reports WebGPU ON. Include provider intent in cache reuse.
-    if (cachedEngine instanceof LamaMangaInpaintEngine) {
+    if (cachedEngine instanceof LamaBaseInpaintEngine) {
       const requestedProvider = await cachedEngine.getRequestedProvider();
       console.log('[InpaintManager] LaMa cache decision:', {
         tier,
@@ -108,6 +110,9 @@ export class InpaintManager {
       case 'lama-base' as InpaintTier:
       case 'lama-manga':
         engine = new LamaMangaInpaintEngine(this.platform);
+        break;
+      case 'lama-manga-fast':
+        engine = new LamaScaledInpaintEngine(this.platform);
         break;
       case 'none':
         engine = new NoneInpaintEngine();

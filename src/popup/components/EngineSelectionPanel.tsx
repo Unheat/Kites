@@ -171,7 +171,8 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
     { id: 'simple', name: 'Simple Fill', type: 'local', isDownloaded: true },
     { id: 'telea', name: 'Telea Diffusion', type: 'local', isDownloaded: true },
     { id: 'aotgan', name: 'AOT-GAN', type: 'local', isDownloaded: false },
-    { id: 'lama-manga', name: 'LaMa Manga', type: 'local', isDownloaded: false },
+    { id: 'lama-manga', name: 'LaMa Manga (1:1 Tiles)', type: 'local', isDownloaded: false },
+    { id: 'lama-manga-fast', name: 'LaMa Manga (1-Pass Fast)', type: 'local', isDownloaded: false },
   ]);
 
   const [ocrBaseEngines, setOcrBaseEngines] = useState<Engine[]>([

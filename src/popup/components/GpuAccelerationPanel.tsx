@@ -15,6 +15,7 @@ const INPAINT_VRAM_MAP: Record<string, string> = {
   telea: 'Telea Diffusion • 0 MB',
   aotgan: 'AOT-GAN • ~50 MB',
   'lama-manga': 'LaMa Manga • ~200 MB',
+  'lama-manga-fast': 'LaMa Manga 1-Pass • ~200 MB',
 };
 
 export default function GpuAccelerationPanel({ state, updateState }: GpuAccelerationPanelProps) {
