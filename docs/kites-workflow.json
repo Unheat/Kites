@@ -2,51 +2,141 @@
   "schema_version": 2,
   "diagram_type": "workflow",
   "meta": {
-    "title": "Kites Translation Pipeline",
+    "title": "Kites Translation Pipeline — Algorithm Map",
     "animation": "trace",
     "quality_profile": "showcase",
     "views": [
       {
         "id": "e2e-pipeline",
-        "label": "End-to-End Translation",
-        "focus": ["dom_trigger", "bg_queue", "offscreen_ocr", "parallel_trans", "parallel_inpaint", "typeset_bake", "dom_swap"],
-        "note": "Follow an image from user detection through background queueing, offscreen AI, to visual DOM swap."
+        "label": "End-to-End Flow",
+        "focus": [
+          "dom_trigger",
+          "bg_queue",
+          "offscreen_ocr",
+          "ocr_post_filter",
+          "parallel_trans",
+          "typeset_bake",
+          "dom_swap"
+        ],
+        "note": "Trace a DOM image through Blob queueing, PP-OCRv6, noise filtering, MST grouping, parallel compute, typesetting, and swap."
+      },
+      {
+        "id": "ocr-detail",
+        "label": "OCR Filters",
+        "focus": [
+          "offscreen_ocr",
+          "ocr_post_filter",
+          "parallel_trans",
+          "parallel_inpaint"
+        ],
+        "note": "Inspect DBNet polygon extraction, projective crop recognition, the 14-stage noise battery, and text-ink polygon output."
+      },
+      {
+        "id": "typeset-algorithm",
+        "label": "Font Search",
+        "focus": [
+          "ocr_post_filter",
+          "parallel_trans",
+          "typeset_bake",
+          "dom_swap"
+        ],
+        "note": "Follow four-pass font fitting, balanced-wrap width search, median dialogue sizing, decollision, and affine text placement."
       },
       {
         "id": "dual-compute",
-        "label": "Dual-Compute & Inpaint",
-        "focus": ["offscreen_ocr", "parallel_trans", "parallel_inpaint", "typeset_bake", "dexie_db"],
-        "note": "Inspect concurrent WebLLM/Google translation and 6-tier inpainting execution before canvas baking."
+        "label": "Parallel AI",
+        "focus": [
+          "parallel_trans",
+          "parallel_inpaint",
+          "typeset_bake",
+          "dexie_db"
+        ],
+        "note": "Promise.all waits for index-safe translation and polygon-only inpainting before canvas composition."
       },
       {
         "id": "local-storage",
-        "label": "Zero-Copy DB & Dashboard",
-        "focus": ["bg_queue", "dexie_db", "typeset_bake", "dashboard_editor"],
-        "note": "Trace how raw image blobs, clean inpainted plates, and OCR text blocks are persisted in Dexie IndexedDB."
+        "label": "Storage",
+        "focus": [
+          "bg_queue",
+          "dexie_db",
+          "typeset_bake",
+          "dashboard_editor"
+        ],
+        "note": "Raw Blob enters Dexie; clean plate and editable TextBlock lines persist separately from the baked PNG returned to the page."
       }
     ],
     "output": "docs/workflow.html"
   },
   "lanes": [
-    { "id": "webpage", "label": "Webpage Content" },
-    { "id": "background", "label": "Background Worker" },
-    { "id": "offscreen", "label": "Offscreen Runtime" },
-    { "id": "storage", "label": "Local Storage" }
+    {
+      "id": "webpage",
+      "label": "Webpage Content"
+    },
+    {
+      "id": "background",
+      "label": "Background Worker"
+    },
+    {
+      "id": "offscreen",
+      "label": "Offscreen Runtime"
+    },
+    {
+      "id": "storage",
+      "label": "Local Storage"
+    }
   ],
   "phases": [
-    { "id": "capture_phase", "label": "Intake", "fromCol": 0, "toCol": 1 },
-    { "id": "ai_phase", "label": "AI Compute", "fromCol": 2, "toCol": 3, "variant": "emphasis" },
-    { "id": "render_phase", "label": "Bake & Save", "fromCol": 4, "toCol": 5, "variant": "dashed" }
+    {
+      "id": "capture_phase",
+      "label": "Select & Queue",
+      "fromCol": 0,
+      "toCol": 1
+    },
+    {
+      "id": "ai_phase",
+      "label": "Detect, Merge & Compute",
+      "fromCol": 2,
+      "toCol": 3,
+      "variant": "emphasis"
+    },
+    {
+      "id": "render_phase",
+      "label": "Fit, Bake & Persist",
+      "fromCol": 4,
+      "toCol": 5,
+      "variant": "dashed"
+    }
   ],
   "groups": [
-    { "id": "intake_group", "label": "Queueing", "lane": "background", "fromCol": 0, "toCol": 1 },
-    { "id": "parallel_ai_group", "label": "Parallel AI", "lane": "offscreen", "fromCol": 2, "toCol": 3, "variant": "emphasis" },
-    { "id": "persistence_group", "label": "Storage", "lane": "storage", "fromCol": 4, "toCol": 5, "variant": "dashed" }
+    {
+      "id": "intake_group",
+      "label": "Blob Queue",
+      "lane": "background",
+      "fromCol": 0,
+      "toCol": 1
+    },
+    {
+      "id": "parallel_ai_group",
+      "label": "Promise.all Branches",
+      "lane": "offscreen",
+      "fromCol": 2,
+      "toCol": 3,
+      "variant": "emphasis"
+    },
+    {
+      "id": "persistence_group",
+      "label": "Editable Project Data",
+      "lane": "storage",
+      "fromCol": 4,
+      "toCol": 5,
+      "variant": "dashed"
+    }
   ],
   "mainPath": [
     "dom_trigger",
     "bg_queue",
     "offscreen_ocr",
+    "ocr_post_filter",
     "parallel_trans",
     "typeset_bake",
     "dom_swap"
@@ -57,55 +147,65 @@
       "lane": "webpage",
       "col": 0,
       "type": "frontend",
-      "label": "Image Detection",
-      "sublabel": "Hover / Auto / Menu",
-      "width": 136
+      "label": "DOM Image Selection",
+      "sublabel": "img ≥150×150",
+      "width": 144
     },
     {
       "id": "bg_queue",
       "lane": "background",
       "col": 1,
       "type": "backend",
-      "label": "Queue Manager",
-      "sublabel": "1-5 Concurrent Slots",
-      "width": 136
+      "label": "Blob Job Queue",
+      "sublabel": "Dexie · 1–5 workers",
+      "width": 144
     },
     {
       "id": "offscreen_ocr",
       "lane": "offscreen",
       "col": 2,
       "type": "backend",
-      "label": "PaddleOCR Engine",
-      "sublabel": "DBNet + CRNN Text",
-      "width": 136
+      "label": "PP-OCRv6 DBNet",
+      "sublabel": "polygon detect + warp recognize",
+      "width": 164
+    },
+    {
+      "id": "ocr_post_filter",
+      "lane": "offscreen",
+      "col": 2,
+      "type": "security",
+      "label": "14-Gate + Kruskal MST",
+      "sublabel": "cut edge > mean+2σ · recurse",
+      "yOffset": 60,
+      "width": 164
     },
     {
       "id": "parallel_trans",
       "lane": "offscreen",
       "col": 3,
       "type": "cloud",
-      "label": "Translation Engine",
-      "sublabel": "WebLLM / Cloud API",
-      "width": 136
+      "label": "Index-Safe Translation",
+      "sublabel": "GTX 1800 chars · LLM batch 15",
+      "width": 164
     },
     {
       "id": "parallel_inpaint",
       "lane": "offscreen",
       "col": 3,
       "type": "backend",
-      "label": "Inpaint Eraser",
-      "sublabel": "Simple / Telea / LaMa",
+      "label": "Polygon-Only Inpaint",
+      "sublabel": "median · FMM r=3 · neural 512²",
       "yOffset": 60,
-      "width": 136
+      "width": 164
     },
     {
       "id": "typeset_bake",
       "lane": "offscreen",
       "col": 4,
       "type": "backend",
-      "label": "Canvas Typesetter",
-      "sublabel": "1:1 Cotrans Bake",
-      "width": 136
+      "label": "4-Pass Font Search",
+      "sublabel": "binary 6px…max · width search",
+      "width": 164
     },
     {
       "id": "dom_swap",
@@ -113,8 +213,8 @@
       "col": 5,
       "type": "frontend",
       "label": "DOM Image Swap",
-      "sublabel": "Smooth Opacity Swap",
-      "width": 136
+      "sublabel": "baked PNG data URL",
+      "width": 144
     },
     {
       "id": "dexie_db",
@@ -122,17 +222,17 @@
       "col": 4,
       "type": "database",
       "label": "Dexie IndexedDB",
-      "sublabel": "Blobs & Text Blocks",
-      "width": 136
+      "sublabel": "clean Blob + editable lines",
+      "width": 164
     },
     {
       "id": "dashboard_editor",
       "lane": "storage",
       "col": 5,
       "type": "frontend",
-      "label": "Interactive Editor",
-      "sublabel": "Konva Canvas Editing",
-      "width": 136
+      "label": "Studio Editor",
+      "sublabel": "rerender saved TextBlocks",
+      "width": 144
     }
   ],
   "edges": [
@@ -140,89 +240,113 @@
       "id": "trigger-to-queue",
       "from": "dom_trigger",
       "to": "bg_queue",
-      "label": "TRANSLATE_IMAGE",
+      "label": "TRANSLATE_IMAGE · image URL",
       "variant": "emphasis"
     },
     {
       "id": "queue-to-ocr",
       "from": "bg_queue",
       "to": "offscreen_ocr",
-      "label": "PROCESS_JOB",
+      "label": "PROCESS_JOB · jobId only",
       "variant": "emphasis"
     },
     {
-      "id": "ocr-to-trans",
+      "id": "ocr-to-filter",
       "from": "offscreen_ocr",
-      "to": "parallel_trans",
-      "label": "Text lines",
-      "variant": "default"
+      "to": "ocr_post_filter",
+      "label": "DBNet quads + CRNN text",
+      "variant": "emphasis"
     },
     {
-      "id": "ocr-to-inpaint",
-      "from": "offscreen_ocr",
+      "id": "filter-to-trans",
+      "from": "ocr_post_filter",
+      "to": "parallel_trans",
+      "label": "merged reading-order blocks",
+      "variant": "emphasis"
+    },
+    {
+      "id": "filter-to-inpaint",
+      "from": "ocr_post_filter",
       "to": "parallel_inpaint",
-      "label": "Polygons & mask",
+      "label": "surviving text-ink polygons",
       "variant": "dashed"
     },
     {
       "id": "trans-to-typeset",
       "from": "parallel_trans",
       "to": "typeset_bake",
-      "label": "Translated text",
+      "label": "translated texts by index",
       "variant": "emphasis"
     },
     {
       "id": "inpaint-to-typeset",
       "from": "parallel_inpaint",
       "to": "typeset_bake",
-      "label": "Clean plate",
+      "label": "clean plate after erase",
       "variant": "dashed"
     },
     {
       "id": "typeset-to-swap",
       "from": "typeset_bake",
       "to": "dom_swap",
-      "label": "Base64 DataURL",
+      "label": "baked PNG data URL",
       "variant": "emphasis"
     },
     {
       "id": "typeset-to-db",
       "from": "typeset_bake",
       "to": "dexie_db",
-      "label": "Save Job & Blocks",
+      "label": "clean plate + fitted TextBlocks",
       "variant": "dashed"
     },
     {
       "id": "db-to-dashboard",
       "from": "dexie_db",
       "to": "dashboard_editor",
-      "label": "Load Project",
+      "label": "load editable project",
       "variant": "default"
     }
   ],
   "cards": [
     {
       "dot": "cyan",
-      "title": "Dual-Compute Engine",
+      "title": "OCR Detection + 14-Layer Noise Battery",
       "items": [
-        "WebLLM provides local GPU translation, Google Translate acts as fast online fallback",
-        "6-tier hybrid inpainting routes from microsecond simple edge fill to neural LaMa Fourier CNN"
+        "DBNet: max side 960 → probability ≥0.3 → 4-connected blobs ≥15 px → convex hull + minimum-area rectangle → score ≥0.5 → unclip 1.5.",
+        "Crop recognition: projective homography + bicubic sampling; rotate vertical crops 90° when height/width ≥1.5.",
+        "1–5 Geometry: stray cleanup; giant ≥60% width and ≥120 px; tilt 12°/10°; margin ≤5 px; thin-sliver overlap rejection.",
+        "6–11 Text noise: punctuation recovery; valuable text + area ≥16; short ASCII confidence gate; watermark suffix rescale; scanlator and ornament pruning.",
+        "12–14 Language/dedup: furigana <0.45×; pure-Latin prune after native-script evidence; ≥50% smaller-box coverage dedup + weak-neighbor suppression."
       ]
     },
     {
       "dot": "emerald",
-      "title": "Zero Layout Shift & 1:1 Cotrans Math",
+      "title": "Line Grouping — Cotrans Graph + Kruskal MST",
       "items": [
-        "Bakes translated text directly onto clean image canvas before DOM swap",
-        "Calculates font sizing and text placement using Cotrans 1:1 Kruskal MST region splitting"
+        "Direction graph: gap 2, char gap 0.6, alignment 1.5, font ratio 1.5, aspect tolerance 1; connected-component majority assigns horizontal/vertical.",
+        "Merge graph: aspect tolerance 1.3, font ratio 2, char gaps 1/3; rotated candidates require angle ≤15° and relative font delta ≤0.25.",
+        "For 3+ lines, build complete weighted graph → Kruskal MST → keep if max edge ≤ mean + 2σ or ≤1.5× font; else cut largest edge and recurse.",
+        "Assemble blocks top-to-bottom or right-to-left; CJK joins without spaces; minimum line font wins; angle <3° snaps to zero; fit minimum-area rectangle."
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Typesetting — Two Binary Searches + Affine Render",
+      "items": [
+        "Font fitter: 5% inset, line height 1.2, search 6 px…max; Pass 1 clean binary fit; Pass 2 tall-box geometric cap when H/W ≥2.0.",
+        "Pass 3 scans down with six-stage hyphenation for words ≥7 chars when H/W ≥1.5; Pass 4 runs fallback binary search to the 6 px floor.",
+        "Balanced wrap: greedy line count N → binary-search the minimum width preserving ≤N lines → centered diamond/inverted-pyramid stanza.",
+        "Median dialogue cap max(18, round(median×1.25)) → decollide boxes → sample central 20–80% for color → exact lines → aspect pad → affine warp."
       ]
     },
     {
       "dot": "amber",
-      "title": "Local-First Privacy & Persistence",
+      "title": "Parallel Compute + Output Contract",
       "items": [
-        "Raw image blobs, clean inpainted plates, and editable OCR text blocks stay in IndexedDB",
-        "Dashboard enables full typography tweaking and PSD / JSON coordinate export"
+        "Translation: Google GTX chunks ≤1800 chars with ⟦index⟧ delimiters; LLM batches 15 tagged segments and writes results back by tag index.",
+        "Inpaint: raw surviving line polygons only; Simple uses luminance ≥180 RGB median, Telea-like FMM radius 3, neural tiers use 512² patches.",
+        "Promise.all waits for translated text and clean plate; raw DBNet mask forwarding remains rejected to avoid erasing non-text bubble art.",
+        "Persist clean image plus editable fitted lines in Dexie; return a separate baked PNG data URL for immediate DOM replacement."
       ]
     }
   ]
