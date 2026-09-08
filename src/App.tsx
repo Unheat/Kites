@@ -471,12 +471,17 @@ export default function App() {
         </div>
 
         {/* Footer info */}
-        <div className="p-3 border-t border-dust/20 text-[11px] font-mono text-dust flex items-center justify-between">
-          <span>Dexie v4 IndexedDB</span>
-          <span className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-            Ready
-          </span>
+        <div className="p-3 border-t border-dust/20 text-[11px] font-mono text-dust flex flex-col gap-1.5">
+          <div className="flex items-center justify-between">
+            <span>Dexie v4 IndexedDB</span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+              Ready
+            </span>
+          </div>
+          <div className="text-[10px] ">
+            Images will be deleted after 7 days
+          </div>
         </div>
       </aside>
 
