@@ -26,6 +26,159 @@ import { fitFontSizeWithLines, fontSpec } from './offscreen/utils/typesetLayout'
 
 type ViewMode = 'final' | 'cleaned' | 'original';
 
+export type DragHandle = 'move' | 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
+
+export interface ActiveDragState {
+  blockId: number;
+  handle: DragHandle;
+  startX: number;
+  startY: number;
+  origX: number;
+  origY: number;
+  origW: number;
+  origH: number;
+  origFontSize: number;
+  origLines: string[];
+  translatedText: string;
+  fontFamily: string;
+}
+
+/** Minimum allowable width and height for an interactive text block in pixels. */
+export const MIN_BLOCK_SIZE = 24;
+
+/** Box margin inset ratio for binary font fitting. */
+const BOX_INSET_RATIO = 0.05;
+
+/** Maximum font size boundary during interactive resizing. */
+const MAX_FONT_SIZE_CEILING = 64;
+
+/** Eight-point resize handles configuration for selected text blocks. */
+const RESIZE_HANDLES: { handle: DragHandle; cursor: string; posClass: string }[] = [
+  { handle: 'nw', cursor: 'cursor-nwse-resize', posClass: 'top-0 left-0 -translate-x-1/2 -translate-y-1/2' },
+  { handle: 'n', cursor: 'cursor-ns-resize', posClass: 'top-0 left-1/2 -translate-x-1/2 -translate-y-1/2' },
+  { handle: 'ne', cursor: 'cursor-nesw-resize', posClass: 'top-0 right-0 translate-x-1/2 -translate-y-1/2' },
+  { handle: 'e', cursor: 'cursor-ew-resize', posClass: 'top-1/2 right-0 translate-x-1/2 -translate-y-1/2' },
+  { handle: 'se', cursor: 'cursor-nwse-resize', posClass: 'bottom-0 right-0 translate-x-1/2 translate-y-1/2' },
+  { handle: 's', cursor: 'cursor-ns-resize', posClass: 'bottom-0 left-1/2 -translate-x-1/2 translate-y-1/2' },
+  { handle: 'sw', cursor: 'cursor-nesw-resize', posClass: 'bottom-0 left-0 -translate-x-1/2 translate-y-1/2' },
+  { handle: 'w', cursor: 'cursor-ew-resize', posClass: 'top-1/2 left-0 -translate-x-1/2 -translate-y-1/2' },
+];
+
+/** Cached offscreen 2D canvas context for text measurement in the Studio UI thread. */
+let sharedMeasureCtx: CanvasRenderingContext2D | null = null;
+function getMeasureContext(): CanvasRenderingContext2D | null {
+  if (!sharedMeasureCtx && typeof document !== 'undefined') {
+    const canvas = document.createElement('canvas');
+    sharedMeasureCtx = canvas.getContext('2d');
+  }
+  return sharedMeasureCtx;
+}
+
+/**
+ * Fits font size and wraps text into balanced diamond line envelopes using the shared
+ * typesetting engine for immediate visual feedback during box resize or text edits.
+ *
+ * @param text - Translated text string to typeset.
+ * @param fontFamily - CSS font family stack.
+ * @param width - Available block width in image pixels.
+ * @param height - Available block height in image pixels.
+ * @param fallbackSize - Baseline starting font size.
+ * @returns Fitted font size and wrapped lines.
+ */
+function recalculateBlockTypeset(
+  text: string,
+  fontFamily: string,
+  width: number,
+  height: number,
+  fallbackSize: number = 14
+): { fontSize: number; lines: string[] } {
+  const ctx = getMeasureContext();
+  if (!ctx || !text || !text.trim() || width <= 10 || height <= 10) {
+    return { fontSize: fallbackSize, lines: text ? [text] : [] };
+  }
+  const fitted = fitFontSizeWithLines(
+    ctx,
+    text,
+    fontFamily || 'sans-serif',
+    width,
+    height,
+    fallbackSize,
+    Math.max(fallbackSize, MAX_FONT_SIZE_CEILING),
+    BOX_INSET_RATIO
+  );
+  return {
+    fontSize: fitted.size,
+    lines: fitted.lines.length > 0 ? fitted.lines : [text],
+  };
+}
+
+/**
+ * Computes bounded rectangle coordinates and dimensions based on handle movement.
+ *
+ * @param drag - Snapshot of initial drag geometry.
+ * @param deltaX - Pointer displacement along X axis in image coordinate space.
+ * @param deltaY - Pointer displacement along Y axis in image coordinate space.
+ * @param maxImageW - Outer boundary width.
+ * @param maxImageH - Outer boundary height.
+ * @returns Clamped coordinate rectangle { x, y, w, h }.
+ */
+export function computeNewBounds(
+  drag: ActiveDragState,
+  deltaX: number,
+  deltaY: number,
+  maxImageW: number,
+  maxImageH: number
+): { x: number; y: number; w: number; h: number } {
+  const { origX, origY, origW, origH, handle } = drag;
+
+  if (handle === 'move') {
+    let x = origX + deltaX;
+    let y = origY + deltaY;
+    if (maxImageW > 0) {
+      x = Math.max(0, Math.min(maxImageW - origW, x));
+    }
+    if (maxImageH > 0) {
+      y = Math.max(0, Math.min(maxImageH - origH, y));
+    }
+    return { x, y, w: origW, h: origH };
+  }
+
+  let x = origX;
+  let y = origY;
+  let w = origW;
+  let h = origH;
+
+  // Horizontal edge adjustment
+  if (handle === 'e' || handle === 'ne' || handle === 'se') {
+    w = Math.max(MIN_BLOCK_SIZE, origW + deltaX);
+    if (maxImageW > 0 && x + w > maxImageW) {
+      w = maxImageW - x;
+    }
+  } else if (handle === 'w' || handle === 'nw' || handle === 'sw') {
+    const maxDeltaX = origW - MIN_BLOCK_SIZE;
+    const minDeltaX = -origX;
+    const clampedDeltaX = Math.max(minDeltaX, Math.min(maxDeltaX, deltaX));
+    x = origX + clampedDeltaX;
+    w = origW - clampedDeltaX;
+  }
+
+  // Vertical edge adjustment
+  if (handle === 's' || handle === 'se' || handle === 'sw') {
+    h = Math.max(MIN_BLOCK_SIZE, origH + deltaY);
+    if (maxImageH > 0 && y + h > maxImageH) {
+      h = maxImageH - y;
+    }
+  } else if (handle === 'n' || handle === 'ne' || handle === 'nw') {
+    const maxDeltaY = origH - MIN_BLOCK_SIZE;
+    const minDeltaY = -origY;
+    const clampedDeltaY = Math.max(minDeltaY, Math.min(maxDeltaY, deltaY));
+    y = origY + clampedDeltaY;
+    h = origH - clampedDeltaY;
+  }
+
+  return { x, y, w, h };
+}
+
 export default function App() {
   // Theme state
   const [isDark, setIsDark] = useState<boolean>(() => {
@@ -119,6 +272,10 @@ export default function App() {
   const dragStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const viewportRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Active Drag & Resize state for Speech Bubbles
+  const [activeDrag, setActiveDrag] = useState<ActiveDragState | null>(null);
+  const latestBlockRef = useRef<TextBlock | null>(null);
 
   // Sync dark class on root html
   useEffect(() => {
@@ -305,6 +462,124 @@ export default function App() {
   };
 
   /**
+   * Initiates text block position drag or handle resizing on primary pointer down.
+   *
+   * @param e - React PointerEvent triggered over the block body or a resize handle.
+   * @param block - Target TextBlock instance.
+   * @param handle - Cardinal direction of resize handle or 'move' for position translation.
+   */
+  const handleStartDrag = (
+    e: React.PointerEvent,
+    block: TextBlock,
+    handle: DragHandle
+  ) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    e.preventDefault();
+
+    setSelectedBlockId(block.id || null);
+
+    const initialDrag: ActiveDragState = {
+      blockId: block.id!,
+      handle,
+      startX: e.clientX,
+      startY: e.clientY,
+      origX: block.posX,
+      origY: block.posY,
+      origW: block.width,
+      origH: block.height,
+      origFontSize: block.fontSize || 14,
+      origLines: block.lines && block.lines.length > 0 ? block.lines : (block.translatedText ? [block.translatedText] : []),
+      translatedText: block.translatedText || '',
+      fontFamily: block.fontFamily || 'sans-serif',
+    };
+
+    latestBlockRef.current = block;
+    setActiveDrag(initialDrag);
+  };
+
+  // Window-level pointer tracking for smooth box dragging and resizing with live typesetting
+  useEffect(() => {
+    if (!activeDrag) return;
+
+    const onPointerMove = (e: PointerEvent) => {
+      const deltaX = (e.clientX - activeDrag.startX) / zoom;
+      const deltaY = (e.clientY - activeDrag.startY) / zoom;
+
+      const bounds = computeNewBounds(
+        activeDrag,
+        deltaX,
+        deltaY,
+        imageDimensions.width,
+        imageDimensions.height
+      );
+
+      let nextFontSize = activeDrag.origFontSize;
+      let nextLines = activeDrag.origLines;
+
+      if (activeDrag.handle !== 'move') {
+        const fitted = recalculateBlockTypeset(
+          activeDrag.translatedText,
+          activeDrag.fontFamily,
+          bounds.w,
+          bounds.h,
+          activeDrag.origFontSize
+        );
+        nextFontSize = fitted.fontSize;
+        nextLines = fitted.lines;
+      }
+
+      setTextBlocks((prev) =>
+        prev.map((b) => {
+          if (b.id !== activeDrag.blockId) return b;
+          const updated: TextBlock = {
+            ...b,
+            posX: bounds.x,
+            posY: bounds.y,
+            width: bounds.w,
+            height: bounds.h,
+            fontSize: nextFontSize,
+            lines: nextLines,
+          };
+          latestBlockRef.current = updated;
+          return updated;
+        })
+      );
+    };
+
+    const onPointerUp = async () => {
+      const targetBlock = latestBlockRef.current;
+      const dragInfo = activeDrag;
+      setActiveDrag(null);
+
+      if (targetBlock && targetBlock.id === dragInfo.blockId) {
+        try {
+          await db.textBlocks.update(targetBlock.id, {
+            posX: targetBlock.posX,
+            posY: targetBlock.posY,
+            width: targetBlock.width,
+            height: targetBlock.height,
+            fontSize: targetBlock.fontSize,
+            lines: targetBlock.lines,
+          });
+        } catch (err) {
+          console.error('[Dashboard] Failed to persist text block layout:', err);
+        }
+      }
+    };
+
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerUp);
+
+    return () => {
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerUp);
+    };
+  }, [activeDrag, zoom, imageDimensions]);
+
+  /**
    * Confirms and deletes a translation job plus its associated image and text records.
    *
    * @param jobId - Numeric identifier of the TranslationJob to delete.
@@ -380,18 +655,42 @@ export default function App() {
   };
 
   /**
-   * Persists real-time inline text edits for a selected speech bubble block into Dexie.
+   * Persists real-time inline text edits for a selected speech bubble block into Dexie,
+   * dynamically reflowing lines and fitting font size.
    *
    * @param blockId - Numeric identifier of the edited TextBlock record.
    * @param newText - Updated translated text content.
    */
   const handleTextChange = async (blockId: number, newText: string) => {
-    // Clearing lines signals both the DOM overlay and PNG exporter to re-wrap on next render.
+    const targetBlock = textBlocks.find((b) => b.id === blockId);
+    let fittedSize = targetBlock?.fontSize || 14;
+    let fittedLines: string[] = [];
+
+    if (targetBlock) {
+      const fitted = recalculateBlockTypeset(
+        newText,
+        targetBlock.fontFamily,
+        targetBlock.width,
+        targetBlock.height,
+        targetBlock.fontSize || 14
+      );
+      fittedSize = fitted.fontSize;
+      fittedLines = fitted.lines;
+    }
+
     setTextBlocks((prev) =>
-      prev.map((b) => (b.id === blockId ? { ...b, translatedText: newText, lines: [] } : b))
+      prev.map((b) =>
+        b.id === blockId
+          ? { ...b, translatedText: newText, fontSize: fittedSize, lines: fittedLines }
+          : b
+      )
     );
     try {
-      await db.textBlocks.update(blockId, { translatedText: newText, lines: [] });
+      await db.textBlocks.update(blockId, {
+        translatedText: newText,
+        fontSize: fittedSize,
+        lines: fittedLines,
+      });
     } catch (err) {
       console.error('[Dashboard] Failed updating text block:', err);
     }
@@ -788,27 +1087,37 @@ export default function App() {
 
               {/* XianScan Style SVG & DOM Bounding Box Overlays */}
               {viewMode === 'final' && imageDimensions.width > 0 && (
-                <div className="absolute inset-0 pointer-events-auto">
+                <div
+                  className="absolute inset-0 pointer-events-auto"
+                  onPointerDown={(e) => {
+                    if (e.target === e.currentTarget) {
+                      setSelectedBlockId(null);
+                    }
+                  }}
+                >
                   {textBlocks.map((block) => {
                     const isSelected = selectedBlockId === block.id;
                     const isHovered = hoveredBlockId === block.id;
+                    const isDraggingThis = activeDrag?.blockId === block.id;
 
                     return (
                       <div
                         key={block.id}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onPointerDown={(e) => handleStartDrag(e, block, 'move')}
                         onClick={(e) => {
                           e.stopPropagation();
                           setSelectedBlockId(block.id || null);
                         }}
                         onMouseEnter={() => setHoveredBlockId(block.id || null)}
                         onMouseLeave={() => setHoveredBlockId(null)}
-                        className={`absolute transition-all cursor-pointer group ${
+                        className={`absolute transition-colors ${
                           isSelected
-                            ? 'ring-2 ring-editorial bg-editorial/15 z-20'
+                            ? 'ring-2 ring-editorial bg-editorial/15 z-20 cursor-move shadow-md'
                             : isHovered
-                            ? 'ring-1 ring-editorial/80 bg-editorial/10 z-10'
-                            : 'border border-dust/40 hover:border-editorial/60 z-0'
-                        }`}
+                            ? 'ring-1 ring-editorial/80 bg-editorial/10 z-10 cursor-pointer'
+                            : 'border border-dust/40 hover:border-editorial/60 z-0 cursor-pointer'
+                        } ${isDraggingThis ? 'ring-editorial select-none shadow-lg' : ''}`}
                         style={{
                           left: `${block.posX}px`,
                           top: `${block.posY}px`,
@@ -816,9 +1125,33 @@ export default function App() {
                           height: `${block.height}px`,
                         }}
                       >
-                        {/* Corner markers */}
-                        <div className="absolute -top-1 -left-1 w-2 h-2 border-t-2 border-l-2 border-editorial opacity-0 group-hover:opacity-100 transition-opacity" />
-                        <div className="absolute -bottom-1 -right-1 w-2 h-2 border-b-2 border-r-2 border-editorial opacity-0 group-hover:opacity-100 transition-opacity" />
+                        {/* Corner markers when not selected */}
+                        {!isSelected && (
+                          <>
+                            <div className="absolute -top-1 -left-1 w-2 h-2 border-t-2 border-l-2 border-editorial opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
+                            <div className="absolute -bottom-1 -right-1 w-2 h-2 border-b-2 border-r-2 border-editorial opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
+                          </>
+                        )}
+
+                        {/* Selected overlay: Floating dimension tag + 8 resize handles */}
+                        {isSelected && (
+                          <>
+                            <div className="absolute -top-6 left-1/2 -translate-x-1/2 px-1.5 py-0.5 bg-ink/90 text-paper text-[10px] font-mono rounded-xs shadow-xs whitespace-nowrap pointer-events-none z-30 flex items-center gap-1.5 select-none">
+                              <span>{Math.round(block.width)}×{Math.round(block.height)}</span>
+                              <span className="opacity-40">•</span>
+                              <span>{Math.round(block.fontSize || 14)}px</span>
+                            </div>
+
+                            {RESIZE_HANDLES.map((rh) => (
+                              <div
+                                key={rh.handle}
+                                onMouseDown={(e) => e.stopPropagation()}
+                                onPointerDown={(e) => handleStartDrag(e, block, rh.handle)}
+                                className={`absolute w-2.5 h-2.5 bg-paper border-1.5 border-editorial rounded-xs z-30 shadow-xs hover:scale-125 transition-transform ${rh.cursor} ${rh.posClass}`}
+                              />
+                            ))}
+                          </>
+                        )}
 
                         {/* Rendered Text Inside Box */}
                         <div 
@@ -919,7 +1252,7 @@ export default function App() {
                   >
                     <div className="flex items-center justify-between text-[11px] font-mono text-dust mb-1.5">
                       <span className="font-semibold text-ink">#{index + 1}</span>
-                      <span>{Math.round(block.width)}×{Math.round(block.height)}px</span>
+                      <span>{Math.round(block.width)}×{Math.round(block.height)}px • {Math.round(block.fontSize || 14)}px</span>
                     </div>
 
                     {/* Original OCR Text */}
