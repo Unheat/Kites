@@ -72,6 +72,9 @@ export class InpaintManager {
     await this.init();
 
     const cachedEngine = this.engines.get(tier);
+    // WORKAROUND: LaMa sessions bind their execution provider at initialization. Reusing
+    // a tier-only cache after GPU settings change leaves a WASM session permanently active
+    // even when the popup later reports WebGPU ON. Include provider intent in cache reuse.
     if (cachedEngine instanceof LamaMangaInpaintEngine) {
       const requestedProvider = await cachedEngine.getRequestedProvider();
       console.log('[InpaintManager] LaMa cache decision:', {

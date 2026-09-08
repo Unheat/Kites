@@ -44,6 +44,51 @@ Finally, `InpaintManager` cached the initialized LaMa engine only by tier. Chang
 
 Offscreen RPC messages also lacked an explicit owner. Because `chrome.runtime.sendMessage` broadcasts to extension contexts, background and offscreen listeners could both observe popup requests and compete to answer. Requests now carry minimal `target`, `source`, and `request` markers: popup/dashboard target background, background retargets offscreen, and offscreen ignores every message not explicitly forwarded by background.
 
+### Why Unrelated Features Appeared to Break at Once
+
+No single macOS update or new LaMa algorithm change caused the incident. Several dormant defects shared the popup/background/offscreen boundary and were hidden while Chrome retained a healthy runtime state.
+
+The previously working state included a complete persisted popup object, an already-created WebGPU LaMa session, cached models, and extension contexts whose first responding message listener happened to be the intended one. A source rebuild, extension reload, storage reset, popup remount, or offscreen recreation changed initialization order and exercised the broken paths together:
+
+1. Popup React state began from `DEFAULT_POPUP_STATE`, so the UI displayed WebGPU support and enabled switches.
+2. Background could return a sparse historical `popupState`; offscreen interpreted a missing `webgpuMaster` as false because its condition requires the value to be exactly `true`.
+3. Unserialized popup writes could persist older snapshots after newer ones, widening the difference between visible React state and background state.
+4. LaMa initialized once with WASM and `InpaintManager` cached that tier-only engine, so later WebGPU rechecks did not replace the existing session.
+5. Large single-threaded WASM inference consumed enough extension renderer/CPU resources to make the popup appear frozen.
+6. Unaddressed runtime messages let background and offscreen listeners compete to respond, causing closed ports and unrelated controls such as authentication or status queries to fail when a context reloaded mid-request.
+7. A fresh WebLLM model exposed a separate HTML bug: its visible download icon was a descendant of the disabled model-selection button, so Chrome suppressed the click before any message or log existed.
+
+This explains the misleading observation that old branches, an extension reinstall, and a macOS restart retained the failure. Git changes source files but not the exact historical combination of Chrome profile storage, IndexedDB/model cache, extension IDs, popup lifetime, offscreen lifetime, service-worker lifetime, or the previously compiled WebGPU session. Restarting recreated the same deterministic application paths and therefore reproduced the same bugs.
+
+### WebLLM Download Control Failure
+
+Uninstalled WebLLM rows are intentionally not selectable until their model is downloaded. The old markup placed the download action inside that disabled native row button. Disabled buttons suppress activation for their descendant subtree, so the icon was visible but its handler never ran:
+
+```text
+click download icon
+  -> browser suppresses event at disabled ancestor
+  -> no START_MODEL_DOWNLOAD
+  -> no background log
+  -> no error response
+  -> UI appears dead
+```
+
+The model-selection button and download button are now siblings. Downloads use an explicit background-targeted request, await offscreen acknowledgement, show `Queued` immediately, prevent duplicate clicks, and expose a visible failed status when registration fails.
+
+### Explicit Runtime Message Ownership
+
+Chrome documents that `runtime.sendMessage()` delivers a message to extension listeners and, when multiple `onMessage` listeners respond, only the first response affects the sender while the other listeners still run. Kites previously treated this broadcast as a point-to-point RPC:
+
+```text
+popup broadcasts request
+  -> background receives it
+  -> existing offscreen document may also receive it
+  -> background rebroadcasts unchanged request
+  -> listeners compete to answer
+```
+
+Kites now adds minimal routing metadata. Popup/dashboard control requests target background. Background is the single public request owner and retargets a new message to offscreen. Offscreen accepts requests only when `target === 'offscreen'`, `source === 'background'`, and `request === true`. These guards are required architecture, not decorative metadata.
+
 ### Mandatory High-Performance Adapter Constraint
 
 Keep this adapter request:
@@ -168,3 +213,9 @@ Tests       180 passed (180)
 6. When enabled, try WebGPU first and retain the explicit one-way WASM recovery.
 7. Keep fixed 512×512 sequential inference and explicit tensor disposal unless ONNX Runtime Web behavior is revalidated with multi-page stress testing.
 8. Do not infer the active provider from undocumented session internals; maintain explicit provider state and log it.
+9. Never return sparse stored popup state to a consumer; always normalize over `DEFAULT_POPUP_STATE` with a deep `webgpuOverrides` merge.
+10. Keep popup storage writes in one serialized chain; never restore independent async read-modify-write persistence.
+11. Every offscreen RPC must carry `target`/`source`/`request` markers; never remove the background or offscreen listener guards.
+12. Keep model download controls as siblings of disabled selection rows; never nest an interactive control inside a disabled `<button>`.
+13. `InpaintManager` cache keys must account for the requested provider; never reuse a LaMa session whose provider differs from the current setting.
+14. When GPU capability, provider selection, or message routing changes, record the reasoning here and in `AGENTS.md` before editing code.

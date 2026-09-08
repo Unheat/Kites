@@ -105,6 +105,8 @@ function PopupApp() {
           ...(updates.webgpuOverrides ?? {}),
         },
       });
+      // WORKAROUND: Serial writes prevent two rapid toggle updates from persisting
+      // independent snapshots and restoring stale GPU flags behind the live React UI.
       storageWriteQueue.current = storageWriteQueue.current
         .catch(() => undefined)
         .then(async () => {

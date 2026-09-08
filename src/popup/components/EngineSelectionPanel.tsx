@@ -418,6 +418,9 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                               ) : null}
                             </div>
                           </button>
+                          {/* WORKAROUND: Keep download as a sibling of the disabled model-row
+                              button. Browsers suppress all descendant clicks of a disabled native
+                              button, which previously made this visible icon a silent no-op. */}
                           {isUninstalledLocal && !isGpuDisabledForModel ? (
                             <button
                               type="button"

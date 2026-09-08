@@ -42,6 +42,10 @@ const OFFSCREEN_RETRY_INTERVAL_MS = 150;
  * @returns The normalized popup state and whether it needs to be saved.
  */
 export function normalizePopupState(popupState: Partial<PopupState> | undefined): { state: PopupState; changed: boolean } {
+  // WORKAROUND: Legacy popupState objects may omit later GPU fields. The popup starts
+  // from defaults and can visually show GPU ON, while offscreen reads the sparse object
+  // and treats `webgpuMaster === true` as false. Complete and deep-merge state here so
+  // every extension context receives identical values. See devlog 015.
   const completedState: PopupState = {
     ...DEFAULT_POPUP_STATE,
     ...(popupState ?? {}),
@@ -293,6 +297,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
+  // WORKAROUND: runtime.sendMessage broadcasts to extension contexts. Without explicit
+  // ownership, background and offscreen both handled the popup request and competed to
+  // answer, producing closed message ports and silent model downloads. Do not remove
+  // these route guards or forward the original unaddressed message. See devlog 015.
   if (message.target === 'background' && message.request === true && (message.type === 'PROCESS_JOB' || message.type === 'START_MODEL_DOWNLOAD' || message.type === 'CHECK_MODEL_STATUS' || message.type === 'GET_MODEL_STATUSES' || message.type === 'CHECK_WEBGPU_SUPPORT' || message.type === 'PRELOAD_ACTIVE_ENGINE' || message.type === 'GET_ACTIVE_DOWNLOADS' || message.type === 'VALIDATE_CUSTOM_API')) {
     console.log(`[Background] Received ${message.type}. Forwarding to Offscreen...`);
     sendMessageToOffscreen(message)
