@@ -75,7 +75,7 @@ export default function GpuAccelerationPanel({ state, updateState }: GpuAccelera
                   e.stopPropagation();
                   updateState({ webgpuSupported: null });
                   chrome.runtime.sendMessage(
-                    { type: 'CHECK_WEBGPU_SUPPORT', payload: { force: true } },
+                    { type: 'CHECK_WEBGPU_SUPPORT', target: 'background', source: 'popup', request: true, payload: { force: true } },
                     (response) => {
                       if (chrome.runtime.lastError || response?.status !== 'success') {
                         console.error('[GpuAccelerationPanel] WebGPU re-check failed:', chrome.runtime.lastError?.message || response?.error);

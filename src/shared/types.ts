@@ -34,10 +34,21 @@ export interface ImageTranslatedMessage {
     bakedBase64: string;
   };
 }
-export interface StartModelDownloadMessage {
+export type RuntimeMessageTarget = 'background' | 'offscreen';
+export type RuntimeMessageSource = 'popup' | 'background' | 'offscreen' | 'dashboard';
+export type ModelCategory = 'translation' | 'inpaint' | 'ocr';
+
+export interface RuntimeMessageRoute {
+  target?: RuntimeMessageTarget;
+  source?: RuntimeMessageSource;
+  request?: true;
+}
+
+export interface StartModelDownloadMessage extends RuntimeMessageRoute {
   type: 'START_MODEL_DOWNLOAD';
   payload: {
     modelId: string;
+    category: ModelCategory;
   };
 }
 

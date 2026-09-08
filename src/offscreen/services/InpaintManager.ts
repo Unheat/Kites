@@ -71,9 +71,24 @@ export class InpaintManager {
   async getEngine(tier: InpaintTier): Promise<IInpaintEngine> {
     await this.init();
 
-    if (this.engines.has(tier)) {
-      return this.engines.get(tier)!;
+    const cachedEngine = this.engines.get(tier);
+    if (cachedEngine instanceof LamaMangaInpaintEngine) {
+      const requestedProvider = await cachedEngine.getRequestedProvider();
+      console.log('[InpaintManager] LaMa cache decision:', {
+        tier,
+        requestedProvider,
+        activeProvider: cachedEngine.getActiveProvider(),
+      });
+      if (cachedEngine.getActiveProvider() !== requestedProvider) {
+        await cachedEngine.destroy();
+        this.engines.delete(tier);
+      }
+    } else if (cachedEngine) {
+      return cachedEngine;
     }
+
+    const reusableEngine = this.engines.get(tier);
+    if (reusableEngine) return reusableEngine;
 
     let engine: IInpaintEngine;
     switch (tier) {

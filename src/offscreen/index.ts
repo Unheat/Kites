@@ -10,6 +10,10 @@ import { hasModelInCache } from '@mlc-ai/web-llm';
 import { checkWebGPUAvailability } from './utils/hardware';
 
 chrome.runtime.onMessage.addListener((message: ProcessJobMessage | any, _sender: chrome.runtime.MessageSender, sendResponse: (response?: any) => void) => {
+  if (message.target !== 'offscreen' || message.source !== 'background' || message.request !== true) {
+    return false;
+  }
+
   if (message.type === 'PROCESS_JOB' && message.payload?.jobId) {
     console.log(`[Offscreen] Received project processing request for ID: ${message.payload.jobId}`);
     

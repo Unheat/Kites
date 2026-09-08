@@ -41,9 +41,17 @@ const OFFSCREEN_RETRY_INTERVAL_MS = 150;
  * @param popupState - The persisted popup state to validate.
  * @returns The normalized popup state and whether it needs to be saved.
  */
-export function normalizePopupState(popupState: PopupState): { state: PopupState; changed: boolean } {
-  const customApis = Array.isArray(popupState.customApis)
-    ? popupState.customApis.map(normalizeCustomApiConfig).filter((api): api is NonNullable<typeof api> => Boolean(api))
+export function normalizePopupState(popupState: Partial<PopupState> | undefined): { state: PopupState; changed: boolean } {
+  const completedState: PopupState = {
+    ...DEFAULT_POPUP_STATE,
+    ...(popupState ?? {}),
+    webgpuOverrides: {
+      ...DEFAULT_POPUP_STATE.webgpuOverrides,
+      ...(popupState?.webgpuOverrides ?? {}),
+    },
+  };
+  const customApis = Array.isArray(completedState.customApis)
+    ? completedState.customApis.map(normalizeCustomApiConfig).filter((api): api is NonNullable<typeof api> => Boolean(api))
     : [];
   const uniqueCustomApis = customApis.filter((api, index, apis) => apis.findIndex((candidate) => candidate.id === api.id) === index);
   const webLlmIds = new Set(modelsRegistryData
@@ -56,33 +64,34 @@ export function normalizePopupState(popupState: PopupState): { state: PopupState
     webLlmIds.has(engineId) ||
     customApiIds.has(engineId);
 
-  const activeEngineId = isSupportedEngine(popupState.activeEngineId)
-    ? popupState.activeEngineId
+  const activeEngineId = isSupportedEngine(completedState.activeEngineId)
+    ? completedState.activeEngineId
     : DEFAULT_POPUP_STATE.activeEngineId;
-  const fallbackSource = Array.isArray(popupState.fallbackChain) ? popupState.fallbackChain : [];
+  const fallbackSource = Array.isArray(completedState.fallbackChain) ? completedState.fallbackChain : [];
   const fallbackChain = fallbackSource.filter((engineId, index, chain) =>
     engineId !== activeEngineId && isSupportedEngine(engineId) && chain.indexOf(engineId) === index
   );
-  const rawInpaintId = popupState.activeInpaintId === 'lama-base'
+  const rawInpaintId = completedState.activeInpaintId === 'lama-base'
     ? 'lama-manga'
-    : (popupState.activeInpaintId === 'aot' ? 'aotgan' : popupState.activeInpaintId);
+    : (completedState.activeInpaintId === 'aot' ? 'aotgan' : completedState.activeInpaintId);
   const supportedInpaintIds = new Set(['none', 'simple', 'telea', ...Object.keys(inpaintRegistry)]);
   const activeInpaintId = supportedInpaintIds.has(rawInpaintId)
     ? rawInpaintId
     : DEFAULT_POPUP_STATE.activeInpaintId;
-  const activeOcrId = resolveOcrTier(popupState.activeOcrId);
-  const renderFontPresetId = normalizeRenderFontPresetId(popupState.renderFontPresetId);
-  const changed = activeEngineId !== popupState.activeEngineId ||
-    activeInpaintId !== popupState.activeInpaintId ||
-    activeOcrId !== popupState.activeOcrId ||
-    renderFontPresetId !== popupState.renderFontPresetId ||
-    fallbackChain.length !== fallbackSource.length ||
-    uniqueCustomApis.length !== (Array.isArray(popupState.customApis) ? popupState.customApis.length : 0);
-
-  return {
-    state: changed ? { ...popupState, customApis: uniqueCustomApis, activeEngineId, activeInpaintId, activeOcrId, renderFontPresetId, fallbackChain } : popupState,
-    changed,
+  const activeOcrId = resolveOcrTier(completedState.activeOcrId);
+  const renderFontPresetId = normalizeRenderFontPresetId(completedState.renderFontPresetId);
+  const state: PopupState = {
+    ...completedState,
+    customApis: uniqueCustomApis,
+    activeEngineId,
+    activeInpaintId,
+    activeOcrId,
+    renderFontPresetId,
+    fallbackChain,
   };
+  const changed = JSON.stringify(state) !== JSON.stringify(popupState ?? {});
+
+  return { state, changed };
 }
 
 /**
@@ -127,11 +136,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'GET_POPUP_STATE') {
     chrome.storage.local.get('popupState').then(async (data) => {
       const storedState = data.popupState as PopupState | undefined;
-      if (!storedState) {
-        sendResponse(DEFAULT_POPUP_STATE);
-        return;
-      }
-
       const { state, changed } = normalizePopupState(storedState);
       if (changed) {
         console.log('[Background] Removed archived translation engines from popup settings.');
@@ -289,7 +293,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
-  if (message.type === 'START_MODEL_DOWNLOAD' || message.type === 'CHECK_MODEL_STATUS' || message.type === 'GET_MODEL_STATUSES' || message.type === 'CHECK_WEBGPU_SUPPORT' || message.type === 'PRELOAD_ACTIVE_ENGINE' || message.type === 'GET_ACTIVE_DOWNLOADS' || message.type === 'VALIDATE_CUSTOM_API') {
+  if (message.target === 'background' && message.request === true && (message.type === 'PROCESS_JOB' || message.type === 'START_MODEL_DOWNLOAD' || message.type === 'CHECK_MODEL_STATUS' || message.type === 'GET_MODEL_STATUSES' || message.type === 'CHECK_WEBGPU_SUPPORT' || message.type === 'PRELOAD_ACTIVE_ENGINE' || message.type === 'GET_ACTIVE_DOWNLOADS' || message.type === 'VALIDATE_CUSTOM_API')) {
     console.log(`[Background] Received ${message.type}. Forwarding to Offscreen...`);
     sendMessageToOffscreen(message)
       .then((res) => sendResponse(res))
@@ -385,10 +389,13 @@ async function setupOffscreenDocument(path: string) {
     reasons: [chrome.offscreen.Reason.WORKERS],
     justification: 'Heavy ONNX image processing (OCR/Translation) and database writes'
   });
-  
-  await creatingOffscreenPromise;
-  creatingOffscreenPromise = null;
-  console.log('[Background] Offscreen document created successfully.');
+
+  try {
+    await creatingOffscreenPromise;
+    console.log('[Background] Offscreen document created successfully.');
+  } finally {
+    creatingOffscreenPromise = null;
+  }
 }
 
 /**
@@ -407,9 +414,11 @@ async function sendMessageToOffscreen(message: any, timeoutMs: number = 30000): 
   while (performance.now() - startTime < timeoutMs) {
     try {
       const response = await new Promise<any>((resolve, reject) => {
-        chrome.runtime.sendMessage(message, (res) => {
+        chrome.runtime.sendMessage({ ...message, target: 'offscreen', source: 'background', request: true }, (res) => {
           if (chrome.runtime.lastError) {
             reject(new Error(chrome.runtime.lastError.message));
+          } else if (res === undefined) {
+            reject(new Error(`Offscreen returned no response for ${message.type}`));
           } else {
             resolve(res);
           }

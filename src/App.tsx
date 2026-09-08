@@ -641,6 +641,9 @@ export default function App() {
       // 4. Trigger Offscreen Pipeline
       chrome.runtime.sendMessage({
         type: 'PROCESS_JOB',
+        target: 'background',
+        source: 'dashboard',
+        request: true,
         payload: { jobId: numericJobId }
       }, async (response) => {
         console.log('[Dashboard] Pipeline response for local file:', response);

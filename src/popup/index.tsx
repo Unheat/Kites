@@ -1,4 +1,4 @@
-import { StrictMode, useState, useEffect } from 'react';
+import { StrictMode, useState, useEffect, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import '../index.css'; 
 
@@ -10,10 +10,28 @@ import { Settings, Home, Power } from 'lucide-react';
 import type { PopupState } from '../shared/types';
 import { DEFAULT_POPUP_STATE } from '../shared/types';
 
+/**
+ * Completes persisted popup settings and preserves nested WebGPU defaults.
+ *
+ * @param state - Partial state loaded from storage or a state update.
+ * @returns A complete popup state.
+ */
+export function completePopupState(state?: Partial<PopupState>): PopupState {
+  return {
+    ...DEFAULT_POPUP_STATE,
+    ...(state ?? {}),
+    webgpuOverrides: {
+      ...DEFAULT_POPUP_STATE.webgpuOverrides,
+      ...(state?.webgpuOverrides ?? {}),
+    },
+  };
+}
+
 function PopupApp() {
   const [activeTab, setActiveTab] = useState<'home' | 'settings'>('home');
   const [isLoaded, setIsLoaded] = useState(false);
   const [state, setState] = useState<PopupState>(DEFAULT_POPUP_STATE);
+  const storageWriteQueue = useRef<Promise<void>>(Promise.resolve());
 
   useEffect(() => {
     let isMounted = true;
@@ -23,14 +41,14 @@ function PopupApp() {
       if (chrome.runtime.lastError) {
         console.warn('[Popup] Failed to load normalized popup state:', chrome.runtime.lastError.message);
       } else if (popupState && typeof popupState === 'object') {
-        setState(prev => ({ ...prev, ...(popupState as Partial<PopupState>) }));
+        setState(completePopupState(popupState as Partial<PopupState>));
       }
       setIsLoaded(true);
 
       // WORKAROUND: Probe through offscreen after hydration. Popup WebGPU capability can
       // differ from the inference document, and the stale persisted result must not win
       // this race or LaMa will silently run on WASM. See devlog 015.
-      chrome.runtime.sendMessage({ type: 'CHECK_WEBGPU_SUPPORT' }, (response) => {
+      chrome.runtime.sendMessage({ type: 'CHECK_WEBGPU_SUPPORT', target: 'background', source: 'popup', request: true }, (response) => {
         if (!isMounted) return;
         if (chrome.runtime.lastError || response?.status !== 'success') {
           console.warn('[Popup] WebGPU support check failed:', chrome.runtime.lastError?.message || response?.error);
@@ -46,7 +64,7 @@ function PopupApp() {
       areaName: string
     ) => {
       if (areaName === 'local' && changes.popupState?.newValue) {
-        setState(prev => ({ ...prev, ...(changes.popupState.newValue as Partial<PopupState>) }));
+        setState(completePopupState(changes.popupState.newValue as Partial<PopupState>));
       }
     };
 
@@ -71,18 +89,30 @@ function PopupApp() {
     }
   }, [state.isDark]);
 
+  /**
+   * Applies an optimistic popup update and serializes complete storage writes.
+   *
+   * @param updates - Popup fields to update, including partial nested WebGPU overrides.
+   * @returns Nothing.
+   */
   const updateState = (updates: Partial<PopupState>) => {
     setState(prev => {
-      const newState = { ...prev, ...updates };
-      // Atomically update storage with merged state
-      chrome.storage.local.get('popupState').then(data => {
-        const currentStored = (data?.popupState || {}) as PopupState;
-        chrome.storage.local.set({
-          popupState: { ...currentStored, ...updates }
-        }).catch(() => {});
-      }).catch(() => {
-        chrome.storage.local.set({ popupState: newState }).catch(() => {});
+      const newState = completePopupState({
+        ...prev,
+        ...updates,
+        webgpuOverrides: {
+          ...prev.webgpuOverrides,
+          ...(updates.webgpuOverrides ?? {}),
+        },
       });
+      storageWriteQueue.current = storageWriteQueue.current
+        .catch(() => undefined)
+        .then(async () => {
+          await chrome.storage.local.set({ popupState: newState });
+        })
+        .catch((error) => {
+          console.error('[Popup] Failed to persist popup state:', error);
+        });
       return newState;
     });
   };

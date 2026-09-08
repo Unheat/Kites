@@ -7,6 +7,11 @@ import { ModelRegistry } from '../services/ModelRegistry';
 import { isLlmGpuAvailable } from '../../shared/utils/hardwareUtils';
 import { RENDER_FONT_PRESETS, normalizeRenderFontPresetId } from '../../shared/renderFontPresets';
 
+interface DownloadAcknowledgement {
+  status?: 'success' | 'error';
+  error?: string;
+}
+
 interface EngineSelectionPanelProps {
   state: PopupState;
   updateState: (updates: Partial<PopupState>) => void;
@@ -45,10 +50,47 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
   const [searchQuery, setSearchQuery] = useState('');
   const [downloads, setDownloads] = useState<Record<string, { progress: number; status: string }>>({});
   const [translationOrder, setTranslationOrder] = useState<string[] | null>(null);
+  const [pendingDownloadIds, setPendingDownloadIds] = useState<Set<string>>(() => new Set());
   const customApiIds = useRef<string[] | null>(null);
   const customApisRef = useRef(state.customApis);
   const readyModelIds = useRef(new Set<string>());
   const stateRef = useRef(state);
+
+  /**
+   * Queues one model download through the background-owned RPC route.
+   *
+   * @param modelId - Registry model identifier.
+   * @param category - Model subsystem that owns the download.
+   * @returns A promise resolved after background/offscreen acknowledgement.
+   */
+  const requestDownload = async (modelId: string, category: 'translation' | 'inpaint' | 'ocr'): Promise<void> => {
+    if (pendingDownloadIds.has(modelId) || downloads[modelId]?.status === 'Queued') return;
+    setPendingDownloadIds(prev => new Set(prev).add(modelId));
+    setDownloads(prev => ({ ...prev, [modelId]: { progress: 0, status: 'Queued' } }));
+
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: 'START_MODEL_DOWNLOAD',
+        target: 'background',
+        source: 'popup',
+        request: true,
+        payload: { modelId, category },
+      }) as DownloadAcknowledgement | undefined;
+      if (!response || response.status !== 'success') {
+        throw new Error(response?.error || 'Download request was not acknowledged');
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[EngineSelectionPanel] Failed to queue ${modelId}:`, error);
+      setDownloads(prev => ({ ...prev, [modelId]: { progress: 0, status: `Failed: ${message}` } }));
+    } finally {
+      setPendingDownloadIds(prev => {
+        const next = new Set(prev);
+        next.delete(modelId);
+        return next;
+      });
+    }
+  };
 
   useEffect(() => {
     stateRef.current = state;
@@ -56,7 +98,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
 
   useEffect(() => {
     // Query active downloads on mount
-    chrome.runtime.sendMessage({ type: 'GET_ACTIVE_DOWNLOADS' }, (response) => {
+    chrome.runtime.sendMessage({ type: 'GET_ACTIVE_DOWNLOADS', target: 'background', source: 'popup', request: true }, (response) => {
       if (chrome.runtime.lastError) {
         console.warn('[EngineSelectionPanel] Failed to query active downloads:', chrome.runtime.lastError.message);
         return;
@@ -169,7 +211,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
         ...inpaintBaseEngines.map(engine => engine.id),
         ...ocrBaseEngines.map(engine => engine.id),
       ];
-      chrome.runtime.sendMessage({ type: 'GET_MODEL_STATUSES', payload: { modelIds } }, (response) => {
+      chrome.runtime.sendMessage({ type: 'GET_MODEL_STATUSES', target: 'background', source: 'popup', request: true, payload: { modelIds } }, (response) => {
         if (chrome.runtime.lastError || response?.status !== 'success') {
           console.warn('[EngineSelectionPanel] Failed to hydrate model statuses:', chrome.runtime.lastError?.message || response?.error);
           return;
@@ -337,6 +379,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                       const isActive = state.activeEngineId === engine.id && isSelectable;
                       return (
                         <div key={engine.id} className="relative">
+                          <div className="flex items-center">
                           <button
                             disabled={!isSelectable && !isActive}
                             onClick={() => {
@@ -345,7 +388,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                               setIsOpen(false);
                               setSearchQuery('');
                             }}
-                            className={`w-full flex items-center justify-between p-2 text-left rounded-sm transition-colors ${
+                            className={`min-w-0 flex-1 flex items-center justify-between p-2 text-left rounded-sm transition-colors ${
                               isActive
                                 ? 'bg-[var(--color-vellum)] text-[var(--color-editorial)] font-semibold cursor-pointer'
                                 : isAuthRequired
@@ -372,20 +415,22 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                             <div className="flex-shrink-0 ml-2">
                               {isActive ? (
                                 <Check size={14} className="text-[var(--color-editorial)]" />
-                              ) : isGpuDisabledForModel ? null : isUninstalledLocal ? (
-                                <div 
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    chrome.runtime.sendMessage({ type: 'START_MODEL_DOWNLOAD', payload: { modelId: engine.id } });
-                                  }}
-                                  className="p-1 -mr-1 rounded hover:bg-[var(--color-vellum)] transition-colors cursor-pointer text-[var(--color-ink)] opacity-100"
-                                  title="Download model"
-                                >
-                                  <Download size={14} />
-                                </div>
                               ) : null}
                             </div>
                           </button>
+                          {isUninstalledLocal && !isGpuDisabledForModel ? (
+                            <button
+                              type="button"
+                              disabled={pendingDownloadIds.has(engine.id) || downloads[engine.id]?.status === 'Queued'}
+                              onClick={() => void requestDownload(engine.id, 'translation')}
+                              className="p-2 rounded hover:bg-[var(--color-vellum)] transition-colors cursor-pointer text-[var(--color-ink)] disabled:cursor-not-allowed disabled:opacity-50"
+                              title="Download model"
+                              aria-label={`Download ${engine.name}`}
+                            >
+                              <Download size={14} />
+                            </button>
+                          ) : null}
+                          </div>
 
                           {/* ? Help icon & tooltip for unauthenticated Cloudflare Shared Pool */}
                           {isAuthRequired && (
@@ -526,7 +571,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                               // Only trigger the download here. The model becomes selectable
                               // once MODEL_DOWNLOAD_PROGRESS confirms it's actually ready —
                               // the user then clicks the row itself to select it.
-                              chrome.runtime.sendMessage({ type: 'START_MODEL_DOWNLOAD', payload: { modelId: engine.id, category: 'inpaint' } });
+                              void requestDownload(engine.id, 'inpaint');
                             }}
                             className="p-1 -mr-1 rounded hover:bg-[var(--color-vellum)] transition-colors cursor-pointer text-[var(--color-ink)] opacity-100"
                             title="Download model"
@@ -632,7 +677,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                           <div 
                             onClick={(e) => {
                               e.stopPropagation();
-                              chrome.runtime.sendMessage({ type: 'START_MODEL_DOWNLOAD', payload: { modelId: engine.id, category: 'ocr' } });
+                              void requestDownload(engine.id, 'ocr');
                             }}
                             className="p-1 -mr-1 rounded hover:bg-[var(--color-vellum)] transition-colors cursor-pointer text-[var(--color-ink)] opacity-100"
                             title="Download model"

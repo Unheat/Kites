@@ -22,7 +22,7 @@ A translated page logged:
 
 The page contained one clustered 512×512 LaMa inference patch. Patch construction had not multiplied the workload. The slowdown came from that patch running on CPU WASM instead of WebGPU. Earlier `lama-manga` tests completed in roughly 7–8 seconds for the full pipeline; the regression increased this run to approximately 28.8 seconds.
 
-Checking out older Git branches did not restore performance because the incorrect capability result lived in `chrome.storage.local`, outside the Git working tree. Chrome extension storage survives source checkouts, rebuilds, and ordinary extension reloads.
+Checking out older Git branches did not restore performance because two independent state paths survived code changes: persisted popup preferences in `chrome.storage.local`, and a cached LaMa engine/session inside the still-running offscreen document. Chrome extension storage and an existing offscreen document can both survive source checkouts and ordinary rebuilds/reloads.
 
 ### Root Cause
 
@@ -38,7 +38,11 @@ The offscreen document later read that persisted value and returned `false` befo
 
 The Settings **Re-check** action called the ordinary cached check instead of clearing the cached value, so it repeatedly returned the same persisted `false`.
 
-A race also existed between popup-state hydration and the fresh capability result. If both requests ran concurrently, persisted `PopupState.webgpuSupported` could overwrite the newer offscreen result.
+A race also existed between popup-state hydration and the fresh capability result. If both requests ran concurrently, persisted `PopupState.webgpuSupported` could overwrite the newer offscreen result. Popup storage writes were read-modify-write operations without serialization, so rapid updates could also complete out of order and restore stale fields or incomplete legacy nested overrides.
+
+Finally, `InpaintManager` cached the initialized LaMa engine only by tier. Changing Image Cleaning GPU preference changed the requested provider but reused the old WebGPU/WASM session. Provider selection therefore had to participate in the cache reuse decision; capability probing alone could not switch an already-created engine.
+
+Offscreen RPC messages also lacked an explicit owner. Because `chrome.runtime.sendMessage` broadcasts to extension contexts, background and offscreen listeners could both observe popup requests and compete to answer. Requests now carry minimal `target`, `source`, and `request` markers: popup/dashboard target background, background retargets offscreen, and offscreen ignores every message not explicitly forwarded by background.
 
 ### Mandatory High-Performance Adapter Constraint
 

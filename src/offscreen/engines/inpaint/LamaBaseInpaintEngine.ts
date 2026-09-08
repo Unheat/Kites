@@ -52,11 +52,7 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
       return;
     }
 
-    const popupState = await new Promise<any>((resolve) => {
-      chrome.runtime.sendMessage({ type: 'GET_POPUP_STATE' }, (response) => resolve(response || {}));
-    });
-    const gpuEnabled = popupState.webgpuMaster === true && popupState.webgpuOverrides?.inpaint !== false;
-    const requestedProvider: LamaProvider = gpuEnabled && await checkWebGPUAvailability() ? 'webgpu' : 'wasm';
+    const requestedProvider = await this.getRequestedProvider();
 
     const ortUrl = chrome.runtime.getURL('/ort-wasm/ort.webgpu.mjs');
     this.ort = await import(/* @vite-ignore */ ortUrl);
@@ -83,6 +79,32 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
       console.error('[LamaBaseInpaintEngine] WebGPU session creation failed; falling back to WASM:', error);
       await this.createBrowserSession('wasm');
     }
+  }
+
+  /**
+   * Resolves the provider currently requested by user settings and hardware.
+   *
+   * @returns WebGPU when enabled and available; otherwise WASM.
+   */
+  async getRequestedProvider(): Promise<Exclude<LamaProvider, 'cpu'>> {
+    if (typeof window === 'undefined') return 'wasm';
+    const popupState = await new Promise<any>((resolve) => {
+      chrome.runtime.sendMessage({ type: 'GET_POPUP_STATE' }, (response) => resolve(response || {}));
+    });
+    const gpuEnabled = popupState.webgpuMaster === true && popupState.webgpuOverrides?.inpaint !== false;
+    const webgpuAvailable = gpuEnabled ? await checkWebGPUAvailability() : false;
+    const requestedProvider = gpuEnabled && webgpuAvailable ? 'webgpu' : 'wasm';
+    console.log('[LamaBaseInpaintEngine] Provider decision:', { gpuEnabled, webgpuAvailable, requestedProvider });
+    return requestedProvider;
+  }
+
+  /**
+   * Returns the provider owned by the current cached session.
+   *
+   * @returns Active CPU, WebGPU, WASM provider, or null before initialization.
+   */
+  getActiveProvider(): LamaProvider | null {
+    return this.activeProvider;
   }
 
   /**
