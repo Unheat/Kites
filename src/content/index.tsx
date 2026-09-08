@@ -40,6 +40,10 @@ let isSelfMutating = false;
  * Runs a DOM mutation callback while temporarily suppressing internal MutationObservers
  * to avoid recursive event triggering or feedback loops.
  *
+ * WORKAROUND: [SPA / Framework Mutation Loops] -> When mutating DOM attributes on images,
+ * our own MutationObservers would catch the mutation and trigger duplicate handling or infinite loops.
+ * Wrapping in isSelfMutating with a tick delay suppresses self-triggered mutations.
+ *
  * @param fn - Callback performing DOM mutations.
  */
 function runSelfMutation(fn: () => void): void {
@@ -56,6 +60,11 @@ function runSelfMutation(fn: () => void): void {
 /**
  * Normalizes an image URL by stripping query parameters and hash fragments
  * to enable reliable matching when host CDNs dynamically change resolution flags.
+ *
+ * WORKAROUND: [Dynamic CDN Resolution Upgrades] -> Modern SPAs (Twitter, Reddit, etc.) dynamically
+ * upgrade thumbnail URLs to high-res variants (e.g. ?name=medium -> ?name=large) while the background
+ * translation pipeline is running. Exact string matching fails silently; stripping query parameters
+ * allows matching the underlying image across quality upgrades.
  *
  * @param url - Raw image URL string.
  * @returns Cleaned URL without search query or hash parameters.
@@ -142,6 +151,11 @@ function resolveTargetImageElement(originalUrl: string): HTMLImageElement | null
  * Adopts the XianScan production pattern to bypass strict inline data: CSP rules
  * and avoid multi-megabyte string bloat in DOM attributes.
  *
+ * WORKAROUND: [CSP & DOM Bloat Mitigation] -> Storing multi-megabyte base64 strings
+ * in raw img.src attributes causes memory pressure and triggers strict host site CSP
+ * blocks (e.g. img-src without data:). Converting to a local same-origin blob: URL keeps
+ * the DOM attribute footprint negligible and complies with host-origin image loading.
+ *
  * @param dataUrl - Base64 data URL from the pipeline.
  * @returns Same-origin Blob URL or original data URL on error.
  */
@@ -171,6 +185,12 @@ function createSafeBlobUrlFromData(dataUrl: string): string {
 /**
  * Backs up original src, srcset, and lazy-loading attributes before stripping them,
  * preventing host site scripts and responsive loaders from overriding our replacement.
+ *
+ * WORKAROUND: [HTML5 Responsive Image Precedence] -> Under W3C/HTML5 specifications,
+ * if an <img> contains a valid srcset attribute, the browser rendering engine evaluates
+ * the srcset candidates first and completely ignores src. Merely updating img.src while
+ * leaving srcset present causes the original image to continue displaying. We must back up
+ * and wipe srcset = '' and remove the attribute.
  *
  * @param img - Target image element to sanitize.
  */
@@ -221,6 +241,12 @@ function suppressParentBackgroundImage(img: HTMLImageElement): void {
  * Attaches a MutationObserver shield to the translated image.
  * If a host framework (React/Vue) or lazy-loader reverts src or re-applies srcset,
  * the shield immediately restores the translated image.
+ *
+ * WORKAROUND: [SPA Virtual DOM Reconciliation Resets] -> Modern SPAs (Twitter/X, Reddit, Threads)
+ * maintain their own internal component state. Whenever user interactions trigger a React re-render
+ * (hovering, scrolling, liking, timeline stream updates), React's reconciliation loop compares the real
+ * DOM against its virtual DOM and immediately reverts img.src back to the host CDN URL.
+ * This shield intercepts any such reset on src/srcset and re-applies our translated URL immediately.
  *
  * @param img - The translated image element to protect.
  * @param safeUrl - The safe Blob/Data URL of the translated image.
