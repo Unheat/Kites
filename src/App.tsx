@@ -15,7 +15,11 @@ import {
   FileImage, 
   Layers, 
   Sun, 
-  Moon 
+  Moon,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen
 } from 'lucide-react';
 import './index.css';
 import { fitFontSizeWithLines, fontSpec } from './offscreen/utils/typesetLayout';
@@ -28,6 +32,69 @@ export default function App() {
     return document.documentElement.classList.contains('dark') || 
       window.matchMedia('(prefers-color-scheme: dark)').matches;
   });
+
+  // Responsive sidebars state (persisted in localStorage)
+  const [isLeftOpen, setIsLeftOpen] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return true;
+    const stored = localStorage.getItem('kites_studio_sidebar_left');
+    if (stored !== null) return stored === 'true';
+    return window.innerWidth >= 1024;
+  });
+
+  const [isRightOpen, setIsRightOpen] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return true;
+    const stored = localStorage.getItem('kites_studio_sidebar_right');
+    if (stored !== null) return stored === 'true';
+    return window.innerWidth >= 1280;
+  });
+
+  const [isCompact, setIsCompact] = useState<boolean>(() => {
+    return typeof window !== 'undefined' ? window.innerWidth < 1024 : false;
+  });
+
+  const toggleLeftSidebar = useCallback(() => {
+    setIsLeftOpen((prev) => {
+      const next = !prev;
+      localStorage.setItem('kites_studio_sidebar_left', String(next));
+      return next;
+    });
+  }, []);
+
+  const toggleRightSidebar = useCallback(() => {
+    setIsRightOpen((prev) => {
+      const next = !prev;
+      localStorage.setItem('kites_studio_sidebar_right', String(next));
+      return next;
+    });
+  }, []);
+
+  // Monitor window resize for responsive drawer mode
+  useEffect(() => {
+    const handleResize = () => {
+      setIsCompact(window.innerWidth < 1024);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // Global Cmd+B / Ctrl+B shortcut to toggle left history sidebar
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement ||
+        (e.target as HTMLElement)?.isContentEditable
+      ) {
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
+        e.preventDefault();
+        toggleLeftSidebar();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [toggleLeftSidebar]);
 
   // DB State
   const [jobs, setJobs] = useState<TranslationJob[]>([]);
@@ -70,8 +137,38 @@ export default function App() {
       if (allJobs.length > 0) {
         setActiveJobId((currentJobId) => currentJobId ?? allJobs[0].id ?? null);
       }
+      return allJobs;
     } catch (err) {
       console.error('[Dashboard] Failed to load jobs:', err);
+      return [];
+    }
+  }, []);
+
+  /**
+   * Loads image binary and extracted text blocks for the specified or active job.
+   *
+   * @param jobIdToLoad - Numeric ID of the translation job to load.
+   */
+  const loadJobDetails = useCallback(async (jobIdToLoad: number | null) => {
+    if (!jobIdToLoad) {
+      setImageRecord(null);
+      setTextBlocks([]);
+      setSelectedBlockId(null);
+      return;
+    }
+
+    try {
+      const img = await db.images.where({ jobId: jobIdToLoad }).first();
+      setImageRecord(img || null);
+
+      if (img?.id) {
+        const blocks = await db.textBlocks.where({ imageId: img.id }).toArray();
+        setTextBlocks(blocks);
+      } else {
+        setTextBlocks([]);
+      }
+    } catch (error) {
+      console.error('[Dashboard] Failed loading active job details:', error);
     }
   }, []);
 
@@ -97,41 +194,29 @@ export default function App() {
     };
   }, [loadJobs]);
 
-  // Load image & text blocks for activeJobId
+  // Load image & text blocks whenever activeJobId changes
   useEffect(() => {
-    if (!activeJobId) {
-      setImageRecord(null);
-      setTextBlocks([]);
-      setSelectedBlockId(null);
-      return;
-    }
+    void loadJobDetails(activeJobId);
+  }, [activeJobId, loadJobDetails]);
 
-    let isSubscribed = true;
-
-    async function loadJobDetails() {
-      try {
-        const img = await db.images.where({ jobId: activeJobId! }).first();
-        if (!isSubscribed) return;
-        setImageRecord(img || null);
-
-        if (img?.id) {
-          const blocks = await db.textBlocks.where({ imageId: img.id }).toArray();
-          if (!isSubscribed) return;
-          setTextBlocks(blocks);
-        } else {
-          setTextBlocks([]);
+  // Listen for pipeline completion or job updates from background / offscreen
+  useEffect(() => {
+    const handleRuntimeMessage = (message: any) => {
+      if (message?.type === 'JOB_COMPLETED' || message?.type === 'IMAGE_TRANSLATED') {
+        void loadJobs();
+        const completedJobId = message.payload?.jobId;
+        if (!completedJobId || completedJobId === activeJobId) {
+          void loadJobDetails(activeJobId);
         }
-      } catch (error) {
-        console.error('[Dashboard] Failed loading active job details:', error);
+      } else if (message?.type === 'JOB_ERROR') {
+        void loadJobs();
       }
-    }
-
-    loadJobDetails();
-
-    return () => {
-      isSubscribed = false;
     };
-  }, [activeJobId]);
+    chrome.runtime.onMessage.addListener(handleRuntimeMessage);
+    return () => {
+      chrome.runtime.onMessage.removeListener(handleRuntimeMessage);
+    };
+  }, [activeJobId, loadJobs, loadJobDetails]);
 
   // Create Object URLs for image blobs
   useEffect(() => {
@@ -257,26 +342,36 @@ export default function App() {
         status: 'queued',
         srcUrl: file.name
       });
+      const numericJobId = Number(jobId);
 
       // 2. Save raw blob in db.images
       await db.images.add({
-        jobId: Number(jobId),
+        jobId: numericJobId,
         rawImageBlob: file
       });
 
-      // 3. Trigger Offscreen Pipeline
-      await db.translationJobs.update(jobId, { status: 'processing' });
+      // 3. Mark processing and display immediately in editing panel
+      await db.translationJobs.update(numericJobId, { status: 'processing' });
+      await loadJobs();
+      setActiveJobId(numericJobId);
+      await loadJobDetails(numericJobId);
+
+      // Ensure offscreen document is ready before dispatching task
+      try {
+        await chrome.runtime.sendMessage({ type: 'ENSURE_OFFSCREEN' });
+      } catch {
+        // Ignored if runtime is not ready
+      }
+
+      // 4. Trigger Offscreen Pipeline
       chrome.runtime.sendMessage({
         type: 'PROCESS_JOB',
-        payload: { jobId: Number(jobId) }
+        payload: { jobId: numericJobId }
       }, async (response) => {
         console.log('[Dashboard] Pipeline response for local file:', response);
         await loadJobs();
-        setActiveJobId(Number(jobId));
+        await loadJobDetails(numericJobId);
       });
-
-      await loadJobs();
-      setActiveJobId(Number(jobId));
     } catch (err) {
       console.error('[Dashboard] Local upload failed:', err);
     } finally {
@@ -376,173 +471,226 @@ export default function App() {
   const activeJob = jobs.find((j) => j.id === activeJobId);
 
   return (
-    <div className="flex h-screen w-full font-body overflow-hidden selection:bg-editorial selection:text-vellum bg-paper text-ink">
+    <div className="flex h-screen w-full font-body overflow-hidden selection:bg-editorial selection:text-vellum bg-paper text-ink relative">
       
       {/* 1. LEFT SIDEBAR: History & Jobs */}
-      <aside className="w-[300px] h-full bg-paper flex flex-col border-r border-dust/30 z-10 shrink-0">
-        <div className="p-4 border-b border-dust/20 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <h1 className="font-display text-xl font-bold tracking-widest text-ink">KITES</h1>
-            <span className="text-[10px] font-mono uppercase bg-editorial/10 text-editorial px-2 py-0.5 rounded">STUDIO</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => setIsDark(!isDark)}
-              className="p-1.5 text-dust hover:text-ink hover:bg-dust/20 rounded transition-colors"
-              title="Toggle theme"
-            >
-              {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-            </button>
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-1 px-2 py-1 bg-ink text-vellum hover:bg-editorial text-xs rounded transition-colors font-medium cursor-pointer"
-              title="Import image from disk"
-            >
-              <Upload className="w-3.5 h-3.5" />
-              <span>Import</span>
-            </button>
-            <input 
-              type="file" 
-              ref={fileInputRef} 
-              onChange={handleFileUpload} 
-              accept="image/*" 
-              className="hidden" 
-            />
-          </div>
-        </div>
+      {/* Backdrop for compact overlay */}
+      {isCompact && isLeftOpen && (
+        <div
+          onClick={() => setIsLeftOpen(false)}
+          className="fixed inset-0 bg-black/40 backdrop-blur-xs z-30 transition-opacity"
+          aria-hidden="true"
+        />
+      )}
 
-        {/* History List */}
-        <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-1.5">
-          <div className="text-[11px] font-mono tracking-wider text-dust uppercase px-2 mb-1">
-            History ({jobs.length})
-          </div>
-
-          {jobs.length === 0 ? (
-            <div className="p-8 text-center text-dust text-xs">
-              <FileImage className="w-8 h-8 mx-auto mb-2 opacity-40" />
-              <p>No translation jobs yet.</p>
-              <p className="mt-1 opacity-75">Click "Import" or translate images on websites.</p>
+      <aside
+        className={
+          isCompact
+            ? `fixed inset-y-0 left-0 z-40 w-[290px] max-w-[85vw] bg-paper shadow-2xl flex flex-col border-r border-dust/30 transition-transform duration-300 ease-in-out ${
+                isLeftOpen ? 'translate-x-0' : '-translate-x-full'
+              }`
+            : `h-full bg-paper flex flex-col border-r border-dust/30 z-10 shrink-0 transition-all duration-300 ease-in-out ${
+                isLeftOpen ? 'w-[290px]' : 'w-0 border-r-0 overflow-hidden'
+              }`
+        }
+      >
+        <div className="w-[290px] max-w-[85vw] h-full flex flex-col shrink-0">
+          <div className="p-3.5 border-b border-dust/20 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <h1 className="font-display text-lg font-bold tracking-widest text-ink">KITES</h1>
+              <span className="text-[9px] font-mono uppercase bg-editorial/10 text-editorial px-1.5 py-0.5 rounded font-semibold">STUDIO</span>
             </div>
-          ) : (
-            jobs.map((job) => {
-              const isActive = job.id === activeJobId;
-              const title = job.srcUrl ? job.srcUrl.split('/').pop()?.split('?')[0] || 'Image' : `Job #${job.id}`;
-              const timeStr = new Date(job.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-              return (
-                <div
-                  key={job.id}
-                  onClick={() => setActiveJobId(job.id!)}
-                  className={`group relative flex items-center justify-between p-2.5 rounded-md cursor-pointer transition-all border ${
-                    isActive
-                      ? 'bg-ink text-vellum border-ink shadow-sm'
-                      : 'border-transparent hover:bg-dust/20 text-ink'
-                  }`}
-                >
-                  <div className="flex items-center gap-2.5 min-w-0 pr-6">
-                    {job.status === 'completed' && <Check className={`w-3.5 h-3.5 shrink-0 ${isActive ? 'text-emerald-400' : 'text-emerald-600'}`} />}
-                    {job.status === 'processing' && <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin text-editorial" />}
-                    {job.status === 'queued' && <Clock className="w-3.5 h-3.5 shrink-0 text-amber-500" />}
-                    {job.status === 'error' && <AlertCircle className="w-3.5 h-3.5 shrink-0 text-red-500" />}
-                    
-                    <div className="min-w-0">
-                      <div className="text-xs font-medium truncate">{title}</div>
-                      <div className={`text-[10px] font-mono ${isActive ? 'text-dust' : 'text-dust'}`}>{timeStr}</div>
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      void deleteJob(job.id!);
-                    }}
-                    className={`opacity-0 group-hover:opacity-100 focus:opacity-100 p-1 rounded hover:bg-red-500 hover:text-white transition-opacity ${
-                      isActive ? 'text-dust hover:text-white' : 'text-dust'
-                    }`}
-                    title="Delete job"
-                    aria-label="Delete job"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              );
-            })
-          )}
-        </div>
-
-        {/* Footer info */}
-        <div className="p-3 border-t border-dust/20 text-[11px] font-mono text-dust flex flex-col gap-1.5">
-          <div className="flex items-center justify-between">
-            <span>Dexie v4 IndexedDB</span>
-            <span className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-              Ready
-            </span>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setIsDark(!isDark)}
+                className="p-1.5 text-dust hover:text-ink hover:bg-dust/20 rounded transition-colors cursor-pointer"
+                title="Toggle theme"
+              >
+                {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+              </button>
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="flex items-center gap-1 px-2 py-1 bg-ink text-vellum hover:bg-editorial text-xs rounded transition-colors font-medium cursor-pointer"
+                title="Import image from disk"
+              >
+                <Upload className="w-3.5 h-3.5" />
+                <span>Import</span>
+              </button>
+              <input 
+                type="file" 
+                ref={fileInputRef} 
+                onChange={handleFileUpload} 
+                accept="image/*" 
+                className="hidden" 
+              />
+              <button
+                onClick={toggleLeftSidebar}
+                className="p-1.5 text-dust hover:text-ink hover:bg-dust/20 rounded transition-colors cursor-pointer ml-0.5"
+                title="Close history sidebar (Cmd+B)"
+                aria-label="Close history sidebar"
+              >
+                <PanelLeftClose className="w-4 h-4" />
+              </button>
+            </div>
           </div>
-          <div className="text-[10px] ">
-            Images will be deleted after 7 days
+
+          {/* History List */}
+          <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-1.5">
+            <div className="text-[11px] font-mono tracking-wider text-dust uppercase px-2 mb-1">
+              History ({jobs.length})
+            </div>
+
+            {jobs.length === 0 ? (
+              <div className="p-8 text-center text-dust text-xs">
+                <FileImage className="w-8 h-8 mx-auto mb-2 opacity-40" />
+                <p>No translation jobs yet.</p>
+                <p className="mt-1 opacity-75">Click "Import" or translate images on websites.</p>
+              </div>
+            ) : (
+              jobs.map((job) => {
+                const isActive = job.id === activeJobId;
+                const title = job.srcUrl ? job.srcUrl.split('/').pop()?.split('?')[0] || 'Image' : `Job #${job.id}`;
+                const timeStr = new Date(job.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+                return (
+                  <div
+                    key={job.id}
+                    onClick={() => {
+                      setActiveJobId(job.id!);
+                      if (isCompact) {
+                        setIsLeftOpen(false);
+                      }
+                    }}
+                    className={`group relative flex items-center justify-between p-2.5 rounded-md cursor-pointer transition-all border ${
+                      isActive
+                        ? 'bg-ink text-vellum border-ink shadow-sm'
+                        : 'border-transparent hover:bg-dust/20 text-ink'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0 pr-6">
+                      {job.status === 'completed' && <Check className={`w-3.5 h-3.5 shrink-0 ${isActive ? 'text-emerald-400' : 'text-emerald-600'}`} />}
+                      {job.status === 'processing' && <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin text-editorial" />}
+                      {job.status === 'queued' && <Clock className="w-3.5 h-3.5 shrink-0 text-amber-500" />}
+                      {job.status === 'error' && <AlertCircle className="w-3.5 h-3.5 shrink-0 text-red-500" />}
+                      
+                      <div className="min-w-0">
+                        <div className="text-xs font-medium truncate">{title}</div>
+                        <div className={`text-[10px] font-mono ${isActive ? 'text-dust' : 'text-dust'}`}>{timeStr}</div>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void deleteJob(job.id!);
+                      }}
+                      className={`opacity-0 group-hover:opacity-100 focus:opacity-100 p-1 rounded hover:bg-red-500 hover:text-white transition-opacity ${
+                        isActive ? 'text-dust hover:text-white' : 'text-dust'
+                      }`}
+                      title="Delete job"
+                      aria-label="Delete job"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* Footer info */}
+          <div className="p-3 border-t border-dust/20 text-[11px] font-mono text-dust flex flex-col gap-1.5">
+            <div className="flex items-center justify-between">
+              <span>Dexie v4 IndexedDB</span>
+              <span className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                Ready
+              </span>
+            </div>
+            <div className="text-[10px] ">
+              Images will be deleted after 7 days
+            </div>
           </div>
         </div>
       </aside>
 
       {/* 2. CENTER STAGE: Canvas Viewport (XianScan Style) */}
-      <main className="flex-1 h-full bg-glass relative flex flex-col overflow-hidden">
+      <main className="flex-1 min-w-0 h-full bg-glass relative flex flex-col overflow-hidden">
         
         {/* Top Control Bar */}
-        <header className="h-12 border-b border-dust/20 bg-paper/80 backdrop-blur px-4 flex items-center justify-between z-10 shrink-0">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-mono text-dust uppercase">View:</span>
+        <header className="h-12 border-b border-dust/20 bg-paper/80 backdrop-blur px-3 sm:px-4 flex items-center justify-between gap-2 z-10 shrink-0 min-w-0 overflow-x-auto custom-scrollbar">
+          <div className="flex items-center gap-2 shrink-0">
+            {/* Sidebar open button when collapsed */}
+            {!isLeftOpen && (
+              <button
+                onClick={toggleLeftSidebar}
+                className="p-1.5 text-dust hover:text-ink hover:bg-dust/20 rounded transition-colors cursor-pointer"
+                title="Open history sidebar (Cmd+B)"
+                aria-label="Open history sidebar"
+              >
+                <PanelLeftOpen className="w-4 h-4" />
+              </button>
+            )}
+
+            {/* View Mode Switcher */}
+            <span className="text-xs font-mono text-dust uppercase hidden sm:inline">View:</span>
             <div className="flex items-center bg-dust/20 p-0.5 rounded text-xs">
               <button
                 onClick={() => setViewMode('final')}
-                className={`px-2.5 py-1 rounded transition-colors font-medium ${
+                className={`px-2 sm:px-2.5 py-1 rounded transition-colors font-medium cursor-pointer ${
                   viewMode === 'final' ? 'bg-ink text-vellum shadow-xs' : 'text-ink hover:text-editorial'
                 }`}
+                title="Typeset translation preview"
               >
-                Typeset Preview
+                <span className="hidden md:inline">Typeset Preview</span>
+                <span className="md:hidden">Typeset</span>
               </button>
               <button
                 onClick={() => setViewMode('cleaned')}
-                className={`px-2.5 py-1 rounded transition-colors font-medium ${
+                className={`px-2 sm:px-2.5 py-1 rounded transition-colors font-medium cursor-pointer ${
                   viewMode === 'cleaned' ? 'bg-ink text-vellum shadow-xs' : 'text-ink hover:text-editorial'
                 }`}
+                title="Cleaned inpainted scan"
               >
-                Clean Inpaint
+                <span className="hidden md:inline">Clean Inpaint</span>
+                <span className="md:hidden">Inpaint</span>
               </button>
               <button
                 onClick={() => setViewMode('original')}
-                className={`px-2.5 py-1 rounded transition-colors font-medium ${
+                className={`px-2 sm:px-2.5 py-1 rounded transition-colors font-medium cursor-pointer ${
                   viewMode === 'original' ? 'bg-ink text-vellum shadow-xs' : 'text-ink hover:text-editorial'
                 }`}
+                title="Original unmodified scan"
               >
-                Original Scan
+                <span className="hidden md:inline">Original Scan</span>
+                <span className="md:hidden">Original</span>
               </button>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             {/* Zoom Controls */}
-            <div className="flex items-center gap-1 bg-dust/20 p-0.5 rounded">
+            <div className="flex items-center gap-0.5 bg-dust/20 p-0.5 rounded">
               <button
                 onClick={() => setZoom((z) => Math.max(z / 1.2, 0.2))}
-                className="p-1 text-ink hover:text-editorial rounded transition-colors"
+                className="p-1 text-ink hover:text-editorial rounded transition-colors cursor-pointer"
                 title="Zoom Out"
               >
                 <ZoomOut className="w-3.5 h-3.5" />
               </button>
-              <span className="text-[11px] font-mono px-1 min-w-11 text-center">
+              <span className="text-[11px] font-mono px-1 min-w-9 sm:min-w-11 text-center">
                 {Math.round(zoom * 100)}%
               </span>
               <button
                 onClick={() => setZoom((z) => Math.min(z * 1.2, 5))}
-                className="p-1 text-ink hover:text-editorial rounded transition-colors"
+                className="p-1 text-ink hover:text-editorial rounded transition-colors cursor-pointer"
                 title="Zoom In"
               >
                 <ZoomIn className="w-3.5 h-3.5" />
               </button>
               <button
                 onClick={resetViewport}
-                className="p-1 text-ink hover:text-editorial rounded transition-colors ml-0.5"
+                className="p-1 text-ink hover:text-editorial rounded transition-colors ml-0.5 cursor-pointer"
                 title="Reset View"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
@@ -552,19 +700,36 @@ export default function App() {
             <button
               onClick={() => activeJobId !== null && void deleteJob(activeJobId)}
               disabled={activeJobId === null}
-              className="flex items-center gap-1.5 px-3 py-1 border border-red-500/40 text-red-600 dark:text-red-400 hover:bg-red-500 hover:text-white disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-red-600 dark:disabled:hover:text-red-400 text-xs font-medium rounded transition-colors cursor-pointer disabled:cursor-not-allowed"
+              className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 border border-red-500/40 text-red-600 dark:text-red-400 hover:bg-red-500 hover:text-white disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-red-600 dark:disabled:hover:text-red-400 text-xs font-medium rounded transition-colors cursor-pointer disabled:cursor-not-allowed"
+              title="Delete active job"
             >
               <Trash2 className="w-3.5 h-3.5" />
-              <span>Delete</span>
+              <span className="hidden sm:inline">Delete</span>
             </button>
 
             <button
               onClick={handleExportPng}
               disabled={!imageRecord}
-              className="flex items-center gap-1.5 px-3 py-1 bg-editorial text-white hover:bg-editorial/90 disabled:opacity-50 text-xs font-medium rounded transition-colors cursor-pointer"
+              className="flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1 bg-editorial text-white hover:bg-editorial/90 disabled:opacity-50 text-xs font-medium rounded transition-colors cursor-pointer"
+              title="Export translated image as PNG"
             >
               <Download className="w-3.5 h-3.5" />
-              <span>Export PNG</span>
+              <span className="hidden sm:inline">Export PNG</span>
+            </button>
+
+            {/* Right Inspector Toggle */}
+            <button
+              onClick={toggleRightSidebar}
+              className={`p-1.5 rounded transition-colors flex items-center gap-1 text-xs font-mono cursor-pointer ${
+                isRightOpen
+                  ? 'bg-ink text-vellum shadow-xs'
+                  : 'text-dust hover:text-ink hover:bg-dust/20'
+              }`}
+              title={isRightOpen ? "Close detected regions panel" : "Open detected regions panel"}
+              aria-label="Toggle detected regions panel"
+            >
+              {isRightOpen ? <PanelRightClose className="w-4 h-4" /> : <PanelRightOpen className="w-4 h-4" />}
+              <span className="hidden lg:inline">{textBlocks.length}</span>
             </button>
           </div>
         </header>
@@ -583,6 +748,14 @@ export default function App() {
         >
           {/* Subtle Grid Background */}
           <div className="absolute inset-0 opacity-15 pointer-events-none bg-[radial-gradient(circle_at_center,var(--color-dust)_1px,transparent_1px)] bg-[size:24px_24px]"></div>
+
+          {/* Floating Processing Indicator */}
+          {activeJob?.status === 'processing' && (
+            <div className="absolute top-4 z-20 flex items-center gap-2 px-3.5 py-1.5 bg-paper/90 dark:bg-paper/90 backdrop-blur-md border border-editorial/40 text-editorial rounded-full shadow-lg text-xs font-mono animate-pulse">
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              <span>Processing translation pipeline...</span>
+            </div>
+          )}
 
           {activeJob ? (
             <div
@@ -680,85 +853,116 @@ export default function App() {
       </main>
 
       {/* 3. RIGHT SIDEBAR: Text Block Inspector */}
-      <aside className="w-[340px] h-full bg-paper flex flex-col border-l border-dust/30 z-10 shrink-0">
-        <div className="p-4 border-b border-dust/20 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Languages className="w-4 h-4 text-editorial" />
-            <h2 className="text-xs font-mono tracking-widest text-dust uppercase">Detected Regions</h2>
-          </div>
-          <span className="text-xs font-mono bg-dust/20 px-2 py-0.5 rounded text-ink">
-            {textBlocks.length} blocks
-          </span>
-        </div>
+      {/* Backdrop for compact overlay */}
+      {isCompact && isRightOpen && (
+        <div
+          onClick={() => setIsRightOpen(false)}
+          className="fixed inset-0 bg-black/40 backdrop-blur-xs z-30 transition-opacity"
+          aria-hidden="true"
+        />
+      )}
 
-        {/* Region items list */}
-        <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-3">
-          {textBlocks.length === 0 ? (
-            <div className="p-8 text-center text-dust text-xs">
-              <p>No text regions detected.</p>
-              <p className="mt-1 opacity-75">Click a completed job to inspect translation boxes.</p>
+      <aside
+        className={
+          isCompact
+            ? `fixed inset-y-0 right-0 z-40 w-[340px] max-w-[90vw] bg-paper shadow-2xl flex flex-col border-l border-dust/30 transition-transform duration-300 ease-in-out ${
+                isRightOpen ? 'translate-x-0' : 'translate-x-full'
+              }`
+            : `h-full bg-paper flex flex-col border-l border-dust/30 z-10 shrink-0 transition-all duration-300 ease-in-out ${
+                isRightOpen ? 'w-[340px]' : 'w-0 border-l-0 overflow-hidden'
+              }`
+        }
+      >
+        <div className="w-[340px] max-w-[90vw] h-full flex flex-col shrink-0">
+          <div className="p-3.5 border-b border-dust/20 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Languages className="w-4 h-4 text-editorial" />
+              <h2 className="text-xs font-mono tracking-widest text-dust uppercase">Detected Regions</h2>
             </div>
-          ) : (
-            textBlocks.map((block, index) => {
-              const isSelected = selectedBlockId === block.id;
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-mono bg-dust/20 px-2 py-0.5 rounded text-ink">
+                {textBlocks.length} blocks
+              </span>
+              <button
+                onClick={toggleRightSidebar}
+                className="p-1 text-dust hover:text-ink hover:bg-dust/20 rounded transition-colors cursor-pointer"
+                title="Close inspector"
+                aria-label="Close inspector"
+              >
+                <PanelRightClose className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
 
-              return (
-                <div
-                  key={block.id}
-                  onClick={() => setSelectedBlockId(block.id || null)}
-                  onMouseEnter={() => setHoveredBlockId(block.id || null)}
-                  onMouseLeave={() => setHoveredBlockId(null)}
-                  className={`p-3 rounded-lg border transition-all ${
-                    isSelected
-                      ? 'border-editorial bg-editorial/5 shadow-xs'
-                      : 'border-dust/30 hover:border-dust bg-vellum/50'
-                  }`}
-                >
-                  <div className="flex items-center justify-between text-[11px] font-mono text-dust mb-1.5">
-                    <span className="font-semibold text-ink">#{index + 1}</span>
-                    <span>{Math.round(block.width)}×{Math.round(block.height)}px</span>
-                  </div>
+          {/* Region items list */}
+          <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-3">
+            {textBlocks.length === 0 ? (
+              <div className="p-8 text-center text-dust text-xs">
+                <p>No text regions detected.</p>
+                <p className="mt-1 opacity-75">Click a completed job to inspect translation boxes.</p>
+              </div>
+            ) : (
+              textBlocks.map((block, index) => {
+                const isSelected = selectedBlockId === block.id;
 
-                  {/* Original OCR Text */}
-                  <div className="mb-2">
-                    <div className="text-[10px] uppercase font-mono text-dust mb-0.5">Original (OCR)</div>
-                    <div className="text-xs font-medium text-ink bg-dust/10 px-2 py-1 rounded select-text">
-                      {block.originalText || '<Empty>'}
+                return (
+                  <div
+                    key={block.id}
+                    onClick={() => setSelectedBlockId(block.id || null)}
+                    onMouseEnter={() => setHoveredBlockId(block.id || null)}
+                    onMouseLeave={() => setHoveredBlockId(null)}
+                    className={`p-3 rounded-lg border transition-all ${
+                      isSelected
+                        ? 'border-editorial bg-editorial/5 shadow-xs'
+                        : 'border-dust/30 hover:border-dust bg-vellum/50'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between text-[11px] font-mono text-dust mb-1.5">
+                      <span className="font-semibold text-ink">#{index + 1}</span>
+                      <span>{Math.round(block.width)}×{Math.round(block.height)}px</span>
+                    </div>
+
+                    {/* Original OCR Text */}
+                    <div className="mb-2">
+                      <div className="text-[10px] uppercase font-mono text-dust mb-0.5">Original (OCR)</div>
+                      <div className="text-xs font-medium text-ink bg-dust/10 px-2 py-1 rounded select-text">
+                        {block.originalText || '<Empty>'}
+                      </div>
+                    </div>
+
+                    {/* Localized Editable Text */}
+                    <div>
+                      <div className="text-[10px] uppercase font-mono text-editorial font-semibold mb-0.5 flex items-center justify-between">
+                        <span>Translated</span>
+                        {isSelected && <span className="text-[9px] font-normal text-dust">Editing</span>}
+                      </div>
+                      <textarea
+                        value={block.translatedText}
+                        onChange={(e) => handleTextChange(block.id!, e.target.value)}
+                        rows={2}
+                        className="w-full text-xs p-2 rounded bg-paper border border-dust/40 focus:border-editorial focus:ring-1 focus:ring-editorial outline-none resize-none transition-colors text-ink"
+                        placeholder="Enter translation..."
+                      />
                     </div>
                   </div>
+                );
+              })
+            )}
+          </div>
 
-                  {/* Localized Editable Text */}
-                  <div>
-                    <div className="text-[10px] uppercase font-mono text-editorial font-semibold mb-0.5 flex items-center justify-between">
-                      <span>Translated</span>
-                      {isSelected && <span className="text-[9px] font-normal text-dust">Editing</span>}
-                    </div>
-                    <textarea
-                      value={block.translatedText}
-                      onChange={(e) => handleTextChange(block.id!, e.target.value)}
-                      rows={2}
-                      className="w-full text-xs p-2 rounded bg-paper border border-dust/40 focus:border-editorial focus:ring-1 focus:ring-editorial outline-none resize-none transition-colors text-ink"
-                      placeholder="Enter translation..."
-                    />
-                  </div>
-                </div>
-              );
-            })
+          {/* Selected block quick actions */}
+          {selectedBlockId && (
+            <div className="p-3 border-t border-dust/20 bg-vellum/30 flex items-center justify-between">
+              <span className="text-xs font-mono text-dust">Block #{textBlocks.findIndex((b) => b.id === selectedBlockId) + 1} Selected</span>
+              <button
+                onClick={() => setSelectedBlockId(null)}
+                className="text-xs font-mono text-editorial hover:underline cursor-pointer"
+              >
+                Deselect
+              </button>
+            </div>
           )}
         </div>
-
-        {/* Selected block quick actions */}
-        {selectedBlockId && (
-          <div className="p-3 border-t border-dust/20 bg-vellum/30 flex items-center justify-between">
-            <span className="text-xs font-mono text-dust">Block #{textBlocks.findIndex((b) => b.id === selectedBlockId) + 1} Selected</span>
-            <button
-              onClick={() => setSelectedBlockId(null)}
-              className="text-xs font-mono text-editorial hover:underline"
-            >
-              Deselect
-            </button>
-          </div>
-        )}
       </aside>
 
     </div>

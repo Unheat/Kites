@@ -292,6 +292,16 @@ export class PipelineOrchestrator {
 
       await db.translationJobs.update(jobId, { status: 'completed' });
       
+      // Notify active Studio or other dashboard tabs that this job is complete
+      try {
+        chrome.runtime.sendMessage({
+          type: 'JOB_COMPLETED',
+          payload: { jobId }
+        }).catch(() => {});
+      } catch {
+        // Ignored if runtime is unavailable
+      }
+      
       const totalDuration = (performance.now() - totalPipelineStart).toFixed(2);
       console.log(`[PipelineOrchestrator] Full Pipeline finished in ${totalDuration}ms.`);
 
@@ -302,6 +312,14 @@ export class PipelineOrchestrator {
     } catch (error) {
       console.error(`[PipelineOrchestrator] Pipeline failed for job ${jobId}:`, error);
       await db.translationJobs.update(jobId, { status: 'error' });
+      try {
+        chrome.runtime.sendMessage({
+          type: 'JOB_ERROR',
+          payload: { jobId, error: error instanceof Error ? error.message : String(error) }
+        }).catch(() => {});
+      } catch {
+        // Ignored if runtime is unavailable
+      }
       throw error; // Rethrow to let the caller know
     }
   }

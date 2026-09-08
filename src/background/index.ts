@@ -279,6 +279,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === 'ENSURE_OFFSCREEN') {
+    setupOffscreenDocument('src/offscreen/offscreen.html')
+      .then(() => sendResponse({ status: 'ready' }))
+      .catch((err) => {
+        console.error('[Background] Failed to setup offscreen document:', err);
+        sendResponse({ status: 'error', error: err instanceof Error ? err.message : String(err) });
+      });
+    return true;
+  }
+
   if (message.type === 'START_MODEL_DOWNLOAD' || message.type === 'CHECK_MODEL_STATUS' || message.type === 'GET_MODEL_STATUSES' || message.type === 'PRELOAD_ACTIVE_ENGINE' || message.type === 'GET_ACTIVE_DOWNLOADS' || message.type === 'VALIDATE_CUSTOM_API') {
     console.log(`[Background] Received ${message.type}. Forwarding to Offscreen...`);
     sendMessageToOffscreen(message)
