@@ -9,6 +9,288 @@ const MIN_WIDTH_IMAGE_PX = 150;
 const MIN_HEIGHT_IMAGE_PX = 150;
 const IMAGE_SCAN_DEBOUNCE_MS = 300;
 const HOVER_LEAVE_DELAY_MS = 150;
+const SELF_MUTATION_RESET_DELAY_MS = 50;
+const MAX_PARENT_BG_SEARCH_DEPTH = 2;
+
+// Standard lazy-load attributes commonly used by host websites and CMSs
+const LAZY_LOAD_ATTRIBUTES = [
+  'data-src',
+  'data-original',
+  'data-lazy-src',
+  'data-actual-src',
+  'data-url',
+  'data-origin',
+  'data-full-image',
+  'data-real-src',
+];
+
+// In-memory registry mapping original/base image URLs to live DOM HTMLImageElement references
+const imageElementRegistry = new Map<string, HTMLImageElement>();
+
+// Track created same-origin Blob URLs to prevent memory leaks and allow eventual revocation
+const activeObjectUrls = new Set<string>();
+
+// WeakMap holding active MutationObserver shields for each translated image element
+const activeShieldObservers = new WeakMap<HTMLImageElement, MutationObserver>();
+
+// Guard flag suppressing internal MutationObservers during Kites DOM modifications
+let isSelfMutating = false;
+
+/**
+ * Runs a DOM mutation callback while temporarily suppressing internal MutationObservers
+ * to avoid recursive event triggering or feedback loops.
+ *
+ * @param fn - Callback performing DOM mutations.
+ */
+function runSelfMutation(fn: () => void): void {
+  isSelfMutating = true;
+  try {
+    fn();
+  } finally {
+    window.setTimeout(() => {
+      isSelfMutating = false;
+    }, SELF_MUTATION_RESET_DELAY_MS);
+  }
+}
+
+/**
+ * Normalizes an image URL by stripping query parameters and hash fragments
+ * to enable reliable matching when host CDNs dynamically change resolution flags.
+ *
+ * @param url - Raw image URL string.
+ * @returns Cleaned URL without search query or hash parameters.
+ */
+function getNormalizedBaseUrl(url: string): string {
+  try {
+    const parsed = new URL(url, window.location.href);
+    return `${parsed.origin}${parsed.pathname}`;
+  } catch {
+    return url.split('?')[0].split('#')[0];
+  }
+}
+
+/**
+ * Attaches a unique Kites tracking ID and registers the image element in our in-memory map.
+ *
+ * @param img - Target image element to register.
+ * @param srcUrl - Image URL used as lookup key.
+ * @returns The assigned tracking ID.
+ */
+function registerImageElement(img: HTMLImageElement, srcUrl: string): string {
+  let kitesId = img.getAttribute('data-kites-id');
+  if (!kitesId) {
+    kitesId = `kites-${Math.random().toString(36).substring(2, 11)}`;
+    img.setAttribute('data-kites-id', kitesId);
+  }
+  imageElementRegistry.set(srcUrl, img);
+  const normalized = getNormalizedBaseUrl(srcUrl);
+  if (normalized) {
+    imageElementRegistry.set(normalized, img);
+  }
+  return kitesId;
+}
+
+/**
+ * Resolves the target HTMLImageElement using a robust multi-tier fallback lookup:
+ * 1. Direct in-memory registry reference (if still attached to the DOM).
+ * 2. Exact match on img.src or img.currentSrc.
+ * 3. Match on data-kites-orig-src attribute.
+ * 4. Normalized base URL match (stripping CDN resolution parameters).
+ *
+ * @param originalUrl - The original image URL requested for translation.
+ * @returns The resolved HTMLImageElement, or null if no matching element exists in DOM.
+ */
+function resolveTargetImageElement(originalUrl: string): HTMLImageElement | null {
+  // Tier 1: Check in-memory registry
+  const registered = imageElementRegistry.get(originalUrl);
+  if (registered && document.contains(registered)) {
+    return registered;
+  }
+
+  const normalized = getNormalizedBaseUrl(originalUrl);
+  if (normalized) {
+    const normRegistered = imageElementRegistry.get(normalized);
+    if (normRegistered && document.contains(normRegistered)) {
+      return normRegistered;
+    }
+  }
+
+  const allImgs = Array.from(document.querySelectorAll('img'));
+
+  // Tier 2: Exact URL match on src or currentSrc
+  const exactMatch = allImgs.find((img) => img.src === originalUrl || img.currentSrc === originalUrl);
+  if (exactMatch) return exactMatch;
+
+  // Tier 3: Match on data-kites-orig-src attribute
+  const origAttrMatch = allImgs.find((img) => img.getAttribute('data-kites-orig-src') === originalUrl);
+  if (origAttrMatch) return origAttrMatch;
+
+  // Tier 4: Match on normalized base URL
+  if (normalized) {
+    const baseMatch = allImgs.find((img) => {
+      const imgNorm = getNormalizedBaseUrl(img.src || img.currentSrc);
+      return imgNorm === normalized;
+    });
+    if (baseMatch) return baseMatch;
+  }
+
+  return null;
+}
+
+/**
+ * Converts a Base64 Data URL into a local same-origin Blob URL.
+ * Adopts the XianScan production pattern to bypass strict inline data: CSP rules
+ * and avoid multi-megabyte string bloat in DOM attributes.
+ *
+ * @param dataUrl - Base64 data URL from the pipeline.
+ * @returns Same-origin Blob URL or original data URL on error.
+ */
+function createSafeBlobUrlFromData(dataUrl: string): string {
+  try {
+    if (!dataUrl.startsWith('data:')) return dataUrl;
+
+    const parts = dataUrl.split(',');
+    const mimeMatch = parts[0].match(/:(.*?);/);
+    const mime = mimeMatch ? mimeMatch[1] : 'image/png';
+    const binaryStr = atob(parts[1]);
+    const len = binaryStr.length;
+    const u8arr = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      u8arr[i] = binaryStr.charCodeAt(i);
+    }
+    const blob = new Blob([u8arr], { type: mime });
+    const objUrl = URL.createObjectURL(blob);
+    activeObjectUrls.add(objUrl);
+    return objUrl;
+  } catch (error) {
+    console.warn('[Content Script] Failed to convert dataUrl to Blob URL, falling back to raw dataUrl:', error);
+    return dataUrl;
+  }
+}
+
+/**
+ * Backs up original src, srcset, and lazy-loading attributes before stripping them,
+ * preventing host site scripts and responsive loaders from overriding our replacement.
+ *
+ * @param img - Target image element to sanitize.
+ */
+function sanitizeImageAttributes(img: HTMLImageElement): void {
+  if (!img.getAttribute('data-kites-orig-src')) {
+    img.setAttribute('data-kites-orig-src', img.src || img.getAttribute('data-src') || '');
+    img.setAttribute('data-kites-orig-srcset', img.srcset || '');
+  }
+
+  for (const attr of LAZY_LOAD_ATTRIBUTES) {
+    if (img.hasAttribute(attr)) {
+      const val = img.getAttribute(attr);
+      if (val && !img.hasAttribute(`data-kites-orig-${attr}`)) {
+        img.setAttribute(`data-kites-orig-${attr}`, val);
+      }
+      img.removeAttribute(attr);
+    }
+  }
+
+  // Clear responsive candidate set so browser engine renders src
+  img.srcset = '';
+  img.removeAttribute('srcset');
+}
+
+/**
+ * Suppresses matching background-image on parent containers (common in Twitter/X media wrappers)
+ * so the original image does not bleed through.
+ *
+ * @param img - Image element whose parent containers should be inspected.
+ */
+function suppressParentBackgroundImage(img: HTMLImageElement): void {
+  let parent = img.parentElement;
+  let depth = 0;
+  while (parent && depth < MAX_PARENT_BG_SEARCH_DEPTH) {
+    const bg = parent.style.backgroundImage || window.getComputedStyle(parent).backgroundImage;
+    if (bg && bg !== 'none' && bg.includes('url(')) {
+      if (!parent.getAttribute('data-kites-orig-bg')) {
+        parent.setAttribute('data-kites-orig-bg', parent.style.backgroundImage || bg);
+      }
+      parent.style.backgroundImage = 'none';
+    }
+    parent = parent.parentElement;
+    depth++;
+  }
+}
+
+/**
+ * Attaches a MutationObserver shield to the translated image.
+ * If a host framework (React/Vue) or lazy-loader reverts src or re-applies srcset,
+ * the shield immediately restores the translated image.
+ *
+ * @param img - The translated image element to protect.
+ * @param safeUrl - The safe Blob/Data URL of the translated image.
+ */
+function attachReversionShield(img: HTMLImageElement, safeUrl: string): void {
+  const existingObserver = activeShieldObservers.get(img);
+  if (existingObserver) {
+    existingObserver.disconnect();
+  }
+
+  const observer = new MutationObserver((mutations) => {
+    if (isSelfMutating) return;
+
+    for (const mutation of mutations) {
+      if (mutation.type === 'attributes') {
+        const appliedSrc = img.getAttribute('data-kites-applied-src') || safeUrl;
+        if (mutation.attributeName === 'src' && appliedSrc && img.src !== appliedSrc) {
+          console.log('[Content Script] Host SPA reset detected on src, restoring translated image.');
+          runSelfMutation(() => {
+            img.src = appliedSrc;
+            img.srcset = '';
+            img.removeAttribute('srcset');
+            for (const attr of LAZY_LOAD_ATTRIBUTES) {
+              img.removeAttribute(attr);
+            }
+          });
+        }
+        if (mutation.attributeName === 'srcset' && img.srcset) {
+          console.log('[Content Script] Host SPA restored srcset, clearing.');
+          runSelfMutation(() => {
+            img.srcset = '';
+            img.removeAttribute('srcset');
+          });
+        }
+      }
+    }
+  });
+
+  observer.observe(img, {
+    attributes: true,
+    attributeFilter: ['src', 'srcset', ...LAZY_LOAD_ATTRIBUTES],
+  });
+
+  activeShieldObservers.set(img, observer);
+}
+
+/**
+ * Performs a resilient, native image replacement with SPA protection,
+ * srcset clearing, lazy attribute stripping, and parent background suppression.
+ *
+ * @param targetImg - The target HTMLImageElement in the DOM.
+ * @param bakedBase64 - The translated image data URL.
+ * @param originalUrl - The original image URL for logging and attribution.
+ */
+function replaceImageWithTranslation(targetImg: HTMLImageElement, bakedBase64: string, originalUrl: string): void {
+  const safeUrl = createSafeBlobUrlFromData(bakedBase64);
+
+  runSelfMutation(() => {
+    sanitizeImageAttributes(targetImg);
+    targetImg.setAttribute('data-kites-applied-src', safeUrl);
+    targetImg.setAttribute('data-kites-translated', 'true');
+    targetImg.src = safeUrl;
+    targetImg.style.display = '';
+    targetImg.style.filter = 'none';
+    suppressParentBackgroundImage(targetImg);
+  });
+
+  attachReversionShield(targetImg, safeUrl);
+  console.log(`[Content Script] Successfully replaced image for: ${originalUrl}`);
+}
 
 type OverlayImage = {
   srcUrl: string;
@@ -165,7 +447,10 @@ function GlobalOverlay() {
   const requestTranslation = (srcUrl: string, image?: OverlayImage): void => {
     if (!srcUrl || translatingUrlRef.current === srcUrl) return;
 
-    if (image) setActiveImg(image);
+    if (image) {
+      setActiveImg(image);
+      registerImageElement(image.imgElement, srcUrl);
+    }
     setTranslatingUrl(srcUrl);
     console.log('[Content Script] Sending TRANSLATE_IMAGE to background:', srcUrl);
 
@@ -218,11 +503,13 @@ function GlobalOverlay() {
 
       if (message.type !== 'IMAGE_TRANSLATED' || !bakedBase64) return;
       console.log(`[Content Script] Received translated image for: ${originalUrl}`);
-      const targetImg = Array.from(document.querySelectorAll('img')).find((img) => img.src === originalUrl);
-      if (!targetImg) return;
+      const targetImg = resolveTargetImageElement(originalUrl);
+      if (!targetImg) {
+        console.warn(`[Content Script] Target image element could not be found in DOM for: ${originalUrl}`);
+        return;
+      }
 
-      // Instant native swap (no opacity fade/blink)
-      targetImg.src = bakedBase64;
+      replaceImageWithTranslation(targetImg, bakedBase64, originalUrl);
     };
 
     chrome.runtime.onMessage.addListener(handleMessage);
@@ -240,6 +527,7 @@ function GlobalOverlay() {
 
     const queueVisibleImage = (img: HTMLImageElement) => {
       if (!isValidImage(img) || translatedImages.has(img) || queuedUrls.has(img.src)) return;
+      registerImageElement(img, img.src);
       queuedUrls.add(img.src);
       console.log('[Content Script] Auto-Translating visible image:', img.src);
       chrome.runtime.sendMessage({ type: 'TRANSLATE_IMAGE', url: img.src }, (response) => {
@@ -271,9 +559,13 @@ function GlobalOverlay() {
     };
 
     const mutationObserver = new MutationObserver((mutations) => {
+      if (isSelfMutating) return;
       for (const mutation of mutations) {
         if (mutation.type === 'attributes' && mutation.target instanceof HTMLImageElement && mutation.attributeName === 'src') {
-          translatedImages.add(mutation.target);
+          const target = mutation.target;
+          if (target.getAttribute('data-kites-translated') === 'true' || target.src.startsWith('blob:') || target.src.startsWith('data:')) {
+            translatedImages.add(target);
+          }
         }
       }
       scheduleObserve();
@@ -350,6 +642,7 @@ function GlobalOverlay() {
       }
       if (!(target instanceof HTMLImageElement) || !isHoverableImage(target)) return;
       cancelHide();
+      registerImageElement(target, target.src);
       setActiveImg({ srcUrl: target.src, imgElement: target, anchorName: getAnchorName(target) });
     };
     const handleMouseOut = (event: MouseEvent) => {
@@ -378,7 +671,7 @@ function GlobalOverlay() {
   if (mode === 'persistent') {
     return <>{consistentImages.map((image) => (
       <TranslateButton key={image.anchorName} srcUrl={image.srcUrl} anchorName={image.anchorName}
-        isTranslating={translatingUrl === image.srcUrl} onTranslate={(srcUrl) => requestTranslation(srcUrl)} />
+        isTranslating={translatingUrl === image.srcUrl} onTranslate={(srcUrl) => requestTranslation(srcUrl, image)} />
     ))}</>;
   }
 
@@ -406,3 +699,13 @@ try {
 } catch (error) {
   console.error('[Content Script] Failed to initialize overlay:', error);
 }
+
+// Revoke any created same-origin Blob URLs when the tab/window is unloaded
+window.addEventListener('beforeunload', () => {
+  for (const objUrl of activeObjectUrls) {
+    try {
+      URL.revokeObjectURL(objUrl);
+    } catch {}
+  }
+  activeObjectUrls.clear();
+});
