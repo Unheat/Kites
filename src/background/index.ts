@@ -17,11 +17,10 @@ import { oAuthManager } from './auth/OAuthManager';
  * How long a job may stay in an in-flight status ('processing'/'downloading') before the
  * queue assumes its owning offscreen document died and reclaims the concurrency slot.
  *
- * Sized well above a realistic worst-case first run (cold-start model downloads for OCR and a
- * local LLM over a slow connection can legitimately take several minutes) so genuinely slow
- * work is never cancelled -- this only catches jobs whose owner is provably gone.
+ * Sized at 2 minutes (twice SINGLE_JOB_TIMEOUT_MS of 60s) to guard against dead slots
+ * when an offscreen task is terminated or crashes.
  */
-const STALE_JOB_TIMEOUT_MS = 20 * 60 * 1000;
+const STALE_JOB_TIMEOUT_MS = 2 * 60 * 1000;
 
 /**
  * Maximum time in milliseconds to wait for a single translation job to complete
@@ -292,9 +291,38 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 });
 
+/**
+ * Fails any jobs left in-flight ('processing'/'downloading') from a previous
+ * browser session, extension reload, or service worker restart.
+ *
+ * When the service worker boots fresh, no previous in-memory offscreen processing
+ * promise exists, so any job marked in-flight is guaranteed orphaned.
+ */
+async function resetOrphanedInFlightJobs(): Promise<void> {
+  if (typeof indexedDB === 'undefined') return;
+  try {
+    const inFlight = await db.translationJobs
+      .where('status')
+      .anyOf(['processing', 'downloading'])
+      .toArray();
+    for (const job of inFlight) {
+      console.warn(
+        `[Background] Failing orphaned in-flight job ${job.id} (was '${job.status}') from previous session.`
+      );
+      await db.translationJobs.update(job.id!, { status: 'error' });
+    }
+  } catch (err) {
+    console.error('[Background] Failed to reset orphaned in-flight jobs:', err);
+  }
+}
+
+// Clean up any orphaned in-flight jobs immediately when service worker starts
+resetOrphanedInFlightJobs().catch(() => {});
+
 // Trigger preload and auto-download on extension boot
 chrome.runtime.onStartup.addListener(async () => {
   console.log('[Background] Extension startup. Preloading active engine & default OCR...');
+  await resetOrphanedInFlightJobs();
   await cleanupOldJobs();
   try {
     await sendMessageToOffscreen({ type: 'PRELOAD_ACTIVE_ENGINE' } as PreloadActiveEngineMessage);
@@ -310,6 +338,7 @@ chrome.runtime.onStartup.addListener(async () => {
 chrome.runtime.onInstalled.addListener(async () => {
   console.log('[Background] Extension installed/updated. Preloading active engine & default OCR...');
   setupContextMenu();
+  await resetOrphanedInFlightJobs();
   await cleanupOldJobs();
   try {
     await sendMessageToOffscreen({

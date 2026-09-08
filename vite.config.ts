@@ -59,7 +59,8 @@ export default defineConfig(({ mode }) => {
       exclude: [
         '**/node_modules/**', 
         '**/dist/**', 
-        '**/docs/reference/**'
+        '**/docs/reference/**',
+        '**/scratches/**'
       ],
       setupFiles: ['./test.setup.ts']
     }
