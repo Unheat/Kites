@@ -143,6 +143,7 @@ function TranslateButton({
  * @returns Collection of active translation buttons or null in idle Hover mode.
  */
 function GlobalOverlay() {
+  const [isEnabled, setIsEnabled] = useState<boolean>(true);
   const [activeImg, setActiveImg] = useState<OverlayImage | null>(null);
   const [consistentImages, setConsistentImages] = useState<OverlayImage[]>([]);
   const [mode, setMode] = useState<'hover' | 'persistent'>('hover');
@@ -192,6 +193,7 @@ function GlobalOverlay() {
       chrome.storage.local.get('popupState', (data) => {
         const state = data.popupState as PopupState | undefined;
         if (state) {
+          setIsEnabled(state.isExtensionEnabled ?? true);
           setMode(state.manualMode || 'hover');
           setAutoTranslate(state.isAuto || false);
         }
@@ -229,7 +231,7 @@ function GlobalOverlay() {
 
   // Automatic mode observes only images entering the viewport. Queue capacity remains owned by background.
   useEffect(() => {
-    if (!autoTranslate) return;
+    if (!isEnabled || !autoTranslate) return;
 
     const queuedUrls = new Set<string>();
     const translatedImages = new WeakSet<HTMLImageElement>();
@@ -287,11 +289,11 @@ function GlobalOverlay() {
       window.removeEventListener('resize', scheduleObserve);
       if (timeoutId !== null) window.clearTimeout(timeoutId);
     };
-  }, [autoTranslate]);
+  }, [isEnabled, autoTranslate]);
 
   // Persistent mode creates a manual button for every valid image.
   useEffect(() => {
-    if (mode !== 'persistent') {
+    if (!isEnabled || mode !== 'persistent') {
       setConsistentImages([]);
       return;
     }
@@ -316,11 +318,14 @@ function GlobalOverlay() {
       window.removeEventListener('resize', scheduleUpdate);
       if (timeoutId !== null) window.clearTimeout(timeoutId);
     };
-  }, [mode]);
+  }, [isEnabled, mode]);
 
   // Hover mode retains its normal fade behavior, except a queued translation remains pinned.
   useEffect(() => {
-    if (mode !== 'hover') return;
+    if (!isEnabled || mode !== 'hover') {
+      setActiveImg(null);
+      return;
+    }
 
     let hideTimeoutId: number | null = null;
     const cancelHide = () => {
@@ -366,7 +371,9 @@ function GlobalOverlay() {
       document.removeEventListener('mouseover', handleMouseOver);
       document.removeEventListener('mouseout', handleMouseOut);
     };
-  }, [mode]);
+  }, [isEnabled, mode]);
+
+  if (!isEnabled) return null;
 
   if (mode === 'persistent') {
     return <>{consistentImages.map((image) => (
