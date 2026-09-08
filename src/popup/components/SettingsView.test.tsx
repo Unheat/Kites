@@ -20,7 +20,7 @@ import SettingsView from './SettingsView';
 import { DEFAULT_POPUP_STATE, type PopupState } from '../../shared/types';
 
 describe('SettingsView', () => {
-  it('renders font preset selector and handles preset changes', async () => {
+  it('renders Render Font after OCR and handles preset changes', async () => {
     const container = document.createElement('div');
     document.body.appendChild(container);
     const root = createRoot(container);
@@ -35,16 +35,29 @@ describe('SettingsView', () => {
       root.render(<SettingsView state={state} updateState={updateState} />);
     });
 
-    const select = container.querySelector('#render-font-preset') as HTMLSelectElement | null;
-    expect(select).not.toBeNull();
-    expect(select?.value).toBe('standard');
+    const headings = Array.from(container.querySelectorAll('h2'));
+    const ocrHeading = headings.find((heading) => heading.textContent === 'OCR Engine');
+    const renderFontHeading = headings.find((heading) => heading.textContent === 'Render Font');
+    expect(ocrHeading).toBeDefined();
+    expect(renderFontHeading).toBeDefined();
+    expect(ocrHeading && renderFontHeading
+      ? ocrHeading.compareDocumentPosition(renderFontHeading) & Node.DOCUMENT_POSITION_FOLLOWING
+      : 0).toBeTruthy();
 
-    // Change to comic preset
+    const trigger = container.querySelector('button[aria-label="Render Font"]') as HTMLButtonElement | null;
+    expect(trigger?.textContent).toContain('Standard');
+
     await act(async () => {
-      if (select) {
-        select.value = 'comic';
-        select.dispatchEvent(new Event('change', { bubbles: true }));
-      }
+      trigger?.click();
+    });
+
+    const fontButtons = Array.from(trigger?.parentElement?.querySelectorAll('button') ?? []);
+    const optionLabels = fontButtons.slice(1).map((button) => button.textContent?.trim());
+    expect(optionLabels).toEqual(['Standard', 'Comic', 'Serif', 'Monospace']);
+
+    const comicOption = fontButtons.find((button) => button.textContent?.trim() === 'Comic');
+    await act(async () => {
+      comicOption?.click();
     });
 
     expect(updateState).toHaveBeenCalledWith({ renderFontPresetId: 'comic' });

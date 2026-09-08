@@ -76,21 +76,22 @@ export class TranslationManager {
         console.log(`[TranslationManager] Attempting translation with engine: ${engineId} (Attempt ${i + 1}/${engineSequence.length})`);
         
         // 2. Load the specific engine dynamically
-        const loadStart = performance.now();
+        const loadStart = import.meta.env.DEV ? performance.now() : 0;
         const customApi = popupState.customApis?.find((api) => api.id === engineId);
         const engine = await this.getOrLoadEngine(engineId, undefined, customApi);
-        const loadMs = performance.now() - loadStart;
+        const loadMs = import.meta.env.DEV ? performance.now() - loadStart : 0;
 
         // 3. Execute translation
-        const inferStart = performance.now();
+        const inferStart = import.meta.env.DEV ? performance.now() : 0;
         const results = await engine.translate(texts, sourceLang, targetLang);
-        const inferMs = performance.now() - inferStart;
-
-        console.log(
-          `[TranslationManager] Translation successful using engine: ${engineId}. ` +
-          `Timing: model wait/load ${loadMs.toFixed(2)}ms + inference ${inferMs.toFixed(2)}ms ` +
-          `= ${(loadMs + inferMs).toFixed(2)}ms for ${texts.length} blocks.`
-        );
+        if (import.meta.env.DEV) {
+          const inferMs = performance.now() - inferStart;
+          console.log(
+            `[TranslationManager] Translation successful using engine: ${engineId}. ` +
+            `Timing: model wait/load ${loadMs.toFixed(2)}ms + inference ${inferMs.toFixed(2)}ms ` +
+            `= ${(loadMs + inferMs).toFixed(2)}ms for ${texts.length} blocks.`
+          );
+        }
         return results;
 
       } catch (error) {

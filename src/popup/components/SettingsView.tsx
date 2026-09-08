@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import type { PopupState } from '../../shared/types';
-import { Moon, Sun, KeyRound, Network, Type } from 'lucide-react';
-import { RENDER_FONT_PRESETS, normalizeRenderFontPresetId } from '../../shared/renderFontPresets';
+import { Moon, Sun, KeyRound, Network } from 'lucide-react';
 import ApiManagerPanel from './ApiManagerPanel';
 import FallbackConfigPanel from './FallbackConfigPanel';
 import EngineSelectionPanel from './EngineSelectionPanel';
@@ -24,7 +23,6 @@ export default function SettingsView({ state, updateState }: SettingsViewProps) 
   const [showFallbackConfig, setShowFallbackConfig] = useState(false);
 
   const concurrency = Math.min(5, Math.max(1, state.concurrency));
-  const activeFontPresetId = normalizeRenderFontPresetId(state.renderFontPresetId);
 
   return (
     <div className="flex flex-col gap-3.5">
@@ -43,29 +41,6 @@ export default function SettingsView({ state, updateState }: SettingsViewProps) 
         >
           {state.isDark ? <Sun size={16} /> : <Moon size={16} />}
         </button>
-      </div>
-
-      {/* Global Render Font Preset Selector */}
-      <div className="flex flex-col gap-1.5">
-        <label
-          htmlFor="render-font-preset"
-          className="text-xs font-medium text-[var(--color-dust)] uppercase tracking-wider flex items-center gap-1.5"
-        >
-          <Type size={14} className="text-[var(--color-dust)]" />
-          <span>Render Font</span>
-        </label>
-        <select
-          id="render-font-preset"
-          value={activeFontPresetId}
-          onChange={(e) => updateState({ renderFontPresetId: normalizeRenderFontPresetId(e.target.value) })}
-          className="w-full p-2 text-sm bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md focus:outline-none focus:border-[var(--color-ink)] transition-colors cursor-pointer text-[var(--color-ink)]"
-        >
-          {RENDER_FONT_PRESETS.map((preset) => (
-            <option key={preset.id} value={preset.id}>
-              {preset.label}
-            </option>
-          ))}
-        </select>
       </div>
 
       <EngineSelectionPanel state={state} updateState={updateState} />

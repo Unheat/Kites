@@ -331,17 +331,19 @@ export function extractPolygons(
           y: Math.max(0, Math.min(originalHeight, Math.round(p.y * scale)))
         }));
 
-        if (scaledRect[0].x < 20 && scaledRect[0].y > 1000) {
-          // Dump stats of the empty bottom-left box
-          let maxVal = -1, minVal = 2;
-          for (const p of blobPoints) {
-            const val = probMap[p.y * width + p.x];
-            if (val > maxVal) maxVal = val;
-            if (val < minVal) minVal = val;
+        if (import.meta.env.DEV) {
+          if (scaledRect[0].x < 20 && scaledRect[0].y > 1000) {
+            // Dump stats of the empty bottom-left box
+            let maxVal = -1, minVal = 2;
+            for (const p of blobPoints) {
+              const val = probMap[p.y * width + p.x];
+              if (val > maxVal) maxVal = val;
+              if (val < minVal) minVal = val;
+            }
+            console.log(`[extractPolygons] DEBUG Empty box x0=${scaledRect[0].x}, y0=${scaledRect[0].y}: size=${blobPoints.length}, score=${score.toFixed(4)}, minProb=${minVal.toFixed(4)}, maxProb=${maxVal.toFixed(4)}`);
+          } else {
+            console.log(`[extractPolygons] Kept box at x0=${scaledRect[0].x}, y0=${scaledRect[0].y} score=${score.toFixed(4)}`);
           }
-          console.log(`[extractPolygons] DEBUG Empty box x0=${scaledRect[0].x}, y0=${scaledRect[0].y}: size=${blobPoints.length}, score=${score.toFixed(4)}, minProb=${minVal.toFixed(4)}, maxProb=${maxVal.toFixed(4)}`);
-        } else {
-          console.log(`[extractPolygons] Kept box at x0=${scaledRect[0].x}, y0=${scaledRect[0].y} score=${score.toFixed(4)}`);
         }
 
         polygons.push({ points: scaledRect, score });

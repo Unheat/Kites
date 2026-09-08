@@ -325,7 +325,7 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
     const cropW = 512;
     const cropH = 512;
 
-    let startTime = performance.now();
+    let startTime = import.meta.env.DEV ? performance.now() : 0;
     console.log(`[LamaBaseInpaintEngine] Starting Phase 1 inference for ${boxes.length} patches using ${this.session.options?.executionProviders?.[0] || 'unknown'}...`);
 
     // Phase 1: Prepare all patches and run all ONNX inferences sequentially.
@@ -389,8 +389,10 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
       patchJobs.push({ outData, sx, sy, size });
     }
 
-    const endTime = performance.now();
-    console.log(`[LamaBaseInpaintEngine] Inference finished in ${(endTime - startTime).toFixed(2)}ms for ${boxes.length} patches.`);
+    if (import.meta.env.DEV) {
+      const endTime = performance.now();
+      console.log(`[LamaBaseInpaintEngine] Inference finished in ${(endTime - startTime).toFixed(2)}ms for ${boxes.length} patches.`);
+    }
 
     // Phase 2: Apply all inference results back to finalCtx sequentially.
     // Sequential application is required because patches may overlap — a later patch

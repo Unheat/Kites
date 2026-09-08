@@ -121,20 +121,22 @@ export class WebLLMEngine extends BaseLlmTranslationEngine {
       throw new Error('WebLLMEngine is not initialized. Call init() first.');
     }
 
-    const chunkStart = performance.now();
+    const chunkStart = import.meta.env.DEV ? performance.now() : 0;
     const reply = await this.engine.chat.completions.create({
       messages: [{ role: 'user', content: prompt }],
       temperature: WEBLLM_TEMPERATURE,
       max_tokens: WEBLLM_MAX_TOKENS,
     });
-    const chunkMs = performance.now() - chunkStart;
 
     const rawOutput = reply.choices[0]?.message?.content || '';
-    const completionTokens = (reply as any).usage?.completion_tokens;
-    const tokPerSec = completionTokens ? (completionTokens / (chunkMs / 1000)).toFixed(1) : 'n/a';
-    console.log(
-      `[WebLLMEngine] Batch in ${chunkMs.toFixed(2)}ms (${completionTokens ?? '?'} completion tokens, ${tokPerSec} tok/s).`
-    );
+    if (import.meta.env.DEV) {
+      const chunkMs = performance.now() - chunkStart;
+      const completionTokens = (reply as any).usage?.completion_tokens;
+      const tokPerSec = completionTokens ? (completionTokens / (chunkMs / 1000)).toFixed(1) : 'n/a';
+      console.log(
+        `[WebLLMEngine] Batch in ${chunkMs.toFixed(2)}ms (${completionTokens ?? '?'} completion tokens, ${tokPerSec} tok/s).`
+      );
+    }
 
     return rawOutput;
   }
