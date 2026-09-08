@@ -14,6 +14,6 @@ export const inpaintRegistry: Record<string, InpaintModelRegistryEntry> = {
     onnxUrl: 'https://huggingface.co/Unhead/lama-manga/resolve/main/lama-manga.onnx'
   },
   'lama-manga-fast': {
-    onnxUrl: 'https://huggingface.co/Unhead/lama-manga/resolve/main/lama-manga.onnx'
+    onnxUrl: 'https://huggingface.co/ogkalu/lama-manga-onnx-dynamic/resolve/main/lama-manga-dynamic.onnx'
   }
 };

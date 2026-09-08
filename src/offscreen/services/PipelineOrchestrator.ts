@@ -189,7 +189,7 @@ export class PipelineOrchestrator {
       const cleanedBlob = new Blob([cleanedImageBuffer], { type: 'image/png' });
       const bitmap = await createImageBitmap(cleanedBlob);
       const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-      const ctx = canvas.getContext('2d') as OffscreenCanvasRenderingContext2D;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true }) as OffscreenCanvasRenderingContext2D;
 
       // Draw the clean inpainted image
       ctx.drawImage(bitmap, 0, 0);

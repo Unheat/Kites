@@ -198,10 +198,8 @@ export class LamaScaledInpaintEngine extends LamaBaseInpaintEngine {
     }
     origCtx.putImageData(finalData, 0, 0);
 
-    if ((import.meta as any).env?.DEV) {
-      const endTime = performance.now();
-      console.log(`[LamaScaledInpaintEngine] 1-pass inpainting completed in ${(endTime - startTime).toFixed(2)}ms.`);
-    }
+    const endTime = performance.now();
+    console.log(`[LamaScaledInpaintEngine] 1-pass inpainting completed in ${(endTime - startTime).toFixed(2)}ms.`);
 
     return await this.canvasToArrayBuffer(origCanvas);
   }
