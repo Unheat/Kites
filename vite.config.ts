@@ -19,6 +19,10 @@ export default defineConfig(({ mode }) => {
       tailwindcss(),
       crx({ manifest }),
     ],
+    // WORKAROUND: @crxjs/vite-plugin 2.7.1 only discovers extra extension
+    // entries from build.rollupOptions during serve. Explicit entries prevent Vite 8
+    // from discovering dependencies after Chrome starts the MV3 worker, which can
+    // return 504 Outdated Optimize Dep and abort service-worker registration.
     optimizeDeps: {
       entries: [
         'popup.html',
@@ -38,6 +42,10 @@ export default defineConfig(({ mode }) => {
     build: {
       minify: isProd,
       modulePreload: false,
+      // WORKAROUND: Keep deprecated rollupOptions until CRXJS reads Vite 8's
+      // rolldownOptions in its raw config hook. Vite 8 aliases this internally.
+      // Native Node dependencies must stay external so Rolldown never parses .node
+      // binaries or bundles ppu-paddle-ocr's desktop/OpenCV fallback.
       rollupOptions: {
         external: [
           'ppu-paddle-ocr',

@@ -84,3 +84,11 @@ warning: because chrome cdn not allow to import code, library like opencv-js can
 - **Documenting New Workarounds:** If you exhaust standard solutions and must implement a non-obvious workaround:
   1. Add an inline comment: `# WORKAROUND: [Explain upstream failure] -> [Why this weird approach works]`.
   2. Briefly document the quirk and affected modules in this file so future turns follow the same pattern without re-debugging.
+
+### Vite 8 + CRXJS 2.7.1 Build Configuration
+
+- **Do not rename `build.rollupOptions` to `build.rolldownOptions` in `vite.config.ts` yet.** Vite 8 accepts and internally aliases the deprecated key, but `@crxjs/vite-plugin` 2.7.1 reads the raw `build.rollupOptions` key to discover extra HTML entry points. Using only `rolldownOptions` omits `src/offscreen/offscreen.html` and `index.html` from CRXJS dev dependency discovery. Vite can then re-optimize dependencies while Chrome is registering the MV3 service worker, return `504 Outdated Optimize Dep`, and make Chrome fail registration with status code 3.
+- **Keep explicit `optimizeDeps.entries` for every Kites runtime entry:** `popup.html`, `index.html`, `src/offscreen/offscreen.html`, `src/content/index.tsx`, and `src/background/index.ts`. These entries force cold-start dependency discovery before the extension requests modules.
+- **Keep Node/native packages in both `optimizeDeps.exclude` and `build.rollupOptions.external`:** `ppu-paddle-ocr`, `ppu-paddle-ocr/node`, `@napi-rs/canvas`, `@napi-rs/canvas-darwin-arm64`, `canvas`, and `onnxruntime-node`. Without these exclusions Rolldown may try to parse native `.node` binaries as UTF-8 and bundle the desktop/OpenCV fallback into the browser extension.
+- **Keep `build.minify` mode-aware.** `minify: mode === 'production'` leaves dev output readable while production dead-code elimination removes blocks guarded by `import.meta.env.DEV`, including performance timing and diagnostic logs.
+- **Upstream status:** A local contribution branch exists at `scratches/reference/chrome-extension-tools`, branch `fix/vite-8-rolldown-options`, commit `28aed46`. Remove Kites compatibility workarounds only after upgrading to a released CRXJS version that supports `build.rolldownOptions`, then verify both `npm run dev` and `npm run build`.
