@@ -6,6 +6,9 @@ import type { ITranslationEngine } from './BaseEngine';
  */
 const MAX_CHUNK_CHAR_LIMIT = 1800;
 
+/** Maximum wait before one Google client attempt yields to fallback handling. */
+const GOOGLE_TRANSLATE_TIMEOUT_MS = 8_000;
+
 /**
  * Prefix format for text block delimiters.
  * Uses special bracket symbols '⟦' and '⟧' which Google Translate preserves during translation.
@@ -136,6 +139,9 @@ export class GoogleTranslateEngine implements ITranslationEngine {
     let lastError: Error | null = null;
 
     for (const client of clients) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), GOOGLE_TRANSLATE_TIMEOUT_MS);
+
       try {
         let response: Response;
         if (text.length > 600) {
@@ -145,6 +151,7 @@ export class GoogleTranslateEngine implements ITranslationEngine {
           response = await fetch(postUrl, {
             method: 'POST',
             body,
+            signal: controller.signal,
           });
         } else {
           const url = new URL('https://translate.googleapis.com/translate_a/single');
@@ -153,7 +160,7 @@ export class GoogleTranslateEngine implements ITranslationEngine {
           url.searchParams.append('tl', targetLang);
           url.searchParams.append('dt', 't');
           url.searchParams.append('q', text);
-          response = await fetch(url.toString());
+          response = await fetch(url.toString(), { signal: controller.signal });
         }
 
         if (!response.ok) {
@@ -174,6 +181,8 @@ export class GoogleTranslateEngine implements ITranslationEngine {
         return translatedText || text;
       } catch (err: any) {
         lastError = err;
+      } finally {
+        clearTimeout(timer);
       }
     }
 

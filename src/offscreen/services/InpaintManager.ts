@@ -34,8 +34,8 @@ type CanonicalInpaintTier = Exclude<InpaintTier, 'aot'>;
  * - 'telea' / 'aot' / 'lama-manga': the quality tiers. All model/algorithm work
  *   happens inside the engine, fed by polygons.
  *
- * `maskRawCanvas` remains available on OcrResult (free DBNet byproduct) for
- * diagnostics/visual tests — but filling with it is a rejected design.
+ * `maskRawCanvas` remains an optional legacy OcrResult field for compatibility, but OCR
+ * no longer generates it because no production or diagnostic path consumes it.
  */
 export class InpaintManager {
   private platform: any = null;

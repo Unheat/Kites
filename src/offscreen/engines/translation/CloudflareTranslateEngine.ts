@@ -19,6 +19,9 @@ export { CLOUDFLARE_TRANSLATE_DEFAULT_ENDPOINT, CLOUDFLARE_TRANSLATE_MODEL };
 /** Timeout for Cloudflare Worker translate completions request */
 const REQUEST_TIMEOUT_MS = 15_000;
 
+/** Cache OAuth tokens below Google's one-hour token lifetime. */
+const TOKEN_CACHE_TTL_MS = 45 * 60 * 1000;
+
 /** Default batch size for Cloudflare worker translation */
 const DEFAULT_CLOUDFLARE_BATCH_SIZE = 15;
 
@@ -37,6 +40,8 @@ export class CloudflarePoolExhaustedError extends Error {
 
 export class CloudflareTranslateEngine extends BaseLlmTranslationEngine {
   private endpoint: string;
+  private cachedToken = '';
+  private tokenExpiresAt = 0;
 
   constructor(endpoint = CLOUDFLARE_TRANSLATE_DEFAULT_ENDPOINT) {
     super();
@@ -50,6 +55,10 @@ export class CloudflareTranslateEngine extends BaseLlmTranslationEngine {
    * Offscreen documents cannot access chrome.identity directly.
    */
   private async getAuthToken(): Promise<string> {
+    if (this.cachedToken && Date.now() < this.tokenExpiresAt) {
+      return this.cachedToken;
+    }
+
     if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
       try {
         const response = await new Promise<{ success?: boolean; token?: string }>((resolve) => {
@@ -57,7 +66,11 @@ export class CloudflareTranslateEngine extends BaseLlmTranslationEngine {
             resolve(res || {});
           });
         });
-        if (response.token) return response.token;
+        if (response.token) {
+          this.cachedToken = response.token;
+          this.tokenExpiresAt = Date.now() + TOKEN_CACHE_TTL_MS;
+          return response.token;
+        }
       } catch {
         // Continue to fallback
       }
@@ -105,6 +118,11 @@ export class CloudflareTranslateEngine extends BaseLlmTranslationEngine {
       clearTimeout(timer);
 
       if (!response.ok) {
+        if (response.status === 401) {
+          this.cachedToken = '';
+          this.tokenExpiresAt = 0;
+        }
+
         const errorJson = (await response.json().catch(() => ({}))) as any;
         const errCode = errorJson?.error?.code || 'unknown_error';
         const errMessage = errorJson?.error?.message || `HTTP ${response.status}`;

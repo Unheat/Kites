@@ -60,6 +60,7 @@ export class TranslationManager {
    * @param sourceLang - Source language, defaulting to automatic detection.
    * @param targetLang - Target language, defaulting to English.
    * @param onInitialization - Optional WebLLM cold-initialization lifecycle callback.
+   * @param providedPopupState - Optional state already read by the pipeline to avoid duplicate IPC.
    * @returns Translated strings from the first successful engine.
    */
   async processTranslation(
@@ -67,10 +68,11 @@ export class TranslationManager {
     sourceLang: string = 'auto',
     targetLang: string = 'English',
     onInitialization?: InitializationLifecycleCallback,
+    providedPopupState?: PopupState,
   ): Promise<string[]> {
     console.log('[TranslationManager] Starting translation process...');
 
-    const popupState = await new Promise<PopupState | undefined>((resolve) => {
+    const popupState = providedPopupState ?? await new Promise<PopupState | undefined>((resolve) => {
       chrome.runtime.sendMessage({ type: 'GET_POPUP_STATE' }, (response) => {
         resolve(response as PopupState | undefined);
       });

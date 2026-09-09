@@ -169,7 +169,7 @@ export class PipelineOrchestrator {
         console.log(`[PipelineOrchestrator] Running translation and inpainting in parallel (tier: ${inpaintTier}).`);
         
         const translationPromise = translationManager
-          .processTranslation(ocrResult.texts, sourceLang, targetLang, initializationLifecycle)
+          .processTranslation(ocrResult.texts, sourceLang, targetLang, initializationLifecycle, popupState)
           .then((r) => {
             if (import.meta.env.DEV) {
               console.log(`[PipelineOrchestrator] Translation branch finished in ${(performance.now() - stage2Start).toFixed(2)}ms.`);
@@ -194,7 +194,7 @@ export class PipelineOrchestrator {
       } else {
         // No inpainting — just translate
         console.log(`[PipelineOrchestrator] Translating ${ocrResult.texts.length} text blocks (no inpainting)...`);
-        translatedTexts = await translationManager.processTranslation(ocrResult.texts, sourceLang, targetLang, initializationLifecycle);
+        translatedTexts = await translationManager.processTranslation(ocrResult.texts, sourceLang, targetLang, initializationLifecycle, popupState);
         if (import.meta.env.DEV) {
           const stage2Duration = (performance.now() - stage2Start).toFixed(2);
           console.log(`[PipelineOrchestrator] Translation complete in ${stage2Duration}ms.`);

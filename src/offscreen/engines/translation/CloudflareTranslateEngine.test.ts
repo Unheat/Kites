@@ -105,4 +105,39 @@ describe('CloudflareTranslateEngine', () => {
 
     await expect(engine.translate(['Test text'])).rejects.toThrow(CloudflarePoolExhaustedError);
   });
+
+  it('caches the OAuth token across requests', async () => {
+    const tokenSpy = vi.spyOn(chrome.runtime, 'sendMessage').mockImplementation(((...args: unknown[]) => {
+      const callback = args.find((argument): argument is (response: unknown) => void => typeof argument === 'function');
+      callback?.({ success: true, token: 'cached-token' });
+    }) as typeof chrome.runtime.sendMessage);
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ choices: [{ message: { content: 'translated' } }] }), { status: 200 })
+    );
+
+    await (engine as any).requestLlm('first');
+    await (engine as any).requestLlm('second');
+
+    expect(tokenSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('evicts the cached OAuth token after HTTP 401', async () => {
+    const tokenSpy = vi.spyOn(chrome.runtime, 'sendMessage')
+      .mockImplementationOnce(((...args: unknown[]) => {
+        const callback = args.find((argument): argument is (response: unknown) => void => typeof argument === 'function');
+        callback?.({ success: true, token: 'expired-token' });
+      }) as typeof chrome.runtime.sendMessage)
+      .mockImplementationOnce(((...args: unknown[]) => {
+        const callback = args.find((argument): argument is (response: unknown) => void => typeof argument === 'function');
+        callback?.({ success: true, token: 'fresh-token' });
+      }) as typeof chrome.runtime.sendMessage);
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: 'Unauthorized' } }), { status: 401 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: 'translated' } }] }), { status: 200 }));
+
+    await expect((engine as any).requestLlm('first')).rejects.toThrow('401');
+    await expect((engine as any).requestLlm('second')).resolves.toBe('translated');
+
+    expect(tokenSpy).toHaveBeenCalledTimes(2);
+  });
 });

@@ -145,6 +145,18 @@ describe('TranslationManager Waterfall Logic', () => {
     expect(mocks.instantiatedIds).toEqual(['gg-translate']);
   });
 
+  it('uses provided popup state without sending redundant state IPC', async () => {
+    const popupState = {
+      activeEngineId: 'gg-translate',
+      fallbackChain: [],
+      customApis: [],
+    } as any;
+
+    await expect(manager.processTranslation(['Hello'], 'auto', 'English', undefined, popupState))
+      .resolves.toEqual(['Mock translated text']);
+    expect(mockChromeSendMessage).not.toHaveBeenCalled();
+  });
+
   it('falls back from WebLLM to Google Translate', async () => {
     respondWith('SmolLM2-135M-Instruct-q0f16-MLC', ['gg-translate']);
     mocks.failFirstTranslate = true;
