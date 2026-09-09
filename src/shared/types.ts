@@ -13,7 +13,12 @@ export type MessageType =
   | 'CHECK_MODEL_STATUS'   // Popup -> Background -> Offscreen
   | 'GET_MODEL_STATUSES'   // Popup -> Background -> Offscreen
   | 'CHECK_WEBGPU_SUPPORT' // Popup -> Background -> Offscreen
-  | 'PRELOAD_ACTIVE_ENGINE'; // Background -> Offscreen
+  | 'PRELOAD_ACTIVE_ENGINE' // Background -> Offscreen
+  | 'START_AREA_SELECTION' // Popup/Background -> Content
+  | 'CAPTURE_VISIBLE_TAB' // Content -> Background
+  | 'TRANSLATE_CAPTURED_IMAGE' // Content -> Background
+  | 'CAPTURE_TRANSLATED' // Background -> Content
+  | 'CAPTURE_TRANSLATION_ERROR'; // Background -> Content
 
 export interface TranslateImageMessage {
   type: 'TRANSLATE_IMAGE';
@@ -35,8 +40,32 @@ export interface ImageTranslatedMessage {
   };
 }
 export type RuntimeMessageTarget = 'background' | 'offscreen';
-export type RuntimeMessageSource = 'popup' | 'background' | 'offscreen' | 'dashboard';
+export type RuntimeMessageSource = 'popup' | 'background' | 'offscreen' | 'dashboard' | 'content';
 export type ModelCategory = 'translation' | 'inpaint' | 'ocr';
+
+export interface ViewportSelection {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+export type CropStatus = 'capturing' | 'translating' | 'completed' | 'failed';
+
+export interface CropOverlayItem {
+  id: string;
+  sourceKey: string;
+  pageLeft: number;
+  pageTop: number;
+  width: number;
+  height: number;
+  originalDataUrl: string;
+  translatedDataUrl?: string;
+  jobId?: number;
+  status: CropStatus;
+  showOriginal: boolean;
+  error?: string;
+}
 
 export interface RuntimeMessageRoute {
   target?: RuntimeMessageTarget;

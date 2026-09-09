@@ -1,8 +1,14 @@
 import { createRoot } from 'react-dom/client';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import './content.css';
-import { Languages } from 'lucide-react';
-import type { PopupState } from '../shared/types';
+import { Languages, Eye, EyeOff, ExternalLink, X, Crop } from 'lucide-react';
+import type { PopupState, CropOverlayItem, ViewportSelection } from '../shared/types';
+import {
+  normalizeSelection,
+  calculateCaptureSourceRect,
+  cropCapturedDataUrl,
+  waitForCleanFrames,
+} from './captureArea';
 
 // Minimum rendered dimensions prevent controls and thumbnails from entering the pipeline.
 const MIN_WIDTH_IMAGE_PX = 150;
@@ -445,6 +451,189 @@ function TranslateButton({
   );
 }
 
+interface ScreenSnipperProps {
+  onComplete: (selection: ViewportSelection) => void;
+  onCancel: () => void;
+}
+
+function ScreenSnipper({ onComplete, onCancel }: ScreenSnipperProps) {
+  const [startPos, setStartPos] = useState<{ x: number; y: number } | null>(null);
+  const [currentPos, setCurrentPos] = useState<{ x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onCancel();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onCancel]);
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const pos = { x: e.clientX, y: e.clientY };
+    setStartPos(pos);
+    setCurrentPos(pos);
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {}
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!startPos) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setCurrentPos({ x: e.clientX, y: e.clientY });
+  };
+
+  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!startPos || !currentPos) {
+      onCancel();
+      return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {}
+
+    const selection = normalizeSelection(
+      startPos,
+      currentPos,
+      { width: window.innerWidth, height: window.innerHeight }
+    );
+
+    if (selection) {
+      onComplete(selection);
+    } else {
+      onCancel();
+    }
+  };
+
+  const activeSelection = startPos && currentPos
+    ? normalizeSelection(startPos, currentPos, { width: window.innerWidth, height: window.innerHeight })
+    : null;
+
+  return (
+    <div
+      className="kites-snipper-backdrop"
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+    >
+      <div className="kites-snipper-hint">
+        <Crop size={15} />
+        Drag to select area · Esc to cancel
+      </div>
+      {activeSelection && (
+        <div
+          className="kites-snipper-selection"
+          style={{
+            left: `${activeSelection.left}px`,
+            top: `${activeSelection.top}px`,
+            width: `${activeSelection.width}px`,
+            height: `${activeSelection.height}px`,
+          }}
+        >
+          <div className="kites-snipper-badge">
+            {activeSelection.width} × {activeSelection.height} px
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface CropOverlayBoxProps {
+  crop: CropOverlayItem;
+  onToggleOriginal: (id: string) => void;
+  onRemove: (id: string) => void;
+}
+
+function CropOverlayBox({ crop, onToggleOriginal, onRemove }: CropOverlayBoxProps) {
+  const isTranslating = crop.status === 'capturing' || crop.status === 'translating';
+  const displayUrl = crop.showOriginal ? crop.originalDataUrl : (crop.translatedDataUrl || crop.originalDataUrl);
+
+  const openInStudio = () => {
+    try {
+      chrome.runtime.sendMessage({
+        target: 'background',
+        source: 'content',
+        request: true,
+        type: 'OPEN_DASHBOARD'
+      });
+    } catch {
+      window.open(chrome.runtime.getURL('index.html'), '_blank');
+    }
+  };
+
+  return (
+    <div
+      className="kites-crop-overlay"
+      style={{
+        left: `${crop.pageLeft}px`,
+        top: `${crop.pageTop}px`,
+        width: `${crop.width}px`,
+        height: `${crop.height}px`,
+      }}
+    >
+      {/* Floating Toolbar */}
+      <div className="kites-crop-toolbar">
+        {crop.status === 'completed' && crop.originalDataUrl && (
+          <button
+            type="button"
+            className={`kites-crop-toolbar-btn ${crop.showOriginal ? 'kites-crop-btn-active' : ''}`}
+            onClick={() => onToggleOriginal(crop.id)}
+            title={crop.showOriginal ? 'View Translated' : 'View Original'}
+          >
+            {crop.showOriginal ? <EyeOff size={14} /> : <Eye size={14} />}
+          </button>
+        )}
+        <button
+          type="button"
+          className="kites-crop-toolbar-btn"
+          onClick={openInStudio}
+          title="Open in Studio"
+        >
+          <ExternalLink size={14} />
+        </button>
+        <button
+          type="button"
+          className="kites-crop-toolbar-btn"
+          onClick={() => onRemove(crop.id)}
+          title="Close"
+        >
+          <X size={14} />
+        </button>
+      </div>
+
+      {/* Render Image or Loading/Error */}
+      {displayUrl && (
+        <img
+          src={displayUrl}
+          alt="Cropped manga panel"
+          className="kites-crop-overlay-img"
+        />
+      )}
+
+      {isTranslating && (
+        <div className="kites-crop-loading">
+          <Languages size={24} className="kites-anim-spin" />
+          <span>{crop.status === 'capturing' ? 'Capturing screen...' : 'Translating panel...'}</span>
+        </div>
+      )}
+
+      {crop.status === 'failed' && (
+        <div className="kites-crop-error">
+          <span>{crop.error || 'Translation failed'}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /**
  * Manages automatic image detection plus hover/persistent manual translation overlays.
  *
@@ -457,6 +646,8 @@ function GlobalOverlay() {
   const [mode, setMode] = useState<'hover' | 'persistent'>('hover');
   const [autoTranslate, setAutoTranslate] = useState(false);
   const [translatingUrl, setTranslatingUrl] = useState<string | null>(null);
+  const [isSnipping, setIsSnipping] = useState<boolean>(false);
+  const [crops, setCrops] = useState<CropOverlayItem[]>([]);
 
   const activeImgRef = useRef(activeImg);
   const translatingUrlRef = useRef(translatingUrl);
@@ -498,6 +689,133 @@ function GlobalOverlay() {
     }
   };
 
+  const handleCropComplete = async (selection: ViewportSelection) => {
+    setIsSnipping(false);
+
+    const scrollX = window.scrollX;
+    const scrollY = window.scrollY;
+    const pageLeft = selection.left + scrollX;
+    const pageTop = selection.top + scrollY;
+    const requestId = Math.random().toString(36).substring(2, 11);
+
+    const newCrop: CropOverlayItem = {
+      id: requestId,
+      sourceKey: `kites-capture:${requestId}`,
+      pageLeft,
+      pageTop,
+      width: selection.width,
+      height: selection.height,
+      originalDataUrl: '',
+      status: 'capturing',
+      showOriginal: false,
+    };
+
+    setCrops((prev) => [...prev, newCrop]);
+
+    // Wait two animation frames so the selection box is completely unmounted before capture
+    await waitForCleanFrames();
+
+    try {
+      chrome.runtime.sendMessage(
+        { target: 'background', source: 'content', request: true, type: 'CAPTURE_VISIBLE_TAB' },
+        async (response) => {
+          if (chrome.runtime.lastError || response?.status !== 'success' || !response?.dataUrl) {
+            console.error('[Content Script] CAPTURE_VISIBLE_TAB failed:', chrome.runtime.lastError?.message || response?.error);
+            setCrops((prev) =>
+              prev.map((c) =>
+                c.id === requestId
+                  ? { ...c, status: 'failed', error: response?.error || 'Failed to capture screen' }
+                  : c
+              )
+            );
+            return;
+          }
+
+          try {
+            const fullDataUrl = response.dataUrl;
+            const img = new Image();
+            img.src = fullDataUrl;
+            await new Promise((resolve, reject) => {
+              img.onload = resolve;
+              img.onerror = reject;
+            });
+
+            const sourceRect = calculateCaptureSourceRect(
+              selection,
+              { width: window.innerWidth, height: window.innerHeight },
+              img.naturalWidth,
+              img.naturalHeight
+            );
+
+            const croppedDataUrl = await cropCapturedDataUrl(fullDataUrl, sourceRect);
+            const safeOriginalBlob = createSafeBlobUrlFromData(croppedDataUrl);
+
+            setCrops((prev) =>
+              prev.map((c) =>
+                c.id === requestId
+                  ? { ...c, originalDataUrl: safeOriginalBlob, status: 'translating' }
+                  : c
+              )
+            );
+
+            chrome.runtime.sendMessage(
+              {
+                target: 'background',
+                source: 'content',
+                request: true,
+                type: 'TRANSLATE_CAPTURED_IMAGE',
+                payload: {
+                  requestId,
+                  dataUrl: croppedDataUrl,
+                },
+              },
+              (queueRes) => {
+                if (chrome.runtime.lastError || queueRes?.status === 'error') {
+                  console.error('[Content Script] TRANSLATE_CAPTURED_IMAGE failed:', chrome.runtime.lastError?.message || queueRes?.error);
+                  setCrops((prev) =>
+                    prev.map((c) =>
+                      c.id === requestId
+                        ? { ...c, status: 'failed', error: queueRes?.error || 'Failed to queue translation' }
+                        : c
+                    )
+                  );
+                }
+              }
+            );
+          } catch (cropErr: any) {
+            console.error('[Content Script] Failed to crop captured image:', cropErr);
+            setCrops((prev) =>
+              prev.map((c) =>
+                c.id === requestId
+                  ? { ...c, status: 'failed', error: cropErr?.message || 'Crop processing failed' }
+                  : c
+              )
+            );
+          }
+        }
+      );
+    } catch (err: any) {
+      console.error('[Content Script] Capture visible tab dispatch error:', err);
+      setCrops((prev) =>
+        prev.map((c) =>
+          c.id === requestId
+            ? { ...c, status: 'failed', error: err?.message || 'Capture dispatch failed' }
+            : c
+        )
+      );
+    }
+  };
+
+  const handleToggleOriginal = useCallback((id: string) => {
+    setCrops((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, showOriginal: !c.showOriginal } : c))
+    );
+  }, []);
+
+  const handleRemoveCrop = useCallback((id: string) => {
+    setCrops((prev) => prev.filter((c) => c.id !== id));
+  }, []);
+
   // Load user settings and react to popup updates.
   useEffect(() => {
     const loadSettings = () => {
@@ -521,6 +839,40 @@ function GlobalOverlay() {
   // Receive terminal job events, restore the image, and allow Hover mode to disappear again.
   useEffect(() => {
     const handleMessage = (message: any) => {
+      if (message.type === 'START_AREA_SELECTION') {
+        setIsSnipping(true);
+        return;
+      }
+
+      if (message.type === 'CAPTURE_TRANSLATED' && message.payload) {
+        const { requestId, bakedBase64, jobId } = message.payload;
+        setCrops((prev) =>
+          prev.map((c) =>
+            c.id === requestId
+              ? {
+                  ...c,
+                  status: 'completed',
+                  translatedDataUrl: createSafeBlobUrlFromData(bakedBase64),
+                  jobId,
+                }
+              : c
+          )
+        );
+        return;
+      }
+
+      if (message.type === 'CAPTURE_TRANSLATION_ERROR' && message.payload) {
+        const { requestId, error } = message.payload;
+        setCrops((prev) =>
+          prev.map((c) =>
+            c.id === requestId
+              ? { ...c, status: 'failed', error: error || 'Translation failed' }
+              : c
+          )
+        );
+        return;
+      }
+
       if (!message.payload || (message.type !== 'IMAGE_TRANSLATED' && message.type !== 'TRANSLATION_ERROR')) return;
 
       const { originalUrl, bakedBase64 } = message.payload;
@@ -694,16 +1046,44 @@ function GlobalOverlay() {
 
   if (!isEnabled) return null;
 
-  if (mode === 'persistent') {
-    return <>{consistentImages.map((image) => (
-      <TranslateButton key={image.anchorName} srcUrl={image.srcUrl} anchorName={image.anchorName}
-        isTranslating={translatingUrl === image.srcUrl} onTranslate={(srcUrl) => requestTranslation(srcUrl, image)} />
-    ))}</>;
-  }
+  return (
+    <>
+      {isSnipping && (
+        <ScreenSnipper
+          onComplete={handleCropComplete}
+          onCancel={() => setIsSnipping(false)}
+        />
+      )}
 
-  if (!activeImg) return null;
-  return <TranslateButton srcUrl={activeImg.srcUrl} anchorName={activeImg.anchorName}
-    isTranslating={translatingUrl === activeImg.srcUrl} onTranslate={(srcUrl) => requestTranslation(srcUrl, activeImg)} />;
+      {crops.map((crop) => (
+        <CropOverlayBox
+          key={crop.id}
+          crop={crop}
+          onToggleOriginal={handleToggleOriginal}
+          onRemove={handleRemoveCrop}
+        />
+      ))}
+
+      {mode === 'persistent' && consistentImages.map((image) => (
+        <TranslateButton
+          key={image.anchorName}
+          srcUrl={image.srcUrl}
+          anchorName={image.anchorName}
+          isTranslating={translatingUrl === image.srcUrl}
+          onTranslate={(srcUrl) => requestTranslation(srcUrl, image)}
+        />
+      ))}
+
+      {mode === 'hover' && activeImg && (
+        <TranslateButton
+          srcUrl={activeImg.srcUrl}
+          anchorName={activeImg.anchorName}
+          isTranslating={translatingUrl === activeImg.srcUrl}
+          onTranslate={(srcUrl) => requestTranslation(srcUrl, activeImg)}
+        />
+      )}
+    </>
+  );
 }
 
 try {

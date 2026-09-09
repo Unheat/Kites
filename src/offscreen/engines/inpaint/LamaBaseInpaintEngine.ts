@@ -19,12 +19,12 @@ type LamaProvider = 'cpu' | 'webgpu' | 'wasm';
  * Runs on ONNX Runtime. Requires ~207MB download.
  */
 export class LamaBaseInpaintEngine implements IInpaintEngine {
-  private platform: any;
-  private session: any = null;
-  private ort: any = null;
-  private activeProvider: LamaProvider | null = null;
-  private browserModelBuffer: ArrayBuffer | null = null;
-  private browserExternalData: Array<{ data: ArrayBuffer; path: string }> | undefined;
+  protected platform: any;
+  protected session: any = null;
+  protected ort: any = null;
+  protected activeProvider: LamaProvider | null = null;
+  protected browserModelBuffer: ArrayBuffer | null = null;
+  protected browserExternalData: Array<{ data: ArrayBuffer; path: string }> | undefined;
 
   constructor(platform: any) {
     this.platform = platform;
@@ -144,7 +144,7 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
    * @param feeds - ONNX input tensors for one 512x512 patch.
    * @returns ONNX inference outputs from the active provider.
    */
-  private async runPatch(feeds: Record<string, any>): Promise<any> {
+  protected async runPatch(feeds: Record<string, any>): Promise<any> {
     // WORKAROUND: Device loss can occur after a WebGPU session initializes. Permit one
     // provider transition for the engine instance; repeated retries would loop forever
     // on malformed models or persistent WASM failures. See devlog 015.
@@ -205,7 +205,7 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
    * @param height - The height of the canvas in pixels.
    * @returns A promise resolving to a Canvas instance.
    */
-  private async createCanvas(width: number, height: number): Promise<any> {
+  protected async createCanvas(width: number, height: number): Promise<any> {
     if (typeof window === 'undefined') {
       const { createCanvas } = await import('canvas');
       return createCanvas(width, height);
@@ -224,7 +224,7 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
    * @param canvas - The canvas element to convert (node-canvas, OffscreenCanvas, or HTMLCanvasElement).
    * @returns A promise resolving to the image data as an ArrayBuffer.
    */
-  private async canvasToArrayBuffer(canvas: any): Promise<ArrayBuffer> {
+  protected async canvasToArrayBuffer(canvas: any): Promise<ArrayBuffer> {
     if (typeof window === 'undefined') {
       return new Uint8Array(canvas.toBuffer('image/jpeg', { quality: 1.0 })).buffer;
     } else {

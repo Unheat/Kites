@@ -5,7 +5,7 @@ import '../index.css';
 import EngineDropdown from './components/EngineDropdown';
 import SettingsView from './components/SettingsView';
 
-import { Settings, Home, Power } from 'lucide-react';
+import { Settings, Home, Power, Crop } from 'lucide-react';
 
 import type { PopupState } from '../shared/types';
 import { DEFAULT_POPUP_STATE } from '../shared/types';
@@ -167,7 +167,26 @@ function PopupApp() {
         </div>
 
         {/* Footer Action */}
-        <div className="px-3.5 pb-3.5">
+        <div className="px-3.5 pb-3.5 flex flex-col gap-2">
+          <button
+            onClick={async () => {
+              try {
+                const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+                if (tab?.id) {
+                  await chrome.tabs.sendMessage(tab.id, { type: 'START_AREA_SELECTION' });
+                  window.close();
+                }
+              } catch (err) {
+                console.warn('[Popup] Failed to start area selection on active tab:', err);
+              }
+            }}
+            className="w-full py-2 bg-[var(--color-vellum)] text-[var(--color-ink)] border border-[var(--color-dust)] border-opacity-30 font-semibold rounded hover:border-[var(--color-editorial)] hover:text-[var(--color-editorial)] transition-colors flex items-center justify-center gap-2 cursor-pointer text-sm"
+            title="Drag a rectangle across any on-screen manga panel, canvas, or video to translate it"
+          >
+            <Crop size={16} />
+            Crop & Translate Area
+          </button>
+
           <button 
             onClick={() => {
               chrome.tabs.create({ url: chrome.runtime.getURL('index.html') });

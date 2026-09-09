@@ -115,6 +115,18 @@ function setupContextMenu(): void {
         }
       }
     );
+    chrome.contextMenus.create(
+      {
+        id: 'translate-area',
+        title: 'Crop & Translate Area',
+        contexts: ['page', 'frame', 'selection', 'image', 'video'],
+      },
+      () => {
+        if (chrome.runtime.lastError) {
+          console.warn('[Background] Context menu setup warning:', chrome.runtime.lastError.message);
+        }
+      }
+    );
   });
 }
 
@@ -132,6 +144,17 @@ chrome.contextMenus.onClicked.addListener(async (info: chrome.contextMenus.OnCli
     } catch (error) {
       console.error('[Background] Context menu translation failed:', error);
     }
+  } else if (info.menuItemId === 'translate-area' && _tab?.id) {
+    const data = await chrome.storage.local.get('popupState');
+    const popupState = data.popupState as PopupState | undefined;
+    if (popupState && popupState.isExtensionEnabled === false) {
+      console.log('[Background] Context menu ignored: Kites extension is disabled.');
+      return;
+    }
+    console.log('[Background] Context menu Crop & Translate Area clicked for tab:', _tab.id);
+    chrome.tabs.sendMessage(_tab.id, { type: 'START_AREA_SELECTION' }).catch((err) => {
+      console.warn('[Background] Failed to send START_AREA_SELECTION to tab:', err);
+    });
   }
 });
 
@@ -172,6 +195,53 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       });
       return true; // Keep message channel open for async response
     }
+  }
+
+  if (message.type === 'CAPTURE_VISIBLE_TAB') {
+    const windowId = _sender.tab?.windowId ?? chrome.windows.WINDOW_ID_CURRENT;
+    chrome.tabs.captureVisibleTab(windowId, { format: 'png' }, (dataUrl) => {
+      if (chrome.runtime.lastError || !dataUrl) {
+        sendResponse({
+          status: 'error',
+          error: chrome.runtime.lastError?.message || 'Failed to capture visible tab'
+        });
+      } else {
+        sendResponse({
+          status: 'success',
+          dataUrl
+        });
+      }
+    });
+    return true;
+  }
+
+  if (message.type === 'TRANSLATE_CAPTURED_IMAGE') {
+    const { requestId, dataUrl } = message.payload || {};
+    if (!requestId || !dataUrl) {
+      sendResponse({ status: 'error', error: 'Missing requestId or dataUrl' });
+      return false;
+    }
+    chrome.storage.local.get('popupState').then(async (data) => {
+      const popupState = data.popupState as PopupState | undefined;
+      if (popupState && popupState.isExtensionEnabled === false) {
+        console.warn('[Background] Rejected TRANSLATE_CAPTURED_IMAGE: Kites extension is disabled.');
+        sendResponse({ status: 'error', error: 'Extension is disabled' });
+        return;
+      }
+      console.log('[Background] Received TRANSLATE_CAPTURED_IMAGE from content script. Request ID:', requestId);
+      queueCapturedTranslation(requestId, dataUrl, _sender.tab?.id)
+        .then(() => sendResponse({ status: 'queued' }))
+        .catch((err) => sendResponse({ status: 'error', error: err instanceof Error ? err.message : String(err) }));
+    }).catch((err) => {
+      sendResponse({ status: 'error', error: err instanceof Error ? err.message : String(err) });
+    });
+    return true;
+  }
+
+  if (message.type === 'OPEN_DASHBOARD') {
+    chrome.tabs.create({ url: chrome.runtime.getURL('index.html') });
+    sendResponse({ status: 'success' });
+    return true;
   }
   
   // Pluggable OAuth Dispatcher (Google, Apple, etc.)
@@ -479,6 +549,36 @@ async function queueTranslation(srcUrl: string, tabId?: number) {
 }
 
 /**
+ * Queues a captured image (crop or screenshot) by saving its Blob to IndexedDB
+ * and scheduling it in the background queue.
+ *
+ * @param {string} requestId - Unique identifier for the capture session.
+ * @param {string} dataUrl - Base64 data URL of the cropped screen area.
+ * @param {number} [tabId] - ID of the tab that requested translation.
+ * @returns {Promise<void>}
+ */
+async function queueCapturedTranslation(requestId: string, dataUrl: string, tabId?: number): Promise<void> {
+  const response = await fetch(dataUrl);
+  const blob = await response.blob();
+  const srcUrl = `kites-capture:${requestId}`;
+
+  console.log('[Background] Queuing captured screen area:', srcUrl);
+  const jobId = (await db.translationJobs.add({
+    timestamp: Date.now(),
+    status: 'queued',
+    srcUrl,
+    tabId,
+  })) as number;
+
+  await db.images.add({
+    jobId,
+    rawImageBlob: blob,
+  });
+
+  processQueue();
+}
+
+/**
  * Checks the queue in Dexie and pulls the next image if under the concurrency limit.
  * 
  * @returns {Promise<void>}
@@ -586,18 +686,21 @@ async function processQueue() {
  */
 async function processImageTranslation(jobId: number, srcUrl: string, tabId?: number) {
   try {
-    console.log(`[Background] Fetching image for job ${jobId} from URL: ${srcUrl}`);
-    const response = await fetch(srcUrl);
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+    const existingImage = await db.images.where('jobId').equals(jobId).first();
+    if (!existingImage) {
+      console.log(`[Background] Fetching image for job ${jobId} from URL: ${srcUrl}`);
+      const response = await fetch(srcUrl);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const blob = await response.blob();
+      
+      console.log(`[Background] Saving blob for job ${jobId} to IndexedDB...`);
+      await db.images.add({
+        jobId: jobId,
+        rawImageBlob: blob
+      });
     }
-    const blob = await response.blob();
-    
-    console.log(`[Background] Saving blob for job ${jobId} to IndexedDB...`);
-    await db.images.add({
-      jobId: jobId,
-      rawImageBlob: blob
-    });
     
     await db.translationJobs.update(jobId, { status: 'processing' });
     
@@ -613,14 +716,27 @@ async function processImageTranslation(jobId: number, srcUrl: string, tabId?: nu
     console.log(`[Background] Offscreen completed job ${jobId} with status:`, offscreenResponse?.status);
     
     if (offscreenResponse?.status === 'success' && offscreenResponse?.bakedBase64 && tabId) {
-      console.log(`[Background] Sending IMAGE_TRANSLATED back to tab ${tabId}...`);
-      chrome.tabs.sendMessage(tabId, {
-        type: 'IMAGE_TRANSLATED',
-        payload: {
-          originalUrl: srcUrl,
-          bakedBase64: offscreenResponse.bakedBase64
-        }
-      }).catch(() => {});
+      if (srcUrl.startsWith('kites-capture:')) {
+        const requestId = srcUrl.replace('kites-capture:', '');
+        console.log(`[Background] Sending CAPTURE_TRANSLATED to tab ${tabId} for request ${requestId}...`);
+        chrome.tabs.sendMessage(tabId, {
+          type: 'CAPTURE_TRANSLATED',
+          payload: {
+            requestId,
+            jobId,
+            bakedBase64: offscreenResponse.bakedBase64
+          }
+        }).catch(() => {});
+      } else {
+        console.log(`[Background] Sending IMAGE_TRANSLATED back to tab ${tabId}...`);
+        chrome.tabs.sendMessage(tabId, {
+          type: 'IMAGE_TRANSLATED',
+          payload: {
+            originalUrl: srcUrl,
+            bakedBase64: offscreenResponse.bakedBase64
+          }
+        }).catch(() => {});
+      }
     } else if (offscreenResponse?.status === 'error') {
       throw new Error(offscreenResponse.error || 'Offscreen translation pipeline failed');
     }
@@ -633,10 +749,21 @@ async function processImageTranslation(jobId: number, srcUrl: string, tabId?: nu
     await db.translationJobs.update(jobId, { status: 'error' });
     
     if (tabId) {
-      chrome.tabs.sendMessage(tabId, {
-        type: 'TRANSLATION_ERROR',
-        payload: { originalUrl: srcUrl }
-      }).catch(() => {});
+      if (srcUrl.startsWith('kites-capture:')) {
+        const requestId = srcUrl.replace('kites-capture:', '');
+        chrome.tabs.sendMessage(tabId, {
+          type: 'CAPTURE_TRANSLATION_ERROR',
+          payload: {
+            requestId,
+            error: error instanceof Error ? error.message : String(error)
+          }
+        }).catch(() => {});
+      } else {
+        chrome.tabs.sendMessage(tabId, {
+          type: 'TRANSLATION_ERROR',
+          payload: { originalUrl: srcUrl }
+        }).catch(() => {});
+      }
     }
 
     // Trigger queue again so slots opened up by this error are immediately reclaimed
