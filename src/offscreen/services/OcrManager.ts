@@ -43,39 +43,134 @@ export function isValuableText(text: string): boolean {
  * Dynamically maps to any preset registered in ocrRegistry.
  */
 export type OcrTier = string;
+export type InitializationLifecycleCallback = (phase: 'started' | 'finished') => void;
 
 export class OcrManager {
-  private engines: Map<string, IOcrEngine> = new Map();
-  // Stores the in-flight initialization promise so that concurrent callers
-  // all await the same work rather than spinning in a polling loop.
-  private initPromises: Map<string, Promise<IOcrEngine>> = new Map();
+  private activeTier: string | null = null;
+  private activeEngine: IOcrEngine | null = null;
+  private activeUsers = 0;
+  private usersDrained: Promise<void> | null = null;
+  private resolveUsersDrained: (() => void) | null = null;
+  private lifecycleQueue: Promise<void> = Promise.resolve();
 
   /**
-   * Returns the initialized OCR engine, creating and initializing it on first call.
-   * Uses the singleton promise pattern: if initialization is already in progress,
-   * concurrent callers await the same promise instead of busy-waiting with setTimeout.
+   * Runs one lifecycle mutation after earlier mutations finish, while keeping a rejected
+   * mutation from poisoning the queue for later retries.
    *
-   * @returns A promise that resolves to the loaded OCR engine instance.
+   * @param operation - Lifecycle mutation to serialize.
+   * @returns The operation result.
    */
-  async getOrLoadEngine(tier: OcrTier = 'v6-small'): Promise<IOcrEngine> {
-    const canonicalTier = resolveOcrTier(tier);
-    if (this.engines.has(canonicalTier)) return this.engines.get(canonicalTier)!;
-
-    if (!this.initPromises.has(canonicalTier)) {
-      const promise = (async () => {
-        console.log(`[OcrManager] Instantiating OCR Engine for tier: ${canonicalTier}...`);
-        if (canonicalTier === 'none') {
-          throw new Error('[OcrManager] None OCR engine is not yet implemented.');
-        }
-        const engine = new PaddleOcrEngine(canonicalTier);
-        await engine.init();
-        this.engines.set(canonicalTier, engine);
-        return engine;
-      })();
-      this.initPromises.set(canonicalTier, promise);
+  private async serializeLifecycle<T>(operation: () => Promise<T>): Promise<T> {
+    const previous = this.lifecycleQueue;
+    let releaseQueue!: () => void;
+    this.lifecycleQueue = new Promise<void>(resolve => { releaseQueue = resolve; });
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      releaseQueue();
     }
+  }
 
-    return this.initPromises.get(canonicalTier)!;
+  /**
+   * Waits until all operations using the current engine have released it.
+   *
+   * @returns A promise resolved when no active engine users remain.
+   */
+  private async waitForUsersToDrain(): Promise<void> {
+    if (this.activeUsers === 0) return;
+    if (!this.usersDrained) {
+      this.usersDrained = new Promise<void>(resolve => { this.resolveUsersDrained = resolve; });
+    }
+    await this.usersDrained;
+  }
+
+  /**
+   * Releases one operation's engine lease and wakes a pending tier switch when last user exits.
+   *
+   * @returns Nothing.
+   */
+  private releaseEngine(): void {
+    this.activeUsers -= 1;
+    if (this.activeUsers === 0) {
+      this.resolveUsersDrained?.();
+      this.resolveUsersDrained = null;
+      this.usersDrained = null;
+    }
+  }
+
+  /**
+   * Returns requested initialized OCR engine, replacing another tier only after its users finish.
+   * Same-tier calls reuse one engine. Serialized creation deduplicates initialization, and failed
+   * initialization leaves no cached state so a later call can retry.
+   *
+   * @param tier - OCR model tier or registry alias.
+   * @returns The initialized OCR engine instance.
+   */
+
+  /**
+   * Acquires a counted lease on requested engine so tier replacement cannot destroy it in use.
+   *
+   * @param tier - OCR model tier or registry alias.
+   * @returns Engine and idempotent release callback.
+   */
+  private async acquireEngine(
+    tier: OcrTier,
+    onInitialization?: InitializationLifecycleCallback,
+  ): Promise<{ engine: IOcrEngine; release: () => void }> {
+    return this.serializeLifecycle(async () => {
+      const canonicalTier = resolveOcrTier(tier);
+      let engine = this.activeEngine;
+      if (!engine || this.activeTier !== canonicalTier) {
+        engine = await this.loadEngineInsideLifecycle(canonicalTier, onInitialization);
+      }
+      this.activeUsers += 1;
+      let released = false;
+      return {
+        engine,
+        release: () => {
+          if (released) return;
+          released = true;
+          this.releaseEngine();
+        },
+      };
+    });
+  }
+
+  /**
+   * Replaces current OCR engine while caller owns lifecycle serialization.
+   *
+   * @param canonicalTier - Canonical OCR registry tier.
+   * @param onInitialization - Optional callback notified around genuine cold initialization.
+   * @returns Initialized replacement engine.
+   */
+  private async loadEngineInsideLifecycle(
+    canonicalTier: string,
+    onInitialization?: InitializationLifecycleCallback,
+  ): Promise<IOcrEngine> {
+    if (canonicalTier === 'none') throw new Error('[OcrManager] None OCR engine is not yet implemented.');
+    await this.waitForUsersToDrain();
+    if (this.activeEngine) {
+      console.log(`[OcrManager] Destroying OCR engine: ${this.activeTier}...`);
+      await this.activeEngine.destroy();
+      this.activeEngine = null;
+      this.activeTier = null;
+    }
+    console.log(`[OcrManager] Instantiating OCR Engine for tier: ${canonicalTier}...`);
+    const engine = new PaddleOcrEngine(canonicalTier);
+    onInitialization?.('started');
+    try {
+      await engine.init();
+    } catch (error) {
+      console.error(`[OcrManager] Failed to initialize OCR tier: ${canonicalTier}`, error);
+      await engine.destroy().catch(destroyError => console.error('[OcrManager] Failed to destroy partial engine', destroyError));
+      throw error;
+    } finally {
+      onInitialization?.('finished');
+    }
+    this.activeTier = canonicalTier;
+    this.activeEngine = engine;
+    return engine;
   }
 
   /**
@@ -718,16 +813,22 @@ export class OcrManager {
    * @param context - Optional pipeline context. `sourceLang` activates language-aware
    * filters (XianScan lang.rs); `pageWidth`/`pageHeight` activate the geometry
    * pre-filter battery. All undefined = legacy behavior (no language/geometry filters).
+   * @param onInitialization - Optional callback notified around genuine cold initialization.
    * @returns A promise that resolves to the standardized OCR result.
    */
   async processImage(
     imageBuffer: ArrayBuffer,
     tier: OcrTier = 'v6-small',
-    context?: { sourceLang?: string; pageWidth?: number; pageHeight?: number }
+    context?: { sourceLang?: string; pageWidth?: number; pageHeight?: number },
+    onInitialization?: InitializationLifecycleCallback,
   ): Promise<OcrResult> {
-    const engine = await this.getOrLoadEngine(tier);
-    const rawResult = await engine.recognize(imageBuffer);
-    return this.mergeTextBlocks(rawResult, context);
+    const { engine, release } = await this.acquireEngine(tier, onInitialization);
+    try {
+      const rawResult = await engine.recognize(imageBuffer);
+      return this.mergeTextBlocks(rawResult, context);
+    } finally {
+      release();
+    }
   }
 
   /**
@@ -736,10 +837,13 @@ export class OcrManager {
    * @returns A promise that resolves when cleanup is complete.
    */
   async cleanup(): Promise<void> {
-    for (const engine of this.engines.values()) {
-      await engine.destroy();
-    }
-    this.engines.clear();
-    this.initPromises.clear();
+    await this.serializeLifecycle(async () => {
+      await this.waitForUsersToDrain();
+      if (this.activeEngine) {
+        await this.activeEngine.destroy();
+        this.activeEngine = null;
+        this.activeTier = null;
+      }
+    });
   }
 }

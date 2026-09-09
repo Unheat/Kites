@@ -1,4 +1,4 @@
-import type { ProcessJobMessage } from '../shared/types';
+import type { ModelInitializationMessage, ModelInitializationPhase, ProcessJobMessage } from '../shared/types';
 import { pipelineOrchestrator } from './services/PipelineOrchestrator';
 import { translationManager } from './services/TranslationManager';
 import { CustomApiEngine } from './engines/translation/CustomApiEngine';
@@ -434,7 +434,27 @@ async function handleGetModelStatuses(modelIds: string[]): Promise<{
  * Executes the Translation Pipeline Orchestrator for a given job.
  */
 async function runTranslationPipeline(jobId: number): Promise<string> {
-  return await pipelineOrchestrator.runPipeline(jobId);
+  /**
+   * Sends an addressed model-initialization lifecycle event to background.
+   *
+   * @param eventJobId - Job whose pipeline is waiting for initialization.
+   * @param phase - Whether initialization started or finished.
+   * @returns Nothing.
+   */
+  const reportInitialization = (eventJobId: number, phase: ModelInitializationPhase): void => {
+    const event: ModelInitializationMessage = {
+      type: 'MODEL_INITIALIZATION',
+      target: 'background',
+      source: 'offscreen',
+      event: true,
+      payload: { jobId: eventJobId, phase },
+    };
+    chrome.runtime.sendMessage(event).catch((error) => {
+      console.error('[Offscreen] Failed to report model initialization:', error);
+    });
+  };
+
+  return await pipelineOrchestrator.runPipeline(jobId, reportInitialization);
 }
 
 // Auto-check and cache default OCR model (v6-small) when offscreen document initializes

@@ -160,6 +160,37 @@ chrome.contextMenus.onClicked.addListener(async (info: chrome.contextMenus.OnCli
 
 // Forward messages from content script or offscreen to popup
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (
+    message.type === 'MODEL_INITIALIZATION' &&
+    message.target === 'background' &&
+    message.source === 'offscreen' &&
+    message.event === true &&
+    Number.isInteger(message.payload?.jobId) &&
+    (message.payload?.phase === 'started' || message.payload?.phase === 'finished')
+  ) {
+    const jobId = message.payload.jobId as number;
+    db.translationJobs.get(jobId).then((job) => {
+      if (!job?.tabId || !job.srcUrl) return;
+
+      const isCapture = job.srcUrl.startsWith('kites-capture:');
+      const identity = isCapture
+        ? { requestId: job.srcUrl.replace('kites-capture:', '') }
+        : { originalUrl: job.srcUrl };
+      chrome.tabs.sendMessage(job.tabId, {
+        type: 'MODEL_INITIALIZATION',
+        target: 'content',
+        source: 'background',
+        event: true,
+        payload: { jobId, phase: message.payload.phase, ...identity },
+      }).catch((error) => {
+        console.error(`[Background] Failed to forward model initialization for job ${jobId}:`, error);
+      });
+    }).catch((error) => {
+      console.error(`[Background] Failed to resolve model initialization job ${jobId}:`, error);
+    });
+    return false;
+  }
+
   if (message.type === 'GET_POPUP_STATE') {
     chrome.storage.local.get('popupState').then(async (data) => {
       const storedState = data.popupState as PopupState | undefined;

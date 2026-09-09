@@ -49,30 +49,51 @@ describe('OcrManager', () => {
     });
   });
 
-  describe('getOrLoadEngine', () => {
-    it('instantiates PaddleOcrEngine with default v6-small when no tier is provided', async () => {
-      const engine = await ocrManager.getOrLoadEngine();
-      expect(PaddleOcrEngine).toHaveBeenCalledWith('v6-small');
-      expect(engine).toBeDefined();
-    });
-
-    it('maps legacy paddle-dbnet tier to v6-small', async () => {
-      const engine = await ocrManager.getOrLoadEngine('paddle-dbnet');
-      expect(PaddleOcrEngine).toHaveBeenCalledWith('v6-small');
-      expect(engine).toBeDefined();
-    });
-
-    it('instantiates requested tier (e.g. v6-medium)', async () => {
-      const engine = await ocrManager.getOrLoadEngine('v6-medium');
-      expect(PaddleOcrEngine).toHaveBeenCalledWith('v6-medium');
-      expect(engine).toBeDefined();
-    });
-
-    it('reuses cached engine instances for subsequent calls of the same tier', async () => {
-      const engine1 = await ocrManager.getOrLoadEngine('v6-tiny');
-      const engine2 = await ocrManager.getOrLoadEngine('v6-tiny');
-      expect(engine1).toBe(engine2);
+  describe('engine lifecycle through processImage', () => {
+    it('initializes the default v6-small tier once and reuses it', async () => {
+      await ocrManager.processImage(new ArrayBuffer(1));
+      await ocrManager.processImage(new ArrayBuffer(1));
       expect(PaddleOcrEngine).toHaveBeenCalledTimes(1);
+      expect(PaddleOcrEngine).toHaveBeenCalledWith('v6-small');
+    });
+
+    it('canonicalizes the legacy paddle-dbnet alias', async () => {
+      await ocrManager.processImage(new ArrayBuffer(1), 'paddle-dbnet');
+      expect(PaddleOcrEngine).toHaveBeenCalledWith('v6-small');
+    });
+
+    it('deduplicates deferred successful initialization for concurrent operations', async () => {
+      let resolveInit!: () => void;
+      const init = vi.fn(() => new Promise<void>(resolve => { resolveInit = resolve; }));
+      (PaddleOcrEngine as any).mockImplementation(function () {
+        return {
+          init,
+          recognize: vi.fn().mockResolvedValue({ texts: [], polygons: [], scores: [], detectionScores: [], boxes: [] }),
+          destroy: vi.fn().mockResolvedValue(undefined),
+        };
+      });
+
+      const first = ocrManager.processImage(new ArrayBuffer(1), 'v6-tiny');
+      const concurrent = ocrManager.processImage(new ArrayBuffer(1), 'v6-tiny');
+      await vi.waitFor(() => expect(init).toHaveBeenCalledTimes(1));
+      resolveInit();
+      await Promise.all([first, concurrent]);
+      expect(PaddleOcrEngine).toHaveBeenCalledTimes(1);
+    });
+
+    it('releases its lease when recognition rejects', async () => {
+      const destroy = vi.fn().mockResolvedValue(undefined);
+      (PaddleOcrEngine as any).mockImplementation(function (preset: string) {
+        return {
+          preset,
+          init: vi.fn().mockResolvedValue(undefined),
+          recognize: vi.fn().mockRejectedValue(new Error('recognition failed')),
+          destroy,
+        };
+      });
+      await expect(ocrManager.processImage(new ArrayBuffer(1), 'v6-tiny')).rejects.toThrow('recognition failed');
+      await ocrManager.cleanup();
+      expect(destroy).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -305,8 +326,9 @@ describe('OcrManager', () => {
       expect(result.texts[0]).toBe('Sample text');
     });
 
-    it('cleans up and destroys all active engines', async () => {
-      const engine = await ocrManager.getOrLoadEngine('v6-small');
+    it('cleans up and destroys the active engine', async () => {
+      await ocrManager.processImage(new ArrayBuffer(1), 'v6-small');
+      const engine = vi.mocked(PaddleOcrEngine).mock.results.at(-1)?.value;
       await ocrManager.cleanup();
       expect(engine.destroy).toHaveBeenCalled();
     });

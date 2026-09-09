@@ -1,5 +1,5 @@
 import { createRoot } from 'react-dom/client';
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useId } from 'react';
 import './content.css';
 import { Languages, Eye, EyeOff, ExternalLink, X, Crop, RotateCcw } from 'lucide-react';
 import type { PopupState, CropOverlayItem, ViewportSelection } from '../shared/types';
@@ -19,6 +19,9 @@ const IMAGE_SCAN_DEBOUNCE_MS = 300;
 const HOVER_LEAVE_DELAY_MS = 150;
 const SELF_MUTATION_RESET_DELAY_MS = 50;
 const MAX_PARENT_BG_SEARCH_DEPTH = 2;
+// Avoid flashing cold-start copy for model setup that completes quickly.
+const MODEL_INITIALIZATION_LABEL_DELAY_MS = 700;
+const MODEL_INITIALIZATION_LABEL = 'Preparing AI · first use this session';
 
 // Standard lazy-load attributes commonly used by host websites and CMSs
 const LAZY_LOAD_ATTRIBUTES = [
@@ -393,8 +396,12 @@ function TranslateButton({
   isTranslating: boolean;
   onTranslate: (srcUrl: string) => void;
 }) {
-  const buttonRef = useRef<HTMLButtonElement>(null);
+  const buttonRef = useRef<HTMLDivElement>(null);
+  const initializationDelayRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const activeInitializationJobIdRef = useRef<number | null>(null);
+  const initializationLabelId = useId();
   const [localTranslating, setLocalTranslating] = useState(false);
+  const [showInitializationLabel, setShowInitializationLabel] = useState(false);
   const activeTranslating = isTranslating || localTranslating;
 
   useEffect(() => {
@@ -406,10 +413,56 @@ function TranslateButton({
   }, [anchorName]);
 
   useEffect(() => {
-    const handleMessage = (message: any) => {
+    /**
+     * Clears pending and visible model-initialization feedback for this image.
+     *
+     * @returns Nothing.
+     */
+    const clearInitializationFeedback = (): void => {
+      if (initializationDelayRef.current !== null) {
+        clearTimeout(initializationDelayRef.current);
+        initializationDelayRef.current = null;
+      }
+      setShowInitializationLabel(false);
+    };
+
+    /**
+     * Handles addressed lifecycle and terminal events for this image translation.
+     *
+     * @param message - Runtime event forwarded by background.
+     * @returns Nothing.
+     */
+    const handleMessage = (message: any): void => {
+      if (
+        message.type === 'MODEL_INITIALIZATION' &&
+        message.target === 'content' &&
+        message.source === 'background' &&
+        message.event === true &&
+        message.payload?.originalUrl === srcUrl
+      ) {
+        const eventJobId = message.payload.jobId;
+        if (!Number.isInteger(eventJobId)) return;
+        if (message.payload.phase === 'started') {
+          clearInitializationFeedback();
+          activeInitializationJobIdRef.current = eventJobId;
+          initializationDelayRef.current = setTimeout(() => {
+            initializationDelayRef.current = null;
+            if (activeInitializationJobIdRef.current === eventJobId) setShowInitializationLabel(true);
+          }, MODEL_INITIALIZATION_LABEL_DELAY_MS);
+        } else if (
+          message.payload.phase === 'finished' &&
+          activeInitializationJobIdRef.current === eventJobId
+        ) {
+          activeInitializationJobIdRef.current = null;
+          clearInitializationFeedback();
+        }
+        return;
+      }
+
       if ((message.type === 'IMAGE_TRANSLATED' || message.type === 'TRANSLATION_ERROR') && message.payload) {
         if (message.payload.originalUrl === srcUrl) {
           setLocalTranslating(false);
+          clearInitializationFeedback();
         }
       }
     };
@@ -418,6 +471,7 @@ function TranslateButton({
       if (chrome.runtime?.id) {
         chrome.runtime.onMessage.addListener(handleMessage);
         return () => {
+          clearInitializationFeedback();
           try {
             if (chrome.runtime?.id) {
               chrome.runtime.onMessage.removeListener(handleMessage);
@@ -429,27 +483,45 @@ function TranslateButton({
   }, [srcUrl]);
 
   return (
-    <button
+    <div
       ref={buttonRef}
-      id="kites-translate-btn"
-      onClick={(event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        setLocalTranslating(true);
-        onTranslate(srcUrl);
-      }}
-      disabled={activeTranslating}
-      className={`fixed z-[999999] w-8 h-8 flex items-center justify-center rounded-full bg-[#ff2d75] transition-colors cursor-pointer border-none text-white disabled:cursor-wait ${activeTranslating ? 'kites-anim-spin' : ''}`}
+      className="kites-translate-control fixed z-[999999] flex items-center gap-2"
+      data-kites-translate-control="true"
       style={{ marginTop: '8px', marginLeft: '8px', pointerEvents: 'auto' }}
-      title="Translate Image"
     >
-      <Languages 
-        size={18} 
-        aria-hidden="true" 
-        className={activeTranslating ? 'kites-anim-spin' : ''} 
-        style={activeTranslating ? { animation: 'kites-spin 1s linear infinite' } : undefined}
-      />
-    </button>
+      <button
+        id="kites-translate-btn"
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          setLocalTranslating(true);
+          onTranslate(srcUrl);
+        }}
+        disabled={activeTranslating}
+        className={`w-8 h-8 flex items-center justify-center rounded-full bg-[#ff2d75] transition-colors cursor-pointer border-none text-white disabled:cursor-wait ${activeTranslating ? 'kites-anim-spin' : ''}`}
+        style={{ pointerEvents: 'auto' }}
+        title="Translate Image"
+        aria-label={showInitializationLabel ? MODEL_INITIALIZATION_LABEL : 'Translate Image'}
+        aria-describedby={showInitializationLabel ? initializationLabelId : undefined}
+      >
+        <Languages
+          size={18}
+          aria-hidden="true"
+          className={activeTranslating ? 'kites-anim-spin' : ''}
+          style={activeTranslating ? { animation: 'kites-spin 1s linear infinite' } : undefined}
+        />
+      </button>
+      {showInitializationLabel && (
+        <span
+          id={initializationLabelId}
+          role="status"
+          aria-live="polite"
+          className="whitespace-nowrap rounded-full bg-[#171717]/90 px-3 py-1.5 text-xs font-medium text-white shadow-lg"
+        >
+          {MODEL_INITIALIZATION_LABEL}
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -1088,7 +1160,7 @@ function GlobalOverlay() {
     };
     const handleMouseOver = (event: MouseEvent) => {
       const target = event.target as HTMLElement;
-      if (activeImgRef.current && (target === activeImgRef.current.imgElement || target.closest('#kites-translate-btn'))) {
+      if (activeImgRef.current && (target === activeImgRef.current.imgElement || target.closest('[data-kites-translate-control]'))) {
         cancelHide();
         return;
       }
@@ -1102,11 +1174,11 @@ function GlobalOverlay() {
       if (!current) return;
       const target = event.target as HTMLElement;
       const relatedTarget = event.relatedTarget as HTMLElement | null;
-      if (relatedTarget && (relatedTarget === current.imgElement || relatedTarget.closest('#kites-translate-btn'))) {
+      if (relatedTarget && (relatedTarget === current.imgElement || relatedTarget.closest('[data-kites-translate-control]'))) {
         cancelHide();
         return;
       }
-      if (target === current.imgElement || target.closest('#kites-translate-btn')) scheduleHide();
+      if (target === current.imgElement || target.closest('[data-kites-translate-control]')) scheduleHide();
     };
 
     document.addEventListener('mouseover', handleMouseOver, { passive: true });

@@ -32,6 +32,19 @@ export interface ProcessJobMessage {
   };
 }
 
+export type ModelInitializationPhase = 'started' | 'finished';
+
+export interface ModelInitializationMessage {
+  type: 'MODEL_INITIALIZATION';
+  target: 'background';
+  source: 'offscreen';
+  event: true;
+  payload: {
+    jobId: number;
+    phase: ModelInitializationPhase;
+  };
+}
+
 export interface ImageTranslatedMessage {
   type: 'IMAGE_TRANSLATED';
   payload: {

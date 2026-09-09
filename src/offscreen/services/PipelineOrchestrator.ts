@@ -1,6 +1,6 @@
 import { db } from '../../db';
 import type { PopupState } from '../../shared/types';
-import { OcrManager, type OcrTier } from './OcrManager';
+import { OcrManager, type InitializationLifecycleCallback, type OcrTier } from './OcrManager';
 import { translationManager } from './TranslationManager';
 import { InpaintManager } from './InpaintManager';
 import type { InpaintTier } from './InpaintManager';
@@ -60,7 +60,32 @@ export class PipelineOrchestrator {
    * Returns a base64 DataURL of the "baked" image (with translated text burned in) 
    * for the Content Script to immediately display without layout breakage.
    */
-  async runPipeline(jobId: number): Promise<string> {
+  async runPipeline(
+    jobId: number,
+    onInitialization?: (jobId: number, phase: 'started' | 'finished') => void,
+  ): Promise<string> {
+    let activeInitializations = 0;
+    let reportedInitializationStart = false;
+    const initializationLifecycle: InitializationLifecycleCallback = (phase) => {
+      if (phase === 'started') {
+        activeInitializations += 1;
+        if (!reportedInitializationStart) {
+          reportedInitializationStart = true;
+          onInitialization?.(jobId, 'started');
+        }
+        return;
+      }
+      activeInitializations = Math.max(0, activeInitializations - 1);
+    };
+    const finishInitializationLifecycle = (): void => {
+      if (!reportedInitializationStart) return;
+      if (activeInitializations !== 0) {
+        console.error(`[PipelineOrchestrator] Job ${jobId} ended with ${activeInitializations} unfinished initialization callback(s).`);
+      }
+      onInitialization?.(jobId, 'finished');
+      reportedInitializationStart = false;
+    };
+
     try {
       console.log(`[PipelineOrchestrator] Starting pipeline for Job ID: ${jobId}`);
       await db.translationJobs.update(jobId, { status: 'processing' });
@@ -101,14 +126,14 @@ export class PipelineOrchestrator {
         // Geometry battery simply stays inactive when dimensions are unavailable.
       }
 
-      // 3. OCR Detection
+      // 3. OCR Detection. OcrManager owns lazy model initialization and cache lifecycle.
       const ocrStart = import.meta.env.DEV ? performance.now() : 0;
       console.log(`[PipelineOrchestrator] Running OCR with ${ocrTier}...`);
       const ocrResult = await this.ocrManager.processImage(imageBuffer, ocrTier, {
         sourceLang: sourceLang !== 'auto' ? sourceLang : undefined,
         pageWidth,
         pageHeight
-      });
+      }, initializationLifecycle);
       if (import.meta.env.DEV) {
         const ocrDuration = (performance.now() - ocrStart).toFixed(2);
         console.log(`[PipelineOrchestrator] OCR stage complete in ${ocrDuration}ms.`);
@@ -144,14 +169,14 @@ export class PipelineOrchestrator {
         console.log(`[PipelineOrchestrator] Running translation and inpainting in parallel (tier: ${inpaintTier}).`);
         
         const translationPromise = translationManager
-          .processTranslation(ocrResult.texts, sourceLang, targetLang)
+          .processTranslation(ocrResult.texts, sourceLang, targetLang, initializationLifecycle)
           .then((r) => {
             if (import.meta.env.DEV) {
               console.log(`[PipelineOrchestrator] Translation branch finished in ${(performance.now() - stage2Start).toFixed(2)}ms.`);
             }
             return r;
           });
-        const inpaintPromise = this.inpaintManager.eraseText(imageBuffer, inpaintPolygons, inpaintTier as InpaintTier, ocrResult.maskRawCanvas).then((r) => {
+        const inpaintPromise = this.inpaintManager.eraseText(imageBuffer, inpaintPolygons, inpaintTier as InpaintTier, ocrResult.maskRawCanvas, initializationLifecycle).then((r) => {
           if (import.meta.env.DEV) {
             console.log(`[PipelineOrchestrator] Inpaint branch (${inpaintTier}) finished in ${(performance.now() - stage2Start).toFixed(2)}ms.`);
           }
@@ -169,7 +194,7 @@ export class PipelineOrchestrator {
       } else {
         // No inpainting — just translate
         console.log(`[PipelineOrchestrator] Translating ${ocrResult.texts.length} text blocks (no inpainting)...`);
-        translatedTexts = await translationManager.processTranslation(ocrResult.texts, sourceLang, targetLang);
+        translatedTexts = await translationManager.processTranslation(ocrResult.texts, sourceLang, targetLang, initializationLifecycle);
         if (import.meta.env.DEV) {
           const stage2Duration = (performance.now() - stage2Start).toFixed(2);
           console.log(`[PipelineOrchestrator] Translation complete in ${stage2Duration}ms.`);
@@ -321,6 +346,8 @@ export class PipelineOrchestrator {
         // Ignored if runtime is unavailable
       }
       throw error; // Rethrow to let the caller know
+    } finally {
+      finishInitializationLifecycle();
     }
   }
 }

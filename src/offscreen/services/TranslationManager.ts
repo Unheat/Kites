@@ -5,6 +5,7 @@ import { CustomApiEngine } from '../engines/translation/CustomApiEngine';
 import { CloudflareTranslateEngine, CloudflarePoolExhaustedError } from '../engines/translation/CloudflareTranslateEngine';
 import type { CustomApiConfig, PopupState } from '../../shared/types';
 import modelsRegistryData from '../../shared/models-registry.json';
+import type { InitializationLifecycleCallback } from './OcrManager';
 
 export class TranslationManager {
   private activeEngine: ITranslationEngine | null = null;
@@ -46,9 +47,15 @@ export class TranslationManager {
    * @param texts - The strings to translate
    * @param sourceLang - Source language (default 'auto')
    * @param targetLang - Target language (default 'English')
+   * @param onInitialization - Optional callback for genuine local model cold initialization.
    * @returns Array of translated strings
    */
-  async processTranslation(texts: string[], sourceLang: string = 'auto', targetLang: string = 'English'): Promise<string[]> {
+  async processTranslation(
+    texts: string[],
+    sourceLang: string = 'auto',
+    targetLang: string = 'English',
+    onInitialization?: InitializationLifecycleCallback,
+  ): Promise<string[]> {
     console.log('[TranslationManager] Starting translation process...');
     
     // 1. Fetch the user's PopupState from chrome.storage
@@ -78,7 +85,7 @@ export class TranslationManager {
         // 2. Load the specific engine dynamically
         const loadStart = import.meta.env.DEV ? performance.now() : 0;
         const customApi = popupState.customApis?.find((api) => api.id === engineId);
-        const engine = await this.getOrLoadEngine(engineId, undefined, customApi);
+        const engine = await this.getOrLoadEngine(engineId, undefined, customApi, onInitialization);
         const loadMs = import.meta.env.DEV ? performance.now() - loadStart : 0;
 
         // 3. Execute translation
@@ -129,12 +136,14 @@ export class TranslationManager {
    * @param engineId - The identifier of the translation engine.
    * @param progressCallback - Optional callback for download progress.
    * @param customApi - The saved custom API configuration when engineId belongs to one.
+   * @param onInitialization - Optional callback for genuine local model cold initialization.
    * @returns A promise that resolves to the instantiated translation engine.
    */
   private async getOrLoadEngine(
     engineId: string,
     progressCallback?: (info: any) => void,
     customApi?: CustomApiConfig,
+    onInitialization?: InitializationLifecycleCallback,
   ): Promise<ITranslationEngine> {
     // If the requested engine is already loaded, reuse it
     if (this.activeEngine && this.activeEngineId === engineId) {
@@ -172,7 +181,13 @@ export class TranslationManager {
       }
 
       const loadStart = performance.now();
-      await engine.init?.(progressCallback);
+      const reportsColdInitialization = registryEntry?.engine === 'webllm';
+      if (reportsColdInitialization) onInitialization?.('started');
+      try {
+        await engine.init?.(progressCallback);
+      } finally {
+        if (reportsColdInitialization) onInitialization?.('finished');
+      }
       console.log(`[TranslationManager] Engine ${engineId} load+init took ${(performance.now() - loadStart).toFixed(2)}ms.`);
 
       this.activeEngine = engine;
