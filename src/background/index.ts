@@ -75,7 +75,7 @@ export function normalizePopupState(popupState: Partial<PopupState> | undefined)
   const fallbackChain = fallbackSource.filter((engineId, index, chain) =>
     engineId !== activeEngineId && isSupportedEngine(engineId) && chain.indexOf(engineId) === index
   );
-  const rawInpaintId = completedState.activeInpaintId === 'lama-base'
+  const rawInpaintId = (completedState.activeInpaintId === 'lama-base' || completedState.activeInpaintId === 'lama-manga-fast')
     ? 'lama-manga'
     : (completedState.activeInpaintId === 'aot' ? 'aotgan' : completedState.activeInpaintId);
   const supportedInpaintIds = new Set(['none', 'simple', 'telea', ...Object.keys(inpaintRegistry)]);

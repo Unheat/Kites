@@ -3,12 +3,11 @@ import { SimpleInpaintEngine } from '../engines/inpaint/SimpleInpaintEngine';
 import { TeleaInpaintEngine } from '../engines/inpaint/TeleaInpaintEngine';
 import { AotInpaintEngine } from '../engines/inpaint/AotInpaintEngine';
 import { LamaMangaInpaintEngine } from '../engines/inpaint/LamaMangaInpaintEngine';
-import { LamaScaledInpaintEngine } from '../engines/inpaint/LamaScaledInpaintEngine';
 import { LamaBaseInpaintEngine } from '../engines/inpaint/LamaBaseInpaintEngine';
 import { NoneInpaintEngine } from '../engines/inpaint/NoneInpaintEngine';
 import { OriginalInpaintEngine } from '../engines/inpaint/OriginalInpaintEngine';
 
-export type InpaintTier = 'simple' | 'telea' | 'aot' | 'aotgan' | 'lama-manga' | 'lama-manga-fast' | 'none' | 'original';
+export type InpaintTier = 'simple' | 'telea' | 'aot' | 'aotgan' | 'lama-manga' | 'none' | 'original';
 
 /**
  * LOCKED ARCHITECTURE — DO NOT CHANGE WITHOUT USER APPROVAL (v2 decision, 2026-09).
@@ -108,11 +107,9 @@ export class InpaintManager {
         engine = new AotInpaintEngine(this.platform);
         break;
       case 'lama-base' as InpaintTier:
+      case 'lama-manga-fast' as InpaintTier:
       case 'lama-manga':
         engine = new LamaMangaInpaintEngine(this.platform);
-        break;
-      case 'lama-manga-fast':
-        engine = new LamaScaledInpaintEngine(this.platform);
         break;
       case 'none':
         engine = new NoneInpaintEngine();
