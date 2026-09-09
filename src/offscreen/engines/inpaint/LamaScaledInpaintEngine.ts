@@ -2,12 +2,15 @@ import type { Point2D } from './BaseInpaintEngine';
 import { LamaBaseInpaintEngine } from './LamaBaseInpaintEngine';
 
 /**
- * 1-Pass Full-Page LaMa Inpainting Engine (XianScan inpaint_scaled_mode equivalent).
+ * 1-Pass Full-Size Dynamic LaMa Inpainting Engine.
  *
- * Bypasses all patch clustering and tiling: bakes all text polygons into a single full-page
- * mask, resizes the entire page and mask to 512x512, executes exactly ONE neural inference pass
- * (~1.7s on WebGPU), upscales the hallucinated result, and blends it strictly into the masked
- * regions. Untouched artwork outside speech bubbles is 100% preserved at native resolution.
+ * Uses the dynamic-axes LaMa ONNX model (ogkalu/lama-manga-onnx-dynamic).
+ * Eliminates all 512x512 downscaling, upscaling blur, and patch clustering:
+ * bakes all text polygons into a single full-page mask, feeds the full-resolution
+ * native page (padded to a multiple of 8) directly to the neural network in
+ * EXACTLY ONE INFERENCE PASS, and composites the hallucinated pixels strictly
+ * into the masked text regions. All artwork outside speech bubbles is 100%
+ * preserved at native resolution.
  */
 export class LamaScaledInpaintEngine extends LamaBaseInpaintEngine {
   /**
@@ -20,12 +23,12 @@ export class LamaScaledInpaintEngine extends LamaBaseInpaintEngine {
   }
 
   /**
-   * Returns the local filesystem path to the ONNX model file (for Node.js test environment).
+   * Returns the local filesystem path to the dynamic ONNX model file (for Node.js test environment).
    *
-   * @returns Relative path to the manga LaMa ONNX binary.
+   * @returns Relative path to the dynamic manga LaMa ONNX binary.
    */
   protected getModelPath(): string {
-    return 'src/test/models/lama/lama-manga.onnx';
+    return 'src/test/models/lama/lama-manga-dynamic.onnx';
   }
 
   /**
@@ -39,12 +42,12 @@ export class LamaScaledInpaintEngine extends LamaBaseInpaintEngine {
   }
 
   /**
-   * Erases all text from the page in a single 512x512 inference pass.
+   * Erases all text from the page in a single full-resolution dynamic inference pass.
    *
    * @param imageBuffer - Raw ArrayBuffer of the source image.
    * @param polygons - Array of polygon vertex arrays defining text regions to erase.
    * @param strokeMaskCanvas - Optional pre-rendered stroke mask canvas.
-   * @returns ArrayBuffer containing the inpainted image.
+   * @returns ArrayBuffer containing the clean inpainted image.
    */
   async inpaint(
     imageBuffer: ArrayBuffer,
@@ -59,30 +62,34 @@ export class LamaScaledInpaintEngine extends LamaBaseInpaintEngine {
       return imageBuffer;
     }
 
-    const LAMA_DIM = 512;
-
-    // 1. Prepare image canvas
+    // 1. Prepare image canvas at original resolution
     const rawCanvas = await this.platform.canvas.prepareCanvas(imageBuffer);
     const width = rawCanvas.width;
     const height = rawCanvas.height;
 
-    const origCanvas = await this.createCanvas(width, height);
-    const origCtx = origCanvas.getContext('2d', { willReadFrequently: true });
+    // Convolutional networks require dimensions to be multiples of 8
+    const padW = (8 - (width % 8)) % 8;
+    const padH = (8 - (height % 8)) % 8;
+    const paddedW = width + padW;
+    const paddedH = height + padH;
+
+    const imgCanvas = await this.createCanvas(paddedW, paddedH);
+    const imgCtx = imgCanvas.getContext('2d', { willReadFrequently: true });
     try {
-      origCtx.drawImage(rawCanvas, 0, 0);
+      imgCtx.drawImage(rawCanvas, 0, 0);
     } catch {
       const rawCtx = rawCanvas.getContext?.('2d', { willReadFrequently: true }) || rawCanvas.ctx;
       const rawImgData = rawCtx.getImageData(0, 0, width, height);
-      const origImgData = origCtx.createImageData(width, height);
-      origImgData.data.set(rawImgData.data);
-      origCtx.putImageData(origImgData, 0, 0);
+      const nativeImgData = imgCtx.createImageData(width, height);
+      nativeImgData.data.set(rawImgData.data);
+      imgCtx.putImageData(nativeImgData, 0, 0);
     }
 
-    // 2. Prepare full-page mask
-    const maskCanvas = await this.createCanvas(width, height);
+    // 2. Prepare full-page mask at padded resolution
+    const maskCanvas = await this.createCanvas(paddedW, paddedH);
     const maskCtx = maskCanvas.getContext('2d', { willReadFrequently: true });
     maskCtx.fillStyle = 'black';
-    maskCtx.fillRect(0, 0, width, height);
+    maskCtx.fillRect(0, 0, paddedW, paddedH);
 
     if (strokeMaskCanvas) {
       maskCtx.drawImage(strokeMaskCanvas, 0, 0);
@@ -106,43 +113,31 @@ export class LamaScaledInpaintEngine extends LamaBaseInpaintEngine {
       }
     }
 
-    const startTime = (import.meta as any).env?.DEV ? performance.now() : 0;
-    console.log(`[LamaScaledInpaintEngine] Running 1-pass full-page inpainting using ${this.activeProvider}.`);
+    const startTime = performance.now();
+    console.log(`[LamaScaledInpaintEngine] Running full-size (${paddedW}x${paddedH}) 1-pass inpainting using ${this.activeProvider}.`);
 
-    // 3. Scale full image and mask to 512x512
-    const scaledImgCanvas = await this.createCanvas(LAMA_DIM, LAMA_DIM);
-    const scaledImgCtx = scaledImgCanvas.getContext('2d', { willReadFrequently: true });
-    scaledImgCtx.drawImage(origCanvas, 0, 0, width, height, 0, 0, LAMA_DIM, LAMA_DIM);
+    // 3. Extract Float32Array tensors directly at native dimensions (NO 512x512 RESIZING!)
+    const imgData = imgCtx.getImageData(0, 0, paddedW, paddedH).data;
+    const maskData = maskCtx.getImageData(0, 0, paddedW, paddedH).data;
 
-    const scaledMaskCanvas = await this.createCanvas(LAMA_DIM, LAMA_DIM);
-    const scaledMaskCtx = scaledMaskCanvas.getContext('2d', { willReadFrequently: true });
-    scaledMaskCtx.drawImage(maskCanvas, 0, 0, width, height, 0, 0, LAMA_DIM, LAMA_DIM);
+    const totalPixels = paddedW * paddedH;
+    const imgFloat = new Float32Array(1 * 3 * totalPixels);
+    const maskFloat = new Float32Array(1 * 1 * totalPixels);
 
-    // 4. Extract Float32Array tensors
-    const imgData = scaledImgCtx.getImageData(0, 0, LAMA_DIM, LAMA_DIM).data;
-    const maskData = scaledMaskCtx.getImageData(0, 0, LAMA_DIM, LAMA_DIM).data;
-
-    const imgFloat = new Float32Array(1 * 3 * LAMA_DIM * LAMA_DIM);
-    const maskFloat = new Float32Array(1 * 1 * LAMA_DIM * LAMA_DIM);
-
-    for (let y = 0; y < LAMA_DIM; y++) {
-      for (let x = 0; x < LAMA_DIM; x++) {
-        const offset = (y * LAMA_DIM + x) * 4;
-        const outOffset = y * LAMA_DIM + x;
-        const maskVal = maskData[offset] / 255.0;
-        const m = maskVal >= 0.5 ? 1.0 : 0.0;
-        maskFloat[outOffset] = m;
-        imgFloat[0 * (LAMA_DIM * LAMA_DIM) + outOffset] = this.normalizeImagePixel(imgData[offset]) * (1.0 - m);
-        imgFloat[1 * (LAMA_DIM * LAMA_DIM) + outOffset] = this.normalizeImagePixel(imgData[offset + 1]) * (1.0 - m);
-        imgFloat[2 * (LAMA_DIM * LAMA_DIM) + outOffset] = this.normalizeImagePixel(imgData[offset + 2]) * (1.0 - m);
-      }
+    for (let i = 0; i < totalPixels; i++) {
+      const offset = i * 4;
+      const m = maskData[offset] >= 127 ? 1.0 : 0.0;
+      maskFloat[i] = m;
+      imgFloat[0 * totalPixels + i] = this.normalizeImagePixel(imgData[offset]) * (1.0 - m);
+      imgFloat[1 * totalPixels + i] = this.normalizeImagePixel(imgData[offset + 1]) * (1.0 - m);
+      imgFloat[2 * totalPixels + i] = this.normalizeImagePixel(imgData[offset + 2]) * (1.0 - m);
     }
 
-    const imageTensor = new this.ort.Tensor('float32', imgFloat, [1, 3, LAMA_DIM, LAMA_DIM]);
-    const maskTensor = new this.ort.Tensor('float32', maskFloat, [1, 1, LAMA_DIM, LAMA_DIM]);
+    const imageTensor = new this.ort.Tensor('float32', imgFloat, [1, 3, paddedH, paddedW]);
+    const maskTensor = new this.ort.Tensor('float32', maskFloat, [1, 1, paddedH, paddedW]);
     const feeds = { image: imageTensor, mask: maskTensor };
 
-    // 5. Execute single ONNX inference
+    // 4. Execute single dynamic ONNX inference
     let results: any;
     let outData: Float32Array;
     try {
@@ -159,48 +154,41 @@ export class LamaScaledInpaintEngine extends LamaBaseInpaintEngine {
       }
     }
 
-    // 6. Transfer output to 512x512 canvas
-    const outCanvas = await this.createCanvas(LAMA_DIM, LAMA_DIM);
+    // 5. Transfer output directly at native resolution (NO UPSCALING BLUR!)
+    const outCanvas = await this.createCanvas(paddedW, paddedH);
     const outCtx = outCanvas.getContext('2d', { willReadFrequently: true });
-    const outImgData = outCtx.createImageData(LAMA_DIM, LAMA_DIM);
+    const outImgData = outCtx.createImageData(paddedW, paddedH);
 
-    for (let y = 0; y < LAMA_DIM; y++) {
-      for (let x = 0; x < LAMA_DIM; x++) {
-        const outOffset = y * LAMA_DIM + x;
-        const i = outOffset * 4;
-        let r = this.denormalizeImagePixel(outData[0 * (LAMA_DIM * LAMA_DIM) + outOffset]);
-        let g = this.denormalizeImagePixel(outData[1 * (LAMA_DIM * LAMA_DIM) + outOffset]);
-        let b = this.denormalizeImagePixel(outData[2 * (LAMA_DIM * LAMA_DIM) + outOffset]);
-        outImgData.data[i] = Math.max(0, Math.min(255, r));
-        outImgData.data[i + 1] = Math.max(0, Math.min(255, g));
-        outImgData.data[i + 2] = Math.max(0, Math.min(255, b));
-        outImgData.data[i + 3] = 255;
-      }
+    for (let i = 0; i < totalPixels; i++) {
+      const idx = i * 4;
+      outImgData.data[idx] = Math.max(0, Math.min(255, this.denormalizeImagePixel(outData[0 * totalPixels + i])));
+      outImgData.data[idx + 1] = Math.max(0, Math.min(255, this.denormalizeImagePixel(outData[1 * totalPixels + i])));
+      outImgData.data[idx + 2] = Math.max(0, Math.min(255, this.denormalizeImagePixel(outData[2 * totalPixels + i])));
+      outImgData.data[idx + 3] = 255;
     }
     outCtx.putImageData(outImgData, 0, 0);
 
-    // 7. Upscale 512x512 back to full native resolution
-    const upscaledCanvas = await this.createCanvas(width, height);
-    const upscaledCtx = upscaledCanvas.getContext('2d', { willReadFrequently: true });
-    upscaledCtx.drawImage(outCanvas, 0, 0, LAMA_DIM, LAMA_DIM, 0, 0, width, height);
+    // 6. Masked composite: paste strictly into areas where the mask is active
+    const finalCanvas = await this.createCanvas(width, height);
+    const finalCtx = finalCanvas.getContext('2d', { willReadFrequently: true });
+    finalCtx.drawImage(imgCanvas, 0, 0, width, height, 0, 0, width, height);
 
-    // 8. Masked composite: paste strictly into areas where the native mask is active
-    const finalData = origCtx.getImageData(0, 0, width, height);
-    const upscaledData = upscaledCtx.getImageData(0, 0, width, height);
+    const finalData = finalCtx.getImageData(0, 0, width, height);
+    const inpaintedData = outCtx.getImageData(0, 0, width, height);
     const fullMaskData = maskCtx.getImageData(0, 0, width, height);
 
     for (let i = 0; i < finalData.data.length; i += 4) {
       if (fullMaskData.data[i] >= 127) {
-        finalData.data[i] = upscaledData.data[i];
-        finalData.data[i + 1] = upscaledData.data[i + 1];
-        finalData.data[i + 2] = upscaledData.data[i + 2];
+        finalData.data[i] = inpaintedData.data[i];
+        finalData.data[i + 1] = inpaintedData.data[i + 1];
+        finalData.data[i + 2] = inpaintedData.data[i + 2];
       }
     }
-    origCtx.putImageData(finalData, 0, 0);
+    finalCtx.putImageData(finalData, 0, 0);
 
     const endTime = performance.now();
-    console.log(`[LamaScaledInpaintEngine] 1-pass inpainting completed in ${(endTime - startTime).toFixed(2)}ms.`);
+    console.log(`[LamaScaledInpaintEngine] Full-size 1-pass inpainting completed in ${(endTime - startTime).toFixed(2)}ms.`);
 
-    return await this.canvasToArrayBuffer(origCanvas);
+    return await this.canvasToArrayBuffer(finalCanvas);
   }
 }
