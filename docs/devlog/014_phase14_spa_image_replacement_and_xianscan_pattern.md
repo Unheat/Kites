@@ -4,7 +4,7 @@
 
 * **Date:** 2026-09-08
 * **Feature/Task:** Robust In-Place Image Replacement for SPAs (Twitter/X, Reddit, etc.) & XianScan Architectural Pattern Port
-* **Affected Modules:** `src/content/index.tsx`, `AGENTS.md`
+* **Affected Modules:** `src/content/index.tsx`, `src/content/mediaTargets.ts`, `src/content/mediaTargets.test.ts`, `AGENTS.md`
 * **Status:** Completed
 
 ---
@@ -51,6 +51,18 @@ When translating images on dynamic single-page applications like `x.com` (Twitte
    - Inspected ancestor elements for Twitter placeholder `background-image: url(...)` styles and set them to `none`.
 8. **Fixed Global Auto-Translate MutationObserver:**
    - Modified the observer in `src/content/index.tsx` so images are only marked as translated if their `src` begins with `blob:`/`data:` or has `data-kites-translated="true"`, preventing host resolution upgrades from blacklisting un-translated images.
+9. **Generalized Detection to Media Surfaces (`MediaTarget`):**
+   - Added shared `MediaTarget` discovery for Hover, Persistent, and Auto modes, separating the replaceable `imgElement` from the visible/observable `surfaceElement`.
+   - Source resolution now checks `currentSrc`, `src`, `srcset`, and established lazy-load attributes.
+   - Hover resolution considers the direct event target, composed path, point-hit stack, and only narrow direct wrapper descendants, then selects the largest eligible rendered surface.
+   - Persistent and Auto now consume the same deduplicated document discovery. Auto observes `surfaceElement`, not a potentially hidden backing image.
+10. **Supported Structurally Associated Hidden Backing Images:**
+   - Hidden backing images are rejected unless a nearby visible ancestor has a matching background URL or matching rendered geometry.
+   - On successful translation, Kites preserves original inline styles, reveals the translated backing image with minimum opacity/z-index/pointer-event overrides, and suppresses the associated surface background.
+   - SPA shielding now restores translated source, visibility overrides, and suppressed surface background if host reconciliation reverts them.
+   - Superseded per-image Blob URLs are revoked immediately; remaining active URLs retain unload cleanup.
+11. **Added Focused DOM Coverage:**
+   - Added jsdom fixtures for ordinary images, hidden backing/background association, rejection, shared-surface deduplication, source fallback, and hover largest-surface selection.
 
 ---
 

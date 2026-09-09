@@ -11,14 +11,24 @@ import {
   waitForCleanFrames,
   type CropDragHandle,
 } from './captureArea';
+import {
+  discoverMediaTargets,
+  normalizeMediaUrl,
+  resolveHoverMediaTarget,
+  resolveImageSource,
+  reapplyMediaTargetStyles,
+  type MediaTarget,
+} from './mediaTargets';
 
 // Minimum rendered dimensions prevent controls and thumbnails from entering the pipeline.
-const MIN_WIDTH_IMAGE_PX = 150;
-const MIN_HEIGHT_IMAGE_PX = 150;
 const IMAGE_SCAN_DEBOUNCE_MS = 300;
 const HOVER_LEAVE_DELAY_MS = 150;
 const SELF_MUTATION_RESET_DELAY_MS = 50;
 const MAX_PARENT_BG_SEARCH_DEPTH = 2;
+const REVEALED_BACKING_OPACITY = '1';
+const REVEALED_BACKING_Z_INDEX = '1';
+const REVEALED_BACKING_POINTER_EVENTS = 'none';
+const TRANSLATE_CONTROL_SELECTOR = '[data-kites-translate-control]';
 // Avoid flashing cold-start copy for model setup that completes quickly.
 const MODEL_INITIALIZATION_LABEL_DELAY_MS = 700;
 const MODEL_INITIALIZATION_LABEL = 'Preparing AI · first use this session';
@@ -35,8 +45,8 @@ const LAZY_LOAD_ATTRIBUTES = [
   'data-real-src',
 ];
 
-// In-memory registry mapping original/base image URLs to live DOM HTMLImageElement references
-const imageElementRegistry = new Map<string, HTMLImageElement>();
+// In-memory registry mapping original/base image URLs to live DOM media targets
+const mediaTargetRegistry = new Map<string, MediaTarget>();
 
 // Track created same-origin Blob URLs to prevent memory leaks and allow eventual revocation
 const activeObjectUrls = new Set<string>();
@@ -81,80 +91,69 @@ function runSelfMutation(fn: () => void): void {
  * @returns Cleaned URL without search query or hash parameters.
  */
 function getNormalizedBaseUrl(url: string): string {
-  try {
-    const parsed = new URL(url, window.location.href);
-    return `${parsed.origin}${parsed.pathname}`;
-  } catch {
-    return url.split('?')[0].split('#')[0];
-  }
+  return normalizeMediaUrl(url);
 }
 
 /**
- * Attaches a unique Kites tracking ID and registers the image element in our in-memory map.
+ * Attaches a unique Kites tracking ID and registers a media target in the in-memory URL map.
  *
- * @param img - Target image element to register.
- * @param srcUrl - Image URL used as lookup key.
+ * @param target - Media target and source URL to register.
  * @returns The assigned tracking ID.
  */
-function registerImageElement(img: HTMLImageElement, srcUrl: string): string {
-  let kitesId = img.getAttribute('data-kites-id');
+function registerMediaTarget(target: MediaTarget): string {
+  const { imgElement, srcUrl } = target;
+  let kitesId = imgElement.getAttribute('data-kites-id');
   if (!kitesId) {
     kitesId = `kites-${Math.random().toString(36).substring(2, 11)}`;
-    img.setAttribute('data-kites-id', kitesId);
+    imgElement.setAttribute('data-kites-id', kitesId);
   }
-  imageElementRegistry.set(srcUrl, img);
+  mediaTargetRegistry.set(srcUrl, target);
   const normalized = getNormalizedBaseUrl(srcUrl);
   if (normalized) {
-    imageElementRegistry.set(normalized, img);
+    mediaTargetRegistry.set(normalized, target);
   }
   return kitesId;
 }
 
 /**
- * Resolves the target HTMLImageElement using a robust multi-tier fallback lookup:
- * 1. Direct in-memory registry reference (if still attached to the DOM).
- * 2. Exact match on img.src or img.currentSrc.
+ * Resolves a media target using a robust multi-tier fallback lookup:
+ * 1. Direct in-memory registry reference when image and surface remain attached.
+ * 2. Exact resolved-source match across native, responsive, and lazy attributes.
  * 3. Match on data-kites-orig-src attribute.
  * 4. Normalized base URL match (stripping CDN resolution parameters).
  *
  * @param originalUrl - The original image URL requested for translation.
- * @returns The resolved HTMLImageElement, or null if no matching element exists in DOM.
+ * @returns Resolved media target, or null if no matching image/surface pair exists in DOM.
  */
-function resolveTargetImageElement(originalUrl: string): HTMLImageElement | null {
+function resolveTargetMedia(originalUrl: string): MediaTarget | null {
   // Tier 1: Check in-memory registry
-  const registered = imageElementRegistry.get(originalUrl);
-  if (registered && document.contains(registered)) {
+  const registered = mediaTargetRegistry.get(originalUrl);
+  if (registered && document.contains(registered.imgElement) && document.contains(registered.surfaceElement)) {
     return registered;
   }
 
   const normalized = getNormalizedBaseUrl(originalUrl);
   if (normalized) {
-    const normRegistered = imageElementRegistry.get(normalized);
-    if (normRegistered && document.contains(normRegistered)) {
+    const normRegistered = mediaTargetRegistry.get(normalized);
+    if (normRegistered && document.contains(normRegistered.imgElement) && document.contains(normRegistered.surfaceElement)) {
       return normRegistered;
     }
   }
 
-  const allImgs = Array.from(document.querySelectorAll('img'));
+  const targets = discoverMediaTargets();
 
-  // Tier 2: Exact URL match on src or currentSrc
-  const exactMatch = allImgs.find((img) => img.src === originalUrl || img.currentSrc === originalUrl);
+  // Tier 2: Exact URL match across native, responsive, and lazy source attributes
+  const exactMatch = targets.find((target) => target.srcUrl === originalUrl);
   if (exactMatch) return exactMatch;
 
   // Tier 3: Match on data-kites-orig-src attribute
-  const origAttrMatch = allImgs.find((img) => img.getAttribute('data-kites-orig-src') === originalUrl);
+  const origAttrMatch = targets.find((target) => target.imgElement.getAttribute('data-kites-orig-src') === originalUrl);
   if (origAttrMatch) return origAttrMatch;
 
   // Tier 4: Match on normalized base URL
-  if (normalized) {
-    const baseMatch = allImgs.find((img) => {
-      const imgNorm = getNormalizedBaseUrl(img.src || img.currentSrc);
-      return imgNorm === normalized;
-    });
-    if (baseMatch) return baseMatch;
-  }
-
-  return null;
+  return normalized
+    ? targets.find((target) => getNormalizedBaseUrl(target.srcUrl) === normalized) || null
+    : null;
 }
 
 /**
@@ -232,15 +231,17 @@ function sanitizeImageAttributes(img: HTMLImageElement): void {
  *
  * @param img - Image element whose parent containers should be inspected.
  */
-function suppressParentBackgroundImage(img: HTMLImageElement): void {
-  let parent = img.parentElement;
+function suppressParentBackgroundImage(img: HTMLImageElement, surfaceElement: HTMLElement = img): void {
+  let parent: HTMLElement | null = surfaceElement === img ? img.parentElement : surfaceElement;
   let depth = 0;
+  const originalSource = getNormalizedBaseUrl(img.getAttribute('data-kites-orig-src') || resolveImageSource(img));
   while (parent && depth < MAX_PARENT_BG_SEARCH_DEPTH) {
     const bg = parent.style.backgroundImage || window.getComputedStyle(parent).backgroundImage;
-    if (bg && bg !== 'none' && bg.includes('url(')) {
-      if (!parent.getAttribute('data-kites-orig-bg')) {
-        parent.setAttribute('data-kites-orig-bg', parent.style.backgroundImage || bg);
+    if (bg && bg !== 'none' && bg.includes('url(') && (!originalSource || bg.includes(originalSource) || surfaceElement === parent)) {
+      if (!parent.hasAttribute('data-kites-orig-bg')) {
+        parent.setAttribute('data-kites-orig-bg', parent.style.backgroundImage);
       }
+      parent.setAttribute('data-kites-background-suppressed', 'true');
       parent.style.backgroundImage = 'none';
     }
     parent = parent.parentElement;
@@ -249,9 +250,9 @@ function suppressParentBackgroundImage(img: HTMLImageElement): void {
 }
 
 /**
- * Attaches a MutationObserver shield to the translated image.
- * If a host framework (React/Vue) or lazy-loader reverts src or re-applies srcset,
- * the shield immediately restores the translated image.
+ * Attaches a MutationObserver shield to the translated image and visible media surface.
+ * If a host framework (React/Vue) or lazy-loader reverts source, visibility, or background state,
+ * the shield immediately restores the translated presentation.
  *
  * WORKAROUND: [SPA Virtual DOM Reconciliation Resets] -> Modern SPAs (Twitter/X, Reddit, Threads)
  * maintain their own internal component state. Whenever user interactions trigger a React re-render
@@ -261,8 +262,9 @@ function suppressParentBackgroundImage(img: HTMLImageElement): void {
  *
  * @param img - The translated image element to protect.
  * @param safeUrl - The safe Blob/Data URL of the translated image.
+ * @param surfaceElement - Visible media surface whose suppressed background must remain hidden.
  */
-function attachReversionShield(img: HTMLImageElement, safeUrl: string): void {
+function attachReversionShield(img: HTMLImageElement, safeUrl: string, surfaceElement: HTMLElement = img): void {
   const existingObserver = activeShieldObservers.get(img);
   if (existingObserver) {
     existingObserver.disconnect();
@@ -283,6 +285,7 @@ function attachReversionShield(img: HTMLImageElement, safeUrl: string): void {
             for (const attr of LAZY_LOAD_ATTRIBUTES) {
               img.removeAttribute(attr);
             }
+            reapplyMediaTargetStyles(img, surfaceElement);
           });
         }
         if (mutation.attributeName === 'srcset' && img.srcset) {
@@ -292,14 +295,27 @@ function attachReversionShield(img: HTMLImageElement, safeUrl: string): void {
             img.removeAttribute('srcset');
           });
         }
+        if (mutation.attributeName === 'style') {
+          const imageStyleReverted = mutation.target === img;
+          const surfaceStyleReverted = mutation.target === surfaceElement
+            && surfaceElement.getAttribute('data-kites-background-suppressed') === 'true'
+            && surfaceElement.style.backgroundImage !== 'none';
+          if (imageStyleReverted || surfaceStyleReverted) {
+            console.log('[Content Script] Host SPA reset detected on media style, restoring translated presentation.');
+            runSelfMutation(() => reapplyMediaTargetStyles(img, surfaceElement));
+          }
+        }
       }
     }
   });
 
   observer.observe(img, {
     attributes: true,
-    attributeFilter: ['src', 'srcset', ...LAZY_LOAD_ATTRIBUTES],
+    attributeFilter: ['src', 'srcset', 'style', ...LAZY_LOAD_ATTRIBUTES],
   });
+  if (surfaceElement !== img) {
+    observer.observe(surfaceElement, { attributes: true, attributeFilter: ['style'] });
+  }
 
   activeShieldObservers.set(img, observer);
 }
@@ -312,7 +328,9 @@ function attachReversionShield(img: HTMLImageElement, safeUrl: string): void {
  * @param bakedBase64 - The translated image data URL.
  * @param originalUrl - The original image URL for logging and attribution.
  */
-function replaceImageWithTranslation(targetImg: HTMLImageElement, bakedBase64: string, originalUrl: string): void {
+function replaceImageWithTranslation(target: MediaTarget, bakedBase64: string, originalUrl: string): void {
+  const { imgElement: targetImg, surfaceElement, hiddenBacking } = target;
+  const previousUrl = targetImg.getAttribute('data-kites-applied-src');
   const safeUrl = createSafeBlobUrlFromData(bakedBase64);
 
   runSelfMutation(() => {
@@ -322,43 +340,30 @@ function replaceImageWithTranslation(targetImg: HTMLImageElement, bakedBase64: s
     targetImg.src = safeUrl;
     targetImg.style.display = '';
     targetImg.style.filter = 'none';
-    suppressParentBackgroundImage(targetImg);
+    if (hiddenBacking) {
+      if (!targetImg.hasAttribute('data-kites-orig-style')) targetImg.setAttribute('data-kites-orig-style', targetImg.getAttribute('style') || '');
+      targetImg.setAttribute('data-kites-applied-opacity', REVEALED_BACKING_OPACITY);
+      targetImg.setAttribute('data-kites-applied-z-index', REVEALED_BACKING_Z_INDEX);
+      targetImg.setAttribute('data-kites-applied-pointer-events', REVEALED_BACKING_POINTER_EVENTS);
+      targetImg.style.opacity = REVEALED_BACKING_OPACITY;
+      targetImg.style.visibility = 'visible';
+      targetImg.style.zIndex = REVEALED_BACKING_Z_INDEX;
+      targetImg.style.pointerEvents = REVEALED_BACKING_POINTER_EVENTS;
+    }
+    suppressParentBackgroundImage(targetImg, surfaceElement);
   });
 
-  attachReversionShield(targetImg, safeUrl);
+  if (previousUrl?.startsWith('blob:') && previousUrl !== safeUrl) {
+    URL.revokeObjectURL(previousUrl);
+    activeObjectUrls.delete(previousUrl);
+  }
+  attachReversionShield(targetImg, safeUrl, surfaceElement);
   console.log(`[Content Script] Successfully replaced image for: ${originalUrl}`);
 }
 
-type OverlayImage = {
-  srcUrl: string;
-  imgElement: HTMLImageElement;
+type OverlayImage = MediaTarget & {
   anchorName: string;
 };
-
-/**
- * Returns whether an image is a visible, supported translation target.
- *
- * @param img - Image element to inspect.
- * @returns Whether the image satisfies Kites' rendered-size and visibility requirements.
- */
-function isValidImage(img: HTMLImageElement): boolean {
-  const rect = img.getBoundingClientRect();
-  if (!img.src || rect.width < MIN_WIDTH_IMAGE_PX || rect.height < MIN_HEIGHT_IMAGE_PX) return false;
-
-  const style = window.getComputedStyle(img);
-  return style.filter === 'none' && style.opacity !== '0' && style.visibility !== 'hidden';
-}
-
-/**
- * Returns whether an image meets Hover mode's original size-only eligibility rule.
- *
- * @param img - Image element under the cursor.
- * @returns Whether the image can receive a manual Hover button.
- */
-function isHoverableImage(img: HTMLImageElement): boolean {
-  const rect = img.getBoundingClientRect();
-  return Boolean(img.src) && rect.width >= MIN_WIDTH_IMAGE_PX && rect.height >= MIN_HEIGHT_IMAGE_PX;
-}
 
 /**
  * Gets or assigns the CSS anchor used to place an image's translation button.
@@ -366,7 +371,7 @@ function isHoverableImage(img: HTMLImageElement): boolean {
  * @param img - Image element receiving an anchor.
  * @returns The image's CSS anchor name.
  */
-function getAnchorName(img: HTMLImageElement): string {
+function getAnchorName(img: HTMLElement): string {
   let anchorName = img.style.getPropertyValue('anchor-name');
   if (!anchorName) {
     anchorName = `--kites-img-${Math.random().toString(36).substring(2, 11)}`;
@@ -490,7 +495,7 @@ function TranslateButton({
       style={{ marginTop: '8px', marginLeft: '8px', pointerEvents: 'auto' }}
     >
       <button
-        id="kites-translate-btn"
+        data-kites-translate-button="true"
         onClick={(event) => {
           event.preventDefault();
           event.stopPropagation();
@@ -805,7 +810,7 @@ function GlobalOverlay() {
 
     if (image) {
       setActiveImg(image);
-      registerImageElement(image.imgElement, srcUrl);
+      registerMediaTarget(image);
     }
     setTranslatingUrl(srcUrl);
     console.log('[Content Script] Sending TRANSLATE_IMAGE to background:', srcUrl);
@@ -1027,13 +1032,13 @@ function GlobalOverlay() {
 
       if (message.type !== 'IMAGE_TRANSLATED' || !bakedBase64) return;
       console.log(`[Content Script] Received translated image for: ${originalUrl}`);
-      const targetImg = resolveTargetImageElement(originalUrl);
-      if (!targetImg) {
-        console.warn(`[Content Script] Target image element could not be found in DOM for: ${originalUrl}`);
+      const target = resolveTargetMedia(originalUrl);
+      if (!target) {
+        console.warn(`[Content Script] Target media element could not be found in DOM for: ${originalUrl}`);
         return;
       }
 
-      replaceImageWithTranslation(targetImg, bakedBase64, originalUrl);
+      replaceImageWithTranslation(target, bakedBase64, originalUrl);
     };
 
     chrome.runtime.onMessage.addListener(handleMessage);
@@ -1046,17 +1051,19 @@ function GlobalOverlay() {
 
     const queuedUrls = new Set<string>();
     const translatedImages = new WeakSet<HTMLImageElement>();
-    const observedImages = new WeakSet<HTMLImageElement>();
+    const observedSurfaces = new WeakSet<HTMLElement>();
+    const targetsBySurface = new WeakMap<HTMLElement, MediaTarget>();
     let timeoutId: number | null = null;
 
-    const queueVisibleImage = (img: HTMLImageElement) => {
-      if (!isValidImage(img) || translatedImages.has(img) || queuedUrls.has(img.src)) return;
-      registerImageElement(img, img.src);
-      queuedUrls.add(img.src);
-      console.log('[Content Script] Auto-Translating visible image:', img.src);
-      chrome.runtime.sendMessage({ type: 'TRANSLATE_IMAGE', url: img.src }, (response) => {
+    const queueVisibleImage = (target: MediaTarget) => {
+      const { imgElement, srcUrl } = target;
+      if (translatedImages.has(imgElement) || queuedUrls.has(srcUrl)) return;
+      registerMediaTarget(target);
+      queuedUrls.add(srcUrl);
+      console.log('[Content Script] Auto-Translating visible image:', srcUrl);
+      chrome.runtime.sendMessage({ type: 'TRANSLATE_IMAGE', url: srcUrl }, (response) => {
         if (chrome.runtime.lastError || response?.status === 'error') {
-          queuedUrls.delete(img.src);
+          queuedUrls.delete(srcUrl);
           console.error('[Content Script] Auto-Translate message failed:', chrome.runtime.lastError?.message || response?.error);
         }
       });
@@ -1064,15 +1071,17 @@ function GlobalOverlay() {
 
     const intersectionObserver = new IntersectionObserver((entries) => {
       for (const entry of entries) {
-        if (entry.isIntersecting) queueVisibleImage(entry.target as HTMLImageElement);
+        const target = targetsBySurface.get(entry.target as HTMLElement);
+        if (entry.isIntersecting && target) queueVisibleImage(target);
       }
     });
 
     const observeImages = () => {
-      for (const img of Array.from(document.querySelectorAll('img'))) {
-        if (isValidImage(img) && !observedImages.has(img)) {
-          observedImages.add(img);
-          intersectionObserver.observe(img);
+      for (const target of discoverMediaTargets()) {
+        if (!observedSurfaces.has(target.surfaceElement)) {
+          observedSurfaces.add(target.surfaceElement);
+          targetsBySurface.set(target.surfaceElement, target);
+          intersectionObserver.observe(target.surfaceElement);
         }
       }
     };
@@ -1116,9 +1125,8 @@ function GlobalOverlay() {
 
     let timeoutId: number | null = null;
     const updateImages = () => {
-      setConsistentImages(Array.from(document.querySelectorAll('img'))
-        .filter(isValidImage)
-        .map((img) => ({ srcUrl: img.src, imgElement: img, anchorName: getAnchorName(img) })));
+      setConsistentImages(discoverMediaTargets()
+        .map((target) => ({ ...target, anchorName: getAnchorName(target.surfaceElement) })));
     };
     const scheduleUpdate = () => {
       if (timeoutId !== null) window.clearTimeout(timeoutId);
@@ -1160,25 +1168,26 @@ function GlobalOverlay() {
     };
     const handleMouseOver = (event: MouseEvent) => {
       const target = event.target as HTMLElement;
-      if (activeImgRef.current && (target === activeImgRef.current.imgElement || target.closest('[data-kites-translate-control]'))) {
+      if (activeImgRef.current && (target === activeImgRef.current.surfaceElement || target.closest(TRANSLATE_CONTROL_SELECTOR))) {
         cancelHide();
         return;
       }
-      if (!(target instanceof HTMLImageElement) || !isHoverableImage(target)) return;
+      const mediaTarget = resolveHoverMediaTarget(event);
+      if (!mediaTarget) return;
       cancelHide();
-      registerImageElement(target, target.src);
-      setActiveImg({ srcUrl: target.src, imgElement: target, anchorName: getAnchorName(target) });
+      registerMediaTarget(mediaTarget);
+      setActiveImg({ ...mediaTarget, anchorName: getAnchorName(mediaTarget.surfaceElement) });
     };
     const handleMouseOut = (event: MouseEvent) => {
       const current = activeImgRef.current;
       if (!current) return;
       const target = event.target as HTMLElement;
       const relatedTarget = event.relatedTarget as HTMLElement | null;
-      if (relatedTarget && (relatedTarget === current.imgElement || relatedTarget.closest('[data-kites-translate-control]'))) {
+      if (relatedTarget && (relatedTarget === current.surfaceElement || current.surfaceElement.contains(relatedTarget) || relatedTarget.closest(TRANSLATE_CONTROL_SELECTOR))) {
         cancelHide();
         return;
       }
-      if (target === current.imgElement || target.closest('[data-kites-translate-control]')) scheduleHide();
+      if (target === current.surfaceElement || current.surfaceElement.contains(target) || target.closest(TRANSLATE_CONTROL_SELECTOR)) scheduleHide();
     };
 
     document.addEventListener('mouseover', handleMouseOver, { passive: true });
