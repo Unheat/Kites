@@ -15,6 +15,62 @@ export interface SourceRect {
   sh: number;
 }
 
+export interface CropBounds {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+export type CropDragHandle = 'move' | 'n' | 'e' | 's' | 'w' | 'nw' | 'ne' | 'se' | 'sw';
+
+/**
+ * Computes a moved or resized crop rectangle from an immutable starting rectangle.
+ *
+ * @param initial - Rectangle at pointer-down time in page CSS pixels.
+ * @param handle - Move or directional resize operation.
+ * @param deltaX - Horizontal pointer movement in page CSS pixels.
+ * @param deltaY - Vertical pointer movement in page CSS pixels.
+ * @param bounds - Maximum document width and height.
+ * @returns A rectangle clamped to document bounds and the crop minimum size.
+ */
+export function computeCropBounds(
+  initial: CropBounds,
+  handle: CropDragHandle,
+  deltaX: number,
+  deltaY: number,
+  bounds: { width: number; height: number }
+): CropBounds {
+  if (handle === 'move') {
+    return {
+      ...initial,
+      left: Math.max(0, Math.min(bounds.width - initial.width, initial.left + deltaX)),
+      top: Math.max(0, Math.min(bounds.height - initial.height, initial.top + deltaY)),
+    };
+  }
+
+  let { left, top, width, height } = initial;
+  const right = initial.left + initial.width;
+  const bottom = initial.top + initial.height;
+
+  if (handle.includes('e')) {
+    width = Math.max(MIN_CROP_SIZE_PX, Math.min(bounds.width - left, initial.width + deltaX));
+  }
+  if (handle.includes('s')) {
+    height = Math.max(MIN_CROP_SIZE_PX, Math.min(bounds.height - top, initial.height + deltaY));
+  }
+  if (handle.includes('w')) {
+    left = Math.max(0, Math.min(right - MIN_CROP_SIZE_PX, initial.left + deltaX));
+    width = right - left;
+  }
+  if (handle.includes('n')) {
+    top = Math.max(0, Math.min(bottom - MIN_CROP_SIZE_PX, initial.top + deltaY));
+    height = bottom - top;
+  }
+
+  return { left, top, width, height };
+}
+
 /**
  * Normalizes start and current pointer coordinates into a positive-dimensioned
  * viewport selection rectangle, clamped to the viewport bounds.

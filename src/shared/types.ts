@@ -50,7 +50,7 @@ export interface ViewportSelection {
   height: number;
 }
 
-export type CropStatus = 'capturing' | 'translating' | 'completed' | 'failed';
+export type CropStatus = 'draft' | 'capturing' | 'translating' | 'completed' | 'failed';
 
 export interface CropOverlayItem {
   id: string;

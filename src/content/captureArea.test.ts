@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   normalizeSelection,
   calculateCaptureSourceRect,
+  computeCropBounds,
   MIN_CROP_SIZE_PX,
 } from './captureArea';
 
@@ -42,6 +43,53 @@ describe('captureArea - normalizeSelection', () => {
     expect(normalizeSelection({ x: 100, y: 100 }, { x: 100 + MIN_CROP_SIZE_PX - 1, y: 200 }, viewport)).toBeNull();
     expect(normalizeSelection({ x: 100, y: 100 }, { x: 200, y: 100 + MIN_CROP_SIZE_PX - 1 }, viewport)).toBeNull();
     expect(normalizeSelection({ x: 100, y: 100 }, { x: 100 + MIN_CROP_SIZE_PX, y: 100 + MIN_CROP_SIZE_PX }, viewport)).not.toBeNull();
+  });
+});
+
+describe('captureArea - computeCropBounds', () => {
+  const initial = { left: 100, top: 100, width: 200, height: 150 };
+  const bounds = { width: 800, height: 600 };
+
+  it('moves while preserving size and clamping to document bounds', () => {
+    expect(computeCropBounds(initial, 'move', 50, 75, bounds)).toEqual({
+      left: 150,
+      top: 175,
+      width: 200,
+      height: 150,
+    });
+    expect(computeCropBounds(initial, 'move', 1000, 1000, bounds)).toEqual({
+      left: 600,
+      top: 450,
+      width: 200,
+      height: 150,
+    });
+  });
+
+  it('resizes east and south edges within bounds', () => {
+    expect(computeCropBounds(initial, 'se', 100, 50, bounds)).toEqual({
+      left: 100,
+      top: 100,
+      width: 300,
+      height: 200,
+    });
+  });
+
+  it('resizes west and north while preserving opposite edges', () => {
+    expect(computeCropBounds(initial, 'nw', 40, 30, bounds)).toEqual({
+      left: 140,
+      top: 130,
+      width: 160,
+      height: 120,
+    });
+  });
+
+  it('enforces minimum dimensions', () => {
+    expect(computeCropBounds(initial, 'nw', 500, 500, bounds)).toEqual({
+      left: 270,
+      top: 220,
+      width: MIN_CROP_SIZE_PX,
+      height: MIN_CROP_SIZE_PX,
+    });
   });
 });
 

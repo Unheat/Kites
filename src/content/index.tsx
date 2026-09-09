@@ -1,13 +1,15 @@
 import { createRoot } from 'react-dom/client';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import './content.css';
-import { Languages, Eye, EyeOff, ExternalLink, X, Crop } from 'lucide-react';
+import { Languages, Eye, EyeOff, ExternalLink, X, Crop, RotateCcw } from 'lucide-react';
 import type { PopupState, CropOverlayItem, ViewportSelection } from '../shared/types';
 import {
   normalizeSelection,
   calculateCaptureSourceRect,
+  computeCropBounds,
   cropCapturedDataUrl,
   waitForCleanFrames,
+  type CropDragHandle,
 } from './captureArea';
 
 // Minimum rendered dimensions prevent controls and thumbnails from entering the pipeline.
@@ -548,13 +550,34 @@ function ScreenSnipper({ onComplete, onCancel }: ScreenSnipperProps) {
 
 interface CropOverlayBoxProps {
   crop: CropOverlayItem;
+  onTranslate: (id: string) => void;
+  onReset: (id: string) => void;
+  onGeometryChange: (id: string, bounds: { left: number; top: number; width: number; height: number }) => void;
   onToggleOriginal: (id: string) => void;
   onRemove: (id: string) => void;
 }
 
-function CropOverlayBox({ crop, onToggleOriginal, onRemove }: CropOverlayBoxProps) {
+const CROP_RESIZE_HANDLES: Array<{ handle: CropDragHandle; className: string }> = [
+  { handle: 'n', className: 'kites-resize-n' },
+  { handle: 'e', className: 'kites-resize-e' },
+  { handle: 's', className: 'kites-resize-s' },
+  { handle: 'w', className: 'kites-resize-w' },
+  { handle: 'nw', className: 'kites-resize-nw' },
+  { handle: 'ne', className: 'kites-resize-ne' },
+  { handle: 'se', className: 'kites-resize-se' },
+  { handle: 'sw', className: 'kites-resize-sw' },
+];
+
+function CropOverlayBox({ crop, onTranslate, onReset, onGeometryChange, onToggleOriginal, onRemove }: CropOverlayBoxProps) {
+  const isEditable = crop.status === 'draft' || crop.status === 'failed';
   const isTranslating = crop.status === 'capturing' || crop.status === 'translating';
   const displayUrl = crop.showOriginal ? crop.originalDataUrl : (crop.translatedDataUrl || crop.originalDataUrl);
+  const dragRef = useRef<{
+    handle: CropDragHandle;
+    startPageX: number;
+    startPageY: number;
+    initial: { left: number; top: number; width: number; height: number };
+  } | null>(null);
 
   const openInStudio = () => {
     try {
@@ -569,18 +592,65 @@ function CropOverlayBox({ crop, onToggleOriginal, onRemove }: CropOverlayBoxProp
     }
   };
 
+  const beginInteraction = (event: React.PointerEvent<HTMLDivElement>, handle: CropDragHandle) => {
+    if (event.button !== 0 || (handle !== 'move' && !isEditable)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    dragRef.current = {
+      handle,
+      startPageX: event.clientX + window.scrollX,
+      startPageY: event.clientY + window.scrollY,
+      initial: { left: crop.pageLeft, top: crop.pageTop, width: crop.width, height: crop.height },
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const updateInteraction = (event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const documentWidth = Math.max(document.documentElement.scrollWidth, window.innerWidth);
+    const documentHeight = Math.max(document.documentElement.scrollHeight, window.innerHeight);
+    onGeometryChange(crop.id, computeCropBounds(
+      drag.initial,
+      drag.handle,
+      event.clientX + window.scrollX - drag.startPageX,
+      event.clientY + window.scrollY - drag.startPageY,
+      { width: documentWidth, height: documentHeight }
+    ));
+  };
+
+  const endInteraction = (event: React.PointerEvent<HTMLDivElement>) => {
+    dragRef.current = null;
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {}
+  };
+
   return (
     <div
-      className="kites-crop-overlay"
+      className={`kites-crop-overlay ${isEditable ? 'kites-crop-editable' : 'kites-crop-frozen'}`}
       style={{
         left: `${crop.pageLeft}px`,
         top: `${crop.pageTop}px`,
         width: `${crop.width}px`,
         height: `${crop.height}px`,
       }}
+      onPointerDown={(event) => beginInteraction(event, 'move')}
+      onPointerMove={updateInteraction}
+      onPointerUp={endInteraction}
+      onPointerCancel={endInteraction}
     >
-      {/* Floating Toolbar */}
-      <div className="kites-crop-toolbar">
+      <div
+        className={`kites-crop-toolbar ${crop.pageTop - window.scrollY < 44 ? 'kites-crop-toolbar-inside' : ''}`}
+        onPointerDown={(event) => event.stopPropagation()}
+      >
+        {isEditable && (
+          <button type="button" className="kites-crop-toolbar-btn" onClick={() => onTranslate(crop.id)} title="Translate area">
+            <Languages size={18} />
+          </button>
+        )}
         {crop.status === 'completed' && crop.originalDataUrl && (
           <button
             type="button"
@@ -588,48 +658,45 @@ function CropOverlayBox({ crop, onToggleOriginal, onRemove }: CropOverlayBoxProp
             onClick={() => onToggleOriginal(crop.id)}
             title={crop.showOriginal ? 'View Translated' : 'View Original'}
           >
-            {crop.showOriginal ? <EyeOff size={14} /> : <Eye size={14} />}
+            {crop.showOriginal ? <EyeOff size={18} /> : <Eye size={18} />}
           </button>
         )}
-        <button
-          type="button"
-          className="kites-crop-toolbar-btn"
-          onClick={openInStudio}
-          title="Open in Studio"
-        >
-          <ExternalLink size={14} />
-        </button>
-        <button
-          type="button"
-          className="kites-crop-toolbar-btn"
-          onClick={() => onRemove(crop.id)}
-          title="Close"
-        >
-          <X size={14} />
+        {crop.status === 'completed' && (
+          <button type="button" className="kites-crop-toolbar-btn" onClick={() => onReset(crop.id)} title="Reset crop">
+            <RotateCcw size={18} />
+          </button>
+        )}
+        {crop.jobId && (
+          <button type="button" className="kites-crop-toolbar-btn" onClick={openInStudio} title="Open in Studio">
+            <ExternalLink size={18} />
+          </button>
+        )}
+        <button type="button" className="kites-crop-toolbar-btn" onClick={() => onRemove(crop.id)} title="Close">
+          <X size={18} />
         </button>
       </div>
 
-      {/* Render Image or Loading/Error */}
       {displayUrl && (
-        <img
-          src={displayUrl}
-          alt="Cropped manga panel"
-          className="kites-crop-overlay-img"
+        <img src={displayUrl} alt="Cropped manga panel" className="kites-crop-overlay-img" draggable={false} />
+      )}
+
+      {isTranslating && crop.originalDataUrl && (
+        <div className="kites-crop-loading-badge">
+          <Languages size={16} className="kites-anim-spin" />
+          <span>{crop.status === 'capturing' ? 'Capturing...' : 'Translating...'}</span>
+        </div>
+      )}
+
+      {crop.status === 'failed' && crop.error && <div className="kites-crop-error-pill">{crop.error}</div>}
+
+      {isEditable && CROP_RESIZE_HANDLES.map(({ handle, className }) => (
+        <div
+          key={handle}
+          className={`kites-crop-resize-handle ${className}`}
+          onPointerDown={(event) => beginInteraction(event, handle)}
+          aria-hidden="true"
         />
-      )}
-
-      {isTranslating && (
-        <div className="kites-crop-loading">
-          <Languages size={24} className="kites-anim-spin" />
-          <span>{crop.status === 'capturing' ? 'Capturing screen...' : 'Translating panel...'}</span>
-        </div>
-      )}
-
-      {crop.status === 'failed' && (
-        <div className="kites-crop-error">
-          <span>{crop.error || 'Translation failed'}</span>
-        </div>
-      )}
+      ))}
     </div>
   );
 }
@@ -689,122 +756,129 @@ function GlobalOverlay() {
     }
   };
 
-  const handleCropComplete = async (selection: ViewportSelection) => {
+  const captureQueueRef = useRef<Promise<void>>(Promise.resolve());
+
+  const handleCropComplete = (selection: ViewportSelection) => {
     setIsSnipping(false);
-
-    const scrollX = window.scrollX;
-    const scrollY = window.scrollY;
-    const pageLeft = selection.left + scrollX;
-    const pageTop = selection.top + scrollY;
     const requestId = Math.random().toString(36).substring(2, 11);
-
-    const newCrop: CropOverlayItem = {
+    setCrops((prev) => [...prev, {
       id: requestId,
       sourceKey: `kites-capture:${requestId}`,
-      pageLeft,
-      pageTop,
+      pageLeft: selection.left + window.scrollX,
+      pageTop: selection.top + window.scrollY,
       width: selection.width,
       height: selection.height,
       originalDataUrl: '',
-      status: 'capturing',
+      status: 'draft',
       showOriginal: false,
-    };
+    }]);
+  };
 
-    setCrops((prev) => [...prev, newCrop]);
-
-    // Wait two animation frames so the selection box is completely unmounted before capture
-    await waitForCleanFrames();
-
+  const requestVisibleTabCapture = async (): Promise<string> => {
+    const overlayRoot = document.getElementById('kites-global-overlay');
+    overlayRoot?.classList.add('kites-capture-hidden');
     try {
-      chrome.runtime.sendMessage(
-        { target: 'background', source: 'content', request: true, type: 'CAPTURE_VISIBLE_TAB' },
-        async (response) => {
-          if (chrome.runtime.lastError || response?.status !== 'success' || !response?.dataUrl) {
-            console.error('[Content Script] CAPTURE_VISIBLE_TAB failed:', chrome.runtime.lastError?.message || response?.error);
-            setCrops((prev) =>
-              prev.map((c) =>
-                c.id === requestId
-                  ? { ...c, status: 'failed', error: response?.error || 'Failed to capture screen' }
-                  : c
-              )
-            );
-            return;
+      await waitForCleanFrames();
+      return await new Promise<string>((resolve, reject) => {
+        chrome.runtime.sendMessage(
+          { target: 'background', source: 'content', request: true, type: 'CAPTURE_VISIBLE_TAB' },
+          (response) => {
+            if (chrome.runtime.lastError || response?.status !== 'success' || !response?.dataUrl) {
+              reject(new Error(chrome.runtime.lastError?.message || response?.error || 'Failed to capture screen'));
+              return;
+            }
+            resolve(response.dataUrl);
           }
-
-          try {
-            const fullDataUrl = response.dataUrl;
-            const img = new Image();
-            img.src = fullDataUrl;
-            await new Promise((resolve, reject) => {
-              img.onload = resolve;
-              img.onerror = reject;
-            });
-
-            const sourceRect = calculateCaptureSourceRect(
-              selection,
-              { width: window.innerWidth, height: window.innerHeight },
-              img.naturalWidth,
-              img.naturalHeight
-            );
-
-            const croppedDataUrl = await cropCapturedDataUrl(fullDataUrl, sourceRect);
-            const safeOriginalBlob = createSafeBlobUrlFromData(croppedDataUrl);
-
-            setCrops((prev) =>
-              prev.map((c) =>
-                c.id === requestId
-                  ? { ...c, originalDataUrl: safeOriginalBlob, status: 'translating' }
-                  : c
-              )
-            );
-
-            chrome.runtime.sendMessage(
-              {
-                target: 'background',
-                source: 'content',
-                request: true,
-                type: 'TRANSLATE_CAPTURED_IMAGE',
-                payload: {
-                  requestId,
-                  dataUrl: croppedDataUrl,
-                },
-              },
-              (queueRes) => {
-                if (chrome.runtime.lastError || queueRes?.status === 'error') {
-                  console.error('[Content Script] TRANSLATE_CAPTURED_IMAGE failed:', chrome.runtime.lastError?.message || queueRes?.error);
-                  setCrops((prev) =>
-                    prev.map((c) =>
-                      c.id === requestId
-                        ? { ...c, status: 'failed', error: queueRes?.error || 'Failed to queue translation' }
-                        : c
-                    )
-                  );
-                }
-              }
-            );
-          } catch (cropErr: any) {
-            console.error('[Content Script] Failed to crop captured image:', cropErr);
-            setCrops((prev) =>
-              prev.map((c) =>
-                c.id === requestId
-                  ? { ...c, status: 'failed', error: cropErr?.message || 'Crop processing failed' }
-                  : c
-              )
-            );
-          }
-        }
-      );
-    } catch (err: any) {
-      console.error('[Content Script] Capture visible tab dispatch error:', err);
-      setCrops((prev) =>
-        prev.map((c) =>
-          c.id === requestId
-            ? { ...c, status: 'failed', error: err?.message || 'Capture dispatch failed' }
-            : c
-        )
-      );
+        );
+      });
+    } finally {
+      overlayRoot?.classList.remove('kites-capture-hidden');
     }
   };
+
+  const handleTranslateCrop = (id: string) => {
+    captureQueueRef.current = captureQueueRef.current.catch(() => undefined).then(async () => {
+      const crop = crops.find((candidate) => candidate.id === id);
+      if (!crop || (crop.status !== 'draft' && crop.status !== 'failed')) return;
+
+      const selection: ViewportSelection = {
+        left: crop.pageLeft - window.scrollX,
+        top: crop.pageTop - window.scrollY,
+        width: crop.width,
+        height: crop.height,
+      };
+      if (
+        selection.left < 0 || selection.top < 0 ||
+        selection.left + selection.width > window.innerWidth ||
+        selection.top + selection.height > window.innerHeight
+      ) {
+        setCrops((prev) => prev.map((candidate) => candidate.id === id
+          ? { ...candidate, status: 'failed', error: 'Move the crop fully into view before translating.' }
+          : candidate));
+        return;
+      }
+
+      setCrops((prev) => prev.map((candidate) => candidate.id === id
+        ? { ...candidate, status: 'capturing', originalDataUrl: '', translatedDataUrl: undefined, jobId: undefined, error: undefined, showOriginal: false }
+        : candidate));
+
+      try {
+        const fullDataUrl = await requestVisibleTabCapture();
+        const img = new Image();
+        img.src = fullDataUrl;
+        await new Promise<void>((resolve, reject) => {
+          img.onload = () => resolve();
+          img.onerror = () => reject(new Error('Failed to decode captured screen'));
+        });
+
+        const sourceRect = calculateCaptureSourceRect(
+          selection,
+          { width: window.innerWidth, height: window.innerHeight },
+          img.naturalWidth,
+          img.naturalHeight
+        );
+        const croppedDataUrl = await cropCapturedDataUrl(fullDataUrl, sourceRect);
+        const safeOriginalBlob = createSafeBlobUrlFromData(croppedDataUrl);
+        setCrops((prev) => prev.map((candidate) => candidate.id === id
+          ? { ...candidate, originalDataUrl: safeOriginalBlob, status: 'translating' }
+          : candidate));
+
+        await new Promise<void>((resolve, reject) => {
+          chrome.runtime.sendMessage(
+            {
+              target: 'background', source: 'content', request: true,
+              type: 'TRANSLATE_CAPTURED_IMAGE',
+              payload: { requestId: id, dataUrl: croppedDataUrl },
+            },
+            (response) => {
+              if (chrome.runtime.lastError || response?.status === 'error') {
+                reject(new Error(chrome.runtime.lastError?.message || response?.error || 'Failed to queue translation'));
+              } else {
+                resolve();
+              }
+            }
+          );
+        });
+      } catch (error) {
+        console.error('[Content Script] Crop translation failed:', error);
+        setCrops((prev) => prev.map((candidate) => candidate.id === id
+          ? { ...candidate, status: 'failed', error: error instanceof Error ? error.message : String(error) }
+          : candidate));
+      }
+    });
+  };
+
+  const handleGeometryChange = useCallback((id: string, bounds: { left: number; top: number; width: number; height: number }) => {
+    setCrops((prev) => prev.map((candidate) => candidate.id === id
+      ? { ...candidate, pageLeft: bounds.left, pageTop: bounds.top, width: bounds.width, height: bounds.height }
+      : candidate));
+  }, []);
+
+  const handleResetCrop = useCallback((id: string) => {
+    setCrops((prev) => prev.map((candidate) => candidate.id === id
+      ? { ...candidate, status: 'draft', originalDataUrl: '', translatedDataUrl: undefined, jobId: undefined, error: undefined, showOriginal: false }
+      : candidate));
+  }, []);
 
   const handleToggleOriginal = useCallback((id: string) => {
     setCrops((prev) =>
@@ -1059,6 +1133,9 @@ function GlobalOverlay() {
         <CropOverlayBox
           key={crop.id}
           crop={crop}
+          onTranslate={handleTranslateCrop}
+          onReset={handleResetCrop}
+          onGeometryChange={handleGeometryChange}
           onToggleOriginal={handleToggleOriginal}
           onRemove={handleRemoveCrop}
         />
