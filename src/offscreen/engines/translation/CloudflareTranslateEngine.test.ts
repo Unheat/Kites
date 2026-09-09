@@ -9,6 +9,7 @@ describe('CloudflareTranslateEngine', () => {
 
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.clearAllMocks();
     engine = new CloudflareTranslateEngine('https://test-worker.dev/v1/chat/completions');
   });
 
@@ -111,7 +112,7 @@ describe('CloudflareTranslateEngine', () => {
       const callback = args.find((argument): argument is (response: unknown) => void => typeof argument === 'function');
       callback?.({ success: true, token: 'cached-token' });
     }) as typeof chrome.runtime.sendMessage);
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
       new Response(JSON.stringify({ choices: [{ message: { content: 'translated' } }] }), { status: 200 })
     );
 

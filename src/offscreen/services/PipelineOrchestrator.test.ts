@@ -167,7 +167,12 @@ describe('PipelineOrchestrator', () => {
 
     await pipelineOrchestrator.runPipeline(100);
 
-    expect(processImageMock).toHaveBeenCalledWith(expect.any(ArrayBuffer), 'v6-medium', expect.any(Object));
+    expect(processImageMock).toHaveBeenCalledWith(
+      expect.any(ArrayBuffer),
+      'v6-medium',
+      expect.any(Object),
+      expect.any(Function),
+    );
     blobSpy.mockRestore();
   });
 
@@ -183,7 +188,13 @@ describe('PipelineOrchestrator', () => {
 
     await pipelineOrchestrator.runPipeline(100);
 
-    expect(eraseTextSpy).toHaveBeenCalledWith(expect.any(ArrayBuffer), expect.any(Array), 'simple', undefined);
+    expect(eraseTextSpy).toHaveBeenCalledWith(
+      expect.any(ArrayBuffer),
+      expect.any(Array),
+      'simple',
+      undefined,
+      expect.any(Function),
+    );
     blobSpy.mockRestore();
   });
 
