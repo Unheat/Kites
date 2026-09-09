@@ -490,11 +490,21 @@ function TranslateButton({
   return (
     <div
       ref={buttonRef}
-      className="kites-translate-control fixed z-[999999] flex items-center gap-2"
+      className="kites-translate-control"
       data-kites-translate-control="true"
-      style={{ marginTop: '8px', marginLeft: '8px', pointerEvents: 'auto' }}
+      style={{
+        position: 'fixed',
+        zIndex: 999999,
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px',
+        marginTop: '8px',
+        marginLeft: '8px',
+        pointerEvents: 'auto',
+      }}
     >
       <button
+        id="kites-translate-btn"
         data-kites-translate-button="true"
         onClick={(event) => {
           event.preventDefault();
@@ -503,8 +513,24 @@ function TranslateButton({
           onTranslate(srcUrl);
         }}
         disabled={activeTranslating}
-        className={`w-8 h-8 flex items-center justify-center rounded-full bg-[#ff2d75] transition-colors cursor-pointer border-none text-white disabled:cursor-wait ${activeTranslating ? 'kites-anim-spin' : ''}`}
-        style={{ pointerEvents: 'auto' }}
+        className={`kites-translate-btn ${activeTranslating ? 'kites-anim-spin' : ''}`}
+        style={{
+          width: '32px',
+          height: '32px',
+          minWidth: '32px',
+          minHeight: '32px',
+          borderRadius: '50%',
+          backgroundColor: '#ff2d75',
+          border: 'none',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          cursor: activeTranslating ? 'wait' : 'pointer',
+          color: '#ffffff',
+          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.25)',
+          flexShrink: 0,
+          pointerEvents: 'auto',
+        }}
         title="Translate Image"
         aria-label={showInitializationLabel ? MODEL_INITIALIZATION_LABEL : 'Translate Image'}
         aria-describedby={showInitializationLabel ? initializationLabelId : undefined}
@@ -522,6 +548,18 @@ function TranslateButton({
           role="status"
           aria-live="polite"
           className="whitespace-nowrap rounded-full bg-[#171717]/90 px-3 py-1.5 text-xs font-medium text-white shadow-lg"
+          style={{
+            whiteSpace: 'nowrap',
+            borderRadius: '9999px',
+            backgroundColor: 'rgba(23, 23, 23, 0.9)',
+            padding: '6px 12px',
+            fontSize: '12px',
+            fontWeight: 500,
+            color: '#ffffff',
+            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.35)',
+            pointerEvents: 'none',
+            fontFamily: 'system-ui, -apple-system, sans-serif',
+          }}
         >
           {MODEL_INITIALIZATION_LABEL}
         </span>
@@ -1168,7 +1206,7 @@ function GlobalOverlay() {
     };
     const handleMouseOver = (event: MouseEvent) => {
       const target = event.target as HTMLElement;
-      if (activeImgRef.current && (target === activeImgRef.current.surfaceElement || target.closest(TRANSLATE_CONTROL_SELECTOR))) {
+      if (activeImgRef.current && (target === activeImgRef.current.surfaceElement || activeImgRef.current.surfaceElement.contains(target) || target.closest(TRANSLATE_CONTROL_SELECTOR))) {
         cancelHide();
         return;
       }

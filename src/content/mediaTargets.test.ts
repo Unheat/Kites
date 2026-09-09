@@ -58,6 +58,11 @@ describe('media target source resolution', () => {
     const lazy = document.createElement('img');
     lazy.setAttribute('data-lazy-src', '/lazy.jpg');
     expect(resolveImageSource(lazy)).toBe('/lazy.jpg');
+
+    const lazyWithPlaceholder = document.createElement('img');
+    lazyWithPlaceholder.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+    lazyWithPlaceholder.setAttribute('data-src', 'https://i7.nhentai.net/galleries/123/1.jpg');
+    expect(resolveImageSource(lazyWithPlaceholder)).toBe('https://i7.nhentai.net/galleries/123/1.jpg');
   });
 });
 

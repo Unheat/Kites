@@ -79,13 +79,19 @@ function resolveBestSrcsetUrl(srcset: string): string {
  * @returns First usable currentSrc, src, srcset, or lazy-load URL.
  */
 export function resolveImageSource(img: HTMLImageElement): string {
-  const directCandidates = [img.currentSrc, img.src, img.getAttribute('src') || ''];
-  for (const candidate of directCandidates) {
-    if (candidate) return candidate;
-  }
+  const isBlankPlaceholder = (url: string) => {
+    if (!url) return true;
+    if (url.startsWith('data:image/svg+xml') && url.length < 300) return true;
+    if (url.startsWith('data:image/gif;base64,R0lGODlhAQAB')) return true;
+    return false;
+  };
+
+  const directCandidates = [img.currentSrc, img.src, img.getAttribute('src') || ''].filter(Boolean);
+  const realDirect = directCandidates.find((candidate) => !isBlankPlaceholder(candidate));
+  if (realDirect) return realDirect;
 
   const responsiveCandidate = resolveBestSrcsetUrl(img.srcset || img.getAttribute('srcset') || '');
-  if (responsiveCandidate) return responsiveCandidate;
+  if (responsiveCandidate && !isBlankPlaceholder(responsiveCandidate)) return responsiveCandidate;
 
   const lazyAttributes = [
     'data-src',
@@ -99,9 +105,9 @@ export function resolveImageSource(img: HTMLImageElement): string {
   ];
   for (const attribute of lazyAttributes) {
     const value = img.getAttribute(attribute);
-    if (value) return value;
+    if (value && !isBlankPlaceholder(value)) return value;
   }
-  return '';
+  return directCandidates[0] || '';
 }
 
 /**
@@ -125,7 +131,11 @@ function hasEligibleRect(element: Element): boolean {
  */
 export function surfaceContainsPoint(element: Element, clientX: number, clientY: number): boolean {
   const rect = element.getBoundingClientRect();
-  return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
+  const TOLERANCE_PX = 3;
+  return clientX >= rect.left - TOLERANCE_PX &&
+         clientX <= rect.right + TOLERANCE_PX &&
+         clientY >= rect.top - TOLERANCE_PX &&
+         clientY <= rect.bottom + TOLERANCE_PX;
 }
 
 /**
@@ -237,12 +247,20 @@ export function discoverMediaTargets(root: ParentNode = document): MediaTarget[]
 
 /**
  * Resolves the best media target for a hover event using direct, composed-path, point-hit,
- * and narrow wrapper-descendant candidates, preferring the largest eligible surface.
+ * and wrapper-descendant candidates, preferring the largest eligible surface.
  *
  * @param event - Mouse event used for target and pointer information.
  * @returns Largest matching media target, or null when no supported media exists.
  */
 export function resolveHoverMediaTarget(event: MouseEvent): MediaTarget | null {
+  // Fast path: direct hover over an HTMLImageElement within surface bounds
+  if (event.target instanceof HTMLImageElement) {
+    const directTarget = createMediaTarget(event.target);
+    if (directTarget && surfaceContainsPoint(directTarget.surfaceElement, event.clientX, event.clientY)) {
+      return directTarget;
+    }
+  }
+
   const elements = new Set<Element>();
   if (event.target instanceof Element) elements.add(event.target);
   for (const node of event.composedPath()) {
@@ -255,7 +273,7 @@ export function resolveHoverMediaTarget(event: MouseEvent): MediaTarget | null {
   const images = new Set<HTMLImageElement>();
   for (const element of elements) {
     if (element instanceof HTMLImageElement) images.add(element);
-    for (const img of Array.from(element.querySelectorAll<HTMLImageElement>(':scope > img, :scope > picture > img'))) {
+    for (const img of Array.from(element.querySelectorAll<HTMLImageElement>('img, picture img'))) {
       images.add(img);
     }
   }

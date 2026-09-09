@@ -1,13 +1,29 @@
 /* Scope minimal resets only to our Kites components to avoid breaking host websites */
-#kites-translate-btn, 
+.kites-translate-control,
+[data-kites-translate-control],
+#kites-translate-btn,
+[data-kites-translate-button],
+.kites-translate-btn,
 #kites-global-overlay * {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
 }
 
-#kites-translate-btn {
+.kites-translate-control,
+[data-kites-translate-control] {
   position: fixed;
+  z-index: 999999;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  pointer-events: auto;
+}
+
+#kites-translate-btn,
+[data-kites-translate-button],
+.kites-translate-btn {
+  position: relative;
   z-index: 999999;
   border: none;
   background-color: #ff2d75;
@@ -18,12 +34,18 @@
   justify-content: center;
   width: 32px;
   height: 32px;
+  min-width: 32px;
+  min-height: 32px;
   cursor: pointer;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
   transition: background-color 0.2s ease, opacity 0.2s ease;
+  flex-shrink: 0;
+  pointer-events: auto;
 }
 
-#kites-translate-btn:hover {
+#kites-translate-btn:hover,
+[data-kites-translate-button]:hover,
+.kites-translate-btn:hover {
   background-color: #e02065;
 }
 
