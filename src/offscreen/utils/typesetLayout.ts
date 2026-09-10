@@ -15,7 +15,7 @@
 export const CJK_REGEX = /[\u3040-\u30ff\u31f0-\u31ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af\u1100-\u11ff\u3130-\u318f\u3001-\u3003\u3008-\u3011\u3014-\u301f]/;
 export const NON_LATIN_SCRIPT_REGEX = CJK_REGEX;
 
-export const DEFAULT_FONT_FAMILY = '"Kites Comic", "SVN-Wild Words", "CC Wild Words", "HL-Wild Words", "VNF-Wild Words", "SVN-Anime Ace 2.0", "Patrick Hand SC", "Comic Sans MS", "Bangers", sans-serif';
+export const DEFAULT_FONT_FAMILY = '"Kites Comic", "SVN-Wild Words", "CC Wild Words", "HL-Wild Words", "VNF-Wild Words", "MTO COMIC 1", "SVN-Anime Ace 2.0", "Patrick Hand SC", "Comic Sans MS", "Bangers", sans-serif';
 export const CJK_FONT_STACK = '"Microsoft YaHei Bold", "Microsoft YaHei", "WenQuanYi Micro Hei", "Noto Sans CJK SC", "Noto Sans CJK JP", "Noto Sans CJK KR", "PingFang SC", "PingFang TC", sans-serif';
 
 /**

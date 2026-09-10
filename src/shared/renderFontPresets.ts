@@ -17,7 +17,7 @@ export const RENDER_FONT_PRESETS: readonly RenderFontPreset[] = [
   {
     id: 'comic',
     label: 'Comic',
-    fontFamily: '"Kites Comic", "SVN-Wild Words", "CC Wild Words", "HL-Wild Words", "VNF-Wild Words", "SVN-Anime Ace 2.0", "Patrick Hand SC", "Comic Sans MS", cursive, sans-serif'
+    fontFamily: '"Kites Comic", "SVN-Wild Words", "CC Wild Words", "HL-Wild Words", "VNF-Wild Words", "MTO COMIC 1", "SVN-Anime Ace 2.0", "Patrick Hand SC", "Comic Sans MS", cursive, sans-serif'
   },
   { id: 'serif', label: 'Serif', fontFamily: 'Georgia, "Times New Roman", serif' },
   { id: 'monospace', label: 'Monospace', fontFamily: '"Courier New", Courier, monospace' },
