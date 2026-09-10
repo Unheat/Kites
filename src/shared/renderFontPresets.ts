@@ -28,31 +28,31 @@ export const fontRegistry: Record<string, RenderFontPreset> = {
     id: 'comic',
     label: 'Wild Words',
     fontFamily: '"Kites Comic", "SVN-Wild Words", "CC Wild Words", "HL-Wild Words", "VNF-Wild Words", "MTO COMIC 1", cursive, sans-serif',
-    description: 'Authentic manga dialogue font with compact Vietnamese diacritics.'
+    description: 'Authentic manga dialogue font'
   },
   'anime-ace': {
     id: 'anime-ace',
     label: 'Anime Ace',
     fontFamily: '"MTO Comic 2", "SVN-Anime Ace 2.0", "Anime Ace 2.0 BB", "Anime Ace", cursive, sans-serif',
-    description: 'Popular comic dialogue font with full Vietnamese support.'
+    description: 'Popular comic dialogue font'
   },
   'comic-hand': {
     id: 'comic-hand',
     label: 'Comic Hand',
     fontFamily: '"Patrick Hand SC", "Comic Sans MS", cursive, sans-serif',
-    description: 'Natural small-caps comic lettering with 100% Vietnamese coverage.'
+    description: 'Natural small-caps comic lettering'
   },
   'serif': {
     id: 'serif',
     label: 'Serif',
     fontFamily: 'Georgia, "Times New Roman", serif',
-    description: 'Traditional literary serif font.'
+    description: 'Traditional literary serif font'
   },
   'monospace': {
     id: 'monospace',
     label: 'Monospace',
     fontFamily: '"Courier New", Courier, monospace',
-    description: 'Fixed-width typewriter font.'
+    description: 'Fixed-width typewriter font'
   }
 };
 
