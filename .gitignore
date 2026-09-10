@@ -10,6 +10,7 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+*.zip
 *.local
 
 # Editor directories and files
@@ -31,7 +32,7 @@ dist-ssr
 scripts/.env
 PaddleOCR/
 result/
-!README_images/result/
+
 models/
 model/
 scratches/

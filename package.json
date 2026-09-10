@@ -9,6 +9,7 @@
     "icons": "node scripts/generate-icons.mjs",
     "copy-wasm": "node scripts/copy-wasm.mjs",
     "build": "npm run copy-wasm && tsc -b && vite build",
+    "package": "npm run build && cd dist && zip -r -FS ../kites-v$npm_package_version.zip . -x \"*.DS_Store\" && cd ..",
     "build:dev": "npm run copy-wasm && tsc -b && vite build --mode development",
     "lint": "oxlint",
     "preview": "vite preview",

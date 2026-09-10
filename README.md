@@ -3,7 +3,7 @@
 # 🪁 Kites
 
 ### Read Any Manga in Your Language. Directly in Your Browser.
-**Zero Python • Zero Servers • 100% Private In-Browser AI Translation**
+**Zero Python • Zero Servers • 100% Private In-Browser Extension AI Translation**
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg?style=flat-square)](LICENSE)
 [![Chrome MV3](https://img.shields.io/badge/Chrome-Manifest%20V3-success.svg?style=flat-square&logo=googlechrome&logoColor=white)](manifest.json)
