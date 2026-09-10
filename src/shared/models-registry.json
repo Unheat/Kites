@@ -84,6 +84,18 @@
     "engine": "webllm"
   },
   {
+    "id": "Mistral-7B-Instruct-v0.3-q4f16_1-MLC",
+    "name": "Mistral-7B-Instruct-v0.3-q4f16_1-MLC",
+    "vramEstimate": "~4573 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Mistral-7B-Instruct-v0.3-q4f32_1-MLC",
+    "name": "Mistral-7B-Instruct-v0.3-q4f32_1-MLC",
+    "vramEstimate": "~5619 MB",
+    "engine": "webllm"
+  },
+  {
     "id": "gemma-2-2b-it-q4f16_1-MLC",
     "name": "gemma-2-2b-it-q4f16_1-MLC",
     "vramEstimate": "~1895 MB",
@@ -111,6 +123,12 @@
     "id": "gemma-2-9b-it-q4f16_1-MLC",
     "name": "gemma-2-9b-it-q4f16_1-MLC",
     "vramEstimate": "~6422 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "gemma-2-9b-it-q4f32_1-MLC",
+    "name": "gemma-2-9b-it-q4f32_1-MLC",
+    "vramEstimate": "~8383 MB",
     "engine": "webllm"
   },
   {
@@ -171,6 +189,12 @@
     "id": "Qwen2.5-7B-Instruct-q4f32_1-MLC",
     "name": "Qwen2.5-7B-Instruct-q4f32_1-MLC",
     "vramEstimate": "~5900 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Llama-3.1-70B-Instruct-q3f16_1-MLC",
+    "name": "Llama-3.1-70B-Instruct-q3f16_1-MLC",
+    "vramEstimate": "~31153 MB",
     "engine": "webllm"
   },
   {

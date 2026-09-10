@@ -36,6 +36,13 @@ async function checkUrl(url, useRange = false) {
     }
     return { ok: false, status: res.status };
   } catch (err) {
+    if (!useRange) {
+      await sleep(500);
+      try {
+        const retryRes = await fetch(url, { method: 'GET', headers: { Range: 'bytes=0-10' } });
+        if (retryRes.ok || retryRes.status === 206) return { ok: true, status: retryRes.status };
+      } catch {}
+    }
     return { ok: false, error: err.message };
   }
 }
@@ -90,21 +97,16 @@ function isCandidateForTranslation(model) {
   const isQuantized = lower.includes('q4f16') || lower.includes('q4f32') || lower.includes('q3f16');
   if (!isQuantized) return { keep: false, reason: 'unquantized float weights' };
 
-  // 7. Must fit within browser WebGPU allocations (<= 6500 MB VRAM)
-  if (model.vram_required_MB && model.vram_required_MB > 6500) {
-    return { keep: false, reason: `VRAM exceeds WebGPU allocation limit (${model.vram_required_MB.toFixed(0)} MB)` };
-  }
-
-  // 8. Must be an instruction/chat tuned model (not a raw base model)
+  // 7. Instruction/chat tuned model required (not a raw base model or reasoning model)
   const isInstructOrChat = lower.includes('instruct') || lower.includes('chat') || lower.includes('-it');
   if (!isInstructOrChat) {
     return { keep: false, reason: 'raw base model without instruction tuning' };
   }
 
-  // 9. Reject explicit Base tags even if another word matches
+  // 8. Reject explicit Base tags even if another word matches
   if (lower.includes('-base-')) return { keep: false, reason: 'explicit base model' };
 
-  // 10. Multilingual Translation Capability Filtering:
+  // 9. Multilingual Translation Capability Filtering:
   // Reject architectures that lack multilingual training or have zero CJK tokenizer support.
   // Kites requires models capable of translating across our supported languages (ja, zh, ko, en, fr, de, es, it, pt, ru, ar, vi, th, etc.).
   if (lower.includes('tinyllama')) return { keep: false, reason: 'English-only pretraining (SlimPajama, no CJK vocab)' };
@@ -116,7 +118,7 @@ function isCandidateForTranslation(model) {
   if (lower.includes('gemma-2b-it')) return { keep: false, reason: 'English-only (Gemma 1, superseded by Gemma 2)' };
   if (lower.includes('hermes')) return { keep: false, reason: 'English agentic fine-tune (catastrophic multilingual forgetting)' };
   if (id.startsWith('Llama-3-')) return { keep: false, reason: 'English-primary (superseded by multilingual Llama 3.1)' };
-  if (lower.includes('mistral')) return { keep: false, reason: 'European only (32k vocab, byte-splits CJK into gibberish)' };
+  if (lower.includes('mistral-7b-instruct-v0.2')) return { keep: false, reason: 'superseded by v0.3' };
   if (lower.includes('phi-1') || lower.includes('phi-2') || id.startsWith('Phi-3-')) {
     return { keep: false, reason: 'English-only (superseded by multilingual Phi-3.5/Phi-4)' };
   }
