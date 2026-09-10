@@ -286,6 +286,7 @@ function createProgressCallback(modelId: string) {
 }
 
 async function handleStartDownload(modelId: string, category?: string) {
+  modelId = modelId === 'aot' ? 'aotgan' : modelId;
   const progressCallback = createProgressCallback(modelId);
 
   if (category === 'ocr') {
@@ -372,6 +373,7 @@ async function handleStartDownload(modelId: string, category?: string) {
 }
 
 async function handleCheckStatus(modelId: string): Promise<boolean> {
+  modelId = modelId === 'aot' ? 'aotgan' : modelId;
   // Built-in inpaint algorithms require no downloaded model files
   if (modelId === 'none' || modelId === 'simple' || modelId === 'telea') {
     return true;

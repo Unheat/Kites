@@ -67,7 +67,8 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
     this.browserModelBuffer = await InpaintCacheManager.getModelBuffer(registryEntry.onnxUrl);
     if (registryEntry.dataUrl) {
       const data = await InpaintCacheManager.getModelBuffer(registryEntry.dataUrl);
-      this.browserExternalData = [{ data, path: `${modelId}.data` }];
+      const dataFileName = new URL(registryEntry.dataUrl).pathname.split('/').pop()!;
+      this.browserExternalData = [{ data, path: dataFileName }];
     }
 
     // WORKAROUND: ORT WebGPU can pass adapter validation but fail during LaMa graph
