@@ -1,100 +1,37 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-labelledby="kites-title kites-desc">
+  <title id="kites-title">Kites</title>
+  <desc id="kites-desc">A faceted red-rose kite with bold black spars and a flowing ribbon on a black squircle.</desc>
   <defs>
-    <!-- Facet Gradients -->
-    <linearGradient id="facet-tl" x1="10%" y1="0%" x2="90%" y2="100%">
-      <stop offset="0%" stop-color="#38BDF8" />
-      <stop offset="100%" stop-color="#0284C7" />
+    <linearGradient id="kites-light" x1="72" y1="17" x2="63" y2="55" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FF6584"/>
+      <stop offset="1" stop-color="#FF2A6D"/>
     </linearGradient>
-    <linearGradient id="facet-tr" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#E879F9" />
-      <stop offset="100%" stop-color="#818CF8" />
+    <linearGradient id="kites-fold" x1="99" y1="46" x2="62" y2="91" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#D9381E"/>
+      <stop offset="1" stop-color="#BE123C"/>
     </linearGradient>
-    <linearGradient id="facet-bl" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#0284C7" />
-      <stop offset="100%" stop-color="#092648" />
+    <linearGradient id="kites-ribbon" x1="65" y1="89" x2="82" y2="116" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FF2A6D"/>
+      <stop offset=".55" stop-color="#FF2A6D"/>
+      <stop offset="1" stop-color="#000000"/>
     </linearGradient>
-    <linearGradient id="facet-br" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#F43F5E" />
-      <stop offset="100%" stop-color="#8B5CF6" />
-    </linearGradient>
-
-    <!-- Streamer Gradient -->
-    <linearGradient id="streamer-grad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#EC4899" />
-      <stop offset="50%" stop-color="#8B5CF6" />
-      <stop offset="100%" stop-color="#38BDF8" />
-    </linearGradient>
-
-    <!-- Tail Ribbon Bow Gradients -->
-    <linearGradient id="bow-cyan" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#38BDF8" />
-      <stop offset="100%" stop-color="#0284C7" />
-    </linearGradient>
-    <linearGradient id="bow-pink" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#FB7185" />
-      <stop offset="100%" stop-color="#E11D48" />
-    </linearGradient>
-
-    <!-- Crisp Soft Ambient Drop Shadow -->
-    <filter id="crisp-shadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="2.5" stdDeviation="3" flood-color="#020617" flood-opacity="0.35" />
-    </filter>
   </defs>
 
-  <g filter="url(#crisp-shadow)">
-    <!-- Flowing Kite Streamer String -->
-    <path d="M 64,98 Q 48,110 68,118 T 56,126" 
-          fill="none" 
-          stroke="url(#streamer-grad)" 
-          stroke-width="3.5" 
-          stroke-linecap="round" />
+  <rect id="background" width="128" height="128" rx="28" fill="#000000"/>
 
-    <!-- Ribbon Bow 1 (Cyan) -->
-    <polygon points="53,109 63,111 59,115 51,113" fill="url(#bow-cyan)" />
-    <!-- Ribbon Bow 2 (Pink) -->
-    <polygon points="61,120 71,122 67,126 59,124" fill="url(#bow-pink)" />
+  <path id="ribbon" fill="url(#kites-ribbon)" d="M63 86 67 88C60 99 49 97 49 103C49 111 77 100 82 109C84 113 81 117 77 119C80 115 80 112 77 111C69 107 46 117 44 106C42 96 59 98 63 86Z"/>
 
-    <!-- Speech Bubble Tail / Manga Dialogue Pointer -->
-    <path d="M 50,92 L 30,114 L 64,98 Z" 
-          fill="#0284C7" 
-          stroke="#0284C7" 
-          stroke-width="1" 
-          stroke-linejoin="round" />
+  <g id="kite-body" stroke="none">
+    <path id="upper-left-facet" fill="url(#kites-light)" d="M72 17 65 53 28 56Z"/>
+    <path id="upper-right-facet" fill="#FF2A6D" d="M72 17 106 48 65 53Z"/>
+    <path id="right-fold-facet" fill="url(#kites-fold)" d="M106 48 65 91 65 53Z"/>
+    <path id="lower-shadow-facet" fill="#881337" d="M28 56 65 91 65 53Z"/>
+    <path id="lower-rose-facet" fill="#BE123C" d="M28 56 50 64 65 91Z"/>
+    <path id="top-highlight-facet" fill="#FF6584" d="M72 17 83 39 65 53Z"/>
+  </g>
 
-    <!-- 4 Origami Facets -->
-    <!-- Top-Left (Vibrant Cyan) -->
-    <polygon points="64,6 14,50 64,56" 
-             fill="url(#facet-tl)" 
-             stroke="#38BDF8" 
-             stroke-width="0.75" 
-             stroke-linejoin="round" />
-    
-    <!-- Top-Right (Electric Lavender / Indigo) -->
-    <polygon points="64,6 114,50 64,56" 
-             fill="url(#facet-tr)" 
-             stroke="#C084FC" 
-             stroke-width="0.75" 
-             stroke-linejoin="round" />
-    
-    <!-- Bottom-Left (Deep Azure) -->
-    <polygon points="14,50 64,98 64,56" 
-             fill="url(#facet-bl)" 
-             stroke="#0284C7" 
-             stroke-width="0.75" 
-             stroke-linejoin="round" />
-    
-    <!-- Bottom-Right (Vivid Magenta / Violet) -->
-    <polygon points="114,50 64,98 64,56" 
-             fill="url(#facet-br)" 
-             stroke="#F43F5E" 
-             stroke-width="0.75" 
-             stroke-linejoin="round" />
-
-    <!-- Spine & Crossbar Crease Highlights -->
-    <line x1="64" y1="6" x2="64" y2="98" stroke="#FFFFFF" stroke-width="1.8" stroke-opacity="0.65" stroke-linecap="round" />
-    <line x1="14" y1="50" x2="114" y2="50" stroke="#FFFFFF" stroke-width="1.2" stroke-opacity="0.45" stroke-linecap="round" />
-
-    <!-- Center Spatial Translation Sparkle -->
-    <polygon points="64,48 66,55 73,56 66,57 64,64 62,57 55,56 62,55" fill="#FFFFFF" />
+  <g id="structural-spars" fill="none" stroke="#000000" stroke-width="2.75" stroke-linecap="butt" stroke-linejoin="miter">
+    <path id="spine" d="M72 17 65 53 65 91"/>
+    <path id="crossbar" d="M28 56 65 53 106 48"/>
   </g>
 </svg>
