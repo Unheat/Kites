@@ -31,6 +31,7 @@ dist-ssr
 scripts/.env
 PaddleOCR/
 result/
+!README_images/result/
 models/
 model/
 scratches/
