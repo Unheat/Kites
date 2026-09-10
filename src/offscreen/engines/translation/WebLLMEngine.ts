@@ -14,8 +14,11 @@ const WEBLLM_TEMPERATURE = 0;
 
 export const WEBLLM_RETRY_BATCH_SPLIT = 3;
 
-/** Watchdog timer in milliseconds to prevent runaway GPU loops (30s for full page batches) */
-const WATCHDOG_DEADLINE_MS = 30000;
+/** Maximum watchdog timer in milliseconds to prevent runaway GPU loops (30s for full page batches) */
+const MAX_WATCHDOG_DEADLINE_MS = 30000;
+
+/** Minimum watchdog timer in milliseconds for small batches to enable fast error recovery */
+const MIN_WATCHDOG_DEADLINE_MS = 10000;
 
 export class WebLLMEngine extends BaseLlmTranslationEngine {
   private engine: MLCEngine | null = null;
@@ -182,13 +185,17 @@ export class WebLLMEngine extends BaseLlmTranslationEngine {
       };
     }
 
-    // Watchdog timer: interrupt runaway GPU generation if deadline exceeded
+    // Dynamic watchdog timer: interrupt runaway GPU generation if deadline exceeded
+    const dynamicDeadlineMs = Math.min(
+      MAX_WATCHDOG_DEADLINE_MS,
+      Math.max(MIN_WATCHDOG_DEADLINE_MS, 4000 + dynamicMaxTokens * 30)
+    );
     const runawayTimer = setTimeout(() => {
       if (this.engine) {
-        console.warn('[WebLLMEngine] Watchdog deadline exceeded; interrupting generation.');
+        console.warn(`[WebLLMEngine] Watchdog deadline (${dynamicDeadlineMs}ms) exceeded; interrupting generation.`);
         void this.engine.interruptGenerate();
       }
-    }, WATCHDOG_DEADLINE_MS);
+    }, dynamicDeadlineMs);
 
     if (signal) {
       signal.addEventListener('abort', () => {

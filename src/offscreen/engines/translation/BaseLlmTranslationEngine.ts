@@ -55,13 +55,30 @@ export function maxTokensForBatch(sources: string[]): number {
 }
 
 /**
+ * Maximum acceptable ratio of dropped lines before failing a strict batch (15% drop = 85-90% accuracy).
+ * Allows real-time translation to proceed swiftly when the vast majority of lines succeeded,
+ * avoiding expensive full-page re-inference loops.
+ */
+export const MAX_UNTRANSLATED_TOLERANCE_RATIO = 0.15;
+
+/** Minimum chunk size to apply drop tolerance; smaller batches (1-5) require 100% key survival */
+export const MIN_CHUNK_SIZE_FOR_DROP_TOLERANCE = 6;
+
+/** In-memory cache for compiled JSON schemas across standard batch sizes (1..15) */
+const SCHEMA_CACHE = new Map<number, Record<string, unknown>>();
+
+/**
  * Builds strict JSON schema for a fixed number of keyed slots (b0, b1, ... b{N-1}).
  * Used by XGrammar in WebLLM and structured-output endpoints to enforce exact keys.
+ * Memoized via SCHEMA_CACHE to avoid object allocation and GC churn per batch.
  *
  * @param slotCount - Number of slots in the batch.
  * @returns JSON schema object with required properties and additionalProperties: false.
  */
 export function buildSchema(slotCount: number): Record<string, unknown> {
+  const cached = SCHEMA_CACHE.get(slotCount);
+  if (cached) return cached;
+
   const properties: Record<string, { type: 'string' }> = {};
   const required: string[] = [];
 
@@ -71,12 +88,14 @@ export function buildSchema(slotCount: number): Record<string, unknown> {
     required.push(key);
   }
 
-  return {
+  const schema = {
     type: 'object',
     properties,
     required,
     additionalProperties: false,
   };
+  SCHEMA_CACHE.set(slotCount, schema);
+  return schema;
 }
 
 /**
@@ -229,7 +248,13 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
         const cleaned = cleanTranslatedLine(parsedChunk[j] || '');
         results[chunk[j].originalIndex] = cleaned;
       }
-      if (!this.allowPartialMissingLines && droppedByModel > 0) {
+      const dropRatio = droppedByModel / chunk.length;
+      const exceedsTolerance =
+        !this.allowPartialMissingLines &&
+        droppedByModel > 0 &&
+        (chunk.length < MIN_CHUNK_SIZE_FOR_DROP_TOLERANCE || dropRatio > MAX_UNTRANSLATED_TOLERANCE_RATIO);
+
+      if (exceedsTolerance) {
         throw new Error(
           `Translation dropped ${droppedByModel}/${chunk.length} lines instead of satisfying the 1:1 key contract.`
         );

@@ -251,4 +251,44 @@ describe('BaseLlmTranslationEngine Keyed JSON Protocol', () => {
     const result = await engine.translate(['Custom Angle', 'Rotate Down'], 'ja', 'en');
     expect(result).toEqual(['Custom Angle', 'Rotate Down']);
   });
+
+  it('memoizes buildSchema to avoid repetitive object allocation', () => {
+    const schema1 = buildSchema(5);
+    const schema2 = buildSchema(5);
+    expect(schema1).toBe(schema2); // Strict reference equality from cache
+  });
+
+  it('accepts batches meeting ~90% accuracy without throwing expensive split-retry errors', async () => {
+    const engine = new MockLlmEngine(15, false);
+    engine.setAllowPartialMissingLines(false);
+    // 10 items: 9 translated, 1 dropped (b9 missing) -> 90% accuracy (drop ratio = 0.10 <= 0.15)
+    const mockRes: Record<string, string> = {};
+    for (let i = 0; i < 9; i++) {
+      mockRes[`b${i}`] = `Translated ${i}`;
+    }
+    engine.mockResponse = JSON.stringify(mockRes);
+
+    const inputs = Array.from({ length: 10 }, (_, i) => `日本語${i}`);
+    const result = await engine.translate(inputs, 'ja', 'en');
+    expect(result).toHaveLength(10);
+    expect(result[0]).toBe('Translated 0');
+    expect(result[8]).toBe('Translated 8');
+    expect(result[9]).toBe('日本語9'); // Gracefully preserves original without throwing
+  });
+
+  it('throws split-retry error when dropped lines exceed tolerance (>15%) in larger batches', async () => {
+    const engine = new MockLlmEngine(15, false);
+    engine.setAllowPartialMissingLines(false);
+    // 10 items: 7 translated, 3 dropped -> 70% accuracy (drop ratio = 0.30 > 0.15)
+    const mockRes: Record<string, string> = {};
+    for (let i = 0; i < 7; i++) {
+      mockRes[`b${i}`] = `Translated ${i}`;
+    }
+    engine.mockResponse = JSON.stringify(mockRes);
+
+    const inputs = Array.from({ length: 10 }, (_, i) => `日本語${i}`);
+    await expect(engine.translate(inputs, 'ja', 'en')).rejects.toThrow(
+      'Translation dropped 3/10 lines instead of satisfying the 1:1 key contract.'
+    );
+  });
 });
