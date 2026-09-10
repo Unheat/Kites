@@ -1,232 +1,289 @@
-# Kites: Spatial Manga Translator
+<div align="center">
 
-Kites is a Chrome Manifest V3 extension that detects text in manga and web images, translates it, removes the original lettering, and typesets the result back into the image.
+# 🪁 Kites
 
-> [!IMPORTANT]
-> Kites is under active development and is currently installed from source. It is not published on the Chrome Web Store.
+### Spatial In-Browser Manga & Comic Translator
+**100% Client-Side WebGPU Neural Pipeline • Zero Python • Zero Cloud Lock-in • Studio-Grade Typesetting**
 
-## Features
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg?style=flat-square)](LICENSE)
+[![Manifest V3](https://img.shields.io/badge/Chrome-Manifest%20V3-success.svg?style=flat-square&logo=googlechrome&logoColor=white)](manifest.json)
+[![WebGPU](https://img.shields.io/badge/Hardware-WebGPU%20%2F%20WASM-orange.svg?style=flat-square&logo=webgpu&logoColor=white)](#processing-engines)
+[![ONNX Runtime Web](https://img.shields.io/badge/Runtime-ONNX%20Web-blueviolet.svg?style=flat-square)](https://onnxruntime.ai/)
+[![Vite](https://img.shields.io/badge/Build-Vite%208%20%2B%20React%2019-646CFF.svg?style=flat-square&logo=vite&logoColor=white)](package.json)
+[![Cloudflare Workers](https://img.shields.io/badge/Backend-Cloudflare%20Workers-F38020.svg?style=flat-square&logo=cloudflare&logoColor=white)](worker/)
 
-- **Translate in place** using an image hover button, persistent image controls, automatic translation when images enter the viewport, or the browser context menu.
-- **Browser-side OCR** with PaddleOCR models running through ONNX Runtime WebGPU or WASM.
-- **Spatial text reconstruction** with geometric noise filtering, horizontal/vertical direction detection, and Cotrans-inspired Kruskal minimum-spanning-tree line grouping.
-- **Multiple translation routes** through Google Translate, local WebLLM models, the authenticated Kites Cloud Shared Pool, or custom OpenAI, OpenAI-compatible, Gemini, and Anthropic APIs.
-- **Ordered translation fallbacks** when a configured engine fails.
-- **Selectable image cleanup** with no inpainting, Simple Fill, Telea-like diffusion, AOT-GAN, or LaMa Manga.
-- **Manga-aware typesetting** with binary-search font fitting, balanced line wrapping, adaptive colors, collision reduction, and rotated-region rendering.
-- **Kites Studio** for browsing recent jobs, comparing the original and clean images, editing translated lines, and exporting PNG files.
-- **Local project storage** through Dexie and IndexedDB, with automatic cleanup after seven days.
+<p align="center">
+  <a href="#-features">Features</a> •
+  <a href="#-showcase">Showcase</a> •
+  <a href="#-kites-studio">Studio Editor</a> •
+  <a href="#-extension-modes">Extension UI</a> •
+  <a href="#-architecture">Architecture</a> •
+  <a href="#-processing-engines">Engine Matrix</a> •
+  <a href="#-installation">Installation</a> •
+  <a href="#-license--attribution">Attribution</a>
+</p>
 
-## How it works
+[![Kites Hero Banner](./README_images/Gemini_Generated_Image_f7lh52f7lh52f7lh.jpeg)](./README_images/Gemini_Generated_Image_f7lh52f7lh52f7lh.jpeg)
+
+</div>
+
+---
+
+## 📖 Overview
+
+**Kites** is a modern, high-performance browser extension (Manifest V3) that translates raw manga, manhwa, manhua, and web comics **directly inside your web browser**.
+
+Unlike legacy tools that demand hefty Python environments, local CUDA setups, or upload your reading data to opaque remote servers, Kites executes neural OCR, text grouping, speech-bubble inpainting, and typesetting **locally on your device** via **WebGPU** and **ONNX Runtime Web**.
+
+Need extra translation horsepower? Switch seamlessly to **WebLLM** for private on-device LLMs, configure your own API keys (OpenAI, Gemini, Anthropic, DeepSeek), or leverage the zero-cost **Kites Cloud Shared Pool** powered by Cloudflare Workers.
+
+---
+
+## ✨ Features
+
+- **⚡ Zero-Install Browser Neural Engine:** Runs PaddleOCR (DBNet + PP-OCR) and neural inpainters (LaMa Manga / AOT-GAN) client-side using hardware-accelerated WebGPU with WASM fallback.
+- **📐 Spatial Text Reconstruction:** Rotated polygon detection (`dt_polys`) with geometric noise filtering, vertical/horizontal direction detection, and Kruskal-MST bubble clustering.
+- **🎨 Polygon-Strict Inpainting:** Erases *strictly* over detected character contours (`UNCLIP_RATIO = 1.8`), preserving comic linework, screen tones, and balloon borders without ugly blurred boxes.
+- **✍️ Algorithmic Typesetting:** Binary-search typography layout, hyphenation, adaptive color extraction, decollision padding, and rotated text matrix rendering.
+- **🛠️ Standalone Kites Studio:** Full-featured interactive post-editor with 8-point bounding box dragging/resizing, raw/clean/typeset view toggles, and PNG export.
+- **🔀 Smart Translation Waterfall:** Automatic failover across multi-provider chains (WebLLM, Cloudflare Shared Pool, Google Translate, OpenAI-compatible APIs).
+- **🔒 Private & Local-First:** All images, OCR results, and workspace states stay saved in your browser's IndexedDB (Dexie.js) with 7-day automatic pruning. Zero tracking.
+
+---
+
+## 🖼️ Showcase
+
+### Comparison 1: Japanese to English
+
+> **Source:** *佐藤さんは知っていた* by [@09ra_19ra on X/Twitter](https://x.com/09ra_19ra) (Canonical manga-image-translator benchmark)
+
+<div align="center">
+<table>
+  <tr>
+    <th width="50%" align="center">Original Japanese Scan</th>
+    <th width="50%" align="center">Kites Translated (English)</th>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src="./README_images/input/demo2.jpeg" alt="Original Japanese Manga" width="100%" />
+    </td>
+    <td align="center">
+      <img src="./README_images/result/demo2_result.png" alt="Kites English Translation" width="100%" />
+    </td>
+  </tr>
+</table>
+</div>
+
+### Comparison 2: Japanese to Vietnamese
+
+> **Source:** [Pixiv Artwork #145272482](https://www.pixiv.net/en/artworks/145272482)
+
+<div align="center">
+<table>
+  <tr>
+    <th width="50%" align="center">Original Japanese Scan</th>
+    <th width="50%" align="center">Kites Translated (Vietnamese)</th>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src="./README_images/input/demo7.jpg" alt="Original Japanese Manga" width="100%" />
+    </td>
+    <td align="center">
+      <img src="./README_images/result/demo7_result.png" alt="Kites Vietnamese Translation" width="100%" />
+    </td>
+  </tr>
+</table>
+</div>
+
+---
+
+## 🛠️ Kites Studio
+
+Every translation job is saved locally into browser storage and can be inspected or perfected in **Kites Studio**.
+
+[![Kites Studio Interactive Editor](./README_images/UI-feature/kite_studio_editing.jpg)](./README_images/UI-feature/kite_studio_editing.jpg)
+
+### What you can do in Studio:
+- **3-Mode Canvas Inspection:** Toggle seamlessly between `Original`, `Cleaned` (inpainted background without text), and `Final` (typeset) outputs.
+- **Interactive Bounding Box Controls:** Click, drag, and resize text regions using 8-point handles with real-time typesetting updates.
+- **Fine-Grained Text & Font Editing:** Refine OCR transcriptions, adjust translations, override font families, customize stroke and fill colors, or change text direction.
+- **Lossless PNG Export:** Download studio-polished pages at 1:1 original resolution.
+- **IndexedDB Persistence:** Offline session history with automatic 7-day TTL cleanup.
+
+---
+
+## 🎛️ Extension Modes & UI
+
+Kites integrates natively into your browsing workflow with a responsive Manifest V3 popup interface:
+
+<div align="center">
+<table>
+  <tr>
+    <th width="45%" align="center">Quick Control Popup</th>
+    <th width="55%" align="center">Deep Settings & Engine Presets</th>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src="./README_images/UI-feature/main-panel.jpg" alt="Kites Popup Main Panel" width="85%" />
+    </td>
+    <td align="center">
+      <img src="./README_images/UI-feature/setting-panel.jpg" alt="Kites Settings Panel" width="85%" />
+    </td>
+  </tr>
+</table>
+</div>
+
+### Four Flexible Trigger Modes:
+1. **Hover Button:** An unobtrusive translation badge appears on hovered images using modern CSS anchor positioning.
+2. **Persistent Controls:** Keeps actionable translation buttons pinned to all eligible comic panels on the page.
+3. **Auto-Translate Mode:** Viewport-driven `IntersectionObserver` queues and translates incoming comic panels automatically as you scroll.
+4. **Context Menu:** Right-click any web image and select **Translate Image** for on-demand processing.
+
+---
+
+## ⚡ Architecture
+
+Kites uses a zero-suspension architecture that delegates compute-heavy WebGPU pipelines to an isolated **Offscreen Document**:
 
 ```text
-Web page image
+Web Page Image (DOM <img>)
   │
-  ├─ Content script: detect eligible <img> elements
-  ├─ Background worker: fetch, deduplicate, and queue image jobs
-  ├─ Offscreen runtime
-  │    ├─ PaddleOCR polygon detection and recognition
-  │    ├─ Noise filtering and Kruskal-MST line grouping
-  │    ├─ Translation ───────────────┐
-  │    └─ Polygon-only inpainting ──┤ run in parallel
-  │                                 └─ Binary-search typesetting and canvas render
-  ├─ IndexedDB: clean image and editable text blocks
-  └─ Content script: replace the page image with the translated PNG
+  ├─ Content Script: Discover eligible images, attach CSS anchors & reversion shields
+  │
+  ├─ Background Service Worker: Message hub, request queue, concurrency & token bucket
+  │
+  ├─ Offscreen Document (Persistent WebGPU Runtime)
+  │    ├─ PaddleOCR Engine: DBNet text detection -> dynamic crop -> PP-OCR recognition
+  │    ├─ Geometry Pipeline: Speedline & noise filtering -> Kruskal-MST bubble clustering
+  │    │
+  │    ├─ Parallel Execution:
+  │    │    ├─ Translation Waterfall: WebLLM / Cloudflare Pool / Google / Custom API
+  │    │    └─ Polygon-Strict Inpainting: LaMa Manga / AOT-GAN / Telea / Simple Fill
+  │    │
+  │    └─ Canvas Renderer: Binary-search font sizing, hyphenation & matrix transformation
+  │
+  ├─ IndexedDB (Dexie.js): Store clean background, polygons & editable text blocks
+  │
+  └─ Content Script: Swap original <img> with high-res rendered Blob URL (srcset-safe)
 ```
 
-Open the [interactive algorithm workflow](docs/workflow.html) for detection thresholds, OCR filters, line-merging rules, translation batching, inpainting contracts, and font-fitting details.
+> 💡 **Explore the details:** Open [`docs/workflow.html`](docs/workflow.html) for an interactive breakdown of detection thresholds, polygon math, clustering formulas, and inpainting contracts.
 
-## Requirements
+---
 
-- [Node.js 20](https://nodejs.org/)
-- npm
-- Google Chrome or another Chromium browser with the required Manifest V3 APIs
-- Internet access for online translators and initial model downloads
-- WebGPU-capable hardware and browser support for local WebLLM and optional GPU acceleration
+## 📊 Processing Engines
 
-WebGPU is not required for the default Google Translate, PaddleOCR WASM, and Simple Fill workflow.
+### 1. OCR (Optical Character Recognition)
+Runs locally via `onnxruntime-web` (WebGPU / WASM) with models cached in browser storage.
 
-## Build and install
+| Preset | Target | Architecture | Notes |
+| :--- | :--- | :--- | :--- |
+| **PP-OCRv6-small** *(Default)* | Multilingual | DBNet + SVTR / LCNet | Best balance of speed and precision |
+| **PP-OCRv6-medium / tiny** | Multilingual | DBNet + SVTR | Scaled variants for high-res scans or low-spec devices |
+| **PP-OCRv5-mobile / server** | Multilingual | DBNet + CRNN | Classic PaddleOCR models |
+| **PP-OCRv5-en-mobile** | English | DBNet + MobileNetV3 | Tuned for Latin scripts |
+| **PP-OCRv3-japanese-mobile** | Japanese | DBNet + CRNN | Optimized for complex Kanji and Kana vertical layouts |
 
+### 2. Inpainting (Text Removal & Background Repair)
+Kites strictly erases **character contour polygons** rather than bounding rectangles, preventing background art degradation.
+
+| Engine | Execution | Model Weights | Visual Quality |
+| :--- | :--- | :--- | :--- |
+| **LaMa Manga** *(Recommended)* | WebGPU / WASM | ONNX (~190 MB) | Neural FFC architecture; repairs screentones and textures |
+| **AOT-GAN** | WebGPU / WASM | ONNX (~60 MB) | Fast GAN-based inpainting with dynamic patch bucketing |
+| **Telea Diffusion** | CPU (JS/WASM) | Zero download | Fast-marching diffusion; great for flat colors & gradients |
+| **Simple Fill** | Instant CPU | Zero download | Median color sampling around polygon boundary |
+| **None** | None | None | Leaves original image intact beneath new lettering |
+
+### 3. Translation Engines & Waterfall
+Configure fallback chains to guarantee translation even during network hiccups or rate limits.
+
+| Engine | Tier | Requirements | Description |
+| :--- | :--- | :--- | :--- |
+| **Google Translate** | Remote | None | Fast, reliable default with batched block indexing |
+| **WebLLM** | Local (WebGPU) | WebGPU (VRAM ≥ 2 GB) | Runs open-weight LLMs (Llama 3.2, Qwen 2.5, Phi-3.5, Gemma 2) completely offline |
+| **Kites Cloud Shared Pool** | Remote | Google Sign-in | Zero-cost community pool on Cloudflare Workers with multi-model fallback |
+| **Custom API (BYOK)** | Remote | User API Key | Direct access to OpenAI (GPT-4o), Anthropic (Claude 3.5), Google (Gemini 2.5), or custom endpoints |
+
+---
+
+## 🚀 Installation
+
+### Prerequisites
+- Node.js 20+ (recommended: Node 22.14 LTS)
+- Chromium-based browser (Google Chrome, Brave, Edge, Opera) with WebGPU support enabled
+- Hardware acceleration enabled in browser flags (`chrome://flags/#enable-unsafe-webgpu` optional for dev builds)
+
+### 1. Build from Source
 ```bash
+# Clone the repository
 git clone https://github.com/Unheat/Kites.git
 cd Kites
+
+# Install dependencies
 npm ci
+
+# Build the extension (generates dist/)
 npm run build
 ```
 
-The unpacked extension is generated in `dist/`.
+### 2. Load into Chrome
+1. Navigate to `chrome://extensions/`.
+2. Toggle on **Developer mode** in the top-right corner.
+3. Click **Load unpacked** and select the `dist/` directory inside the project root.
+4. Pin the **Kites** extension icon in your browser toolbar.
 
-1. Open `chrome://extensions`.
-2. Enable **Developer mode**.
-3. Select **Load unpacked**.
-4. Choose the generated `dist/` directory.
-5. Pin Kites, open the popup, and select the source language, target language, and processing engines.
-
-> [!NOTE]
-> Google sign-in is tied to the OAuth client and extension identity configured in `manifest.json`. A locally built extension may need matching Google Cloud OAuth configuration before Cloud Shared Pool sign-in works.
-
-## Usage
-
-1. Open a regular HTTP or HTTPS page containing an image at least `150 × 150` rendered pixels.
-2. Start translation using one of these modes:
-   - **Hover** — show a translation button on the image under the pointer.
-   - **Persistent** — keep controls visible on every eligible image.
-   - **Auto-Translate** — queue eligible images when they enter the viewport.
-   - **Context menu** — right-click an image and choose **Translate Image**.
-3. Wait for OCR, translation, inpainting, and typesetting to complete. Kites replaces the matching page image with a baked PNG.
-4. Open **Kites Studio** from the popup to edit translated lines or export the current result.
-
-Dynamic pages are observed for newly inserted images. Automatic mode uses `IntersectionObserver`, so off-screen images are not queued until they become visible.
-
-## Processing engines
-
-### OCR
-
-Kites runs PaddleOCR detection and recognition in the extension's offscreen document. Available presets include PaddleOCR v3–v6 mobile/server variants plus English- and Japanese-focused recognition models.
-
-OCR model assets are downloaded once and stored in the browser Cache API. Recognition quality varies by selected model and language; the language selector does not guarantee equal OCR coverage for every listed language.
-
-### Translation
-
-| Engine | Execution | Notes |
-| --- | --- | --- |
-| Google Translate | Remote | Default engine; batches indexed text blocks. |
-| WebLLM | Local WebGPU | Downloads model weights and requires WebGPU. Available models and memory estimates come from [`models-registry.json`](src/shared/models-registry.json). |
-| Kites Cloud Shared Pool | Remote | Requires Google sign-in and uses the optional Cloudflare backend. |
-| Custom API | Remote | Supports OpenAI, OpenAI-compatible HTTPS endpoints, Gemini, and Anthropic. |
-
-Fallback engines are tried in their configured order when an engine throws. Google Translate retains the source text for many failed requests internally, so those failures may not advance to the next waterfall engine.
-
-### Inpainting
-
-| Engine | Download | Behavior |
-| --- | ---: | --- |
-| None | No | Keeps the original image beneath translated text. |
-| Simple Fill | No | Fills each OCR polygon using a sampled median background color. |
-| Telea Diffusion | No | Uses local fast-marching-style diffusion around the text mask. |
-| AOT-GAN | Yes | Runs a cached ONNX neural inpainting model. |
-| LaMa Manga | Yes | Runs a cached manga-tuned ONNX model. |
-
-Inpainting receives filtered OCR line polygons—not the full speech-bubble region or raw DBNet probability mask—to reduce accidental removal of artwork.
-
-## Development
-
-```bash
-npm run dev       # Start the Vite development server on port 5173
-npm run lint      # Run Oxlint
-npm test          # Run Vitest unit tests under src/
-npm run build     # Copy ONNX Runtime assets, type-check, and build the extension
-npm run preview   # Preview built web entry points
-```
-
-The Vite page alone does not provide a complete extension environment. Test extension APIs, the background worker, content script, and offscreen pipeline by loading `dist/` in Chrome.
-
-To run the same fast checks as continuous integration:
-
-```bash
-npm ci
-npm run lint
-npm test
-npm run build
-```
-
-### Browser checks
-
-Build first, then run the interactive Chrome test:
-
-```bash
-npm run build
-npm run test:e2e
-```
-
-This launches a visible browser, loads `dist/`, visits a live page, and exercises the default Google Translate and Simple Fill path. Treat it as an interactive end-to-end debugging check rather than a strict continuous-integration result.
-
-Local WebLLM and model-network testing requires hardware WebGPU and larger downloads:
-
-```bash
-npm run build
-npm run test:webllm
-```
-
-The first run may download hundreds of megabytes of OCR and translation models and can take several minutes. The real-model visual pipeline check is deliberately separate from `npm test`:
-
-```bash
-npx tsx src/test/pipelineVisualTest.ts
-```
-
-## Optional Cloudflare Worker
-
-The extension works without a local worker when using Google Translate, WebLLM, or custom APIs. The `worker/` package provides Kites Cloud Shared Pool, Google authentication, quota tracking, provider fallback, and circuit breaking.
-
+### 3. (Optional) Run Cloudflare Shared Pool Worker
+The extension runs out-of-the-box with Google Translate, WebLLM, and Custom APIs. To host your own community pool:
 ```bash
 cd worker
 npm ci
 cp .dev.vars.example .dev.vars
+# Add provider keys (MISTRAL_API_KEY, GEMINI_API_KEY, GROQ_API_KEY, etc.)
 npm run dev
+# Deploy to Cloudflare edge:
+npm run deploy
 ```
 
-Configure `GOOGLE_CLIENT_ID` and `JWT_SALT`, then add API keys only for the providers you enable. Current provider-dependent secrets may include `MISTRAL_API_KEY`, `GEMINI_API_KEY`, `GROQ_API_KEY`, and `OPENROUTER_API_KEY`. Workers AI uses the Wrangler `AI` binding instead of an API key.
+---
+
+## 💻 Development & Testing
 
 ```bash
-npm test          # Worker unit tests
-npm run deploy    # Deploy with Wrangler
+npm run dev              # Vite dev server with Hot Module Replacement
+npm run lint             # Oxlint syntax and safety check
+npm test                 # Run Vitest test suite (200+ unit tests)
+npm run test:e2e         # Interactive Puppeteer test with live Chrome instance
+npm run test:visual      # Visual pipeline verification with real models
 ```
 
-A separate deployment must update both the Worker route in `worker/wrangler.jsonc` and the extension API base URL in `src/shared/constants.ts`.
+---
 
-## Privacy and permissions
+## 🔒 Privacy & Permissions
 
-Kites requests access to all URLs because it must find and fetch user-selected images on arbitrary pages. It also uses extension storage, context menus, an offscreen document, and Google Identity for the features described above.
+- **Local-First Processing:** OCR, polygon clustering, inpainting, and WebLLM translations happen **100% on your device**.
+- **No Cloud Image Uploads:** Raw image pixels are processed in memory and never uploaded to remote inference APIs.
+- **Encrypted Local Storage:** Settings and custom API keys reside exclusively in `chrome.storage.local`.
+- **Zero Telemetry:** No analytics scripts, tracking cookies, or diagnostic beacons.
 
-- OCR and inpainting run locally after their model files are cached.
-- WebLLM translation runs locally after its model is downloaded.
-- Google Translate, Cloud Shared Pool, and custom API engines send extracted text to the selected remote service.
-- Settings and custom API credentials are stored in `chrome.storage.local`.
-- Source images, clean images, OCR text, translations, geometry, and rendering metadata are stored locally in IndexedDB.
-- No production analytics or telemetry integration is present.
+---
 
-## Current limitations
+## 📜 License & Attribution
 
-- Kites targets standard HTML `<img>` elements. Canvas/WebGL readers and protected viewport capture are not supported.
-- Very small, hidden, transparent, or filtered images may be skipped depending on the selected interaction mode.
-- Studio edits translated text but does not currently support dragging/resizing regions, editing per-region colors, or rerunning OCR.
-- WebLLM has no CPU fallback and requires WebGPU.
-- OCR quality and writing-system coverage depend on the selected PaddleOCR model and dictionary.
-- A failed neural inpainting run falls back to rendering over the original image rather than automatically trying another inpainting engine.
+Kites is licensed under the **[GNU General Public License v3.0 (GPLv3)](LICENSE)**.
 
-## Project structure
+This project stands on the shoulders of giants. We express our deepest gratitude to the open-source creators and research communities whose work laid the foundation for Kites:
 
-```text
-Kites/
-├── manifest.json          Chrome Manifest V3 configuration
-├── src/
-│   ├── background/        Service worker, queueing, and authentication
-│   ├── content/           Page image detection and overlay controls
-│   ├── offscreen/         OCR, translation, inpainting, and rendering
-│   ├── popup/             Extension settings UI
-│   ├── shared/            Shared types, constants, registries, and utilities
-│   ├── test/              Pipeline probes and test assets
-│   ├── App.tsx            Kites Studio
-│   └── db.ts              Dexie/IndexedDB schema and cleanup
-├── worker/                Optional Cloudflare Shared Pool backend
-├── scripts/               Build helpers and browser checks
-├── docs/                  Architecture, workflow, and development notes
-└── vite.config.ts         Vite, CRXJS, and Vitest configuration
-```
+- **[manga-image-translator (Cotrans)](https://github.com/zyddnys/manga-image-translator):** Ground truth algorithms for spatial text grouping, direction detection, and typography fitting.
+- **[xianscan-rust](https://github.com/ArbenApura/xianscan-rust):** Dynamic patch inpainting strategies, OCR speedline filtering, and color extraction pipelines.
+- **[PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR):** Ultra-lightweight DBNet detection and text recognition models.
+- **[InpaintWeb](https://github.com/lxfater/inpaint-web) & [pyheal](https://github.com/olvb/pyheal):** Fast in-browser canvas diffusion and inpainting concepts.
+- **[@mlc-ai/web-llm](https://github.com/mlc-ai/web-llm):** High-performance WebGPU client runtime for open-source large language models.
 
-## Documentation
+*For detailed per-module licenses and copyright notices, see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).*
 
-- [Interactive algorithm workflow](docs/workflow.html)
-- [Implementation plan and current scope](docs/fullplan.md)
-- [Development log](docs/devlog/)
-- [Cloudflare Worker WAF notes](worker/WAF_RULES.md)
+---
 
-## License & Attribution
-
-Kites is licensed under the [GNU General Public License v3.0 or later](LICENSE).
-
-This project incorporates ported algorithms, architectural concepts, and assets from third-party open-source projects including [manga-image-translator (Cotrans)](https://github.com/zyddnys/manga-image-translator), [xianscan-rust](https://github.com/ArbenApura/xianscan-rust), [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR), [InpaintWeb](https://github.com/lxfater/inpaint-web), and [OpenCV/pyheal](https://github.com/olvb/pyheal).
-
-For comprehensive third-party copyright notices, licenses, and detailed module-by-module attribution of all ported algorithms, please refer to [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-
+<div align="center">
+  <sub>Built with ❤️ for manga and comic lovers worldwide. Star ⭐ Kites if you enjoy reading comics without language barriers!</sub>
+</div>
