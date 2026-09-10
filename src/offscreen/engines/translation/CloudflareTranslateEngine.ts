@@ -91,10 +91,10 @@ export class CloudflareTranslateEngine extends BaseLlmTranslationEngine {
     prompt: string,
     messages?: LlmChatMessage[],
     _schema?: Record<string, unknown>,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    maxTokens?: number
   ): Promise<string> {
     const token = await this.getAuthToken();
-
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
@@ -121,6 +121,7 @@ export class CloudflareTranslateEngine extends BaseLlmTranslationEngine {
           model: CLOUDFLARE_TRANSLATE_MODEL,
           messages: payloadMessages,
           temperature: DEFAULT_TEMPERATURE,
+          max_tokens: maxTokens,
           stream: false,
         }),
         signal: controller.signal,

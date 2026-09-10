@@ -25,7 +25,9 @@ class MockLlmEngine extends BaseLlmTranslationEngine {
   protected async requestLlm(
     prompt: string,
     messages?: LlmChatMessage[],
-    schema?: Record<string, unknown>
+    schema?: Record<string, unknown>,
+    _signal?: AbortSignal,
+    _maxTokens?: number
   ): Promise<string> {
     this.promptHistory.push(prompt);
     this.messageHistory.push(messages);
@@ -68,11 +70,11 @@ describe('maxTokensForBatch and countCodePoints', () => {
   it('calculates dynamic token safety cap bounded within bounds', () => {
     const tokensSmall = maxTokensForBatch(['Hi']);
     expect(tokensSmall).toBeGreaterThanOrEqual(64);
-    expect(tokensSmall).toBeLessThanOrEqual(384);
+    expect(tokensSmall).toBeLessThanOrEqual(1024);
 
     const longBatch = new Array(6).fill('This is a longer manga text bubble with many words.');
     const tokensLong = maxTokensForBatch(longBatch);
-    expect(tokensLong).toBeLessThanOrEqual(384);
+    expect(tokensLong).toBeLessThanOrEqual(1024);
   });
 });
 
@@ -236,7 +238,17 @@ describe('BaseLlmTranslationEngine Keyed JSON Protocol', () => {
     engine.setAllowPartialMissingLines(false);
     engine.mockResponse = JSON.stringify({ b0: 'Deliver the best', b1: 'Haha, top' }); // missing b2
 
-    await expect(engine.translate(['Item 0', 'Item 1', 'Item 2'], 'ja', 'en'))
+    await expect(engine.translate(['日本語1', '日本語2', '日本語3'], 'ja', 'en'))
       .rejects.toThrow('Translation dropped 1/3 lines instead of satisfying the 1:1 key contract.');
+  });
+
+  it('does not treat Latin source text as a dropped line when translated to English verbatim', async () => {
+    const engine = new MockLlmEngine(15, false);
+    engine.setAllowPartialMissingLines(false);
+    // English source text retained verbatim by the LLM
+    engine.mockResponse = JSON.stringify({ b0: 'Custom Angle', b1: 'Rotate Down' });
+
+    const result = await engine.translate(['Custom Angle', 'Rotate Down'], 'ja', 'en');
+    expect(result).toEqual(['Custom Angle', 'Rotate Down']);
   });
 });

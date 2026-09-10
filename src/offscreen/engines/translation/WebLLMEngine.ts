@@ -6,16 +6,16 @@ import {
 } from './BaseLlmTranslationEngine';
 import { checkWebGPUAvailability } from '../../utils/hardware';
 
-/** Default segment batch size for on-device WebLLM inference (sweet spot: 4-6 bubbles) */
-const DEFAULT_WEBLLM_BATCH_SIZE = 5;
+/** Default segment batch size for on-device WebLLM inference (fits full page in 1 pass) */
+const DEFAULT_WEBLLM_BATCH_SIZE = 15;
 
 /** Greedy sampling temperature for deterministic translation */
 const WEBLLM_TEMPERATURE = 0;
 
 export const WEBLLM_RETRY_BATCH_SPLIT = 3;
 
-/** Watchdog timer in milliseconds to prevent runaway GPU loops */
-const WATCHDOG_DEADLINE_MS = 15000;
+/** Watchdog timer in milliseconds to prevent runaway GPU loops (30s for full page batches) */
+const WATCHDOG_DEADLINE_MS = 30000;
 
 export class WebLLMEngine extends BaseLlmTranslationEngine {
   private engine: MLCEngine | null = null;
@@ -147,7 +147,8 @@ export class WebLLMEngine extends BaseLlmTranslationEngine {
     prompt: string,
     messages?: LlmChatMessage[],
     schema?: Record<string, unknown>,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    maxTokens?: number
   ): Promise<string> {
     if (!this.engine) {
       throw new Error('WebLLMEngine is not initialized. Call init() first.');
@@ -162,9 +163,8 @@ export class WebLLMEngine extends BaseLlmTranslationEngine {
         ? messages
         : [{ role: 'user' as const, content: prompt }];
 
-    // Dynamic safety token cap based on source inputs
-    const sourceTexts = payloadMessages.map((m) => m.content);
-    const dynamicMaxTokens = maxTokensForBatch(sourceTexts);
+    // Dynamic safety token cap passed from batch segments, or bounded fallback
+    const dynamicMaxTokens = maxTokens ?? maxTokensForBatch(payloadMessages.map((m) => m.content));
 
     const completionOptions: any = {
       messages: payloadMessages,
@@ -172,7 +172,7 @@ export class WebLLMEngine extends BaseLlmTranslationEngine {
       top_p: 1,
       repetition_penalty: 1,
       max_tokens: dynamicMaxTokens,
-      stop: [],
+      stop: ['\n\n\n'],
     };
 
     if (schema) {

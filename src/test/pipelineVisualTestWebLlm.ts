@@ -9,7 +9,7 @@ const EXTENSION_PATH = path.resolve(__dirname, '../../dist');
 const USER_DATA_DIR = path.resolve(__dirname, '../../test/model/.chrome-profile-webllm-visual');
 const TEST_IMAGE_DIR = path.resolve(__dirname, 'test-img');
 const RESULT_DIR = path.resolve(process.cwd(), 'result/pipeline_webllm');
-const WEBLLM_MODEL_ID = process.env.WEBLLM_MODEL_ID || 'Qwen2.5-3B-Instruct-q4f16_1-MLC';
+const WEBLLM_MODEL_ID = process.env.WEBLLM_MODEL_ID || 'Qwen2.5-1.5B-Instruct-q4f16_1-MLC';
 const WEBLLM_NO_FEWSHOT = process.env.WEBLLM_NO_FEWSHOT === '1';
 const TRANSLATE_TIMEOUT_MS = 15 * 60 * 1000;
 const TARGET_TIMEOUT_MS = 30_000;
@@ -45,7 +45,7 @@ function startTestImageServer(): Promise<http.Server> {
  */
 function releaseStaleProfileLock(): void {
   fs.mkdirSync(USER_DATA_DIR, { recursive: true });
-  for (const name of ['SingletonLock', 'SingletonCookie', 'SingletonSocket']) {
+  for (const name of ['SingletonLock', 'SingletonCookie', 'SingletonSocket', 'DevToolsActivePort']) {
     fs.rmSync(path.join(USER_DATA_DIR, name), { force: true, recursive: true });
   }
 }
@@ -174,6 +174,7 @@ async function main(): Promise<void> {
     browser = await puppeteer.launch({
       headless: false,
       userDataDir: USER_DATA_DIR,
+      protocolTimeout: 300_000,
       args: [
         `--disable-extensions-except=${EXTENSION_PATH}`,
         `--load-extension=${EXTENSION_PATH}`,
@@ -192,21 +193,27 @@ async function main(): Promise<void> {
     browser.on('targetcreated', (target) => void attachConsoleCapture(target, extensionId, consoleBuffer, sessions));
     await Promise.all(browser.targets().map((target) => attachConsoleCapture(target, extensionId, consoleBuffer, sessions)));
 
-    const settingsPage = await browser.newPage();
+    const configPage = await browser.newPage();
     try {
-      await settingsPage.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'load' });
-      await settingsPage.evaluate((modelId, noFewShot) => new Promise<void>((resolve) => {
-        (globalThis as any).__KITES_WEBLLM_NO_FEWSHOT__ = noFewShot;
+      await configPage.goto(`chrome-extension://${extensionId}/index.html`, { waitUntil: 'load' });
+      const configuredEngineId = await configPage.evaluate((modelId) => new Promise<string | undefined>((resolve) => {
         chrome.storage.local.set({ popupState: {
           isExtensionEnabled: true, isAuto: false, manualMode: 'persistent', concurrency: 1,
+          isDark: true, renderFontPresetId: 'standard',
           sourceLang: 'ja', targetLang: 'en', activeEngineId: modelId,
           activeInpaintId: 'simple', activeOcrId: 'v6-small', fallbackChain: [], customApis: [],
           webgpuSupported: true, webgpuMaster: true,
           webgpuOverrides: { llm: true, inpaint: true, ocr: true },
-        } }, resolve);
-      }), WEBLLM_MODEL_ID, WEBLLM_NO_FEWSHOT);
+        } }, () => {
+          chrome.storage.local.get('popupState', (data: any) => resolve(data?.popupState?.activeEngineId));
+        });
+      }), WEBLLM_MODEL_ID);
+      console.log('[WebLLM-E2E] Storage configured via dashboard:', configuredEngineId);
+      if (configuredEngineId !== WEBLLM_MODEL_ID) {
+        throw new Error(`Failed to configure activeEngineId: expected ${WEBLLM_MODEL_ID}, got ${configuredEngineId}`);
+      }
     } finally {
-      await settingsPage.close();
+      await configPage.close();
     }
 
     await assertHardwareWebGpuInOffscreen(browser, extensionId, consoleBuffer, sessions);

@@ -1,5 +1,6 @@
 import type { ITranslationEngine } from './BaseEngine';
 import { getLanguageName } from '../../../shared/utils/LanguageRegistry';
+import { hasNativeScriptForLang } from '../../../shared/utils/textCleaning';
 
 export interface LlmTranslationSegment {
   originalIndex: number;
@@ -42,7 +43,7 @@ export function countCodePoints(text: string): number {
 /**
  * Computes dynamic token safety bound for a batch of source strings based on
  * number of bubbles and total Unicode code points.
- * Formula: Math.min(384, Math.max(64, 24 + 10 * N + Math.ceil(2.5 * C)))
+ * Formula: Math.min(1024, Math.max(64, 32 + 16 * N + Math.ceil(2.5 * C)))
  *
  * @param sources - Array of source texts in the batch.
  * @returns Maximum completion tokens.
@@ -50,7 +51,7 @@ export function countCodePoints(text: string): number {
 export function maxTokensForBatch(sources: string[]): number {
   const n = sources.length;
   const c = sources.reduce((sum, s) => sum + countCodePoints(s.trim()), 0);
-  return Math.min(384, Math.max(64, 24 + 10 * n + Math.ceil(2.5 * c)));
+  return Math.min(1024, Math.max(64, 32 + 16 * n + Math.ceil(2.5 * c)));
 }
 
 /**
@@ -162,10 +163,16 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
 
   /**
    * Whether a model is allowed to preserve dropped slots when every translation survived.
-   * WebLLM enables this during its experimental prompt sweep so partial variants can be measured,
-   * while production visual tests consider any missing translation a failed run.
+   * Defaults to true so remote APIs or general engines fall back gracefully to source text for missing keys.
+   * WebLLM overrides this to false to trigger split-retry logic on dropped lines.
    */
   protected allowPartialMissingLines = true;
+
+  /**
+   * Keys provided in the most recent model completion parse.
+   * Used to distinguish missing keys from intentional verbatim passthroughs.
+   */
+  protected lastParsedKeys = new Set<string>();
 
   /**
    * Translates an array of text segments from source language to target language.
@@ -205,10 +212,19 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
       const prompt = this.buildPrompt(chunk, sourceLang, targetLang);
       const messages = this.buildJsonMessages(chunk, sourceLang, targetLang);
       const schema = buildSchema(chunk.length);
-      const rawOutput = await this.requestLlm(prompt, messages, schema);
+      const maxTokens = maxTokensForBatch(chunk.map((s) => s.text));
+      const rawOutput = await this.requestLlm(prompt, messages, schema, undefined, maxTokens);
       const parsedChunk = this.parseKeyedOutput(rawOutput, chunk);
 
-      const droppedByModel = chunk.filter((segment, idx) => parsedChunk[idx] === segment.text).length;
+      const droppedByModel = chunk.filter((segment, idx) => {
+        const key = `b${idx}`;
+        const keyWasProvided = this.lastParsedKeys.has(key);
+        if (!keyWasProvided) return true; // Truly omitted by model
+        if (parsedChunk[idx] !== segment.text) return false;
+        // Text is identical to source. If it possessed native script for a non-Latin source,
+        // it means the LLM regurgitated it without translation (verbatim echo).
+        return hasNativeScriptForLang(segment.text, sourceLangId);
+      }).length;
       for (let j = 0; j < chunk.length; j++) {
         const cleaned = cleanTranslatedLine(parsedChunk[j] || '');
         results[chunk[j].originalIndex] = cleaned;
@@ -236,7 +252,8 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
     prompt: string,
     messages?: LlmChatMessage[],
     schema?: Record<string, unknown>,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    maxTokens?: number
   ): Promise<string>;
 
   /**
@@ -398,6 +415,8 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
       return this.parseDelimitedOutput(rawOutput, chunk);
     }
 
+    this.lastParsedKeys = new Set(parsedMap.keys());
+
     if (this.throwOnCountMismatch && parsedMap.size < chunk.length) {
       throw new Error(
         `Keyed parsing failed for chunk. Expected ${chunk.length} keys, got ${parsedMap.size}. Model hallucinated.`
@@ -472,6 +491,13 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
       throw new Error(
         `Delimiter parsing failed for chunk. Expected ${expectedCount} lines, got ${matchedCount}. Model hallucinated.`
       );
+    }
+
+    this.lastParsedKeys = new Set();
+    for (let i = 0; i < expectedCount; i++) {
+      if (parsed[i] !== undefined && parsed[i]!.length > 0) {
+        this.lastParsedKeys.add(`b${i}`);
+      }
     }
 
     return chunk.map((item, idx) => {

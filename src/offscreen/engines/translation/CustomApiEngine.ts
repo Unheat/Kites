@@ -14,8 +14,8 @@ const DEFAULT_CUSTOM_API_BATCH_SIZE = 15;
 /** Sampling temperature for translation fidelity (greedy decoding) */
 const DEFAULT_TEMPERATURE = 0;
 
-/** Max completion tokens for Claude requests */
-const CLAUDE_MAX_TOKENS = 2048;
+/** Default max completion tokens when unspecified by caller */
+const DEFAULT_MAX_COMPLETION_TOKENS = 1024;
 
 /**
  * Translates OCR text through one configured remote API provider using delimiter line tagging.
@@ -113,7 +113,8 @@ export class CustomApiEngine extends BaseLlmTranslationEngine {
     prompt: string,
     messages?: LlmChatMessage[],
     _schema?: Record<string, unknown>,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    maxTokens?: number
   ): Promise<string> {
     let lastError: unknown;
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
@@ -124,7 +125,7 @@ export class CustomApiEngine extends BaseLlmTranslationEngine {
       }
 
       try {
-        return await this.requestProvider(prompt, messages, controller.signal);
+        return await this.requestProvider(prompt, messages, controller.signal, maxTokens);
       } catch (error) {
         lastError = error;
         if (attempt === MAX_ATTEMPTS || !this.isTransientFailure(error)) throw error;
@@ -141,17 +142,21 @@ export class CustomApiEngine extends BaseLlmTranslationEngine {
    *
    * @param prompt - Prompt string.
    * @param messages - Optional structured ChatMessage array.
-   * @param signal - AbortSignal.
+   * @param signal - Optional AbortSignal.
+   * @param maxTokens - Optional maximum tokens allowed.
    * @returns Provider response text.
    */
   private async requestProvider(
     prompt: string,
-    messages: LlmChatMessage[] | undefined,
-    signal: AbortSignal
+    messages?: LlmChatMessage[],
+    signal?: AbortSignal,
+    maxTokens?: number
   ): Promise<string> {
-    if (this.config.provider === 'gemini') return this.requestGemini(prompt, messages, signal);
-    if (this.config.provider === 'claude') return this.requestClaude(prompt, messages, signal);
-    return this.requestOpenAi(prompt, messages, signal);
+    const effectiveMaxTokens = maxTokens ?? DEFAULT_MAX_COMPLETION_TOKENS;
+    const abortSignal = signal ?? new AbortController().signal;
+    if (this.config.provider === 'gemini') return this.requestGemini(prompt, messages, abortSignal, effectiveMaxTokens);
+    if (this.config.provider === 'claude') return this.requestClaude(prompt, messages, abortSignal, effectiveMaxTokens);
+    return this.requestOpenAi(prompt, messages, abortSignal, effectiveMaxTokens);
   }
 
   /**
@@ -165,7 +170,8 @@ export class CustomApiEngine extends BaseLlmTranslationEngine {
   private async requestOpenAi(
     prompt: string,
     messages: LlmChatMessage[] | undefined,
-    signal: AbortSignal
+    signal: AbortSignal,
+    maxTokens: number
   ): Promise<string> {
     const root = this.config.provider === 'openai' ? OPENAI_API_ROOT : this.getCompatibleApiRoot();
     const payloadMessages =
@@ -173,9 +179,10 @@ export class CustomApiEngine extends BaseLlmTranslationEngine {
         ? messages
         : [{ role: 'user', content: prompt }];
 
-    const body = {
+    const body: Record<string, unknown> = {
       model: this.config.modelName,
       temperature: DEFAULT_TEMPERATURE,
+      max_tokens: maxTokens,
       messages: payloadMessages,
     };
 
@@ -216,7 +223,8 @@ export class CustomApiEngine extends BaseLlmTranslationEngine {
   private async requestGemini(
     prompt: string,
     messages: LlmChatMessage[] | undefined,
-    signal: AbortSignal
+    signal: AbortSignal,
+    maxTokens: number
   ): Promise<string> {
     const systemMsg = messages?.find((m) => m.role === 'system');
     const nonSystemMsgs = messages?.filter((m) => m.role !== 'system');
@@ -231,7 +239,10 @@ export class CustomApiEngine extends BaseLlmTranslationEngine {
 
     const body: Record<string, unknown> = {
       contents,
-      generationConfig: { temperature: DEFAULT_TEMPERATURE },
+      generationConfig: {
+        temperature: DEFAULT_TEMPERATURE,
+        maxOutputTokens: maxTokens,
+      },
     };
     if (systemMsg) {
       body.systemInstruction = {
@@ -272,7 +283,8 @@ export class CustomApiEngine extends BaseLlmTranslationEngine {
   private async requestClaude(
     prompt: string,
     messages: LlmChatMessage[] | undefined,
-    signal: AbortSignal
+    signal: AbortSignal,
+    maxTokens: number
   ): Promise<string> {
     const systemMsg = messages?.find((m) => m.role === 'system');
     const nonSystemMsgs = messages?.filter((m) => m.role !== 'system');
@@ -291,7 +303,7 @@ export class CustomApiEngine extends BaseLlmTranslationEngine {
       },
       body: JSON.stringify({
         model: this.config.modelName,
-        max_tokens: CLAUDE_MAX_TOKENS,
+        max_tokens: maxTokens,
         temperature: DEFAULT_TEMPERATURE,
         ...(systemMsg ? { system: systemMsg.content } : {}),
         messages: claudeMessages,
