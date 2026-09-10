@@ -27,19 +27,31 @@ export async function executeGemini(
 ): Promise<AdapterExecutionResult> {
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${route.modelName}:generateContent?key=${apiKey}`;
 
-  // Convert OpenAI messages to Gemini contents structure
-  const contents = request.messages.map((m) => ({
+  // Separate system instruction from conversational contents
+  const systemMsg = request.messages.find((m) => m.role === 'system');
+  const nonSystemMsgs = request.messages.filter((m) => m.role !== 'system');
+
+  // Convert non-system OpenAI messages to Gemini contents structure (strictly alternating user/model)
+  const contents = nonSystemMsgs.map((m) => ({
     role: m.role === 'assistant' ? 'model' : 'user',
     parts: [{ text: m.content }],
   }));
 
-  const body = JSON.stringify({
+  const bodyObj: Record<string, unknown> = {
     contents,
     generationConfig: {
       temperature: request.temperature ?? 0.1,
       maxOutputTokens: request.max_tokens ?? 1024,
     },
-  });
+  };
+
+  if (systemMsg) {
+    bodyObj.systemInstruction = {
+      parts: [{ text: systemMsg.content }],
+    };
+  }
+
+  const body = JSON.stringify(bodyObj);
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);

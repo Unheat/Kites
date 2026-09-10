@@ -3,11 +3,13 @@ import {
   BaseLlmTranslationEngine,
   stripMarkdownFormatting,
   cleanTranslatedLine,
+  type LlmChatMessage,
 } from './BaseLlmTranslationEngine';
 
 class MockLlmEngine extends BaseLlmTranslationEngine {
   public mockResponse: string = '';
   public promptHistory: string[] = [];
+  public messageHistory: (LlmChatMessage[] | undefined)[] = [];
 
   constructor(batchSize = 15, throwOnMismatch = false) {
     super();
@@ -15,8 +17,9 @@ class MockLlmEngine extends BaseLlmTranslationEngine {
     this.throwOnCountMismatch = throwOnMismatch;
   }
 
-  protected async requestLlm(prompt: string): Promise<string> {
+  protected async requestLlm(prompt: string, messages?: LlmChatMessage[]): Promise<string> {
     this.promptHistory.push(prompt);
+    this.messageHistory.push(messages);
     return this.mockResponse;
   }
 }
@@ -111,6 +114,18 @@ describe('BaseLlmTranslationEngine', () => {
     expect(msgs[2].content).toContain("<|1|> Let's go!");
     expect(msgs[3].role).toBe('user');
     expect(msgs[3].content).toContain('<|1|> One');
+  });
+
+  it('passes both prompt string and structured chat messages to requestLlm', async () => {
+    const engine = new MockLlmEngine();
+    engine.mockResponse = '<|1|> One';
+
+    await engine.translate(['One'], 'ja', 'en');
+    expect(engine.promptHistory).toHaveLength(1);
+    expect(engine.messageHistory).toHaveLength(1);
+    const msgs = engine.messageHistory[0]!;
+    expect(msgs).toHaveLength(4);
+    expect(msgs[0].role).toBe('system');
   });
 
   it('recovers accurately from missing bracket |1|> or [1] output', async () => {

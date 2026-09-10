@@ -1,5 +1,5 @@
 import { MLCEngine, CreateMLCEngine } from '@mlc-ai/web-llm';
-import { BaseLlmTranslationEngine } from './BaseLlmTranslationEngine';
+import { BaseLlmTranslationEngine, type LlmChatMessage } from './BaseLlmTranslationEngine';
 import { checkWebGPUAvailability } from '../../utils/hardware';
 
 /** Default segment batch size for on-device WebLLM inference */
@@ -111,45 +111,31 @@ export class WebLLMEngine extends BaseLlmTranslationEngine {
 
   /**
    * Submits prompt to WebGPU LLM completion API.
-   * Automatically structures prompt into a system instruction, Cotrans 1-shot in-context demonstration,
-   * and user query turns so small local models generate immediate numbered lines without conversational chatter.
+   * Uses structured chat messages (system rules + 1-shot in-context priming + user query)
+   * to guarantee concise, non-conversational line translations on WebGPU.
    *
-   * @param prompt - The assembled batch prompt.
+   * @param prompt - The assembled batch prompt fallback string.
+   * @param messages - Optional structured ChatMessage array with system/user/assistant turns.
    * @param _signal - Optional AbortSignal.
    * @returns Raw string completion from the local model.
    */
-  protected async requestLlm(prompt: string, _signal?: AbortSignal): Promise<string> {
+  protected async requestLlm(
+    prompt: string,
+    messages?: LlmChatMessage[],
+    _signal?: AbortSignal
+  ): Promise<string> {
     if (!this.engine) {
       throw new Error('WebLLMEngine is not initialized. Call init() first.');
     }
 
-    // Separate instructions from combined numbered lines
-    const delimiterIndex = prompt.indexOf('\n\n');
-    const systemContent = delimiterIndex !== -1 ? prompt.slice(0, delimiterIndex).trim() : prompt;
-    const userContent = delimiterIndex !== -1 ? prompt.slice(delimiterIndex + 2).trim() : prompt;
-
-    const messages = [
-      {
-        role: 'system' as const,
-        content: systemContent,
-      },
-      {
-        role: 'user' as const,
-        content: '<|1|> 行こう！\n<|2|> 待って！',
-      },
-      {
-        role: 'assistant' as const,
-        content: '<|1|> Let\'s go!\n<|2|> Wait!',
-      },
-      {
-        role: 'user' as const,
-        content: userContent,
-      },
-    ];
+    const payloadMessages =
+      messages && messages.length > 0
+        ? messages
+        : [{ role: 'user' as const, content: prompt }];
 
     const chunkStart = import.meta.env.DEV ? performance.now() : 0;
     const reply = await this.engine.chat.completions.create({
-      messages,
+      messages: payloadMessages,
       temperature: WEBLLM_TEMPERATURE,
       max_tokens: WEBLLM_MAX_TOKENS,
     });

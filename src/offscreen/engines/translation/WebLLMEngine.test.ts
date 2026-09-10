@@ -89,7 +89,7 @@ describe('WebLLMEngine Delimiter Batching', () => {
     const systemMsg = callArg.messages.find((m: any) => m.role === 'system')?.content;
     const userMsg = callArg.messages[callArg.messages.length - 1]?.content;
 
-    expect(systemMsg).toContain('Translate the following manga text lines');
+    expect(systemMsg).toContain('automated translation engine');
     expect(userMsg).toContain('<|1|> Hello');
     expect(userMsg).not.toContain('<|2|>   ');
     expect(userMsg).toContain('<|2|> World');

@@ -58,6 +58,25 @@ describe('CloudflareTranslateEngine', () => {
     expect(result).toEqual(['Preface', 'whispering']);
   });
 
+  it('dispatches structured multi-turn messages with system role to Cloudflare endpoint', async () => {
+    const mockResponse = {
+      choices: [{ message: { content: '<|1|> Hello' } }],
+    };
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(JSON.stringify(mockResponse), { status: 200 })
+    );
+
+    await engine.translate(['Bonjour'], 'fr', 'en');
+    expect(fetchSpy).toHaveBeenCalled();
+    const requestBody = JSON.parse(fetchSpy.mock.calls[0][1]?.body as string);
+    expect(Array.isArray(requestBody.messages)).toBe(true);
+    expect(requestBody.messages[0].role).toBe('system');
+    expect(requestBody.messages[0].content).toContain('automated translation engine');
+    expect(requestBody.messages[1].role).toBe('user');
+    expect(requestBody.messages[2].role).toBe('assistant');
+  });
+
   it('preserves alignment without shifting when upstream model drops a tag', async () => {
     const mockResponse = {
       choices: [

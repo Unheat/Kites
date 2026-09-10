@@ -1,5 +1,5 @@
 import type { CustomApiConfig } from '../../../shared/types';
-import { BaseLlmTranslationEngine } from './BaseLlmTranslationEngine';
+import { BaseLlmTranslationEngine, type LlmChatMessage } from './BaseLlmTranslationEngine';
 
 const REQUEST_TIMEOUT_MS = 45_000;
 const MAX_ATTEMPTS = 2;
@@ -104,11 +104,16 @@ export class CustomApiEngine extends BaseLlmTranslationEngine {
   /**
    * Implements the abstract requestLlm method with retry logic for transient errors.
    *
-   * @param prompt - The assembled batch prompt.
+   * @param prompt - The assembled batch prompt string fallback.
+   * @param messages - Optional structured ChatMessage array.
    * @param signal - Optional AbortSignal.
    * @returns Raw response content from the remote provider.
    */
-  protected async requestLlm(prompt: string, signal?: AbortSignal): Promise<string> {
+  protected async requestLlm(
+    prompt: string,
+    messages?: LlmChatMessage[],
+    signal?: AbortSignal
+  ): Promise<string> {
     let lastError: unknown;
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       const controller = new AbortController();
@@ -118,7 +123,7 @@ export class CustomApiEngine extends BaseLlmTranslationEngine {
       }
 
       try {
-        return await this.requestProvider(prompt, controller.signal);
+        return await this.requestProvider(prompt, messages, controller.signal);
       } catch (error) {
         lastError = error;
         if (attempt === MAX_ATTEMPTS || !this.isTransientFailure(error)) throw error;
@@ -131,31 +136,46 @@ export class CustomApiEngine extends BaseLlmTranslationEngine {
   }
 
   /**
-   * Routes prompt to the corresponding provider client.
+   * Routes prompt or structured messages to the corresponding provider client.
    *
    * @param prompt - Prompt string.
+   * @param messages - Optional structured ChatMessage array.
    * @param signal - AbortSignal.
    * @returns Provider response text.
    */
-  private async requestProvider(prompt: string, signal: AbortSignal): Promise<string> {
-    if (this.config.provider === 'gemini') return this.requestGemini(prompt, signal);
-    if (this.config.provider === 'claude') return this.requestClaude(prompt, signal);
-    return this.requestOpenAi(prompt, signal);
+  private async requestProvider(
+    prompt: string,
+    messages: LlmChatMessage[] | undefined,
+    signal: AbortSignal
+  ): Promise<string> {
+    if (this.config.provider === 'gemini') return this.requestGemini(prompt, messages, signal);
+    if (this.config.provider === 'claude') return this.requestClaude(prompt, messages, signal);
+    return this.requestOpenAi(prompt, messages, signal);
   }
 
   /**
    * Sends Chat Completions request to OpenAI or OpenAI-compatible endpoint.
    *
    * @param prompt - Prompt string.
+   * @param messages - Optional structured ChatMessage array.
    * @param signal - AbortSignal.
    * @returns Response text content.
    */
-  private async requestOpenAi(prompt: string, signal: AbortSignal): Promise<string> {
+  private async requestOpenAi(
+    prompt: string,
+    messages: LlmChatMessage[] | undefined,
+    signal: AbortSignal
+  ): Promise<string> {
     const root = this.config.provider === 'openai' ? OPENAI_API_ROOT : this.getCompatibleApiRoot();
+    const payloadMessages =
+      messages && messages.length > 0
+        ? messages
+        : [{ role: 'user', content: prompt }];
+
     const body = {
       model: this.config.modelName,
       temperature: DEFAULT_TEMPERATURE,
-      messages: [{ role: 'user', content: prompt }],
+      messages: payloadMessages,
     };
 
     const headers: Record<string, string> = {
@@ -188,10 +208,36 @@ export class CustomApiEngine extends BaseLlmTranslationEngine {
    * Sends request to Google Gemini generateContent endpoint.
    *
    * @param prompt - Prompt string.
+   * @param messages - Optional structured ChatMessage array.
    * @param signal - AbortSignal.
    * @returns Response text content.
    */
-  private async requestGemini(prompt: string, signal: AbortSignal): Promise<string> {
+  private async requestGemini(
+    prompt: string,
+    messages: LlmChatMessage[] | undefined,
+    signal: AbortSignal
+  ): Promise<string> {
+    const systemMsg = messages?.find((m) => m.role === 'system');
+    const nonSystemMsgs = messages?.filter((m) => m.role !== 'system');
+
+    const contents =
+      nonSystemMsgs && nonSystemMsgs.length > 0
+        ? nonSystemMsgs.map((m) => ({
+            role: m.role === 'assistant' ? 'model' : 'user',
+            parts: [{ text: m.content }],
+          }))
+        : [{ role: 'user', parts: [{ text: prompt }] }];
+
+    const body: Record<string, unknown> = {
+      contents,
+      generationConfig: { temperature: DEFAULT_TEMPERATURE },
+    };
+    if (systemMsg) {
+      body.systemInstruction = {
+        parts: [{ text: systemMsg.content }],
+      };
+    }
+
     const payload = await this.readResponse(await fetch(`${GEMINI_API_ROOT}/models/${encodeURIComponent(this.config.modelName)}:generateContent`, {
       method: 'POST',
       signal,
@@ -199,10 +245,7 @@ export class CustomApiEngine extends BaseLlmTranslationEngine {
         'Content-Type': 'application/json',
         'x-goog-api-key': this.config.apiKey,
       },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: { temperature: DEFAULT_TEMPERATURE },
-      }),
+      body: JSON.stringify(body),
     }));
 
     const content = payload?.candidates?.[0]?.content?.parts
@@ -221,10 +264,22 @@ export class CustomApiEngine extends BaseLlmTranslationEngine {
    * Sends request to Anthropic Claude Messages endpoint.
    *
    * @param prompt - Prompt string.
+   * @param messages - Optional structured ChatMessage array.
    * @param signal - AbortSignal.
    * @returns Response text content.
    */
-  private async requestClaude(prompt: string, signal: AbortSignal): Promise<string> {
+  private async requestClaude(
+    prompt: string,
+    messages: LlmChatMessage[] | undefined,
+    signal: AbortSignal
+  ): Promise<string> {
+    const systemMsg = messages?.find((m) => m.role === 'system');
+    const nonSystemMsgs = messages?.filter((m) => m.role !== 'system');
+    const claudeMessages =
+      nonSystemMsgs && nonSystemMsgs.length > 0
+        ? nonSystemMsgs.map((m) => ({ role: m.role, content: m.content }))
+        : [{ role: 'user', content: prompt }];
+
     const payload = await this.readResponse(await fetch(`${ANTHROPIC_API_ROOT}/messages`, {
       method: 'POST',
       signal,
@@ -237,7 +292,8 @@ export class CustomApiEngine extends BaseLlmTranslationEngine {
         model: this.config.modelName,
         max_tokens: CLAUDE_MAX_TOKENS,
         temperature: DEFAULT_TEMPERATURE,
-        messages: [{ role: 'user', content: prompt }],
+        ...(systemMsg ? { system: systemMsg.content } : {}),
+        messages: claudeMessages,
       }),
     }));
 

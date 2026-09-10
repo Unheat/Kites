@@ -123,7 +123,8 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
     for (let offset = 0; offset < nonEmptyInputs.length; offset += this.batchSize) {
       const chunk = nonEmptyInputs.slice(offset, offset + this.batchSize);
       const prompt = this.buildPrompt(chunk, sourceLang, targetLang);
-      const rawOutput = await this.requestLlm(prompt);
+      const messages = this.buildMessages(chunk, sourceLang, targetLang);
+      const rawOutput = await this.requestLlm(prompt, messages);
       const parsedChunk = this.parseDelimitedOutput(rawOutput, chunk);
 
       for (let j = 0; j < chunk.length; j++) {
@@ -139,10 +140,15 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
    * Abstract method implemented by subclasses to perform the actual model or API inference.
    *
    * @param prompt - The assembled batch prompt string.
+   * @param messages - Optional structured ChatMessage array with system/user/assistant roles.
    * @param signal - Optional AbortSignal.
    * @returns Raw string response from the LLM.
    */
-  protected abstract requestLlm(prompt: string, signal?: AbortSignal): Promise<string>;
+  protected abstract requestLlm(
+    prompt: string,
+    messages?: LlmChatMessage[],
+    signal?: AbortSignal
+  ): Promise<string>;
 
   /**
    * Resolves language identifiers or codes to human-readable names for LLM prompting.

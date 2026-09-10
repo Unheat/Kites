@@ -8,7 +8,7 @@
  * Extends BaseLlmTranslationEngine for unified prompting, batching, parsing, and markdown stripping.
  */
 
-import { BaseLlmTranslationEngine } from './BaseLlmTranslationEngine';
+import { BaseLlmTranslationEngine, type LlmChatMessage } from './BaseLlmTranslationEngine';
 import {
   CLOUDFLARE_TRANSLATE_DEFAULT_ENDPOINT,
   CLOUDFLARE_TRANSLATE_MODEL,
@@ -80,13 +80,18 @@ export class CloudflareTranslateEngine extends BaseLlmTranslationEngine {
   }
 
   /**
-   * Dispatches the assembled prompt to the Cloudflare Worker chat completions endpoint.
+   * Dispatches the assembled prompt or structured messages to the Cloudflare Worker chat completions endpoint.
    *
-   * @param prompt - The assembled batch prompt.
+   * @param prompt - The assembled batch prompt fallback string.
+   * @param messages - Optional structured ChatMessage array.
    * @param signal - Optional AbortSignal.
    * @returns Raw completion content from the LLM.
    */
-  protected async requestLlm(prompt: string, signal?: AbortSignal): Promise<string> {
+  protected async requestLlm(
+    prompt: string,
+    messages?: LlmChatMessage[],
+    signal?: AbortSignal
+  ): Promise<string> {
     const token = await this.getAuthToken();
 
     const controller = new AbortController();
@@ -96,6 +101,11 @@ export class CloudflareTranslateEngine extends BaseLlmTranslationEngine {
     if (signal) {
       signal.addEventListener('abort', () => controller.abort());
     }
+
+    const payloadMessages =
+      messages && messages.length > 0
+        ? messages
+        : [{ role: 'user' as const, content: prompt }];
 
     try {
       const response = await fetch(this.endpoint, {
@@ -108,7 +118,7 @@ export class CloudflareTranslateEngine extends BaseLlmTranslationEngine {
         },
         body: JSON.stringify({
           model: CLOUDFLARE_TRANSLATE_MODEL,
-          messages: [{ role: 'user', content: prompt }],
+          messages: payloadMessages,
           temperature: DEFAULT_TEMPERATURE,
           stream: false,
         }),
