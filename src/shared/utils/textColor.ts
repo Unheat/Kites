@@ -1,5 +1,11 @@
 /**
+ * @file textColor.ts
  * Background-adaptive text color selection.
+ *
+ * Ported and adapted from XianScan by Arben Apura.
+ * Licensed under the MIT License.
+ * Reference: https://github.com/ArbenApura/xianscan-rust (web/src/lib/server/typeset/color.ts)
+ * See THIRD_PARTY_NOTICES.md for full license and copyright notice.
  *
  * 1:1 port of XianScan `web/src/lib/server/typeset/color.ts` (pure functions only;
  * canvas sampling lives in the renderer). Picks readable fill/stroke pairs based on

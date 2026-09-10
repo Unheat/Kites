@@ -1,11 +1,17 @@
-import type { IInpaintEngine, Point2D } from './BaseInpaintEngine';
-
 /**
+ * @file TeleaInpaintEngine.ts
  * Tier 2 Inpainting Engine: Mathematical Fast Marching Method (FMM) Diffusion.
+ *
+ * Implements Alexandru Telea's Fast Marching Method inpainting algorithm (2004)
+ * adapted from pyheal (olvb) and OpenCV's photo/src/inpaint.cpp implementation.
+ * See THIRD_PARTY_NOTICES.md for full license and copyright notice.
+ *
  * Propagates surrounding background colors inward along text strokes using inverse-distance weighting.
  * Preserves panel borders, speech bubbles, and background drawings.
  * Very fast, 0MB download footprint.
  */
+
+import type { IInpaintEngine, Point2D } from './BaseInpaintEngine';
 export class TeleaInpaintEngine implements IInpaintEngine {
   private platform: any;
 

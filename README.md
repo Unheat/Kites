@@ -221,3 +221,12 @@ Kites/
 - [Implementation plan and current scope](docs/fullplan.md)
 - [Development log](docs/devlog/)
 - [Cloudflare Worker WAF notes](worker/WAF_RULES.md)
+
+## License & Attribution
+
+Kites is licensed under the [GNU General Public License v3.0 or later](LICENSE).
+
+This project incorporates ported algorithms, architectural concepts, and assets from third-party open-source projects including [manga-image-translator (Cotrans)](https://github.com/zyddnys/manga-image-translator), [xianscan-rust](https://github.com/ArbenApura/xianscan-rust), [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR), [InpaintWeb](https://github.com/lxfater/inpaint-web), and [OpenCV/pyheal](https://github.com/olvb/pyheal).
+
+For comprehensive third-party copyright notices, licenses, and detailed module-by-module attribution of all ported algorithms, please refer to [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+

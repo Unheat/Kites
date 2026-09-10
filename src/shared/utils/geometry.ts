@@ -1,6 +1,13 @@
 /**
+ * @file geometry.ts
  * Utility functions for math and geometry, used for text line merging and typesetting
  * of 4-point OCR polygons.
+ *
+ * Ported and adapted from manga-image-translator (Cotrans) by zyddnys and contributors.
+ * Licensed under GNU General Public License v3.0 (GPL-3.0).
+ * Reference: https://github.com/zyddnys/manga-image-translator (manga_translator/utils/generic.py,
+ * manga_translator/textline_merge/__init__.py, and manga_translator/utils/textblock.py).
+ * See THIRD_PARTY_NOTICES.md for full license and copyright notice.
  *
  * The Quadrilateral class, distance functions, and merge predicates are strict 1:1 ports
  * of the Cotrans reference implementation (manga_translator/utils/generic.py).

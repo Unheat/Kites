@@ -4,6 +4,12 @@ import { fitFontSizeWithLines, fontSpec } from './typesetLayout';
 import { sanitizeTypesetText } from '../../shared/utils/textCleaning';
 
 /**
+ * @file cotransDefaultRenderer.ts
+ * Ported and adapted from manga-image-translator (Cotrans) by zyddnys and contributors.
+ * Licensed under GNU General Public License v3.0 (GPL-3.0).
+ * Reference: https://github.com/zyddnys/manga-image-translator
+ * See THIRD_PARTY_NOTICES.md for full license and copyright notice.
+ *
  * 1:1 port of Cotrans's DEFAULT renderer (the one cotrans.touhou.ai uses): rendering/__init__.py
  * `resize_regions_to_font_size` + `render`, and text_render.py `calc_horizontal` + `put_text_horizontal`.
  *

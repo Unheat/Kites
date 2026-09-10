@@ -1,7 +1,13 @@
 /**
+ * @file typesetLayout.ts
  * Typeset Layout Engine for Comic / Manga Speech Bubbles
  * 
- * Ported from XianScan (web/src/lib/server/typeset/layout.ts) for pure TypeScript execution in browser & node.
+ * Ported and adapted from XianScan by Arben Apura.
+ * Licensed under the MIT License.
+ * Reference: https://github.com/ArbenApura/xianscan-rust (web/src/lib/server/typeset/layout.ts)
+ * See THIRD_PARTY_NOTICES.md for full license and copyright notice.
+ *
+ * Ported for pure TypeScript execution in browser & node.
  * Provides:
  * 1. 6-stage morphological hyphenation (findHyphenationPoints) with strict stem protection (len >= 7).
  * 2. Balanced diamond line envelope wrapping (balancedWrapText).
