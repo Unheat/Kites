@@ -22,6 +22,10 @@ class MockLlmEngine extends BaseLlmTranslationEngine {
     this.messageHistory.push(messages);
     return this.mockResponse;
   }
+
+  public setAllowPartialMissingLines(value: boolean): void {
+    this.allowPartialMissingLines = value;
+  }
 }
 
 describe('stripMarkdownFormatting', () => {
@@ -109,9 +113,9 @@ describe('BaseLlmTranslationEngine', () => {
     expect(msgs[0].content).toContain('automated translation engine');
     expect(msgs[0].content).toContain('Never output conversational filler');
     expect(msgs[1].role).toBe('user');
-    expect(msgs[1].content).toContain('<|1|> 行こう！');
+    expect(msgs[1].content).toContain('<|1|> Japanese text line one.');
     expect(msgs[2].role).toBe('assistant');
-    expect(msgs[2].content).toContain("<|1|> Let's go!");
+    expect(msgs[2].content).toContain('<|1|> We need to leave now!');
     expect(msgs[3].role).toBe('user');
     expect(msgs[3].content).toContain('<|1|> One');
   });
@@ -178,5 +182,14 @@ describe('BaseLlmTranslationEngine', () => {
     engine.mockResponse = '<|1|> Line 1'; // 2 items requested, only 1 returned
 
     await expect(engine.translate(['First', 'Second'])).rejects.toThrow('Delimiter parsing failed for chunk');
+  });
+
+  it('rejects partial translated output when the strict production gate is enabled', async () => {
+    const engine = new MockLlmEngine(15, false);
+    engine.setAllowPartialMissingLines(false);
+    engine.mockResponse = '<|1|> Deliver the best possible thing\n<|2|> Haha, top';
+
+    await expect(engine.translate(['Item 1', 'Item 2', 'Item 3'], 'ja', 'en'))
+      .rejects.toThrow('Translation dropped 1/3 lines instead of satisfying the 1:1 tag contract.');
   });
 });

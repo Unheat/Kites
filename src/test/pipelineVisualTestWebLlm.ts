@@ -10,6 +10,7 @@ const USER_DATA_DIR = path.resolve(__dirname, '../../test/model/.chrome-profile-
 const TEST_IMAGE_DIR = path.resolve(__dirname, 'test-img');
 const RESULT_DIR = path.resolve(process.cwd(), 'result/pipeline_webllm');
 const WEBLLM_MODEL_ID = process.env.WEBLLM_MODEL_ID || 'Qwen3.5-2B-q4f16_1-MLC';
+const WEBLLM_NO_FEWSHOT = process.env.WEBLLM_NO_FEWSHOT === '1';
 const TRANSLATE_TIMEOUT_MS = 15 * 60 * 1000;
 const TARGET_TIMEOUT_MS = 30_000;
 const TEST_FILES = ['image1.jpg', 'image2.jpg', 'image3.jpg', 'image4.jpg', 'image5.png', 'image6.jpg', 'image7.jpg'];
@@ -107,6 +108,7 @@ async function assertHardwareWebGpuInOffscreen(
   });
   const result = await session.send('Runtime.evaluate', {
     expression: `(async () => {
+      globalThis.__KITES_WEBLLM_NO_FEWSHOT__ = ${WEBLLM_NO_FEWSHOT ? 'true' : 'false'};
       if (!navigator.gpu) return { ok: false, reason: 'navigator.gpu unavailable' };
       const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
       if (!adapter) return { ok: false, reason: 'high-performance adapter unavailable' };
@@ -193,7 +195,8 @@ async function main(): Promise<void> {
     const settingsPage = await browser.newPage();
     try {
       await settingsPage.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'load' });
-      await settingsPage.evaluate((modelId) => new Promise<void>((resolve) => {
+      await settingsPage.evaluate((modelId, noFewShot) => new Promise<void>((resolve) => {
+        (globalThis as any).__KITES_WEBLLM_NO_FEWSHOT__ = noFewShot;
         chrome.storage.local.set({ popupState: {
           isExtensionEnabled: true, isAuto: false, manualMode: 'persistent', concurrency: 1,
           sourceLang: 'ja', targetLang: 'en', activeEngineId: modelId,
@@ -201,7 +204,7 @@ async function main(): Promise<void> {
           webgpuSupported: true, webgpuMaster: true,
           webgpuOverrides: { llm: true, inpaint: true, ocr: true },
         } }, resolve);
-      }), WEBLLM_MODEL_ID);
+      }), WEBLLM_MODEL_ID, WEBLLM_NO_FEWSHOT);
     } finally {
       await settingsPage.close();
     }
@@ -211,6 +214,9 @@ async function main(): Promise<void> {
     for (const testFile of TEST_FILES) {
       const page = await browser.newPage();
       try {
+        await page.evaluateOnNewDocument((noFewShot) => {
+          (globalThis as any).__KITES_WEBLLM_NO_FEWSHOT__ = noFewShot;
+        }, WEBLLM_NO_FEWSHOT);
         await page.setViewport({ width: 1280, height: 900 });
         await page.goto(`http://127.0.0.1:${address.port}/${encodeURIComponent(testFile)}`, { waitUntil: 'networkidle2' });
         await page.waitForSelector('img', { timeout: TARGET_TIMEOUT_MS });

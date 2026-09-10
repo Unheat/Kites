@@ -11,6 +11,8 @@ const WEBLLM_TEMPERATURE = 0.1;
 /** Max completion tokens for WebLLM chat completions */
 const WEBLLM_MAX_TOKENS = 2048;
 
+export const WEBLLM_RETRY_BATCH_SPLIT = 5;
+
 export class WebLLMEngine extends BaseLlmTranslationEngine {
   private engine: MLCEngine | null = null;
   private modelId: string;
@@ -25,7 +27,7 @@ export class WebLLMEngine extends BaseLlmTranslationEngine {
     super();
     this.modelId = modelId;
     this.batchSize = DEFAULT_WEBLLM_BATCH_SIZE;
-    this.throwOnCountMismatch = true; // WebLLM throws to let TranslationManager waterfall take over
+    this.throwOnCountMismatch = false; // Preserve successful lines; missing tags fall back only their own source slots
   }
 
   /**
@@ -106,7 +108,24 @@ export class WebLLMEngine extends BaseLlmTranslationEngine {
     if (!this.engine) {
       throw new Error('WebLLMEngine is not initialized. Call init() first.');
     }
-    return super.translate(texts, sourceLangId, targetLangId);
+
+    try {
+      return await super.translate(texts, sourceLangId, targetLangId);
+    } catch (error) {
+      const shouldSplit =
+        error instanceof Error &&
+        error.message.includes('Translation dropped') &&
+        texts.length > WEBLLM_RETRY_BATCH_SPLIT;
+      if (!shouldSplit) throw error;
+
+      console.warn(
+        `[WebLLMEngine] Strict batch dropped lines; retrying as smaller batches of ${WEBLLM_RETRY_BATCH_SPLIT}.`
+      );
+      this.batchSize = WEBLLM_RETRY_BATCH_SPLIT;
+      const retried = await super.translate(texts, sourceLangId, targetLangId);
+      this.batchSize = DEFAULT_WEBLLM_BATCH_SIZE;
+      return retried;
+    }
   }
 
   /**
@@ -128,11 +147,15 @@ export class WebLLMEngine extends BaseLlmTranslationEngine {
       throw new Error('WebLLMEngine is not initialized. Call init() first.');
     }
 
+    const useFewShot = typeof globalThis !== 'undefined' && (globalThis as any).__KITES_WEBLLM_NO_FEWSHOT__ !== true;
     const payloadMessages =
       messages && messages.length > 0
-        ? messages
+        ? useFewShot
+          ? messages
+          : messages.filter((message) => message.role !== 'assistant')
         : [{ role: 'user' as const, content: prompt }];
 
+    console.log(`[WebLLMEngine] Few-shot in-context priming: ${useFewShot ? 'enabled' : 'disabled'}.`);
     const chunkStart = import.meta.env.DEV ? performance.now() : 0;
     const reply = await this.engine.chat.completions.create({
       messages: payloadMessages,

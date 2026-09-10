@@ -116,10 +116,9 @@ describe('WebLLMEngine Delimiter Batching', () => {
     expect(results[2]).toBe('世界');
   });
 
-  it('should throw an error if model hallucinates and returns fewer lines', async () => {
+  it('fails strict visual runs when a local model drops a translation line', async () => {
     const inputs = ['Text 1', 'Text 2'];
 
-    // Mock model failing to return the second line
     mockCreate.mockResolvedValue({
       choices: [
         {
@@ -130,7 +129,21 @@ describe('WebLLMEngine Delimiter Batching', () => {
       ]
     });
 
-    await expect(engine.translate(inputs)).rejects.toThrow('Delimiter parsing failed for chunk. Expected 2 lines, got 1. Model hallucinated.');
+    await expect(engine.translate(inputs)).rejects.toThrow('Translation dropped 1/2 lines instead of satisfying the 1:1 tag contract.');
+  });
+
+  it('splits a strict large-batch miss into a smaller retry batch', async () => {
+    const originalBatchSize = (engine as any).batchSize;
+    (engine as any).batchSize = 6;
+    const inputs = ['One', 'Two', 'Three', 'Four', 'Five', 'Six'];
+    mockCreate
+      .mockResolvedValueOnce({ choices: [{ message: { content: '<|1|> 1\n<|2|> 2' } }] })
+      .mockResolvedValueOnce({ choices: [{ message: { content: '<|1|> 1\n<|2|> 2\n<|3|> 3\n<|4|> 4\n<|5|> 5' } }] })
+      .mockResolvedValueOnce({ choices: [{ message: { content: '<|1|> 6' } }] });
+
+    const result = await engine.translate(inputs);
+    expect(result).toEqual(['1', '2', '3', '4', '5', '6']);
+    expect((engine as any).batchSize).toBe(originalBatchSize);
   });
 
   it('should return an array of empty strings immediately if all inputs are empty', async () => {

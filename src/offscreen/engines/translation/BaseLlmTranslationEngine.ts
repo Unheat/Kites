@@ -94,6 +94,13 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
   protected throwOnCountMismatch = false;
 
   /**
+   * Whether a model is allowed to preserve dropped slots when every translation survived.
+   * WebLLM enables this during its experimental prompt sweep so partial variants can be measured,
+   * while production visual tests consider any missing translation a failed run.
+   */
+  protected allowPartialMissingLines = true;
+
+  /**
    * Translates an array of text segments from source language to target language.
    * Preserves exact 1:1 positional indexing with the input array.
    *
@@ -127,9 +134,13 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
       const rawOutput = await this.requestLlm(prompt, messages);
       const parsedChunk = this.parseDelimitedOutput(rawOutput, chunk);
 
+      const droppedByModel = chunk.filter((segment, idx) => parsedChunk[idx] === segment.text).length;
       for (let j = 0; j < chunk.length; j++) {
         const cleaned = cleanTranslatedLine(parsedChunk[j] || '');
         results[chunk[j].originalIndex] = cleaned;
+      }
+      if (!this.allowPartialMissingLines && droppedByModel > 0) {
+        throw new Error(`Translation dropped ${droppedByModel}/${chunk.length} lines instead of satisfying the 1:1 tag contract.`);
       }
     }
 
@@ -204,10 +215,10 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
   ): LlmChatMessage[] {
     const combinedText = chunk.map((item, index) => `<|${index + 1}|> ${item.text}`).join('\n');
 
-    const sampleAssistant =
+    const sampleContent =
       targetLang.toLowerCase().includes('chinese') || targetLang.toLowerCase().includes('中文')
         ? '<|1|> 走吧！\n<|2|> 等等！'
-        : '<|1|> Let\'s go!\n<|2|> Wait!';
+        : '<|1|> We need to leave now!\n<|2|> Please wait a little longer.';
 
     return [
       {
@@ -220,15 +231,16 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
           `- Output raw plain text only. Do NOT use markdown styling (no asterisks **, *, no backticks, no bold or italic tags).\n` +
           `- Never output conversational filler, greetings, apologies, explanations, or notes.\n` +
           `- Do NOT repeat the original source text.\n` +
+          `- Preserve the actual meaning of every source line. Never copy the demonstration translation unless it also means the same thing as that source.\n` +
           `- Do NOT wrap translations in quotes.`,
       },
       {
         role: 'user',
-        content: '<|1|> 行こう！\n<|2|> 待って！',
+        content: `<|1|> ${sourceLang} text line one.\n<|2|> ${sourceLang} text line two.`,
       },
       {
         role: 'assistant',
-        content: sampleAssistant,
+        content: sampleContent,
       },
       {
         role: 'user',
