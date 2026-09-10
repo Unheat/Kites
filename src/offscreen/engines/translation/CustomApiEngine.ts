@@ -11,8 +11,8 @@ const ANTHROPIC_API_ROOT = 'https://api.anthropic.com/v1';
 /** Default batch size for custom API requests */
 const DEFAULT_CUSTOM_API_BATCH_SIZE = 15;
 
-/** Sampling temperature for translation fidelity */
-const DEFAULT_TEMPERATURE = 0.1;
+/** Sampling temperature for translation fidelity (greedy decoding) */
+const DEFAULT_TEMPERATURE = 0;
 
 /** Max completion tokens for Claude requests */
 const CLAUDE_MAX_TOKENS = 2048;
@@ -112,6 +112,7 @@ export class CustomApiEngine extends BaseLlmTranslationEngine {
   protected async requestLlm(
     prompt: string,
     messages?: LlmChatMessage[],
+    _schema?: Record<string, unknown>,
     signal?: AbortSignal
   ): Promise<string> {
     let lastError: unknown;

@@ -1,17 +1,21 @@
 import { MLCEngine, CreateMLCEngine } from '@mlc-ai/web-llm';
-import { BaseLlmTranslationEngine, type LlmChatMessage } from './BaseLlmTranslationEngine';
+import {
+  BaseLlmTranslationEngine,
+  maxTokensForBatch,
+  type LlmChatMessage,
+} from './BaseLlmTranslationEngine';
 import { checkWebGPUAvailability } from '../../utils/hardware';
 
-/** Default segment batch size for on-device WebLLM inference */
-const DEFAULT_WEBLLM_BATCH_SIZE = 15;
+/** Default segment batch size for on-device WebLLM inference (sweet spot: 4-6 bubbles) */
+const DEFAULT_WEBLLM_BATCH_SIZE = 5;
 
-/** Sampling temperature for translation fidelity */
-const WEBLLM_TEMPERATURE = 0.1;
+/** Greedy sampling temperature for deterministic translation */
+const WEBLLM_TEMPERATURE = 0;
 
-/** Max completion tokens for WebLLM chat completions */
-const WEBLLM_MAX_TOKENS = 2048;
+export const WEBLLM_RETRY_BATCH_SPLIT = 3;
 
-export const WEBLLM_RETRY_BATCH_SPLIT = 5;
+/** Watchdog timer in milliseconds to prevent runaway GPU loops */
+const WATCHDOG_DEADLINE_MS = 15000;
 
 export class WebLLMEngine extends BaseLlmTranslationEngine {
   private engine: MLCEngine | null = null;
@@ -131,50 +135,89 @@ export class WebLLMEngine extends BaseLlmTranslationEngine {
 
   /**
    * Submits prompt to WebGPU LLM completion API.
-   * Uses structured chat messages (system rules + 1-shot in-context priming + user query)
-   * to guarantee concise, non-conversational line translations on WebGPU.
+   * Uses Keyed JSON Protocol with XGrammar schema-constrained generation and stateless transactions.
    *
    * @param prompt - The assembled batch prompt fallback string.
-   * @param messages - Optional structured ChatMessage array with system/user/assistant turns.
-   * @param _signal - Optional AbortSignal.
+   * @param messages - Optional structured ChatMessage array with system/user turns.
+   * @param schema - Strict JSON schema for the batch slots (b0, b1, ... bN).
+   * @param signal - Optional AbortSignal.
    * @returns Raw string completion from the local model.
    */
   protected async requestLlm(
     prompt: string,
     messages?: LlmChatMessage[],
-    _signal?: AbortSignal
+    schema?: Record<string, unknown>,
+    signal?: AbortSignal
   ): Promise<string> {
     if (!this.engine) {
       throw new Error('WebLLMEngine is not initialized. Call init() first.');
     }
 
-    const useFewShot = typeof globalThis !== 'undefined' && (globalThis as any).__KITES_WEBLLM_NO_FEWSHOT__ !== true;
+    // Reset multi-round chat history so each translation transaction is stateless.
+    // This prevents historical output leakage from contaminating subsequent batches.
+    await this.engine.resetChat();
+
     const payloadMessages =
       messages && messages.length > 0
-        ? useFewShot
-          ? messages
-          : messages.filter((message) => message.role !== 'assistant')
+        ? messages
         : [{ role: 'user' as const, content: prompt }];
 
-    console.log(`[WebLLMEngine] Few-shot in-context priming: ${useFewShot ? 'enabled' : 'disabled'}.`);
-    const chunkStart = import.meta.env.DEV ? performance.now() : 0;
-    const reply = await this.engine.chat.completions.create({
+    // Dynamic safety token cap based on source inputs
+    const sourceTexts = payloadMessages.map((m) => m.content);
+    const dynamicMaxTokens = maxTokensForBatch(sourceTexts);
+
+    const completionOptions: any = {
       messages: payloadMessages,
       temperature: WEBLLM_TEMPERATURE,
-      max_tokens: WEBLLM_MAX_TOKENS,
-    });
+      top_p: 1,
+      repetition_penalty: 1,
+      max_tokens: dynamicMaxTokens,
+      stop: [],
+    };
 
-    const rawOutput = reply.choices[0]?.message?.content || '';
-    if (import.meta.env.DEV) {
-      const chunkMs = performance.now() - chunkStart;
-      const completionTokens = (reply as any).usage?.completion_tokens;
-      const tokPerSec = completionTokens ? (completionTokens / (chunkMs / 1000)).toFixed(1) : 'n/a';
-      console.log(
-        `[WebLLMEngine] Batch in ${chunkMs.toFixed(2)}ms (${completionTokens ?? '?'} completion tokens, ${tokPerSec} tok/s).`
-      );
+    if (schema) {
+      completionOptions.response_format = {
+        type: 'json_object',
+        schema: JSON.stringify(schema),
+      };
     }
 
-    return rawOutput;
+    // Watchdog timer: interrupt runaway GPU generation if deadline exceeded
+    const runawayTimer = setTimeout(() => {
+      if (this.engine) {
+        console.warn('[WebLLMEngine] Watchdog deadline exceeded; interrupting generation.');
+        void this.engine.interruptGenerate();
+      }
+    }, WATCHDOG_DEADLINE_MS);
+
+    if (signal) {
+      signal.addEventListener('abort', () => {
+        if (this.engine) void this.engine.interruptGenerate();
+      });
+    }
+
+    const chunkStart = import.meta.env.DEV ? performance.now() : 0;
+    try {
+      const reply = await this.engine.chat.completions.create(completionOptions);
+      clearTimeout(runawayTimer);
+
+      const rawOutput = reply.choices[0]?.message?.content || '';
+      if (import.meta.env.DEV) {
+        const chunkMs = performance.now() - chunkStart;
+        const completionTokens = (reply as any).usage?.completion_tokens;
+        const tokPerSec = completionTokens ? (completionTokens / (chunkMs / 1000)).toFixed(1) : 'n/a';
+        console.log(
+          `[WebLLMEngine] Batch in ${chunkMs.toFixed(2)}ms (${completionTokens ?? '?'} completion tokens, ${tokPerSec} tok/s).\n` +
+          `[WebLLMEngine] Raw model output:\n${rawOutput}`
+        );
+      }
+
+      return rawOutput;
+    } catch (err) {
+      clearTimeout(runawayTimer);
+      console.error('[WebLLMEngine] Completion request failed:', err);
+      throw err;
+    }
   }
 
   /**

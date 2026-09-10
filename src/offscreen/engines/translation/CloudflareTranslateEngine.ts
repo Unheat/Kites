@@ -22,11 +22,11 @@ const REQUEST_TIMEOUT_MS = 15_000;
 /** Cache OAuth tokens below Google's one-hour token lifetime. */
 const TOKEN_CACHE_TTL_MS = 45 * 60 * 1000;
 
-/** Default batch size for Cloudflare worker translation */
-const DEFAULT_CLOUDFLARE_BATCH_SIZE = 15;
+/** Default batch size for Cloudflare worker translation (sweet spot: 6 bubbles) */
+const DEFAULT_CLOUDFLARE_BATCH_SIZE = 6;
 
-/** LLM generation sampling temperature */
-const DEFAULT_TEMPERATURE = 0.1;
+/** LLM generation sampling temperature (greedy decoding) */
+const DEFAULT_TEMPERATURE = 0;
 
 export class CloudflarePoolExhaustedError extends Error {
   readonly code: string;
@@ -90,6 +90,7 @@ export class CloudflareTranslateEngine extends BaseLlmTranslationEngine {
   protected async requestLlm(
     prompt: string,
     messages?: LlmChatMessage[],
+    _schema?: Record<string, unknown>,
     signal?: AbortSignal
   ): Promise<string> {
     const token = await this.getAuthToken();

@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import {
   BaseLlmTranslationEngine,
+  isDeterministicPassthrough,
+  countCodePoints,
+  maxTokensForBatch,
+  buildSchema,
   stripMarkdownFormatting,
   cleanTranslatedLine,
   type LlmChatMessage,
@@ -10,6 +14,7 @@ class MockLlmEngine extends BaseLlmTranslationEngine {
   public mockResponse: string = '';
   public promptHistory: string[] = [];
   public messageHistory: (LlmChatMessage[] | undefined)[] = [];
+  public schemaHistory: (Record<string, unknown> | undefined)[] = [];
 
   constructor(batchSize = 15, throwOnMismatch = false) {
     super();
@@ -17,9 +22,14 @@ class MockLlmEngine extends BaseLlmTranslationEngine {
     this.throwOnCountMismatch = throwOnMismatch;
   }
 
-  protected async requestLlm(prompt: string, messages?: LlmChatMessage[]): Promise<string> {
+  protected async requestLlm(
+    prompt: string,
+    messages?: LlmChatMessage[],
+    schema?: Record<string, unknown>
+  ): Promise<string> {
     this.promptHistory.push(prompt);
     this.messageHistory.push(messages);
+    this.schemaHistory.push(schema);
     return this.mockResponse;
   }
 
@@ -27,6 +37,56 @@ class MockLlmEngine extends BaseLlmTranslationEngine {
     this.allowPartialMissingLines = value;
   }
 }
+
+describe('isDeterministicPassthrough', () => {
+  it('identifies punctuation, ellipses, and symbol-only strings', () => {
+    expect(isDeterministicPassthrough('...')).toBe(true);
+    expect(isDeterministicPassthrough('……')).toBe(true);
+    expect(isDeterministicPassthrough('!?')).toBe(true);
+    expect(isDeterministicPassthrough('！？')).toBe(true);
+    expect(isDeterministicPassthrough('ーー')).toBe(true);
+    expect(isDeterministicPassthrough('——')).toBe(true);
+    expect(isDeterministicPassthrough('   ')).toBe(true);
+    expect(isDeterministicPassthrough('')).toBe(true);
+  });
+
+  it('preserves text with linguistic characters for LLM translation', () => {
+    expect(isDeterministicPassthrough('行こう！')).toBe(false);
+    expect(isDeterministicPassthrough('What?!')).toBe(false);
+    expect(isDeterministicPassthrough('休')).toBe(false);
+    expect(isDeterministicPassthrough('ドン')).toBe(false);
+    expect(isDeterministicPassthrough('123')).toBe(false);
+  });
+});
+
+describe('maxTokensForBatch and countCodePoints', () => {
+  it('accurately counts Unicode code points including emojis and multi-byte CJK', () => {
+    expect(countCodePoints('行こう！')).toBe(4);
+    expect(countCodePoints('Hello')).toBe(5);
+  });
+
+  it('calculates dynamic token safety cap bounded within bounds', () => {
+    const tokensSmall = maxTokensForBatch(['Hi']);
+    expect(tokensSmall).toBeGreaterThanOrEqual(64);
+    expect(tokensSmall).toBeLessThanOrEqual(384);
+
+    const longBatch = new Array(6).fill('This is a longer manga text bubble with many words.');
+    const tokensLong = maxTokensForBatch(longBatch);
+    expect(tokensLong).toBeLessThanOrEqual(384);
+  });
+});
+
+describe('buildSchema', () => {
+  it('generates exact keyed schema for batch slots', () => {
+    const schema = buildSchema(3) as any;
+    expect(schema.type).toBe('object');
+    expect(schema.additionalProperties).toBe(false);
+    expect(schema.required).toEqual(['b0', 'b1', 'b2']);
+    expect(schema.properties.b0).toEqual({ type: 'string' });
+    expect(schema.properties.b1).toEqual({ type: 'string' });
+    expect(schema.properties.b2).toEqual({ type: 'string' });
+  });
+});
 
 describe('stripMarkdownFormatting', () => {
   it('strips bold and italic asterisks correctly', () => {
@@ -68,7 +128,7 @@ describe('cleanTranslatedLine tag debris & filler shield', () => {
   });
 });
 
-describe('BaseLlmTranslationEngine', () => {
+describe('BaseLlmTranslationEngine Keyed JSON Protocol', () => {
   it('returns empty array when input is empty without invoking requestLlm', async () => {
     const engine = new MockLlmEngine();
     const result = await engine.translate([]);
@@ -76,120 +136,107 @@ describe('BaseLlmTranslationEngine', () => {
     expect(engine.promptHistory).toHaveLength(0);
   });
 
-  it('filters empty or whitespace-only strings and preserves array positions', async () => {
+  it('resolves deterministic punctuation-only tokens directly without dispatching to LLM', async () => {
     const engine = new MockLlmEngine();
-    engine.mockResponse = '<|1|> Hello\n<|2|> World';
+    engine.mockResponse = JSON.stringify({ b0: 'Hello', b1: 'World' });
 
-    const result = await engine.translate(['Hi', '   ', '\n', 'Earth'], 'en', 'en');
-    expect(result).toEqual(['Hello', '', '', 'World']);
+    const result = await engine.translate(['Hi', '...', '!?', 'Earth'], 'en', 'en');
+    expect(result).toEqual(['Hello', '...', '!?', 'World']);
     expect(engine.promptHistory).toHaveLength(1);
-    expect(engine.promptHistory[0]).toContain('<|1|> Hi');
-    expect(engine.promptHistory[0]).toContain('<|2|> Earth');
-    expect(engine.promptHistory[0]).not.toContain('   ');
+    // Only 'Hi' and 'Earth' were sent to the LLM (b0, b1)
+    expect(engine.promptHistory[0]).toContain('"b0":"Hi"');
+    expect(engine.promptHistory[0]).toContain('"b1":"Earth"');
+    expect(engine.promptHistory[0]).not.toContain('...');
   });
 
-  it('chunks items into batches according to batchSize', async () => {
-    const engine = new MockLlmEngine(3); // Small batch size 3
-    engine.mockResponse = '<|1|> T1\n<|2|> T2\n<|3|> T3';
+  it('chunks items into batches according to batchSize and supplies schema', async () => {
+    const engine = new MockLlmEngine(2); // Small batch size 2
+    engine.mockResponse = JSON.stringify({ b0: 'T0', b1: 'T1' });
 
-    const inputs = ['A', 'B', 'C', 'D', 'E'];
+    const inputs = ['A', 'B', 'C', 'D'];
     const result = await engine.translate(inputs, 'en', 'ja');
 
-    // 5 items with batchSize 3 -> 2 batches (3 items, then 2 items)
+    // 4 items with batchSize 2 -> 2 batches
     expect(engine.promptHistory).toHaveLength(2);
-    expect(result).toHaveLength(5);
+    expect(engine.schemaHistory).toHaveLength(2);
+    expect((engine.schemaHistory[0] as any).required).toEqual(['b0', 'b1']);
+    expect(result).toEqual(['T0', 'T1', 'T0', 'T1']);
   });
 
-  it('builds structured chat messages with system instructions and Cotrans 1-shot priming', () => {
+  it('builds structured chat messages with Keyed JSON zero-shot instructions', () => {
     const engine = new MockLlmEngine();
-    const msgs = (engine as any).buildMessages(
-      [{ originalIndex: 0, text: 'One' }],
+    const msgs = (engine as any).buildJsonMessages(
+      [{ originalIndex: 0, text: 'One' }, { originalIndex: 1, text: 'Two' }],
       'Japanese',
       'English'
     );
 
-    expect(msgs).toHaveLength(4);
+    expect(msgs).toHaveLength(2);
     expect(msgs[0].role).toBe('system');
-    expect(msgs[0].content).toContain('automated translation engine');
-    expect(msgs[0].content).toContain('Never output conversational filler');
+    expect(msgs[0].content).toContain('Return only one JSON object matching the required schema');
+    expect(msgs[0].content).toContain('Keep every output key exactly as required (e.g. b0, b1)');
     expect(msgs[1].role).toBe('user');
-    expect(msgs[1].content).toContain('<|1|> Japanese text line one.');
-    expect(msgs[2].role).toBe('assistant');
-    expect(msgs[2].content).toContain('<|1|> We need to leave now!');
-    expect(msgs[3].role).toBe('user');
-    expect(msgs[3].content).toContain('<|1|> One');
+    expect(msgs[1].content).toContain('"b0":"One"');
+    expect(msgs[1].content).toContain('"b1":"Two"');
   });
 
-  it('passes both prompt string and structured chat messages to requestLlm', async () => {
+  it('handles re-ordered JSON keys with zero positional drift', async () => {
     const engine = new MockLlmEngine();
-    engine.mockResponse = '<|1|> One';
+    // Model emitted b1 before b0
+    engine.mockResponse = JSON.stringify({
+      b1: 'Second Translation',
+      b0: 'First Translation',
+    });
 
-    await engine.translate(['One'], 'ja', 'en');
-    expect(engine.promptHistory).toHaveLength(1);
-    expect(engine.messageHistory).toHaveLength(1);
-    const msgs = engine.messageHistory[0]!;
-    expect(msgs).toHaveLength(4);
-    expect(msgs[0].role).toBe('system');
+    const result = await engine.translate(['Item 0', 'Item 1'], 'ja', 'en');
+    expect(result[0]).toBe('First Translation');
+    expect(result[1]).toBe('Second Translation');
   });
 
-  it('recovers accurately from missing bracket |1|> or [1] output', async () => {
+  it('recovers accurately from markdown-wrapped JSON responses', async () => {
     const engine = new MockLlmEngine();
-    engine.mockResponse = '|1|> Deliver the best possible thing\n|2|> Haha, top\n|3|> Just one more month';
+    engine.mockResponse = '```json\n{"b0": "Deliver the best possible thing", "b1": "Haha, top"}\n```';
 
-    const result = await engine.translate(['Item 1', 'Item 2', 'Item 3'], 'ja', 'en');
-    expect(result).toEqual([
-      'Deliver the best possible thing',
-      'Haha, top',
-      'Just one more month',
-    ]);
+    const result = await engine.translate(['Item 0', 'Item 1'], 'ja', 'en');
+    expect(result).toEqual(['Deliver the best possible thing', 'Haha, top']);
   });
 
-  it('filters out conversational preamble when model outputs intro text before translations', async () => {
-    const engine = new MockLlmEngine();
-    engine.mockResponse =
-      "Sure, I'd be happy to help you translate the manga text! Here are the translations:\n" +
-      '1. Deliver the best possible thing\n' +
-      '2. Haha, top\n' +
-      '3. Just one more month, please';
-
-    const result = await engine.translate(['Item 1', 'Item 2', 'Item 3'], 'ja', 'en');
-    expect(result).toEqual([
-      'Deliver the best possible thing',
-      'Haha, top',
-      'Just one more month, please',
-    ]);
-  });
-
-  it('prevents index shift when an item tag is omitted by LLM', async () => {
+  it('guarantees slot isolation: missing key slot falls back to its own source without cascading shift', async () => {
     const engine = new MockLlmEngine(15, false);
     // 3 items: [0: "Kotoha", 1: "Name:", 2: "Story"]
-    // LLM skips tag 2 ("Name:"), outputting only tag 1 and tag 3
-    engine.mockResponse = '<|1|> Kotoha\n<|3|> The story of our park';
+    // Model omits key "b1", providing only "b0" and "b2"
+    engine.mockResponse = JSON.stringify({
+      b0: 'Kotoha',
+      b2: 'The story of our park',
+    });
 
     const inputs = ['Kotoha', 'Name:', 'Story'];
-    const result = await engine.translate(inputs, 'zh', 'en');
+    const result = await engine.translate(inputs, 'ja', 'en');
 
     // Slot 0 translated to Kotoha
     expect(result[0]).toBe('Kotoha');
-    // Slot 1 was dropped: safely kept as original text 'Name:' instead of shifting!
+    // Slot 1 was omitted: isolated fallback to original text 'Name:' without shifting slot 2!
     expect(result[1]).toBe('Name:');
-    // Slot 2 translated to The story of our park
+    // Slot 2 correctly mapped to its own slot!
     expect(result[2]).toBe('The story of our park');
   });
 
-  it('throws error when throwOnCountMismatch is true and tag is omitted', async () => {
-    const engine = new MockLlmEngine(15, true);
-    engine.mockResponse = '<|1|> Line 1'; // 2 items requested, only 1 returned
+  it('parses resilient keyed regex fallback if JSON syntax is slightly broken', async () => {
+    const engine = new MockLlmEngine();
+    // Broken JSON without closing braces, but with clear key lines
+    engine.mockResponse = 'b0: "Deliver the best"\nb1: "Just one more month"';
 
-    await expect(engine.translate(['First', 'Second'])).rejects.toThrow('Delimiter parsing failed for chunk');
+    const result = await engine.translate(['Item 0', 'Item 1'], 'ja', 'en');
+    expect(result[0]).toBe('Deliver the best');
+    expect(result[1]).toBe('Just one more month');
   });
 
   it('rejects partial translated output when the strict production gate is enabled', async () => {
     const engine = new MockLlmEngine(15, false);
     engine.setAllowPartialMissingLines(false);
-    engine.mockResponse = '<|1|> Deliver the best possible thing\n<|2|> Haha, top';
+    engine.mockResponse = JSON.stringify({ b0: 'Deliver the best', b1: 'Haha, top' }); // missing b2
 
-    await expect(engine.translate(['Item 1', 'Item 2', 'Item 3'], 'ja', 'en'))
-      .rejects.toThrow('Translation dropped 1/3 lines instead of satisfying the 1:1 tag contract.');
+    await expect(engine.translate(['Item 0', 'Item 1', 'Item 2'], 'ja', 'en'))
+      .rejects.toThrow('Translation dropped 1/3 lines instead of satisfying the 1:1 key contract.');
   });
 });

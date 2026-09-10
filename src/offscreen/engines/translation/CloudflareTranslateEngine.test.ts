@@ -4,7 +4,7 @@ import {
   CloudflarePoolExhaustedError,
 } from './CloudflareTranslateEngine';
 
-describe('CloudflareTranslateEngine', () => {
+describe('CloudflareTranslateEngine Keyed JSON Protocol', () => {
   let engine: CloudflareTranslateEngine;
 
   beforeEach(() => {
@@ -20,12 +20,12 @@ describe('CloudflareTranslateEngine', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it('translates batch successfully and maps tags in order', async () => {
+  it('translates batch successfully and maps keys in order', async () => {
     const mockResponse = {
       choices: [
         {
           message: {
-            content: '<|1|> Hello world\n<|2|> Good morning',
+            content: JSON.stringify({ b0: 'Hello world', b1: 'Good morning' }),
           },
         },
       ],
@@ -44,7 +44,7 @@ describe('CloudflareTranslateEngine', () => {
       choices: [
         {
           message: {
-            content: '<|1|> **Preface**\n<|2|> *whispering*',
+            content: JSON.stringify({ b0: '**Preface**', b1: '*whispering*' }),
           },
         },
       ],
@@ -58,9 +58,9 @@ describe('CloudflareTranslateEngine', () => {
     expect(result).toEqual(['Preface', 'whispering']);
   });
 
-  it('dispatches structured multi-turn messages with system role to Cloudflare endpoint', async () => {
+  it('dispatches structured JSON messages with system role to Cloudflare endpoint', async () => {
     const mockResponse = {
-      choices: [{ message: { content: '<|1|> Hello' } }],
+      choices: [{ message: { content: JSON.stringify({ b0: 'Hello' }) } }],
     };
 
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
@@ -72,17 +72,17 @@ describe('CloudflareTranslateEngine', () => {
     const requestBody = JSON.parse(fetchSpy.mock.calls[0][1]?.body as string);
     expect(Array.isArray(requestBody.messages)).toBe(true);
     expect(requestBody.messages[0].role).toBe('system');
-    expect(requestBody.messages[0].content).toContain('automated translation engine');
+    expect(requestBody.messages[0].content).toContain('Return only one JSON object');
     expect(requestBody.messages[1].role).toBe('user');
-    expect(requestBody.messages[2].role).toBe('assistant');
+    expect(requestBody.messages[1].content).toContain('"b0":"Bonjour"');
   });
 
-  it('preserves alignment without shifting when upstream model drops a tag', async () => {
+  it('preserves alignment without shifting when upstream model drops a key', async () => {
     const mockResponse = {
       choices: [
         {
           message: {
-            content: '<|1|> Kotoha\n<|3|> Welcome to our park',
+            content: JSON.stringify({ b0: 'Kotoha', b2: 'Welcome to our park' }),
           },
         },
       ],
@@ -132,7 +132,7 @@ describe('CloudflareTranslateEngine', () => {
       callback?.({ success: true, token: 'cached-token' });
     }) as typeof chrome.runtime.sendMessage);
     vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
-      new Response(JSON.stringify({ choices: [{ message: { content: 'translated' } }] }), { status: 200 })
+      new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ b0: 'translated' }) } }] }), { status: 200 })
     );
 
     await (engine as any).requestLlm('first');
@@ -153,10 +153,10 @@ describe('CloudflareTranslateEngine', () => {
       }) as typeof chrome.runtime.sendMessage);
     vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: 'Unauthorized' } }), { status: 401 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: 'translated' } }] }), { status: 200 }));
+      .mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ b0: 'translated' }) } }] }), { status: 200 }));
 
     await expect((engine as any).requestLlm('first')).rejects.toThrow('401');
-    await expect((engine as any).requestLlm('second')).resolves.toBe('translated');
+    await expect((engine as any).requestLlm('second')).resolves.toBe(JSON.stringify({ b0: 'translated' }));
 
     expect(tokenSpy).toHaveBeenCalledTimes(2);
   });

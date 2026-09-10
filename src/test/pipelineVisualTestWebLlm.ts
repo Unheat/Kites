@@ -9,7 +9,7 @@ const EXTENSION_PATH = path.resolve(__dirname, '../../dist');
 const USER_DATA_DIR = path.resolve(__dirname, '../../test/model/.chrome-profile-webllm-visual');
 const TEST_IMAGE_DIR = path.resolve(__dirname, 'test-img');
 const RESULT_DIR = path.resolve(process.cwd(), 'result/pipeline_webllm');
-const WEBLLM_MODEL_ID = process.env.WEBLLM_MODEL_ID || 'Qwen3.5-2B-q4f16_1-MLC';
+const WEBLLM_MODEL_ID = process.env.WEBLLM_MODEL_ID || 'Qwen2.5-3B-Instruct-q4f16_1-MLC';
 const WEBLLM_NO_FEWSHOT = process.env.WEBLLM_NO_FEWSHOT === '1';
 const TRANSLATE_TIMEOUT_MS = 15 * 60 * 1000;
 const TARGET_TIMEOUT_MS = 30_000;

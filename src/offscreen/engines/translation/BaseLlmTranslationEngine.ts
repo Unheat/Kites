@@ -12,6 +12,73 @@ export interface LlmChatMessage {
 }
 
 /**
+ * Detects whether a text string consists entirely of punctuation, ellipses, symbols, or whitespace
+ * without linguistic alphanumeric characters (e.g. "...", "！？", "——", "ーー").
+ * Such tokens bypass the LLM and are resolved deterministically as source passthroughs.
+ *
+ * @param text - The raw source text.
+ * @returns True if the text contains no letters or digits.
+ */
+export function isDeterministicPassthrough(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return true;
+  // Strip prolonged sound marks (ー, U+30FC), dashes, wave dashes, and dots
+  const stripped = trimmed.replace(/[ー—–\-_~〜…·・\s]/gu, '');
+  if (!stripped) return true;
+  // Unicode property escapes: check if remaining text has any Letter or Number
+  return !/[\p{L}\p{N}]/u.test(stripped);
+}
+
+/**
+ * Accurately counts Unicode code points (properly handling surrogate pairs and emoji).
+ *
+ * @param text - The text string.
+ * @returns Count of Unicode code points.
+ */
+export function countCodePoints(text: string): number {
+  return [...text].length;
+}
+
+/**
+ * Computes dynamic token safety bound for a batch of source strings based on
+ * number of bubbles and total Unicode code points.
+ * Formula: Math.min(384, Math.max(64, 24 + 10 * N + Math.ceil(2.5 * C)))
+ *
+ * @param sources - Array of source texts in the batch.
+ * @returns Maximum completion tokens.
+ */
+export function maxTokensForBatch(sources: string[]): number {
+  const n = sources.length;
+  const c = sources.reduce((sum, s) => sum + countCodePoints(s.trim()), 0);
+  return Math.min(384, Math.max(64, 24 + 10 * n + Math.ceil(2.5 * c)));
+}
+
+/**
+ * Builds strict JSON schema for a fixed number of keyed slots (b0, b1, ... b{N-1}).
+ * Used by XGrammar in WebLLM and structured-output endpoints to enforce exact keys.
+ *
+ * @param slotCount - Number of slots in the batch.
+ * @returns JSON schema object with required properties and additionalProperties: false.
+ */
+export function buildSchema(slotCount: number): Record<string, unknown> {
+  const properties: Record<string, { type: 'string' }> = {};
+  const required: string[] = [];
+
+  for (let i = 0; i < slotCount; i++) {
+    const key = `b${i}`;
+    properties[key] = { type: 'string' };
+    required.push(key);
+  }
+
+  return {
+    type: 'object',
+    properties,
+    required,
+    additionalProperties: false,
+  };
+}
+
+/**
  * Cleans translated text by stripping markdown formatting, leaked tag debris (<|1|>, |1|>, [1], 1.),
  * leading labels (Translated:, Translation:), and wrapping quotes.
  *
@@ -77,8 +144,8 @@ export const DEFAULT_LLM_BATCH_SIZE = 15;
 
 /**
  * Abstract base class for all LLM-based translation engines (WebLLM, CustomApi, Cloudflare).
- * Encapsulates blank line pre-filtering, batching, prompt assembly, delimiter parsing,
- * index alignment protection, and markdown stripping.
+ * Encapsulates blank line pre-filtering, deterministic passthrough, batching, prompt assembly,
+ * Keyed JSON Protocol parsing, index alignment protection, and markdown stripping.
  */
 export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
   /**
@@ -112,27 +179,34 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
   async translate(texts: string[], sourceLangId = 'auto', targetLangId = 'en'): Promise<string[]> {
     if (!texts || texts.length === 0) return [];
 
-    // 1. Filter out empty or whitespace-only strings to save tokens
-    const nonEmptyInputs: LlmTranslationSegment[] = [];
+    const results: string[] = new Array(texts.length).fill('');
+    const toTranslate: LlmTranslationSegment[] = [];
+
+    // 1. Separate deterministic passthroughs (empty, whitespace, or punctuation-only)
     texts.forEach((text, i) => {
-      if (text && text.trim()) {
-        nonEmptyInputs.push({ originalIndex: i, text: text.trim() });
+      if (!text || !text.trim()) {
+        results[i] = '';
+      } else if (isDeterministicPassthrough(text)) {
+        // Punctuation/symbol/ellipsis strings resolve immediately without LLM dispatch
+        results[i] = text.trim();
+      } else {
+        toTranslate.push({ originalIndex: i, text: text.trim() });
       }
     });
 
-    const results: string[] = new Array(texts.length).fill('');
-    if (nonEmptyInputs.length === 0) return results;
+    if (toTranslate.length === 0) return results;
 
     const sourceLang = this.resolveLanguage(sourceLangId, 'source');
     const targetLang = this.resolveLanguage(targetLangId, 'target');
 
-    // 2. Process in bounded batches
-    for (let offset = 0; offset < nonEmptyInputs.length; offset += this.batchSize) {
-      const chunk = nonEmptyInputs.slice(offset, offset + this.batchSize);
+    // 2. Process remaining meaningful segments in bounded batches
+    for (let offset = 0; offset < toTranslate.length; offset += this.batchSize) {
+      const chunk = toTranslate.slice(offset, offset + this.batchSize);
       const prompt = this.buildPrompt(chunk, sourceLang, targetLang);
-      const messages = this.buildMessages(chunk, sourceLang, targetLang);
-      const rawOutput = await this.requestLlm(prompt, messages);
-      const parsedChunk = this.parseDelimitedOutput(rawOutput, chunk);
+      const messages = this.buildJsonMessages(chunk, sourceLang, targetLang);
+      const schema = buildSchema(chunk.length);
+      const rawOutput = await this.requestLlm(prompt, messages, schema);
+      const parsedChunk = this.parseKeyedOutput(rawOutput, chunk);
 
       const droppedByModel = chunk.filter((segment, idx) => parsedChunk[idx] === segment.text).length;
       for (let j = 0; j < chunk.length; j++) {
@@ -140,7 +214,9 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
         results[chunk[j].originalIndex] = cleaned;
       }
       if (!this.allowPartialMissingLines && droppedByModel > 0) {
-        throw new Error(`Translation dropped ${droppedByModel}/${chunk.length} lines instead of satisfying the 1:1 tag contract.`);
+        throw new Error(
+          `Translation dropped ${droppedByModel}/${chunk.length} lines instead of satisfying the 1:1 key contract.`
+        );
       }
     }
 
@@ -150,14 +226,16 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
   /**
    * Abstract method implemented by subclasses to perform the actual model or API inference.
    *
-   * @param prompt - The assembled batch prompt string.
-   * @param messages - Optional structured ChatMessage array with system/user/assistant roles.
+   * @param prompt - The assembled batch prompt string fallback.
+   * @param messages - Structured ChatMessage array with system and user roles.
+   * @param schema - Strict JSON schema for the batch slots (b0, b1, ... bN).
    * @param signal - Optional AbortSignal.
    * @returns Raw string response from the LLM.
    */
   protected abstract requestLlm(
     prompt: string,
     messages?: LlmChatMessage[],
+    schema?: Record<string, unknown>,
     signal?: AbortSignal
   ): Promise<string>;
 
@@ -177,7 +255,7 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
   }
 
   /**
-   * Constructs the structured batch prompt with strict line delimiters and anti-markdown rules.
+   * Constructs the legacy flat prompt string fallback.
    *
    * @param chunk - The current chunk of segments to translate.
    * @param sourceLang - Resolved source language name.
@@ -185,80 +263,165 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
    * @returns Formatted prompt string.
    */
   protected buildPrompt(chunk: LlmTranslationSegment[], sourceLang: string, targetLang: string): string {
-    const combinedText = chunk.map((item, index) => `<|${index + 1}|> ${item.text}`).join('\n');
+    const sourceObj: Record<string, string> = {};
+    chunk.forEach((item, index) => {
+      sourceObj[`b${index}`] = item.text;
+    });
 
     return (
-      `Translate the following manga text lines from ${sourceLang} to ${targetLang}.\n` +
-      `Rules:\n` +
-      `- Keep the exact line number format (e.g. <|1|>, <|2|>) for every line.\n` +
-      `- Provide an exact 1:1 translation for each numbered line. Never skip, omit, or merge lines.\n` +
-      `- Output raw plain text only. Do NOT use markdown styling (no asterisks **, *, no backticks, no bold or italic tags).\n` +
-      `- Do not add any conversational filler, explanations, or notes. Only output the translated lines with their tags.\n\n` +
-      `${combinedText}`
+      `Translate SOURCE from ${sourceLang} to ${targetLang}.\n\n` +
+      `Return only one JSON object matching the required schema.\n\n` +
+      `SOURCE:\n${JSON.stringify(sourceObj)}`
     );
   }
 
   /**
-   * Constructs structured ChatMessage array with dedicated system instructions and
-   * Cotrans 2023 1-shot in-context demonstration to condition the LLM to output immediate
-   * tags without conversational pleasantries.
+   * Constructs structured ChatMessage array using the Keyed JSON Protocol.
+   * Employs zero-shot system rules and JSON-formatted SOURCE object to eliminate
+   * delimiter collisions and demonstration copycatting.
    *
    * @param chunk - The current chunk of segments to translate.
    * @param sourceLang - Resolved source language name.
    * @param targetLang - Resolved target language name.
-   * @returns Structured ChatMessage array.
+   * @returns Structured ChatMessage array with system and user turns.
+   */
+  protected buildJsonMessages(
+    chunk: LlmTranslationSegment[],
+    sourceLang: string,
+    targetLang: string
+  ): LlmChatMessage[] {
+    const sourceObj: Record<string, string> = {};
+    chunk.forEach((item, index) => {
+      sourceObj[`b${index}`] = item.text;
+    });
+
+    return [
+      {
+        role: 'system',
+        content:
+          `You translate manga/comic OCR text into natural ${targetLang}.\n\n` +
+          `Return only one JSON object matching the required schema.\n\n` +
+          `Rules:\n` +
+          `- Translate only the values in SOURCE.\n` +
+          `- Keep every output key exactly as required (e.g. b0, b1).\n` +
+          `- Never omit, add, merge, split, rename, or renumber a key.\n` +
+          `- Use neighbouring SOURCE values only for dialogue context.\n` +
+          `- If a value is empty, punctuation-only, an ellipsis, or cannot be usefully translated, copy it unchanged.\n` +
+          `- Do not add explanations, labels, markdown, apologies, or introductory text.\n` +
+          `- Do not add quotation marks around a translation. JSON string quotes are syntax only.\n` +
+          `- Output raw JSON only.`,
+      },
+      {
+        role: 'user',
+        content:
+          `Translate SOURCE from ${sourceLang} to ${targetLang}.\n\n` +
+          `SOURCE:\n${JSON.stringify(sourceObj)}`,
+      },
+    ];
+  }
+
+  /**
+   * Legacy message builder kept for backward compatibility with existing tests.
    */
   protected buildMessages(
     chunk: LlmTranslationSegment[],
     sourceLang: string,
     targetLang: string
   ): LlmChatMessage[] {
-    const combinedText = chunk.map((item, index) => `<|${index + 1}|> ${item.text}`).join('\n');
-
-    const sampleContent =
-      targetLang.toLowerCase().includes('chinese') || targetLang.toLowerCase().includes('中文')
-        ? '<|1|> 走吧！\n<|2|> 等等！'
-        : '<|1|> We need to leave now!\n<|2|> Please wait a little longer.';
-
-    return [
-      {
-        role: 'system',
-        content:
-          `You are an automated translation engine. Translate each numbered line from ${sourceLang} to ${targetLang}.\n` +
-          `RULES:\n` +
-          `- Provide an exact 1:1 translation for each numbered line. Never skip, omit, or merge lines.\n` +
-          `- Keep the exact line number format (e.g. <|1|>, <|2|>) for every line.\n` +
-          `- Output raw plain text only. Do NOT use markdown styling (no asterisks **, *, no backticks, no bold or italic tags).\n` +
-          `- Never output conversational filler, greetings, apologies, explanations, or notes.\n` +
-          `- Do NOT repeat the original source text.\n` +
-          `- Preserve the actual meaning of every source line. Never copy the demonstration translation unless it also means the same thing as that source.\n` +
-          `- Do NOT wrap translations in quotes.`,
-      },
-      {
-        role: 'user',
-        content: `<|1|> ${sourceLang} text line one.\n<|2|> ${sourceLang} text line two.`,
-      },
-      {
-        role: 'assistant',
-        content: sampleContent,
-      },
-      {
-        role: 'user',
-        content: combinedText,
-      },
-    ];
+    return this.buildJsonMessages(chunk, sourceLang, targetLang);
   }
 
   /**
-   * Parses raw delimited output using tag regex matching, with fallbacks to split and newline matching.
-   * Guarantees index stability: if the LLM drops a tag, that slot falls back to its original source text
-   * rather than shifting subsequent translations.
+   * Parses model output formatted as a keyed JSON object ({ "b0": "...", "b1": "..." }).
+   * Includes resilient fallbacks to markdown-stripped JSON and keyed line regex (/^"?b(\d+)"?\s*[:\t]\s*"(.*)"?$/).
+   * Guarantees slot isolation: missing or unparseable slots fall back strictly to their own source text
+   * with zero cascading positional drift.
    *
-   * @param rawOutput - Raw response string from the LLM.
-   * @param chunk - The expected chunk items for count and fallback verification.
+   * @param rawOutput - Raw model response string.
+   * @param chunk - Expected segments with slot indices.
    * @returns Array of translated strings with length equal to chunk.length.
    */
+  protected parseKeyedOutput(rawOutput: string, chunk: LlmTranslationSegment[]): string[] {
+    const parsedMap = new Map<string, string>();
+
+    // 1. Direct JSON parse or markdown-fence stripped parse
+    let cleanJson = rawOutput.trim();
+    if (cleanJson.startsWith('```')) {
+      cleanJson = cleanJson.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+    }
+
+    try {
+      const parsed = JSON.parse(cleanJson);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        for (const [key, val] of Object.entries(parsed)) {
+          if (typeof val === 'string' && val.trim()) {
+            parsedMap.set(key, cleanTranslatedLine(val));
+          }
+        }
+      }
+    } catch {
+      // JSON parse failed, try extracting JSON substring between outermost braces
+      const firstBrace = cleanJson.indexOf('{');
+      const lastBrace = cleanJson.lastIndexOf('}');
+      if (firstBrace >= 0 && lastBrace > firstBrace) {
+        try {
+          const subJson = cleanJson.slice(firstBrace, lastBrace + 1);
+          const parsed = JSON.parse(subJson);
+          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            for (const [key, val] of Object.entries(parsed)) {
+              if (typeof val === 'string' && val.trim()) {
+                parsedMap.set(key, cleanTranslatedLine(val));
+              }
+            }
+          }
+        } catch {
+          // Fall through to keyed regex fallback
+        }
+      }
+    }
+
+    // 2. Resilient fallback: Keyed line regex matching `b0: "translation"`, `"b0": "translation"`, or `b0\ttranslation`
+    if (parsedMap.size === 0) {
+      const lineRe = /"?b(\d+)"?\s*[:\t]\s*"?([^"\r\n]+)"?/gi;
+      let match: RegExpExecArray | null;
+      while ((match = lineRe.exec(rawOutput)) !== null) {
+        const slotKey = `b${match[1]}`;
+        const text = cleanTranslatedLine(match[2] || '');
+        if (text) {
+          parsedMap.set(slotKey, text);
+        }
+      }
+    }
+
+    // 3. Resilient fallback: Delimited tags (<|1|>, [1], 1.) or newline splitting for legacy compatibility
+    if (parsedMap.size === 0) {
+      return this.parseDelimitedOutput(rawOutput, chunk);
+    }
+
+    if (this.throwOnCountMismatch && parsedMap.size < chunk.length) {
+      throw new Error(
+        `Keyed parsing failed for chunk. Expected ${chunk.length} keys, got ${parsedMap.size}. Model hallucinated.`
+      );
+    }
+
+    // 4. Assemble results strictly by slot key.
+    // Missing or dropped slots fall back strictly to their own original text.
+    return chunk.map((item, idx) => {
+      const key = `b${idx}`;
+      const translated = parsedMap.get(key);
+      return translated !== undefined && translated.length > 0 ? translated : item.text;
+    });
+  }
+
+  /**
+   * Legacy delimited parser kept for backward compatibility with delimiter tests.
+   */
   protected parseDelimitedOutput(rawOutput: string, chunk: LlmTranslationSegment[]): string[] {
+    // If output is valid JSON, delegate to parseKeyedOutput
+    if (rawOutput.trim().startsWith('{') || rawOutput.trim().startsWith('```json')) {
+      return this.parseKeyedOutput(rawOutput, chunk);
+    }
+
     const expectedCount = chunk.length;
     const parsed: (string | undefined)[] = new Array(expectedCount).fill(undefined);
 
@@ -289,7 +452,6 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
         splitParts = rawOutput
           .split('\n')
           .map((t) => t.trim())
-          // Discard conversational filler and preamble lines before assigning to translation slots
           .filter((line) => {
             if (!line) return false;
             return !/^(?:sure|here (?:is|are)|certainly|okay|i(?:'d| would) be happy|below is|translating:?)/i.test(line);
@@ -312,7 +474,6 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
       );
     }
 
-    // Fill any missing or dropped slots with the original text to prevent cascading alignment shifts
     return chunk.map((item, idx) => {
       const translated = parsed[idx];
       return translated !== undefined && translated.length > 0 ? translated : item.text;
