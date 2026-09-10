@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   BaseLlmTranslationEngine,
   stripMarkdownFormatting,
+  cleanTranslatedLine,
 } from './BaseLlmTranslationEngine';
 
 class MockLlmEngine extends BaseLlmTranslationEngine {
@@ -42,6 +43,24 @@ describe('stripMarkdownFormatting', () => {
   });
 });
 
+describe('cleanTranslatedLine tag debris & filler shield', () => {
+  it('strips malformed tag debris from translated output', () => {
+    expect(cleanTranslatedLine('<|1|> Hello')).toBe('Hello');
+    expect(cleanTranslatedLine('|1|> Hello')).toBe('Hello');
+    expect(cleanTranslatedLine('[1] Hello')).toBe('Hello');
+    expect(cleanTranslatedLine('1. Hello')).toBe('Hello');
+    expect(cleanTranslatedLine('1: Hello')).toBe('Hello');
+  });
+
+  it('strips leading labels and quotes', () => {
+    expect(cleanTranslatedLine('Translated: "I want to deliver something much better."')).toBe(
+      'I want to deliver something much better.'
+    );
+    expect(cleanTranslatedLine('Translation: \'Wait for me!\'')).toBe('Wait for me!');
+    expect(cleanTranslatedLine('Output: “Good morning”')).toBe('Good morning');
+  });
+});
+
 describe('BaseLlmTranslationEngine', () => {
   it('returns empty array when input is empty without invoking requestLlm', async () => {
     const engine = new MockLlmEngine();
@@ -74,15 +93,52 @@ describe('BaseLlmTranslationEngine', () => {
     expect(result).toHaveLength(5);
   });
 
-  it('prompt includes strict 1:1 and anti-markdown instructions', async () => {
+  it('builds structured chat messages with system instructions and Cotrans 1-shot priming', () => {
     const engine = new MockLlmEngine();
-    engine.mockResponse = '<|1|> One';
+    const msgs = (engine as any).buildMessages(
+      [{ originalIndex: 0, text: 'One' }],
+      'Japanese',
+      'English'
+    );
 
-    await engine.translate(['One'], 'en', 'es');
-    const prompt = engine.promptHistory[0];
+    expect(msgs).toHaveLength(4);
+    expect(msgs[0].role).toBe('system');
+    expect(msgs[0].content).toContain('automated translation engine');
+    expect(msgs[0].content).toContain('Never output conversational filler');
+    expect(msgs[1].role).toBe('user');
+    expect(msgs[1].content).toContain('<|1|> 行こう！');
+    expect(msgs[2].role).toBe('assistant');
+    expect(msgs[2].content).toContain("<|1|> Let's go!");
+    expect(msgs[3].role).toBe('user');
+    expect(msgs[3].content).toContain('<|1|> One');
+  });
 
-    expect(prompt).toContain('Never skip, omit, or merge lines');
-    expect(prompt).toContain('Do NOT use markdown styling');
+  it('recovers accurately from missing bracket |1|> or [1] output', async () => {
+    const engine = new MockLlmEngine();
+    engine.mockResponse = '|1|> Deliver the best possible thing\n|2|> Haha, top\n|3|> Just one more month';
+
+    const result = await engine.translate(['Item 1', 'Item 2', 'Item 3'], 'ja', 'en');
+    expect(result).toEqual([
+      'Deliver the best possible thing',
+      'Haha, top',
+      'Just one more month',
+    ]);
+  });
+
+  it('filters out conversational preamble when model outputs intro text before translations', async () => {
+    const engine = new MockLlmEngine();
+    engine.mockResponse =
+      "Sure, I'd be happy to help you translate the manga text! Here are the translations:\n" +
+      '1. Deliver the best possible thing\n' +
+      '2. Haha, top\n' +
+      '3. Just one more month, please';
+
+    const result = await engine.translate(['Item 1', 'Item 2', 'Item 3'], 'ja', 'en');
+    expect(result).toEqual([
+      'Deliver the best possible thing',
+      'Haha, top',
+      'Just one more month, please',
+    ]);
   });
 
   it('prevents index shift when an item tag is omitted by LLM', async () => {

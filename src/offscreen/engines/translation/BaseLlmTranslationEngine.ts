@@ -6,6 +6,44 @@ export interface LlmTranslationSegment {
   text: string;
 }
 
+export interface LlmChatMessage {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+}
+
+/**
+ * Cleans translated text by stripping markdown formatting, leaked tag debris (<|1|>, |1|>, [1], 1.),
+ * leading labels (Translated:, Translation:), and wrapping quotes.
+ *
+ * @param text - The raw translation string.
+ * @returns Sanitized plain text translation ready for typesetting.
+ */
+export function cleanTranslatedLine(text: string): string {
+  if (!text) return '';
+  let out = stripMarkdownFormatting(text);
+
+  // 1. Strip leading tag debris, e.g. `<|1|>`, `|1|>`, `[1]`, `1.` or `1:`
+  out = out.replace(/^(?:<\||\[|\|)?\s*\d+\s*(?:\|>|\]|[.:])\s*/, '');
+
+  // 2. Strip leading labels like `Translated:`, `Translation:`, `Answer:`
+  out = out.replace(/^(?:translated|translation|output|result|target):\s*/i, '');
+
+  // 3. Strip outer quotation marks
+  if (
+    (out.startsWith('"') && out.endsWith('"') && out.length > 1) ||
+    (out.startsWith('\'') && out.endsWith('\'') && out.length > 1) ||
+    (out.startsWith('“') && out.endsWith('”') && out.length > 1) ||
+    (out.startsWith('「') && out.endsWith('」') && out.length > 1)
+  ) {
+    out = out.slice(1, -1).trim();
+  }
+
+  // 4. Strip any lingering leading tag debris
+  out = out.replace(/^(?:<\||\[|\|)?\s*\d+\s*(?:\|>|\]|[.:])\s*/, '');
+
+  return stripMarkdownFormatting(out);
+}
+
 /**
  * Strips common LLM markdown formatting (bold, italic, backticks, fences) from a text string.
  *
@@ -89,7 +127,7 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
       const parsedChunk = this.parseDelimitedOutput(rawOutput, chunk);
 
       for (let j = 0; j < chunk.length; j++) {
-        const cleaned = stripMarkdownFormatting(parsedChunk[j] || '');
+        const cleaned = cleanTranslatedLine(parsedChunk[j] || '');
         results[chunk[j].originalIndex] = cleaned;
       }
     }
@@ -100,7 +138,7 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
   /**
    * Abstract method implemented by subclasses to perform the actual model or API inference.
    *
-   * @param prompt - The assembled batch prompt.
+   * @param prompt - The assembled batch prompt string.
    * @param signal - Optional AbortSignal.
    * @returns Raw string response from the LLM.
    */
@@ -144,6 +182,56 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
   }
 
   /**
+   * Constructs structured ChatMessage array with dedicated system instructions and
+   * Cotrans 2023 1-shot in-context demonstration to condition the LLM to output immediate
+   * tags without conversational pleasantries.
+   *
+   * @param chunk - The current chunk of segments to translate.
+   * @param sourceLang - Resolved source language name.
+   * @param targetLang - Resolved target language name.
+   * @returns Structured ChatMessage array.
+   */
+  protected buildMessages(
+    chunk: LlmTranslationSegment[],
+    sourceLang: string,
+    targetLang: string
+  ): LlmChatMessage[] {
+    const combinedText = chunk.map((item, index) => `<|${index + 1}|> ${item.text}`).join('\n');
+
+    const sampleAssistant =
+      targetLang.toLowerCase().includes('chinese') || targetLang.toLowerCase().includes('中文')
+        ? '<|1|> 走吧！\n<|2|> 等等！'
+        : '<|1|> Let\'s go!\n<|2|> Wait!';
+
+    return [
+      {
+        role: 'system',
+        content:
+          `You are an automated translation engine. Translate each numbered line from ${sourceLang} to ${targetLang}.\n` +
+          `RULES:\n` +
+          `- Provide an exact 1:1 translation for each numbered line. Never skip, omit, or merge lines.\n` +
+          `- Keep the exact line number format (e.g. <|1|>, <|2|>) for every line.\n` +
+          `- Output raw plain text only. Do NOT use markdown styling (no asterisks **, *, no backticks, no bold or italic tags).\n` +
+          `- Never output conversational filler, greetings, apologies, explanations, or notes.\n` +
+          `- Do NOT repeat the original source text.\n` +
+          `- Do NOT wrap translations in quotes.`,
+      },
+      {
+        role: 'user',
+        content: '<|1|> 行こう！\n<|2|> 待って！',
+      },
+      {
+        role: 'assistant',
+        content: sampleAssistant,
+      },
+      {
+        role: 'user',
+        content: combinedText,
+      },
+    ];
+  }
+
+  /**
    * Parses raw delimited output using tag regex matching, with fallbacks to split and newline matching.
    * Guarantees index stability: if the LLM drops a tag, that slot falls back to its original source text
    * rather than shifting subsequent translations.
@@ -156,32 +244,39 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
     const expectedCount = chunk.length;
     const parsed: (string | undefined)[] = new Array(expectedCount).fill(undefined);
 
-    // Primary strategy: Match tagged responses like `<|1|> translation`
-    const tagRegex = /<\|(\d+)\|>\s*(.*?)(?=(?:<\|\d+\|>|$))/gs;
+    // Primary strategy: Tolerant tag matching: `<|1|>`, `|1|>`, `[1]`, and numbered lists `1.` or `1:`
+    const tagRegex = /(?:<\||\[|\||^|\n)\s*(\d+)(?:\|>|\]|[.:])\s*(.*?)(?=(?:(?:<\||\[|\||\n)\s*\d+(?:\|>|\]|[.:])|$))/gs;
     let match: RegExpExecArray | null;
     let matchedCount = 0;
 
     while ((match = tagRegex.exec(rawOutput)) !== null) {
       const tagIndex = parseInt(match[1], 10) - 1;
-      if (tagIndex >= 0 && tagIndex < expectedCount) {
-        parsed[tagIndex] = match[2].trim();
+      const text = cleanTranslatedLine(match[2] || '');
+      if (tagIndex >= 0 && tagIndex < expectedCount && text.length > 0) {
+        parsed[tagIndex] = text;
         matchedCount++;
       }
     }
 
     // Secondary strategy: Delimiter split if tag matching found nothing
     if (matchedCount === 0) {
-      let splitParts = rawOutput.split(/<\|\d+\|>/);
+      let splitParts = rawOutput.split(/<\|\d+\|>|\[\d+\]|\|\d+\|>/);
       if (splitParts.length > 0 && !splitParts[0].trim()) {
         splitParts = splitParts.slice(1);
       }
-      splitParts = splitParts.map((t) => t.trim());
+      splitParts = splitParts.map((t) => cleanTranslatedLine(t)).filter(Boolean);
 
       // Tertiary strategy: Newline split if delimiters were completely omitted
       if (splitParts.length <= 1 && expectedCount > 1) {
         splitParts = rawOutput
           .split('\n')
           .map((t) => t.trim())
+          // Discard conversational filler and preamble lines before assigning to translation slots
+          .filter((line) => {
+            if (!line) return false;
+            return !/^(?:sure|here (?:is|are)|certainly|okay|i(?:'d| would) be happy|below is|translating:?)/i.test(line);
+          })
+          .map((t) => cleanTranslatedLine(t))
           .filter(Boolean);
       }
 

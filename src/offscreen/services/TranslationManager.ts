@@ -116,7 +116,9 @@ export class TranslationManager {
         if (error instanceof CloudflarePoolExhaustedError) {
           console.warn(`[TranslationManager] Cloudflare shared pool exhausted (${error.code}). Pruning external cloud fallbacks to protect user.`);
           const remainingLocalEngines = engineSequence.slice(i + 1).filter((id) => {
-            const isLocalWebLLM = modelsRegistryData.some((model) => model.id === id && model.engine === 'webllm');
+            const isLocalWebLLM =
+              modelsRegistryData.some((model) => model.id === id && model.engine === 'webllm') ||
+              id.endsWith('-MLC');
             return isLocalWebLLM || id === 'chrome-translator';
           });
           engineSequence = [...engineSequence.slice(0, i + 1), ...remainingLocalEngines];
@@ -242,14 +244,14 @@ export class TranslationManager {
       engine = new GoogleTranslateEngine();
     } else if (engineId === 'cloudflare-translate') {
       engine = new CloudflareTranslateEngine();
-    } else if (registryEntry?.engine === 'webllm') {
+    } else if (registryEntry?.engine === 'webllm' || engineId.endsWith('-MLC')) {
       engine = new WebLLMEngine(engineId);
     } else {
       throw new Error(`Unsupported translation engine: ${engineId}`);
     }
 
     const loadStart = performance.now();
-    const reportsColdInitialization = registryEntry?.engine === 'webllm';
+    const reportsColdInitialization = registryEntry?.engine === 'webllm' || engineId.endsWith('-MLC');
     if (reportsColdInitialization && onInitialization) {
       try {
         onInitialization('started');

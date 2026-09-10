@@ -111,9 +111,11 @@ export class WebLLMEngine extends BaseLlmTranslationEngine {
 
   /**
    * Submits prompt to WebGPU LLM completion API.
+   * Automatically structures prompt into a system instruction, Cotrans 1-shot in-context demonstration,
+   * and user query turns so small local models generate immediate numbered lines without conversational chatter.
    *
    * @param prompt - The assembled batch prompt.
-   * @param signal - Optional AbortSignal.
+   * @param _signal - Optional AbortSignal.
    * @returns Raw string completion from the local model.
    */
   protected async requestLlm(prompt: string, _signal?: AbortSignal): Promise<string> {
@@ -121,9 +123,33 @@ export class WebLLMEngine extends BaseLlmTranslationEngine {
       throw new Error('WebLLMEngine is not initialized. Call init() first.');
     }
 
+    // Separate instructions from combined numbered lines
+    const delimiterIndex = prompt.indexOf('\n\n');
+    const systemContent = delimiterIndex !== -1 ? prompt.slice(0, delimiterIndex).trim() : prompt;
+    const userContent = delimiterIndex !== -1 ? prompt.slice(delimiterIndex + 2).trim() : prompt;
+
+    const messages = [
+      {
+        role: 'system' as const,
+        content: systemContent,
+      },
+      {
+        role: 'user' as const,
+        content: '<|1|> 行こう！\n<|2|> 待って！',
+      },
+      {
+        role: 'assistant' as const,
+        content: '<|1|> Let\'s go!\n<|2|> Wait!',
+      },
+      {
+        role: 'user' as const,
+        content: userContent,
+      },
+    ];
+
     const chunkStart = import.meta.env.DEV ? performance.now() : 0;
     const reply = await this.engine.chat.completions.create({
-      messages: [{ role: 'user', content: prompt }],
+      messages,
       temperature: WEBLLM_TEMPERATURE,
       max_tokens: WEBLLM_MAX_TOKENS,
     });
