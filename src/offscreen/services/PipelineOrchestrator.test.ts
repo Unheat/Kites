@@ -3,6 +3,7 @@ import { pipelineOrchestrator } from './PipelineOrchestrator';
 import { db } from '../../db';
 import { InpaintCacheManager } from './InpaintCacheManager';
 import { createCanvas, Canvas } from 'canvas';
+import { resolveRenderFontFamily } from '../../shared/renderFontPresets';
 
 // vi.hoisted lifts the mock above the module imports. PipelineOrchestrator.ts constructs an
 // OcrManager at module scope (`export const pipelineOrchestrator = ...`), so the mock class
@@ -253,7 +254,7 @@ describe('PipelineOrchestrator', () => {
       expect.arrayContaining([
         expect.objectContaining({
           imageId: 2,
-          fontFamily: '"Comic Sans MS", "Comic Sans", cursive'
+          fontFamily: resolveRenderFontFamily('comic')
         })
       ])
     );

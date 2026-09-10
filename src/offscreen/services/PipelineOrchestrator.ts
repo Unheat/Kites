@@ -210,6 +210,11 @@ export class PipelineOrchestrator {
 
       // 6. Bake the translated text into the image for the Live Web return
       console.log(`[PipelineOrchestrator] Baking translated text into Canvas for Live Web...`);
+
+      // Ensure all custom @font-face rules are loaded before canvas text measurements.
+      if (typeof document !== 'undefined' && document.fonts) {
+        await document.fonts.ready;
+      }
       
       const cleanedBlob = new Blob([cleanedImageBuffer], { type: 'image/png' });
       const bitmap = await createImageBitmap(cleanedBlob);

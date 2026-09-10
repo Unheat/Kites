@@ -1,5 +1,34 @@
 @import "tailwindcss";
 
+@font-face {
+  font-family: 'Kites Comic';
+  src: local('SVN-Wild Words'),
+       local('CC Wild Words'),
+       local('HL-Wild Words'),
+       local('VNF-Wild Words'),
+       local('SVN-Anime Ace 2.0'),
+       local('Patrick Hand SC'),
+       url('/fonts/comic-dialogue.woff') format('woff'),
+       url('/fonts/comic-dialogue.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Kites Comic';
+  src: local('SVN-Wild Words Bold'),
+       local('CC Wild Words Bold'),
+       local('HL-Wild Words Bold'),
+       local('VNF-Wild Words Bold'),
+       local('SVN-Anime Ace 2.0 Bold'),
+       url('/fonts/comic-dialogue.woff') format('woff'),
+       url('/fonts/comic-dialogue.ttf') format('truetype');
+  font-weight: bold;
+  font-style: normal;
+  font-display: swap;
+}
+
 @theme {
   /* Kites Design Tokens - Editor's Light Table */
   --color-paper: #E4E0D9;
