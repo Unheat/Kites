@@ -711,7 +711,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
             onClick={() => setIsOpenRenderFont(!isOpenRenderFont)}
             className="w-full flex items-center justify-between p-3 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md hover:border-[var(--color-ink)] transition-colors cursor-pointer"
           >
-            <span className="font-medium truncate pr-2">{activeRenderFontPreset.label}</span>
+            <span className="font-medium truncate pr-2" style={{ fontFamily: activeRenderFontPreset.fontFamily }}>{activeRenderFontPreset.label}</span>
             <ChevronDown size={16} className={`text-[var(--color-dust)] transition-transform ${isOpenRenderFont ? 'rotate-180' : ''}`} />
           </button>
 
@@ -734,7 +734,10 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                       }`}
                     >
                       <div className="flex flex-col overflow-hidden">
-                        <span className="truncate pr-2 text-sm">{preset.label}</span>
+                        <span className="truncate pr-2 text-sm" style={{ fontFamily: preset.fontFamily }}>{preset.label}</span>
+                        {preset.description && (
+                          <span className="text-[11px] text-[var(--color-dust)] truncate">{preset.description}</span>
+                        )}
                       </div>
                       <div className="flex-shrink-0 ml-2">
                         {isActive ? <Check size={14} className="text-[var(--color-editorial)]" /> : null}

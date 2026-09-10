@@ -1,51 +1,95 @@
 /** Allowlisted identifier for a global translation render font preset. */
-export type RenderFontPresetId = 'standard' | 'comic' | 'serif' | 'monospace';
+export type RenderFontPresetId = string;
 
 /** User-facing render font preset metadata. */
 export interface RenderFontPreset {
-  id: RenderFontPresetId;
+  id: string;
   label: string;
   fontFamily: string;
+  description?: string;
 }
 
 /** Default preset used for new, missing, and invalid popup state. */
-export const DEFAULT_RENDER_FONT_PRESET_ID: RenderFontPresetId = 'standard';
-
-/** Ordered allowlist shared by settings, state validation, and rendering. */
-export const RENDER_FONT_PRESETS: readonly RenderFontPreset[] = [
-  { id: 'standard', label: 'Standard', fontFamily: 'sans-serif' },
-  {
-    id: 'comic',
-    label: 'Comic',
-    fontFamily: '"Kites Comic", "SVN-Wild Words", "CC Wild Words", "HL-Wild Words", "VNF-Wild Words", "MTO COMIC 1", "SVN-Anime Ace 2.0", "Patrick Hand SC", "Comic Sans MS", cursive, sans-serif'
-  },
-  { id: 'serif', label: 'Serif', fontFamily: 'Georgia, "Times New Roman", serif' },
-  { id: 'monospace', label: 'Monospace', fontFamily: '"Courier New", Courier, monospace' },
-] as const;
-
-const RENDER_FONT_PRESET_BY_ID = new Map<RenderFontPresetId, RenderFontPreset>(
-  RENDER_FONT_PRESETS.map((preset) => [preset.id, preset])
-);
+export const DEFAULT_RENDER_FONT_PRESET_ID: string = 'standard';
 
 /**
- * Normalizes untrusted persisted input to an allowlisted render font preset ID.
+ * Extensible central font registry.
+ * Any font added here automatically appears in settings dropdowns,
+ * validates in state normalization, and renders in offscreen canvas & studio.
+ */
+export const fontRegistry: Record<string, RenderFontPreset> = {
+  'standard': {
+    id: 'standard',
+    label: 'Standard',
+    fontFamily: 'sans-serif',
+    description: 'Clean system sans-serif font.'
+  },
+  'comic': {
+    id: 'comic',
+    label: 'Wild Words',
+    fontFamily: '"Kites Comic", "SVN-Wild Words", "CC Wild Words", "HL-Wild Words", "VNF-Wild Words", "MTO COMIC 1", cursive, sans-serif',
+    description: 'Authentic manga dialogue font with compact Vietnamese diacritics.'
+  },
+  'anime-ace': {
+    id: 'anime-ace',
+    label: 'Anime Ace',
+    fontFamily: '"MTO Comic 2", "SVN-Anime Ace 2.0", "Anime Ace 2.0 BB", "Anime Ace", cursive, sans-serif',
+    description: 'Popular comic dialogue font with full Vietnamese support.'
+  },
+  'comic-hand': {
+    id: 'comic-hand',
+    label: 'Comic Hand',
+    fontFamily: '"Patrick Hand SC", "Comic Sans MS", cursive, sans-serif',
+    description: 'Natural small-caps comic lettering with 100% Vietnamese coverage.'
+  },
+  'serif': {
+    id: 'serif',
+    label: 'Serif',
+    fontFamily: 'Georgia, "Times New Roman", serif',
+    description: 'Traditional literary serif font.'
+  },
+  'monospace': {
+    id: 'monospace',
+    label: 'Monospace',
+    fontFamily: '"Courier New", Courier, monospace',
+    description: 'Fixed-width typewriter font.'
+  }
+};
+
+/**
+ * Ordered list of available presets for UI dropdowns.
+ * Dynamically populated from fontRegistry.
+ */
+export const RENDER_FONT_PRESETS: readonly RenderFontPreset[] = Object.values(fontRegistry);
+
+/** Known aliases mapped to their canonical registered ID. */
+const FONT_PRESET_ALIASES: Record<string, string> = {
+  'wild-words': 'comic',
+  'manga': 'comic',
+  'wildwords': 'comic',
+  'animeace': 'anime-ace'
+};
+
+/**
+ * Normalizes untrusted persisted input to a registered render font preset ID.
+ * Supports aliases (e.g. 'wild-words' -> 'comic') and falls back to 'standard'.
  *
  * @param value - Candidate preset identifier from storage or another runtime boundary.
- * @returns Matching allowlisted ID, or the Standard preset ID when invalid.
+ * @returns Matching registered ID, or the Standard preset ID when invalid.
  */
-export function normalizeRenderFontPresetId(value: unknown): RenderFontPresetId {
-  return typeof value === 'string' && RENDER_FONT_PRESET_BY_ID.has(value as RenderFontPresetId)
-    ? value as RenderFontPresetId
-    : DEFAULT_RENDER_FONT_PRESET_ID;
+export function normalizeRenderFontPresetId(value: unknown): string {
+  if (typeof value !== 'string') return DEFAULT_RENDER_FONT_PRESET_ID;
+  const canonical = FONT_PRESET_ALIASES[value] ?? value;
+  return fontRegistry[canonical] ? canonical : DEFAULT_RENDER_FONT_PRESET_ID;
 }
 
 /**
  * Resolves an untrusted preset identifier to its safe CSS font-family stack.
  *
  * @param value - Candidate preset identifier.
- * @returns Allowlisted font-family stack, defaulting to sans-serif.
+ * @returns Registered font-family stack, defaulting to sans-serif.
  */
 export function resolveRenderFontFamily(value: unknown): string {
   const presetId = normalizeRenderFontPresetId(value);
-  return RENDER_FONT_PRESET_BY_ID.get(presetId)?.fontFamily ?? 'sans-serif';
+  return fontRegistry[presetId]?.fontFamily ?? 'sans-serif';
 }
