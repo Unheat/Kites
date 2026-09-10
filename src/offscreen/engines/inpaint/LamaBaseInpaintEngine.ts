@@ -17,6 +17,10 @@ type LamaProvider = 'cpu' | 'webgpu' | 'wasm';
  * Tier 4 Inpainting Engine: LaMa (Large Mask Inpainting).
  * Uses Fast Fourier Convolutions for excellent global structure hallucination.
  * Runs on ONNX Runtime. Requires ~207MB download.
+ *
+ * This base intentionally retains its fixed 512x512 window planner and reusable inference
+ * implementation for future fixed-input models. Do not delete it because current AOT-GAN and
+ * LaMa Manga engines override `inpaint`; fixed-shape subclasses still need this stable path.
  */
 export class LamaBaseInpaintEngine implements IInpaintEngine {
   protected platform: any;
@@ -447,10 +451,11 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
   // strictly use the raw polygon patches directly. Do not attempt to synchronize
   // this engine with Cotrans.
   /**
-   * Erases text from the source image by running the LaMa neural network model at 1:1 native resolution.
-   * Plans optimal 512x512 windows using greedy max-fit clustering to cover all text polygons with
-   * minimal ONNX inference passes, crops patches without downscaling, dilates polygon mask edges
-   * to swallow anti-aliased character boundaries, and pastes results back with zero upscaling blur.
+   * Erases text with the intentionally retained fixed-input 512x512 implementation.
+   * Plans fixed windows using greedy max-fit clustering to cover all text polygons with minimal
+   * ONNX inference passes, crops without scaling, dilates mask edges, and pastes results back with
+   * zero upscaling blur. Current AOT-GAN and LaMa Manga subclasses override this method with dynamic
+   * localized flows; this implementation must remain available for future fixed-shape models.
    *
    * @param imageBuffer - Raw ArrayBuffer of the input image.
    * @param polygons - Array of polygon vertex arrays defining text regions to erase.
