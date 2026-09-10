@@ -1,6 +1,7 @@
 import type { IOcrEngine, OcrResult } from '../engines/ocr/BaseOcrEngine';
 import { PaddleOcrEngine } from '../engines/ocr/PaddleOcrEngine';
 import { resolveOcrTier } from '../engines/ocr/ocrRegistry';
+import type { Point2D } from '../../shared/utils/geometry';
 import { Quadrilateral, Graph, calculateBoundingBox, computeMinAreaRect, polygonArea, quadrilateralCanMergeRegion, splitTextRegion, calculateRotationAngle } from '../../shared/utils/geometry';
 import {
   isScanlatorWatermark,
@@ -645,13 +646,7 @@ export class OcrManager {
     const scores = filteredScores.filter((_, index) => !duplicateIndices.has(index));
 
     if (texts.length === 0) {
-      // Nothing to translate, but inpainting still needs the surviving erase polygons:
-      // all noise-filtered lines (pre-dedup — dropped duplicates still have ink to erase)
-      // plus orphan punctuation merged into neighbors.
-      const emptyMaskPolygons = [...filteredPolygons];
-      for (const idx of claimedPunctuation) {
-        emptyMaskPolygons.push(rawPolygons[idx]);
-      }
+      // Nothing to translate, so nothing should be erased.
       return {
         ...result,
         texts: [],
@@ -662,7 +657,7 @@ export class OcrManager {
         fontSizes: [],
         angles: [],
         lineCounts: [],
-        rawPolygons: emptyMaskPolygons,
+        rawPolygons: [],
       };
     }
 
@@ -734,7 +729,8 @@ export class OcrManager {
       }
     }
 
-    // Step 3: emit one merged region per final group
+    // Step 3: emit one merged region per final group that contains non-empty text
+    const validFinalGroups: number[][] = [];
     for (const groupIndices of finalGroups) {
       const groupQuads = groupIndices.map(idx => workingQuads[idx]);
 
@@ -769,6 +765,9 @@ export class OcrManager {
         }
       }
 
+      // Do not emit empty or whitespace-only groups: no text will be placed on top
+      if (!groupText.trim()) continue;
+
       console.log(`[OcrManager] Merged Speech Bubble: "${groupText}" (${majorityDir}) from ${groupIndices.length} lines`);
       const groupScore = groupIndices.reduce((sum, idx) => sum + (workingScores[idx] || 1), 0) / groupIndices.length;
 
@@ -788,6 +787,7 @@ export class OcrManager {
       const minRect = computeMinAreaRect(groupPolygons, angleDeg);
       const minBox = calculateBoundingBox(minRect);
 
+      validFinalGroups.push(groupIndices);
       mergedTexts.push(groupText);
       mergedScores.push(groupScore);
       mergedPolygons.push(minRect);
@@ -837,14 +837,21 @@ export class OcrManager {
 
     const pick = <T>(arr: T[]): T[] => rows.map(i => arr[i]);
 
-    // rawPolygons retains the raw unmerged 4-point line quadrilaterals for inpainting.
-    // Built from PRE-dedup filtered polygons: a dedup-dropped duplicate still has ink
-    // (its non-overlapping part) that must be erased. Orphan punctuation polygons that
-    // were merged into neighbors' text are added too — their ink must also be erased.
-    const maskPolygons = [...filteredPolygons];
-    for (const idx of claimedPunctuation) {
-      maskPolygons.push(rawPolygons[idx]);
+    // INVARIANT: Only inpaint regions where replacement text will actually be rendered!
+    // If a line was suppressed (low confidence), filtered out as noise, or dropped from
+    // the final text groups, no translated text will be drawn over it — so inpainting
+    // must NEVER erase it (preventing empty, blanked-out speech bubbles).
+    const maskPolygons: Point2D[][] = [];
+    for (const cand of rows) {
+      const groupIndices = validFinalGroups[cand];
+      if (!groupIndices) continue;
+      for (const idx of groupIndices) {
+        if (workingQuads[idx]?.pts) {
+          maskPolygons.push(workingQuads[idx].pts);
+        }
+      }
     }
+
     return {
       texts: pick(mergedTexts),
       polygons: pick(mergedPolygons),

@@ -491,5 +491,40 @@ describe('OcrManager', () => {
       expect(result.texts).toHaveLength(0);
       expect(result.rawPolygons).toHaveLength(0);
     });
+
+    it('excludes low-confidence suppressed lines from rawPolygons so inpainter leaves them untouched', async () => {
+      vi.mocked(PaddleOcrEngine).mockImplementationOnce(function () {
+        return {
+          preset: 'v6-small',
+          init: vi.fn().mockResolvedValue(undefined),
+          recognize: vi.fn().mockResolvedValue({
+            // Strong dialogue line + weak whisper line adjacent to it
+            texts: ['こんにちは', 'あ'],
+            polygons: [
+              [{ x: 10, y: 10 }, { x: 100, y: 10 }, { x: 100, y: 40 }, { x: 10, y: 40 }],
+              [{ x: 105, y: 12 }, { x: 125, y: 12 }, { x: 125, y: 38 }, { x: 105, y: 38 }],
+            ],
+            scores: [0.95, 0.50], // 0.50 triggers low-confidence suppression near 0.95
+            detectionScores: [0.98, 0.52],
+            boxes: [
+              { x: 10, y: 10, w: 90, h: 30 },
+              { x: 105, y: 12, w: 20, h: 26 },
+            ]
+          }),
+          destroy: vi.fn().mockResolvedValue(undefined)
+        } as any;
+      });
+
+      const result = await ocrManager.processImage(new ArrayBuffer(16), 'v6-small', { sourceLang: 'ja' });
+      expect(result.texts).toHaveLength(1);
+      expect(result.texts[0]).toBe('こんにちは');
+
+      // The suppressed line "あ" must NOT be in rawPolygons, so inpainting never erases it
+      expect(result.rawPolygons).toBeDefined();
+      expect(result.rawPolygons).toHaveLength(1);
+      expect(result.rawPolygons![0][0].x).toBe(10);
+      expect(result.rawPolygons![0][0].y).toBe(10);
+    });
   });
 });
+
