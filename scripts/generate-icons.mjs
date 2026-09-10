@@ -1,4 +1,14 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+import fs from 'node:fs';
+import path from 'node:path';
+import { createCanvas, loadImage } from 'canvas';
+
+const ICONS_DIR = path.resolve('public/icons');
+if (!fs.existsSync(ICONS_DIR)) {
+  fs.mkdirSync(ICONS_DIR, { recursive: true });
+}
+
+// Master SVG: The Origami Manga Kite (Spatial Speech Bubble & Kite)
+const svgContent = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
   <defs>
     <!-- Facet Gradients -->
     <linearGradient id="facet-tl" x1="10%" y1="0%" x2="90%" y2="100%">
@@ -97,4 +107,63 @@
     <!-- Center Spatial Translation Sparkle -->
     <polygon points="64,48 66,55 73,56 66,57 64,64 62,57 55,56 62,55" fill="#FFFFFF" />
   </g>
-</svg>
+</svg>`;
+
+async function main() {
+  // Write master vector assets
+  fs.writeFileSync('public/icon.svg', svgContent, 'utf-8');
+  fs.writeFileSync('public/favicon.svg', svgContent, 'utf-8');
+  console.log('Saved public/icon.svg and public/favicon.svg');
+
+  const img = await loadImage(Buffer.from(svgContent));
+
+  // Sizes required by Chrome Manifest V3:
+  // 16: Extension toolbar & dropdown list
+  // 32: Windows & Retina 2x toolbar
+  // 48: chrome://extensions management page
+  // 128: Chrome Web Store & installation badge
+  const sizes = [16, 32, 48, 128];
+
+  for (const size of sizes) {
+    const canvas = createCanvas(size, size);
+    const ctx = canvas.getContext('2d');
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(img, 0, 0, size, size);
+
+    const outPath = path.join(ICONS_DIR, `icon${size}.png`);
+    fs.writeFileSync(outPath, canvas.toBuffer('image/png'));
+    console.log(`Generated ${outPath} (${size}x${size})`);
+  }
+
+  // Clean up temporary test files
+  const testFiles = [
+    'public/test-icon.svg',
+    'public/test-icon-16.png',
+    'public/test-icon-32.png',
+    'public/test-icon-48.png',
+    'public/test-icon-128.png',
+    'public/test-kites-icon.svg',
+    'public/icon-standalone.svg',
+    'public/icon-badge.svg',
+    'public/icon-standalone-16.png',
+    'public/icon-standalone-32.png',
+    'public/icon-standalone-48.png',
+    'public/icon-standalone-128.png',
+    'public/icon-badge-16.png',
+    'public/icon-badge-32.png',
+    'public/icon-badge-48.png',
+    'public/icon-badge-128.png'
+  ];
+  for (const file of testFiles) {
+    if (fs.existsSync(file)) {
+      fs.unlinkSync(file);
+    }
+  }
+  console.log('Temporary icon files cleaned up.');
+}
+
+main().catch((err) => {
+  console.error('Failed to generate icons:', err);
+  process.exit(1);
+});

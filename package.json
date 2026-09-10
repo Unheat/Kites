@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "icons": "node scripts/generate-icons.mjs",
     "copy-wasm": "node scripts/copy-wasm.mjs",
     "build": "npm run copy-wasm && tsc -b && vite build",
     "build:dev": "npm run copy-wasm && tsc -b && vite build --mode development",
