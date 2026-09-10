@@ -10,6 +10,9 @@ import { resolve } from 'path'
 export default defineConfig(({ mode }) => {
   const isProd = mode === 'production'
   return {
+    define: {
+      'import.meta.env.DEV': JSON.stringify(!isProd)
+    },
     server: {
       port: 5173,
       strictPort: true

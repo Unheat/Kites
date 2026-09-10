@@ -52,12 +52,12 @@ describe('SettingsView', () => {
     });
 
     const fontButtons = Array.from(trigger?.parentElement?.querySelectorAll('button') ?? []);
-    const optionLabels = fontButtons.slice(1).map((button) => button.textContent?.trim());
-    expect(optionLabels).toEqual(['Standard', 'Comic', 'Serif', 'Monospace']);
+    const optionLabels = fontButtons.slice(1).map((button) => button.querySelector('span')?.textContent?.trim());
+    expect(optionLabels).toEqual(['Standard', 'Wild Words', 'Anime Ace', 'Comic Hand', 'Serif', 'Monospace']);
 
-    const comicOption = fontButtons.find((button) => button.textContent?.trim() === 'Comic');
+    const wildWordsOption = fontButtons.find((button) => button.querySelector('span')?.textContent?.trim() === 'Wild Words');
     await act(async () => {
-      comicOption?.click();
+      wildWordsOption?.click();
     });
 
     expect(updateState).toHaveBeenCalledWith({ renderFontPresetId: 'comic' });

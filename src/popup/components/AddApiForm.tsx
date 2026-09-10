@@ -49,6 +49,9 @@ export default function AddApiForm({ onSave, onCancel }: AddApiFormProps) {
       const response = await new Promise<{ status: string; error?: string }>((resolve) => {
         chrome.runtime.sendMessage({
           type: 'VALIDATE_CUSTOM_API',
+          target: 'background',
+          source: 'popup',
+          request: true,
           payload: { config: newApi }
         }, (res) => {
           if (chrome.runtime.lastError) {

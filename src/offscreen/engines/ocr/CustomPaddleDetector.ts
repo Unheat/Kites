@@ -1,13 +1,12 @@
-import { extractPolygons, extractRawMaskCanvas, type Point2D } from './extractPolygons';
+import { extractPolygons, type Point2D } from './extractPolygons';
 
 /**
  * DBNet polygon expansion factor (PaddleOCR `--det_db_unclip_ratio`). Controls how far the
  * raw segmentation contour is pushed outward via a Clipper polygon offset before becoming
- * the final box — lower values hug the text more tightly.
- *
- * Matches the PaddleOCR online API (PP-OCRv6) `text_det_params.unclip_ratio = 1.5`.
+ * the final box — 1.8 ensures anti-aliased character edges and kanji radicals are swallowed
+ * without truncating at the quad boundary.
  */
-const UNCLIP_RATIO = 1.5;
+const UNCLIP_RATIO = 1.8;
 
 export interface DetectionOutput {
   /** 4-point text quadrilaterals in original image coordinates. */
@@ -35,10 +34,11 @@ export class CustomPaddleDetector {
   }
 
   /**
-   * Runs the underlying ONNX detection model on the image buffer and returns extracted text polygons and raw probability mask.
+   * Runs the underlying ONNX detection model and returns extracted text polygons.
+   * Raw DBNet mask generation is skipped because the locked inpaint contract consumes polygons only.
    *
    * @param imageBuffer - The raw ArrayBuffer of the image.
-   * @returns A promise that resolves to an object containing polygons and optional maskRawCanvas.
+   * @returns A promise that resolves to polygons, scores, and an undefined legacy mask field.
    */
   async detectPolygons(imageBuffer: ArrayBuffer): Promise<DetectionOutput> {
     if (!this.service || !this.service.detector) {
@@ -77,22 +77,10 @@ export class CustomPaddleDetector {
       input.resizeRatio
     );
 
-    // 4. Extract Cotrans-style raw probability mask (mask_raw)
-    const maskRawCanvas = extractRawMaskCanvas(
-      platform,
-      probabilityMap,
-      input.width,
-      input.height,
-      input.originalWidth,
-      input.originalHeight,
-      thresh,
-      input.resizeRatio
-    );
-
     const polygons = detected.map(d => d.points);
     const scores = detected.map(d => d.score);
 
-    console.log(`[CustomPaddleDetector] Found ${polygons.length} text polygons and extracted maskRawCanvas.`);
-    return { polygons, scores, maskRawCanvas };
+    console.log(`[CustomPaddleDetector] Found ${polygons.length} text polygons.`);
+    return { polygons, scores, maskRawCanvas: undefined };
   }
 }

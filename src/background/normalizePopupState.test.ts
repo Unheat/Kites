@@ -43,6 +43,18 @@ describe('normalizePopupState', () => {
     expect(invalidResult.state.renderFontPresetId).toBe('standard');
   });
 
+  it('completes legacy state and deep-merges WebGPU overrides', () => {
+    const result = normalizePopupState({
+      activeEngineId: 'gg-translate',
+      webgpuOverrides: { inpaint: false } as PopupState['webgpuOverrides'],
+    });
+
+    expect(result.changed).toBe(true);
+    expect(result.state.webgpuOverrides).toEqual({ llm: true, inpaint: false, ocr: true });
+    expect(result.state.activeOcrId).toBe(DEFAULT_POPUP_STATE.activeOcrId);
+    expect(result.state.customApis).toEqual([]);
+  });
+
   it('preserves valid renderFontPresetId without flagging changed', () => {
     const validState: PopupState = {
       ...DEFAULT_POPUP_STATE,

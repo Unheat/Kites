@@ -1,36 +1,61 @@
-import { StrictMode, useState, useEffect } from 'react';
+import { StrictMode, useState, useEffect, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import '../index.css'; 
 
 import EngineDropdown from './components/EngineDropdown';
 import SettingsView from './components/SettingsView';
 
-import { Settings, Home, Power } from 'lucide-react';
+import { Settings, Home, Power, Crop } from 'lucide-react';
 
 import type { PopupState } from '../shared/types';
 import { DEFAULT_POPUP_STATE } from '../shared/types';
+
+/**
+ * Completes persisted popup settings and preserves nested WebGPU defaults.
+ *
+ * @param state - Partial state loaded from storage or a state update.
+ * @returns A complete popup state.
+ */
+export function completePopupState(state?: Partial<PopupState>): PopupState {
+  return {
+    ...DEFAULT_POPUP_STATE,
+    ...(state ?? {}),
+    webgpuOverrides: {
+      ...DEFAULT_POPUP_STATE.webgpuOverrides,
+      ...(state?.webgpuOverrides ?? {}),
+    },
+  };
+}
 
 function PopupApp() {
   const [activeTab, setActiveTab] = useState<'home' | 'settings'>('home');
   const [isLoaded, setIsLoaded] = useState(false);
   const [state, setState] = useState<PopupState>(DEFAULT_POPUP_STATE);
+  const storageWriteQueue = useRef<Promise<void>>(Promise.resolve());
 
   useEffect(() => {
-    // Also trigger hardware check on mount to ensure we have it if it's missing from storage
-    import('../offscreen/utils/hardware').then(({ checkWebGPUAvailability }) => {
-      checkWebGPUAvailability().then(supported => {
-        setState(prev => ({ ...prev, webgpuSupported: supported }));
-      });
-    }).catch(err => {
-      console.warn("Failed to load hardware util in popup", err);
-    });
+    let isMounted = true;
+
     chrome.runtime.sendMessage({ type: 'GET_POPUP_STATE' }, (popupState) => {
+      if (!isMounted) return;
       if (chrome.runtime.lastError) {
         console.warn('[Popup] Failed to load normalized popup state:', chrome.runtime.lastError.message);
       } else if (popupState && typeof popupState === 'object') {
-        setState(prev => ({ ...prev, ...(popupState as Partial<PopupState>) }));
+        setState(completePopupState(popupState as Partial<PopupState>));
       }
       setIsLoaded(true);
+
+      // WORKAROUND: Probe through offscreen after hydration. Popup WebGPU capability can
+      // differ from the inference document, and the stale persisted result must not win
+      // this race or LaMa will silently run on WASM. See devlog 015.
+      chrome.runtime.sendMessage({ type: 'CHECK_WEBGPU_SUPPORT', target: 'background', source: 'popup', request: true }, (response) => {
+        if (!isMounted) return;
+        if (chrome.runtime.lastError || response?.status !== 'success') {
+          console.warn('[Popup] WebGPU support check failed:', chrome.runtime.lastError?.message || response?.error);
+          return;
+        }
+        setState(prev => ({ ...prev, webgpuSupported: response.supported === true }));
+      });
     });
 
     // Listen to changes in chrome.storage.local to reactively reflect quota/state updates
@@ -39,7 +64,7 @@ function PopupApp() {
       areaName: string
     ) => {
       if (areaName === 'local' && changes.popupState?.newValue) {
-        setState(prev => ({ ...prev, ...(changes.popupState.newValue as Partial<PopupState>) }));
+        setState(completePopupState(changes.popupState.newValue as Partial<PopupState>));
       }
     };
 
@@ -48,6 +73,7 @@ function PopupApp() {
     }
 
     return () => {
+      isMounted = false;
       if (typeof chrome !== 'undefined' && chrome.storage?.onChanged) {
         chrome.storage.onChanged.removeListener(handleStorageChange);
       }
@@ -63,18 +89,32 @@ function PopupApp() {
     }
   }, [state.isDark]);
 
+  /**
+   * Applies an optimistic popup update and serializes complete storage writes.
+   *
+   * @param updates - Popup fields to update, including partial nested WebGPU overrides.
+   * @returns Nothing.
+   */
   const updateState = (updates: Partial<PopupState>) => {
     setState(prev => {
-      const newState = { ...prev, ...updates };
-      // Atomically update storage with merged state
-      chrome.storage.local.get('popupState').then(data => {
-        const currentStored = (data?.popupState || {}) as PopupState;
-        chrome.storage.local.set({
-          popupState: { ...currentStored, ...updates }
-        }).catch(() => {});
-      }).catch(() => {
-        chrome.storage.local.set({ popupState: newState }).catch(() => {});
+      const newState = completePopupState({
+        ...prev,
+        ...updates,
+        webgpuOverrides: {
+          ...prev.webgpuOverrides,
+          ...(updates.webgpuOverrides ?? {}),
+        },
       });
+      // WORKAROUND: Serial writes prevent two rapid toggle updates from persisting
+      // independent snapshots and restoring stale GPU flags behind the live React UI.
+      storageWriteQueue.current = storageWriteQueue.current
+        .catch(() => undefined)
+        .then(async () => {
+          await chrome.storage.local.set({ popupState: newState });
+        })
+        .catch((error) => {
+          console.error('[Popup] Failed to persist popup state:', error);
+        });
       return newState;
     });
   };
@@ -127,7 +167,26 @@ function PopupApp() {
         </div>
 
         {/* Footer Action */}
-        <div className="px-3.5 pb-3.5">
+        <div className="px-3.5 pb-3.5 flex flex-col gap-2">
+          <button
+            onClick={async () => {
+              try {
+                const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+                if (tab?.id) {
+                  await chrome.tabs.sendMessage(tab.id, { type: 'START_AREA_SELECTION' });
+                  window.close();
+                }
+              } catch (err) {
+                console.warn('[Popup] Failed to start area selection on active tab:', err);
+              }
+            }}
+            className="w-full py-2 bg-[var(--color-vellum)] text-[var(--color-ink)] border border-[var(--color-dust)] border-opacity-30 font-semibold rounded hover:border-[var(--color-editorial)] hover:text-[var(--color-editorial)] transition-colors flex items-center justify-center gap-2 cursor-pointer text-sm"
+            title="Drag a rectangle across any on-screen manga panel, canvas, or video to translate it"
+          >
+            <Crop size={16} />
+            Crop & Translate Area
+          </button>
+
           <button 
             onClick={() => {
               chrome.tabs.create({ url: chrome.runtime.getURL('index.html') });

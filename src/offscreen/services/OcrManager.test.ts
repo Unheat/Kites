@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { OcrManager, isValuableChar, isValuableText } from './OcrManager';
+import { OcrManager, isValuableChar, isValuableText, isRightToLeftReadingOrder } from './OcrManager';
 import { PaddleOcrEngine } from '../engines/ocr/PaddleOcrEngine';
 
 vi.mock('../engines/ocr/PaddleOcrEngine', () => {
@@ -49,30 +49,51 @@ describe('OcrManager', () => {
     });
   });
 
-  describe('getOrLoadEngine', () => {
-    it('instantiates PaddleOcrEngine with default v6-small when no tier is provided', async () => {
-      const engine = await ocrManager.getOrLoadEngine();
-      expect(PaddleOcrEngine).toHaveBeenCalledWith('v6-small');
-      expect(engine).toBeDefined();
-    });
-
-    it('maps legacy paddle-dbnet tier to v6-small', async () => {
-      const engine = await ocrManager.getOrLoadEngine('paddle-dbnet');
-      expect(PaddleOcrEngine).toHaveBeenCalledWith('v6-small');
-      expect(engine).toBeDefined();
-    });
-
-    it('instantiates requested tier (e.g. v6-medium)', async () => {
-      const engine = await ocrManager.getOrLoadEngine('v6-medium');
-      expect(PaddleOcrEngine).toHaveBeenCalledWith('v6-medium');
-      expect(engine).toBeDefined();
-    });
-
-    it('reuses cached engine instances for subsequent calls of the same tier', async () => {
-      const engine1 = await ocrManager.getOrLoadEngine('v6-tiny');
-      const engine2 = await ocrManager.getOrLoadEngine('v6-tiny');
-      expect(engine1).toBe(engine2);
+  describe('engine lifecycle through processImage', () => {
+    it('initializes the default v6-small tier once and reuses it', async () => {
+      await ocrManager.processImage(new ArrayBuffer(1));
+      await ocrManager.processImage(new ArrayBuffer(1));
       expect(PaddleOcrEngine).toHaveBeenCalledTimes(1);
+      expect(PaddleOcrEngine).toHaveBeenCalledWith('v6-small');
+    });
+
+    it('canonicalizes the legacy paddle-dbnet alias', async () => {
+      await ocrManager.processImage(new ArrayBuffer(1), 'paddle-dbnet');
+      expect(PaddleOcrEngine).toHaveBeenCalledWith('v6-small');
+    });
+
+    it('deduplicates deferred successful initialization for concurrent operations', async () => {
+      let resolveInit!: () => void;
+      const init = vi.fn(() => new Promise<void>(resolve => { resolveInit = resolve; }));
+      (PaddleOcrEngine as any).mockImplementation(function () {
+        return {
+          init,
+          recognize: vi.fn().mockResolvedValue({ texts: [], polygons: [], scores: [], detectionScores: [], boxes: [] }),
+          destroy: vi.fn().mockResolvedValue(undefined),
+        };
+      });
+
+      const first = ocrManager.processImage(new ArrayBuffer(1), 'v6-tiny');
+      const concurrent = ocrManager.processImage(new ArrayBuffer(1), 'v6-tiny');
+      await vi.waitFor(() => expect(init).toHaveBeenCalledTimes(1));
+      resolveInit();
+      await Promise.all([first, concurrent]);
+      expect(PaddleOcrEngine).toHaveBeenCalledTimes(1);
+    });
+
+    it('releases its lease when recognition rejects', async () => {
+      const destroy = vi.fn().mockResolvedValue(undefined);
+      (PaddleOcrEngine as any).mockImplementation(function (preset: string) {
+        return {
+          preset,
+          init: vi.fn().mockResolvedValue(undefined),
+          recognize: vi.fn().mockRejectedValue(new Error('recognition failed')),
+          destroy,
+        };
+      });
+      await expect(ocrManager.processImage(new ArrayBuffer(1), 'v6-tiny')).rejects.toThrow('recognition failed');
+      await ocrManager.cleanup();
+      expect(destroy).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -305,10 +326,169 @@ describe('OcrManager', () => {
       expect(result.texts[0]).toBe('Sample text');
     });
 
-    it('cleans up and destroys all active engines', async () => {
-      const engine = await ocrManager.getOrLoadEngine('v6-small');
+    it('cleans up and destroys the active engine', async () => {
+      await ocrManager.processImage(new ArrayBuffer(1), 'v6-small');
+      const engine = vi.mocked(PaddleOcrEngine).mock.results.at(-1)?.value;
       await ocrManager.cleanup();
       expect(engine.destroy).toHaveBeenCalled();
+    });
+  });
+
+  describe('isRightToLeftReadingOrder', () => {
+    it('returns true for Japanese source language', () => {
+      expect(isRightToLeftReadingOrder('ja')).toBe(true);
+      expect(isRightToLeftReadingOrder('JA')).toBe(true);
+      expect(isRightToLeftReadingOrder('jpn')).toBe(true);
+    });
+
+    it('returns true for explicit RTL languages', () => {
+      expect(isRightToLeftReadingOrder('ar')).toBe(true);
+      expect(isRightToLeftReadingOrder('he')).toBe(true);
+      expect(isRightToLeftReadingOrder('fa')).toBe(true);
+      expect(isRightToLeftReadingOrder('ur')).toBe(true);
+    });
+
+    it('returns false for Western/Latin and other LTR languages', () => {
+      expect(isRightToLeftReadingOrder('en')).toBe(false);
+      expect(isRightToLeftReadingOrder('vi')).toBe(false);
+      expect(isRightToLeftReadingOrder('ko')).toBe(false);
+      expect(isRightToLeftReadingOrder('zh')).toBe(false);
+      expect(isRightToLeftReadingOrder('fr')).toBe(false);
+      expect(isRightToLeftReadingOrder('es')).toBe(false);
+    });
+
+    it('infers RTL when sourceLang is undefined but vertical text or kana is present', () => {
+      expect(isRightToLeftReadingOrder(undefined, ['v', 'h'], ['Hello', 'World'])).toBe(true);
+      expect(isRightToLeftReadingOrder(undefined, ['h'], ['こんにちは'])).toBe(true);
+    });
+
+    it('infers LTR when sourceLang is undefined and no vertical text or kana exists', () => {
+      expect(isRightToLeftReadingOrder(undefined, ['h', 'h'], ['Hello', 'World'])).toBe(false);
+    });
+  });
+
+  describe('speech bubble reading order (Cotrans sort_regions)', () => {
+    function mockSideBySideBubbles(engineResult: { leftText: string; rightText: string }) {
+      (PaddleOcrEngine as any).mockImplementation(function () {
+        return {
+          preset: 'v6-small',
+          init: vi.fn().mockResolvedValue(undefined),
+          recognize: vi.fn().mockResolvedValue({
+            texts: [engineResult.leftText, engineResult.rightText],
+            polygons: [
+              // Bubble 1 on Left: x=50, y=100, w=100, h=50 -> centerX=100, centerY=125
+              [{ x: 50, y: 100 }, { x: 150, y: 100 }, { x: 150, y: 150 }, { x: 50, y: 150 }],
+              // Bubble 2 on Right: x=400, y=100, w=100, h=50 -> centerX=450, centerY=125
+              [{ x: 400, y: 100 }, { x: 500, y: 100 }, { x: 500, y: 150 }, { x: 400, y: 150 }]
+            ],
+            scores: [0.95, 0.95],
+            detectionScores: [0.98, 0.98],
+            boxes: [
+              { x: 50, y: 100, w: 100, h: 50 },
+              { x: 400, y: 100, w: 100, h: 50 }
+            ]
+          }),
+          destroy: vi.fn().mockResolvedValue(undefined)
+        };
+      });
+    }
+
+    it('orders side-by-side bubbles Right-to-Left (manga) when sourceLang is ja', async () => {
+      mockSideBySideBubbles({ leftText: '左のセリフ', rightText: '右のセリフ' });
+      const result = await ocrManager.processImage(new ArrayBuffer(16), 'v6-small', { sourceLang: 'ja' });
+      expect(result.texts).toHaveLength(2);
+      // In Japanese manga, Right bubble comes first!
+      expect(result.texts[0]).toBe('右のセリフ');
+      expect(result.texts[1]).toBe('左のセリフ');
+    });
+
+    it('orders side-by-side bubbles Left-to-Right (western) when sourceLang is en', async () => {
+      mockSideBySideBubbles({ leftText: 'Left bubble text', rightText: 'Right bubble text' });
+      const result = await ocrManager.processImage(new ArrayBuffer(16), 'v6-small', { sourceLang: 'en' });
+      expect(result.texts).toHaveLength(2);
+      // In Western comics, Left bubble comes first!
+      expect(result.texts[0]).toBe('Left bubble text');
+      expect(result.texts[1]).toBe('Right bubble text');
+    });
+
+    it('orders side-by-side bubbles Left-to-Right when sourceLang is vi', async () => {
+      mockSideBySideBubbles({ leftText: 'Bong bóng bên trái', rightText: 'Bong bóng bên phải' });
+      const result = await ocrManager.processImage(new ArrayBuffer(16), 'v6-small', { sourceLang: 'vi' });
+      expect(result.texts).toHaveLength(2);
+      expect(result.texts[0]).toBe('Bong bóng bên trái');
+      expect(result.texts[1]).toBe('Bong bóng bên phải');
+    });
+  });
+
+  describe('speedline noise stroke filtering', () => {
+    it('filters out standalone speedline strokes and excludes their polygons from rawPolygons', async () => {
+      vi.mocked(PaddleOcrEngine).mockImplementationOnce(function () {
+        return {
+          preset: 'v6-small',
+          init: vi.fn().mockResolvedValue(undefined),
+          recognize: vi.fn().mockResolvedValue({
+            texts: ['こんにちは', '一', '丨', '一人で走る'],
+            polygons: [
+              [{ x: 10, y: 10 }, { x: 100, y: 10 }, { x: 100, y: 40 }, { x: 10, y: 40 }],
+              [{ x: 150, y: 50 }, { x: 250, y: 50 }, { x: 250, y: 55 }, { x: 150, y: 55 }], // speedline "一"
+              [{ x: 300, y: 100 }, { x: 305, y: 100 }, { x: 305, y: 200 }, { x: 300, y: 200 }], // vertical slash "丨"
+              [{ x: 50, y: 100 }, { x: 150, y: 100 }, { x: 150, y: 140 }, { x: 50, y: 140 }], // legitimate dialogue "一人で走る"
+            ],
+            scores: [0.95, 0.92, 0.88, 0.94],
+            detectionScores: [0.98, 0.95, 0.90, 0.97],
+            boxes: [
+              { x: 10, y: 10, w: 90, h: 30 },
+              { x: 150, y: 50, w: 100, h: 5 },
+              { x: 300, y: 100, w: 5, h: 100 },
+              { x: 50, y: 100, w: 100, h: 40 }
+            ]
+          }),
+          destroy: vi.fn().mockResolvedValue(undefined)
+        } as any;
+      });
+
+      const result = await ocrManager.processImage(new ArrayBuffer(16), 'v6-small', { sourceLang: 'ja' });
+
+      // Only real dialogue survives
+      expect(result.texts).toContain('こんにちは');
+      expect(result.texts).toContain('一人で走る');
+      expect(result.texts).not.toContain('一');
+      expect(result.texts).not.toContain('丨');
+      expect(result.texts).toHaveLength(2);
+
+      // Speedline polygons must NOT be in rawPolygons (so inpainter never erases them)
+      expect(result.rawPolygons).toHaveLength(2);
+      const hasSpeedlinePoly = result.rawPolygons.some(p => p[0].x === 150 && p[0].y === 50);
+      const hasSlashPoly = result.rawPolygons.some(p => p[0].x === 300 && p[0].y === 100);
+      expect(hasSpeedlinePoly).toBe(false);
+      expect(hasSlashPoly).toBe(false);
+    });
+
+    it('returns empty result when image only contains speedline strokes', async () => {
+      vi.mocked(PaddleOcrEngine).mockImplementationOnce(function () {
+        return {
+          preset: 'v6-small',
+          init: vi.fn().mockResolvedValue(undefined),
+          recognize: vi.fn().mockResolvedValue({
+            texts: ['一', '───'],
+            polygons: [
+              [{ x: 10, y: 10 }, { x: 100, y: 10 }, { x: 100, y: 15 }, { x: 10, y: 15 }],
+              [{ x: 150, y: 50 }, { x: 250, y: 50 }, { x: 250, y: 55 }, { x: 150, y: 55 }]
+            ],
+            scores: [0.92, 0.90],
+            detectionScores: [0.95, 0.93],
+            boxes: [
+              { x: 10, y: 10, w: 90, h: 5 },
+              { x: 150, y: 50, w: 100, h: 5 }
+            ]
+          }),
+          destroy: vi.fn().mockResolvedValue(undefined)
+        } as any;
+      });
+
+      const result = await ocrManager.processImage(new ArrayBuffer(16), 'v6-small', { sourceLang: 'ja' });
+      expect(result.texts).toHaveLength(0);
+      expect(result.rawPolygons).toHaveLength(0);
     });
   });
 });

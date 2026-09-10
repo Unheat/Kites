@@ -7,7 +7,7 @@ import { InpaintManager, type InpaintTier } from '../offscreen/services/InpaintM
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const TIERS: InpaintTier[] = ['none', 'simple', 'telea', 'aot', 'lama-manga'];
+const TIERS: InpaintTier[] = ['none', 'simple', 'telea', 'aotgan', 'lama-manga'];
 
 async function runInpaintVisualTest() {
   console.log('--- Starting Comprehensive Inpainting Integration Test ---');

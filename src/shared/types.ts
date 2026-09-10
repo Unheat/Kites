@@ -12,7 +12,13 @@ export type MessageType =
   | 'GET_ACTIVE_DOWNLOADS' // Popup -> Background -> Offscreen
   | 'CHECK_MODEL_STATUS'   // Popup -> Background -> Offscreen
   | 'GET_MODEL_STATUSES'   // Popup -> Background -> Offscreen
-  | 'PRELOAD_ACTIVE_ENGINE'; // Background -> Offscreen
+  | 'CHECK_WEBGPU_SUPPORT' // Popup -> Background -> Offscreen
+  | 'PRELOAD_ACTIVE_ENGINE' // Background -> Offscreen
+  | 'START_AREA_SELECTION' // Popup/Background -> Content
+  | 'CAPTURE_VISIBLE_TAB' // Content -> Background
+  | 'TRANSLATE_CAPTURED_IMAGE' // Content -> Background
+  | 'CAPTURE_TRANSLATED' // Background -> Content
+  | 'CAPTURE_TRANSLATION_ERROR'; // Background -> Content
 
 export interface TranslateImageMessage {
   type: 'TRANSLATE_IMAGE';
@@ -26,6 +32,19 @@ export interface ProcessJobMessage {
   };
 }
 
+export type ModelInitializationPhase = 'started' | 'finished';
+
+export interface ModelInitializationMessage {
+  type: 'MODEL_INITIALIZATION';
+  target: 'background';
+  source: 'offscreen';
+  event: true;
+  payload: {
+    jobId: number;
+    phase: ModelInitializationPhase;
+  };
+}
+
 export interface ImageTranslatedMessage {
   type: 'IMAGE_TRANSLATED';
   payload: {
@@ -33,10 +52,45 @@ export interface ImageTranslatedMessage {
     bakedBase64: string;
   };
 }
-export interface StartModelDownloadMessage {
+export type RuntimeMessageTarget = 'background' | 'offscreen';
+export type RuntimeMessageSource = 'popup' | 'background' | 'offscreen' | 'dashboard' | 'content';
+export type ModelCategory = 'translation' | 'inpaint' | 'ocr';
+
+export interface ViewportSelection {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+export type CropStatus = 'draft' | 'capturing' | 'translating' | 'completed' | 'failed';
+
+export interface CropOverlayItem {
+  id: string;
+  sourceKey: string;
+  pageLeft: number;
+  pageTop: number;
+  width: number;
+  height: number;
+  originalDataUrl: string;
+  translatedDataUrl?: string;
+  jobId?: number;
+  status: CropStatus;
+  showOriginal: boolean;
+  error?: string;
+}
+
+export interface RuntimeMessageRoute {
+  target?: RuntimeMessageTarget;
+  source?: RuntimeMessageSource;
+  request?: true;
+}
+
+export interface StartModelDownloadMessage extends RuntimeMessageRoute {
   type: 'START_MODEL_DOWNLOAD';
   payload: {
     modelId: string;
+    category: ModelCategory;
   };
 }
 

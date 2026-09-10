@@ -6,8 +6,8 @@ import { DEFAULT_POPUP_STATE } from '../types';
 describe('hardwareUtils', () => {
   describe('isWebLlmModel', () => {
     it('identifies webllm models correctly', () => {
-      expect(isWebLlmModel('Llama-3.2-1B-Instruct-q4f32_1-MLC')).toBe(true);
-      expect(isWebLlmModel('DeepSeek-R1-Distill-Qwen-7B-q4f16_1-MLC')).toBe(true);
+      expect(isWebLlmModel('Qwen2.5-3B-Instruct-q4f16_1-MLC')).toBe(true);
+      expect(isWebLlmModel('Qwen2.5-1.5B-Instruct-q4f16_1-MLC')).toBe(true);
       expect(isWebLlmModel('gg-translate')).toBe(false);
       expect(isWebLlmModel('custom-openai')).toBe(false);
       expect(isWebLlmModel('simple')).toBe(false);

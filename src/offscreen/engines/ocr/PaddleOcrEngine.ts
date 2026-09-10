@@ -264,7 +264,7 @@ export class PaddleOcrEngine implements IOcrEngine {
     }
 
     try {
-      const startTime = import.meta.env.DEV ? performance.now() : 0;
+      const startTime = (import.meta as any).env?.DEV ? performance.now() : 0;
       console.log('[PaddleOcrEngine] Starting recognition...');
       
       const { polygons, scores: detectionScores, maskRawCanvas } = await this.customDetector!.detectPolygons(imageBuffer);
@@ -289,7 +289,7 @@ export class PaddleOcrEngine implements IOcrEngine {
         };
       });
 
-      if (import.meta.env.DEV) {
+      if ((import.meta as any).env?.DEV) {
         const totalDuration = (performance.now() - startTime).toFixed(2);
         console.log(`[PaddleOcrEngine] Recognition complete in ${totalDuration}ms. Found ${texts.length} text blocks.`);
       }

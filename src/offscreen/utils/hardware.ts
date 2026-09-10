@@ -2,69 +2,93 @@
  * Utility functions for hardware capability detection.
  */
 
+const WEBGPU_CACHE_KEY = 'hardware_webgpu_supported';
+// WORKAROUND: Chrome may assign an unusable low-power/software adapter to extension
+// offscreen documents when this preference is omitted, freezing LaMa inference. Do not
+// replace this with an unqualified requestAdapter() fallback. See devlog 015.
+const HIGH_PERFORMANCE_ADAPTER_OPTIONS: GPURequestAdapterOptions = { powerPreference: 'high-performance' };
+
 let webgpuSupported: boolean | null = null;
 
 /**
- * Checks if the current environment supports WebGPU and has a valid adapter.
- * Uses Chrome Storage to avoid running the check more than once per extension lifetime,
- * eliminating startup latency.
- * 
- * @returns {Promise<boolean>} True if WebGPU is fully supported and enabled.
+ * Checks whether this offscreen context can create and destroy a device from a
+ * high-performance WebGPU adapter. Only successful probes are cached.
+ *
+ * @param force - Whether to ignore and clear a cached successful probe.
+ * @returns True when a validated high-performance adapter is available.
  */
-export async function checkWebGPUAvailability(): Promise<boolean> {
-  // If we already cached it in memory during this run, return it
-  if (webgpuSupported !== null) {
-    return webgpuSupported;
+export async function checkWebGPUAvailability(force = false): Promise<boolean> {
+  if (force) {
+    webgpuSupported = null;
+    await removeWebGPUCache();
+  } else if (webgpuSupported === true) {
+    return true;
   }
 
-  // Check persistent storage first (set by settings UI or previous run)
-  if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-    const data = await chrome.storage.local.get('hardware_webgpu_supported');
-    if (data.hardware_webgpu_supported !== undefined) {
-      webgpuSupported = Boolean(data.hardware_webgpu_supported);
-      return webgpuSupported;
+  if (!force && typeof chrome !== 'undefined' && chrome.storage?.local) {
+    // WORKAROUND: A historical popup-context probe persisted false globally. Because
+    // chrome.storage.local survives Git checkouts and extension reloads, accepting that
+    // value permanently forced offscreen inference onto WASM. Cache verified success only.
+    const data = await chrome.storage.local.get(WEBGPU_CACHE_KEY);
+    if (data[WEBGPU_CACHE_KEY] === true) {
+      webgpuSupported = true;
+      return true;
+    }
+    if (data[WEBGPU_CACHE_KEY] === false) {
+      await removeWebGPUCache();
     }
   }
 
-  // Node.js test environments
   if (typeof navigator === 'undefined' || !navigator.gpu) {
-    webgpuSupported = false;
-    await saveWebGPUState(false);
+    webgpuSupported = null;
     return false;
   }
 
   try {
-    const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
-    webgpuSupported = !!adapter;
-    await saveWebGPUState(webgpuSupported);
-    return webgpuSupported;
-  } catch (e) {
-    console.warn('[HardwareDetector] WebGPU adapter request failed:', e);
-    webgpuSupported = false;
-    await saveWebGPUState(false);
+    const adapter = await navigator.gpu.requestAdapter(HIGH_PERFORMANCE_ADAPTER_OPTIONS);
+    if (!adapter) {
+      webgpuSupported = null;
+      return false;
+    }
+    const device = await adapter.requestDevice();
+    device.destroy();
+    webgpuSupported = true;
+    await saveWebGPUState();
+    return true;
+  } catch (error) {
+    console.warn('[HardwareDetector] High-performance WebGPU validation failed:', error);
+    webgpuSupported = null;
     return false;
   }
 }
 
 /**
- * Saves the WebGPU status to persistent storage.
+ * Persists a successful WebGPU validation.
+ *
+ * @returns A promise that resolves after the true capability flag is stored.
  */
-export async function saveWebGPUState(isSupported: boolean): Promise<void> {
-  webgpuSupported = isSupported;
-  if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-    await chrome.storage.local.set({ hardware_webgpu_supported: isSupported });
+async function saveWebGPUState(): Promise<void> {
+  if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+    await chrome.storage.local.set({ [WEBGPU_CACHE_KEY]: true });
   }
 }
 
 /**
- * Force-rechecks WebGPU hardware support (used by Settings UI).
+ * Removes stale or explicitly invalidated WebGPU capability state.
+ *
+ * @returns A promise that resolves after storage cleanup.
+ */
+async function removeWebGPUCache(): Promise<void> {
+  if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+    await chrome.storage.local.remove(WEBGPU_CACHE_KEY);
+  }
+}
+
+/**
+ * Re-runs WebGPU hardware validation without using cached state.
+ *
+ * @returns True when a fresh high-performance adapter passes device validation.
  */
 export async function forceRecheckWebGPU(): Promise<boolean> {
-  // Clear memory cache so it actually re-requests
-  webgpuSupported = null;
-  // Remove from storage to bypass storage check
-  if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-    await chrome.storage.local.remove('hardware_webgpu_supported');
-  }
-  return await checkWebGPUAvailability();
+  return checkWebGPUAvailability(true);
 }

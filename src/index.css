@@ -1,5 +1,56 @@
 @import "tailwindcss";
 
+@font-face {
+  font-family: 'Kites Comic';
+  src: local('SVN-Wild Words'),
+       local('CC Wild Words'),
+       local('HL-Wild Words'),
+       local('VNF-Wild Words'),
+       local('MTO COMIC 1'),
+       local('SVN-Anime Ace 2.0'),
+       local('Patrick Hand SC'),
+       url('/fonts/mto-comic-1.woff') format('woff'),
+       url('/fonts/comic-dialogue.woff') format('woff'),
+       url('/fonts/mto-comic-1.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Kites Comic';
+  src: local('SVN-Wild Words Bold'),
+       local('CC Wild Words Bold'),
+       local('HL-Wild Words Bold'),
+       local('VNF-Wild Words Bold'),
+       local('MTO COMIC 1'),
+       local('SVN-Anime Ace 2.0 Bold'),
+       url('/fonts/mto-comic-1.woff') format('woff'),
+       url('/fonts/comic-dialogue.woff') format('woff'),
+       url('/fonts/mto-comic-1.ttf') format('truetype');
+  font-weight: bold;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'MTO Comic 1';
+  src: url('/fonts/mto-comic-1.woff') format('woff'),
+       url('/fonts/mto-comic-1.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'MTO Comic 2';
+  src: url('/fonts/mto-comic-2.woff') format('woff'),
+       url('/fonts/mto-comic-2.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
 @theme {
   /* Kites Design Tokens - Editor's Light Table */
   --color-paper: #E4E0D9;

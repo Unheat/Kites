@@ -1,17 +1,23 @@
 {
-  "name": "temp-vite",
+  "name": "kites",
   "private": true,
   "version": "1.0.2",
+  "license": "GPL-3.0-or-later",
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "icons": "node scripts/generate-icons.mjs",
     "copy-wasm": "node scripts/copy-wasm.mjs",
     "build": "npm run copy-wasm && tsc -b && vite build",
+    "build:dev": "npm run copy-wasm && tsc -b && vite build --mode development",
     "lint": "oxlint",
     "preview": "vite preview",
     "test": "vitest run src/",
     "test:e2e": "node scripts/test-extension.js",
-    "test:webllm": "node scripts/test-webllm-user-flow.js"
+    "test:webllm": "node scripts/test-webllm-user-flow.js",
+    "test:visual:custom-api": "tsx src/test/pipelineVisualTestCustomApi.ts",
+    "test:visual:cloudflare": "tsx src/test/pipelineVisualTestCloudflare.ts",
+    "test:visual:webllm": "npm run build:dev && tsx src/test/pipelineVisualTestWebLlm.ts"
   },
   "dependencies": {
     "@mlc-ai/web-llm": "^0.2.84",
@@ -37,6 +43,7 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",
+    "@webgpu/types": "^0.1.38",
     "autoprefixer": "^10.5.2",
     "canvas": "^3.2.3",
     "fake-indexeddb": "^6.2.5",

@@ -1,15 +1,24 @@
 import { MLCEngine, CreateMLCEngine } from '@mlc-ai/web-llm';
-import { BaseLlmTranslationEngine } from './BaseLlmTranslationEngine';
+import {
+  BaseLlmTranslationEngine,
+  maxTokensForBatch,
+  type LlmChatMessage,
+} from './BaseLlmTranslationEngine';
 import { checkWebGPUAvailability } from '../../utils/hardware';
 
-/** Default segment batch size for on-device WebLLM inference */
+/** Default segment batch size for on-device WebLLM inference (fits full page in 1 pass) */
 const DEFAULT_WEBLLM_BATCH_SIZE = 15;
 
-/** Sampling temperature for translation fidelity */
-const WEBLLM_TEMPERATURE = 0.1;
+/** Greedy sampling temperature for deterministic translation */
+const WEBLLM_TEMPERATURE = 0;
 
-/** Max completion tokens for WebLLM chat completions */
-const WEBLLM_MAX_TOKENS = 2048;
+export const WEBLLM_RETRY_BATCH_SPLIT = 3;
+
+/** Maximum watchdog timer in milliseconds to prevent runaway GPU loops (30s for full page batches) */
+const MAX_WATCHDOG_DEADLINE_MS = 30000;
+
+/** Minimum watchdog timer in milliseconds for small batches to enable fast error recovery */
+const MIN_WATCHDOG_DEADLINE_MS = 10000;
 
 export class WebLLMEngine extends BaseLlmTranslationEngine {
   private engine: MLCEngine | null = null;
@@ -25,7 +34,8 @@ export class WebLLMEngine extends BaseLlmTranslationEngine {
     super();
     this.modelId = modelId;
     this.batchSize = DEFAULT_WEBLLM_BATCH_SIZE;
-    this.throwOnCountMismatch = true; // WebLLM throws to let TranslationManager waterfall take over
+    this.throwOnCountMismatch = false;
+    this.allowPartialMissingLines = false;
   }
 
   /**
@@ -106,39 +116,115 @@ export class WebLLMEngine extends BaseLlmTranslationEngine {
     if (!this.engine) {
       throw new Error('WebLLMEngine is not initialized. Call init() first.');
     }
-    return super.translate(texts, sourceLangId, targetLangId);
+
+    try {
+      return await super.translate(texts, sourceLangId, targetLangId);
+    } catch (error) {
+      const shouldSplit =
+        error instanceof Error &&
+        error.message.includes('Translation dropped') &&
+        texts.length > WEBLLM_RETRY_BATCH_SPLIT;
+      if (!shouldSplit) throw error;
+
+      console.warn(
+        `[WebLLMEngine] Strict batch dropped lines; retrying as smaller batches of ${WEBLLM_RETRY_BATCH_SPLIT}.`
+      );
+      this.batchSize = WEBLLM_RETRY_BATCH_SPLIT;
+      const retried = await super.translate(texts, sourceLangId, targetLangId);
+      this.batchSize = DEFAULT_WEBLLM_BATCH_SIZE;
+      return retried;
+    }
   }
 
   /**
    * Submits prompt to WebGPU LLM completion API.
+   * Uses Keyed JSON Protocol with XGrammar schema-constrained generation and stateless transactions.
    *
-   * @param prompt - The assembled batch prompt.
+   * @param prompt - The assembled batch prompt fallback string.
+   * @param messages - Optional structured ChatMessage array with system/user turns.
+   * @param schema - Strict JSON schema for the batch slots (b0, b1, ... bN).
    * @param signal - Optional AbortSignal.
    * @returns Raw string completion from the local model.
    */
-  protected async requestLlm(prompt: string, _signal?: AbortSignal): Promise<string> {
+  protected async requestLlm(
+    prompt: string,
+    messages?: LlmChatMessage[],
+    schema?: Record<string, unknown>,
+    signal?: AbortSignal,
+    maxTokens?: number
+  ): Promise<string> {
     if (!this.engine) {
       throw new Error('WebLLMEngine is not initialized. Call init() first.');
     }
 
-    const chunkStart = import.meta.env.DEV ? performance.now() : 0;
-    const reply = await this.engine.chat.completions.create({
-      messages: [{ role: 'user', content: prompt }],
-      temperature: WEBLLM_TEMPERATURE,
-      max_tokens: WEBLLM_MAX_TOKENS,
-    });
+    // Reset multi-round chat history so each translation transaction is stateless.
+    // This prevents historical output leakage from contaminating subsequent batches.
+    await this.engine.resetChat();
 
-    const rawOutput = reply.choices[0]?.message?.content || '';
-    if (import.meta.env.DEV) {
-      const chunkMs = performance.now() - chunkStart;
-      const completionTokens = (reply as any).usage?.completion_tokens;
-      const tokPerSec = completionTokens ? (completionTokens / (chunkMs / 1000)).toFixed(1) : 'n/a';
-      console.log(
-        `[WebLLMEngine] Batch in ${chunkMs.toFixed(2)}ms (${completionTokens ?? '?'} completion tokens, ${tokPerSec} tok/s).`
-      );
+    const payloadMessages =
+      messages && messages.length > 0
+        ? messages
+        : [{ role: 'user' as const, content: prompt }];
+
+    // Dynamic safety token cap passed from batch segments, or bounded fallback
+    const dynamicMaxTokens = maxTokens ?? maxTokensForBatch(payloadMessages.map((m) => m.content));
+
+    const completionOptions: any = {
+      messages: payloadMessages,
+      temperature: WEBLLM_TEMPERATURE,
+      top_p: 1,
+      repetition_penalty: 1,
+      max_tokens: dynamicMaxTokens,
+      stop: ['\n\n\n'],
+    };
+
+    if (schema) {
+      completionOptions.response_format = {
+        type: 'json_object',
+        schema: JSON.stringify(schema),
+      };
     }
 
-    return rawOutput;
+    // Dynamic watchdog timer: interrupt runaway GPU generation if deadline exceeded
+    const dynamicDeadlineMs = Math.min(
+      MAX_WATCHDOG_DEADLINE_MS,
+      Math.max(MIN_WATCHDOG_DEADLINE_MS, 4000 + dynamicMaxTokens * 30)
+    );
+    const runawayTimer = setTimeout(() => {
+      if (this.engine) {
+        console.warn(`[WebLLMEngine] Watchdog deadline (${dynamicDeadlineMs}ms) exceeded; interrupting generation.`);
+        void this.engine.interruptGenerate();
+      }
+    }, dynamicDeadlineMs);
+
+    if (signal) {
+      signal.addEventListener('abort', () => {
+        if (this.engine) void this.engine.interruptGenerate();
+      });
+    }
+
+    const chunkStart = import.meta.env.DEV ? performance.now() : 0;
+    try {
+      const reply = await this.engine.chat.completions.create(completionOptions);
+      clearTimeout(runawayTimer);
+
+      const rawOutput = reply.choices[0]?.message?.content || '';
+      if (import.meta.env.DEV) {
+        const chunkMs = performance.now() - chunkStart;
+        const completionTokens = (reply as any).usage?.completion_tokens;
+        const tokPerSec = completionTokens ? (completionTokens / (chunkMs / 1000)).toFixed(1) : 'n/a';
+        console.log(
+          `[WebLLMEngine] Batch in ${chunkMs.toFixed(2)}ms (${completionTokens ?? '?'} completion tokens, ${tokPerSec} tok/s).\n` +
+          `[WebLLMEngine] Raw model output:\n${rawOutput}`
+        );
+      }
+
+      return rawOutput;
+    } catch (err) {
+      clearTimeout(runawayTimer);
+      console.error('[WebLLMEngine] Completion request failed:', err);
+      throw err;
+    }
   }
 
   /**

@@ -55,6 +55,10 @@ export class SimpleInpaintEngine implements IInpaintEngine {
       return imageBuffer;
     }
 
+    // Reuse one growing raster surface instead of allocating a canvas per polygon.
+    const scratchCanvas = this.platform.createCanvas(1, 1);
+    let scratchCtx = scratchCanvas.getContext('2d', { willReadFrequently: true });
+
     // 2. Loop over each polygon and perform dominant boundary color fill
     for (const poly of maskPolygons) {
       // Get bounding box coordinates
@@ -91,19 +95,22 @@ export class SimpleInpaintEngine implements IInpaintEngine {
         }
       }
 
-      // Generate a polygon mask to restrict sampling strictly to inside the text bubble
-      const polyCanvas = this.platform.createCanvas(w, h);
-      const polyCtx = polyCanvas.getContext('2d', { willReadFrequently: true });
-      polyCtx.clearRect(0, 0, w, h);
-      polyCtx.fillStyle = '#FFFFFF';
-      polyCtx.beginPath();
-      polyCtx.moveTo(poly[0].x - x, poly[0].y - y);
-      for (let j = 1; j < poly.length; j++) {
-        polyCtx.lineTo(poly[j].x - x, poly[j].y - y);
+      // Generate a polygon mask to restrict sampling strictly to inside the text bubble.
+      if (w > scratchCanvas.width || h > scratchCanvas.height) {
+        scratchCanvas.width = Math.max(w, scratchCanvas.width);
+        scratchCanvas.height = Math.max(h, scratchCanvas.height);
+        scratchCtx = scratchCanvas.getContext('2d', { willReadFrequently: true });
       }
-      polyCtx.closePath();
-      polyCtx.fill();
-      const polyData = polyCtx.getImageData(0, 0, w, h).data;
+      scratchCtx.clearRect(0, 0, w, h);
+      scratchCtx.fillStyle = '#FFFFFF';
+      scratchCtx.beginPath();
+      scratchCtx.moveTo(poly[0].x - x, poly[0].y - y);
+      for (let j = 1; j < poly.length; j++) {
+        scratchCtx.lineTo(poly[j].x - x, poly[j].y - y);
+      }
+      scratchCtx.closePath();
+      scratchCtx.fill();
+      const polyData = scratchCtx.getImageData(0, 0, w, h).data;
 
       const rSamples: number[] = [];
       const gSamples: number[] = [];

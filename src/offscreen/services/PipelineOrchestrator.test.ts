@@ -3,6 +3,7 @@ import { pipelineOrchestrator } from './PipelineOrchestrator';
 import { db } from '../../db';
 import { InpaintCacheManager } from './InpaintCacheManager';
 import { createCanvas, Canvas } from 'canvas';
+import { resolveRenderFontFamily } from '../../shared/renderFontPresets';
 
 // vi.hoisted lifts the mock above the module imports. PipelineOrchestrator.ts constructs an
 // OcrManager at module scope (`export const pipelineOrchestrator = ...`), so the mock class
@@ -167,7 +168,12 @@ describe('PipelineOrchestrator', () => {
 
     await pipelineOrchestrator.runPipeline(100);
 
-    expect(processImageMock).toHaveBeenCalledWith(expect.any(ArrayBuffer), 'v6-medium', expect.any(Object));
+    expect(processImageMock).toHaveBeenCalledWith(
+      expect.any(ArrayBuffer),
+      'v6-medium',
+      expect.any(Object),
+      expect.any(Function),
+    );
     blobSpy.mockRestore();
   });
 
@@ -183,7 +189,13 @@ describe('PipelineOrchestrator', () => {
 
     await pipelineOrchestrator.runPipeline(100);
 
-    expect(eraseTextSpy).toHaveBeenCalledWith(expect.any(ArrayBuffer), expect.any(Array), 'simple', undefined);
+    expect(eraseTextSpy).toHaveBeenCalledWith(
+      expect.any(ArrayBuffer),
+      expect.any(Array),
+      'simple',
+      undefined,
+      expect.any(Function),
+    );
     blobSpy.mockRestore();
   });
 
@@ -242,7 +254,7 @@ describe('PipelineOrchestrator', () => {
       expect.arrayContaining([
         expect.objectContaining({
           imageId: 2,
-          fontFamily: '"Comic Sans MS", "Comic Sans", cursive'
+          fontFamily: resolveRenderFontFamily('comic')
         })
       ])
     );

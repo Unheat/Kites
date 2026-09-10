@@ -41,9 +41,21 @@ const OFFSCREEN_RETRY_INTERVAL_MS = 150;
  * @param popupState - The persisted popup state to validate.
  * @returns The normalized popup state and whether it needs to be saved.
  */
-export function normalizePopupState(popupState: PopupState): { state: PopupState; changed: boolean } {
-  const customApis = Array.isArray(popupState.customApis)
-    ? popupState.customApis.map(normalizeCustomApiConfig).filter((api): api is NonNullable<typeof api> => Boolean(api))
+export function normalizePopupState(popupState: Partial<PopupState> | undefined): { state: PopupState; changed: boolean } {
+  // WORKAROUND: Legacy popupState objects may omit later GPU fields. The popup starts
+  // from defaults and can visually show GPU ON, while offscreen reads the sparse object
+  // and treats `webgpuMaster === true` as false. Complete and deep-merge state here so
+  // every extension context receives identical values. See devlog 015.
+  const completedState: PopupState = {
+    ...DEFAULT_POPUP_STATE,
+    ...(popupState ?? {}),
+    webgpuOverrides: {
+      ...DEFAULT_POPUP_STATE.webgpuOverrides,
+      ...(popupState?.webgpuOverrides ?? {}),
+    },
+  };
+  const customApis = Array.isArray(completedState.customApis)
+    ? completedState.customApis.map(normalizeCustomApiConfig).filter((api): api is NonNullable<typeof api> => Boolean(api))
     : [];
   const uniqueCustomApis = customApis.filter((api, index, apis) => apis.findIndex((candidate) => candidate.id === api.id) === index);
   const webLlmIds = new Set(modelsRegistryData
@@ -56,33 +68,34 @@ export function normalizePopupState(popupState: PopupState): { state: PopupState
     webLlmIds.has(engineId) ||
     customApiIds.has(engineId);
 
-  const activeEngineId = isSupportedEngine(popupState.activeEngineId)
-    ? popupState.activeEngineId
+  const activeEngineId = isSupportedEngine(completedState.activeEngineId)
+    ? completedState.activeEngineId
     : DEFAULT_POPUP_STATE.activeEngineId;
-  const fallbackSource = Array.isArray(popupState.fallbackChain) ? popupState.fallbackChain : [];
+  const fallbackSource = Array.isArray(completedState.fallbackChain) ? completedState.fallbackChain : [];
   const fallbackChain = fallbackSource.filter((engineId, index, chain) =>
     engineId !== activeEngineId && isSupportedEngine(engineId) && chain.indexOf(engineId) === index
   );
-  const rawInpaintId = popupState.activeInpaintId === 'lama-base'
+  const rawInpaintId = (completedState.activeInpaintId === 'lama-base' || completedState.activeInpaintId === 'lama-manga-fast')
     ? 'lama-manga'
-    : (popupState.activeInpaintId === 'aot' ? 'aotgan' : popupState.activeInpaintId);
+    : (completedState.activeInpaintId === 'aot' ? 'aotgan' : completedState.activeInpaintId);
   const supportedInpaintIds = new Set(['none', 'simple', 'telea', ...Object.keys(inpaintRegistry)]);
   const activeInpaintId = supportedInpaintIds.has(rawInpaintId)
     ? rawInpaintId
     : DEFAULT_POPUP_STATE.activeInpaintId;
-  const activeOcrId = resolveOcrTier(popupState.activeOcrId);
-  const renderFontPresetId = normalizeRenderFontPresetId(popupState.renderFontPresetId);
-  const changed = activeEngineId !== popupState.activeEngineId ||
-    activeInpaintId !== popupState.activeInpaintId ||
-    activeOcrId !== popupState.activeOcrId ||
-    renderFontPresetId !== popupState.renderFontPresetId ||
-    fallbackChain.length !== fallbackSource.length ||
-    uniqueCustomApis.length !== (Array.isArray(popupState.customApis) ? popupState.customApis.length : 0);
-
-  return {
-    state: changed ? { ...popupState, customApis: uniqueCustomApis, activeEngineId, activeInpaintId, activeOcrId, renderFontPresetId, fallbackChain } : popupState,
-    changed,
+  const activeOcrId = resolveOcrTier(completedState.activeOcrId);
+  const renderFontPresetId = normalizeRenderFontPresetId(completedState.renderFontPresetId);
+  const state: PopupState = {
+    ...completedState,
+    customApis: uniqueCustomApis,
+    activeEngineId,
+    activeInpaintId,
+    activeOcrId,
+    renderFontPresetId,
+    fallbackChain,
   };
+  const changed = JSON.stringify(state) !== JSON.stringify(popupState ?? {});
+
+  return { state, changed };
 }
 
 /**
@@ -95,6 +108,18 @@ function setupContextMenu(): void {
         id: 'translate-image',
         title: 'Translate Image',
         contexts: ['image'],
+      },
+      () => {
+        if (chrome.runtime.lastError) {
+          console.warn('[Background] Context menu setup warning:', chrome.runtime.lastError.message);
+        }
+      }
+    );
+    chrome.contextMenus.create(
+      {
+        id: 'translate-area',
+        title: 'Crop & Translate Area',
+        contexts: ['page', 'frame', 'selection', 'image', 'video'],
       },
       () => {
         if (chrome.runtime.lastError) {
@@ -119,19 +144,56 @@ chrome.contextMenus.onClicked.addListener(async (info: chrome.contextMenus.OnCli
     } catch (error) {
       console.error('[Background] Context menu translation failed:', error);
     }
+  } else if (info.menuItemId === 'translate-area' && _tab?.id) {
+    const data = await chrome.storage.local.get('popupState');
+    const popupState = data.popupState as PopupState | undefined;
+    if (popupState && popupState.isExtensionEnabled === false) {
+      console.log('[Background] Context menu ignored: Kites extension is disabled.');
+      return;
+    }
+    console.log('[Background] Context menu Crop & Translate Area clicked for tab:', _tab.id);
+    chrome.tabs.sendMessage(_tab.id, { type: 'START_AREA_SELECTION' }).catch((err) => {
+      console.warn('[Background] Failed to send START_AREA_SELECTION to tab:', err);
+    });
   }
 });
 
 // Forward messages from content script or offscreen to popup
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (
+    message.type === 'MODEL_INITIALIZATION' &&
+    message.target === 'background' &&
+    message.source === 'offscreen' &&
+    message.event === true &&
+    Number.isInteger(message.payload?.jobId) &&
+    (message.payload?.phase === 'started' || message.payload?.phase === 'finished')
+  ) {
+    const jobId = message.payload.jobId as number;
+    db.translationJobs.get(jobId).then((job) => {
+      if (!job?.tabId || !job.srcUrl) return;
+
+      const isCapture = job.srcUrl.startsWith('kites-capture:');
+      const identity = isCapture
+        ? { requestId: job.srcUrl.replace('kites-capture:', '') }
+        : { originalUrl: job.srcUrl };
+      chrome.tabs.sendMessage(job.tabId, {
+        type: 'MODEL_INITIALIZATION',
+        target: 'content',
+        source: 'background',
+        event: true,
+        payload: { jobId, phase: message.payload.phase, ...identity },
+      }).catch((error) => {
+        console.error(`[Background] Failed to forward model initialization for job ${jobId}:`, error);
+      });
+    }).catch((error) => {
+      console.error(`[Background] Failed to resolve model initialization job ${jobId}:`, error);
+    });
+    return false;
+  }
+
   if (message.type === 'GET_POPUP_STATE') {
     chrome.storage.local.get('popupState').then(async (data) => {
       const storedState = data.popupState as PopupState | undefined;
-      if (!storedState) {
-        sendResponse(DEFAULT_POPUP_STATE);
-        return;
-      }
-
       const { state, changed } = normalizePopupState(storedState);
       if (changed) {
         console.log('[Background] Removed archived translation engines from popup settings.');
@@ -164,6 +226,53 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       });
       return true; // Keep message channel open for async response
     }
+  }
+
+  if (message.type === 'CAPTURE_VISIBLE_TAB') {
+    const windowId = _sender.tab?.windowId ?? chrome.windows.WINDOW_ID_CURRENT;
+    chrome.tabs.captureVisibleTab(windowId, { format: 'png' }, (dataUrl) => {
+      if (chrome.runtime.lastError || !dataUrl) {
+        sendResponse({
+          status: 'error',
+          error: chrome.runtime.lastError?.message || 'Failed to capture visible tab'
+        });
+      } else {
+        sendResponse({
+          status: 'success',
+          dataUrl
+        });
+      }
+    });
+    return true;
+  }
+
+  if (message.type === 'TRANSLATE_CAPTURED_IMAGE') {
+    const { requestId, dataUrl } = message.payload || {};
+    if (!requestId || !dataUrl) {
+      sendResponse({ status: 'error', error: 'Missing requestId or dataUrl' });
+      return false;
+    }
+    chrome.storage.local.get('popupState').then(async (data) => {
+      const popupState = data.popupState as PopupState | undefined;
+      if (popupState && popupState.isExtensionEnabled === false) {
+        console.warn('[Background] Rejected TRANSLATE_CAPTURED_IMAGE: Kites extension is disabled.');
+        sendResponse({ status: 'error', error: 'Extension is disabled' });
+        return;
+      }
+      console.log('[Background] Received TRANSLATE_CAPTURED_IMAGE from content script. Request ID:', requestId);
+      queueCapturedTranslation(requestId, dataUrl, _sender.tab?.id)
+        .then(() => sendResponse({ status: 'queued' }))
+        .catch((err) => sendResponse({ status: 'error', error: err instanceof Error ? err.message : String(err) }));
+    }).catch((err) => {
+      sendResponse({ status: 'error', error: err instanceof Error ? err.message : String(err) });
+    });
+    return true;
+  }
+
+  if (message.type === 'OPEN_DASHBOARD') {
+    chrome.tabs.create({ url: chrome.runtime.getURL('index.html') });
+    sendResponse({ status: 'success' });
+    return true;
   }
   
   // Pluggable OAuth Dispatcher (Google, Apple, etc.)
@@ -279,7 +388,21 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
-  if (message.type === 'START_MODEL_DOWNLOAD' || message.type === 'CHECK_MODEL_STATUS' || message.type === 'GET_MODEL_STATUSES' || message.type === 'PRELOAD_ACTIVE_ENGINE' || message.type === 'GET_ACTIVE_DOWNLOADS' || message.type === 'VALIDATE_CUSTOM_API') {
+  if (message.type === 'ENSURE_OFFSCREEN') {
+    setupOffscreenDocument('src/offscreen/offscreen.html')
+      .then(() => sendResponse({ status: 'ready' }))
+      .catch((err) => {
+        console.error('[Background] Failed to setup offscreen document:', err);
+        sendResponse({ status: 'error', error: err instanceof Error ? err.message : String(err) });
+      });
+    return true;
+  }
+
+  // WORKAROUND: runtime.sendMessage broadcasts to extension contexts. Without explicit
+  // ownership, background and offscreen both handled the popup request and competed to
+  // answer, producing closed message ports and silent model downloads. Do not remove
+  // these route guards or forward the original unaddressed message. See devlog 015.
+  if (message.target === 'background' && message.request === true && (message.type === 'PROCESS_JOB' || message.type === 'START_MODEL_DOWNLOAD' || message.type === 'CHECK_MODEL_STATUS' || message.type === 'GET_MODEL_STATUSES' || message.type === 'CHECK_WEBGPU_SUPPORT' || message.type === 'PRELOAD_ACTIVE_ENGINE' || message.type === 'GET_ACTIVE_DOWNLOADS' || message.type === 'VALIDATE_CUSTOM_API')) {
     console.log(`[Background] Received ${message.type}. Forwarding to Offscreen...`);
     sendMessageToOffscreen(message)
       .then((res) => sendResponse(res))
@@ -375,10 +498,13 @@ async function setupOffscreenDocument(path: string) {
     reasons: [chrome.offscreen.Reason.WORKERS],
     justification: 'Heavy ONNX image processing (OCR/Translation) and database writes'
   });
-  
-  await creatingOffscreenPromise;
-  creatingOffscreenPromise = null;
-  console.log('[Background] Offscreen document created successfully.');
+
+  try {
+    await creatingOffscreenPromise;
+    console.log('[Background] Offscreen document created successfully.');
+  } finally {
+    creatingOffscreenPromise = null;
+  }
 }
 
 /**
@@ -397,9 +523,11 @@ async function sendMessageToOffscreen(message: any, timeoutMs: number = 30000): 
   while (performance.now() - startTime < timeoutMs) {
     try {
       const response = await new Promise<any>((resolve, reject) => {
-        chrome.runtime.sendMessage(message, (res) => {
+        chrome.runtime.sendMessage({ ...message, target: 'offscreen', source: 'background', request: true }, (res) => {
           if (chrome.runtime.lastError) {
             reject(new Error(chrome.runtime.lastError.message));
+          } else if (res === undefined) {
+            reject(new Error(`Offscreen returned no response for ${message.type}`));
           } else {
             resolve(res);
           }
@@ -448,6 +576,36 @@ async function queueTranslation(srcUrl: string, tabId?: number) {
   });
   
   // Kick off the queue processor
+  processQueue();
+}
+
+/**
+ * Queues a captured image (crop or screenshot) by saving its Blob to IndexedDB
+ * and scheduling it in the background queue.
+ *
+ * @param {string} requestId - Unique identifier for the capture session.
+ * @param {string} dataUrl - Base64 data URL of the cropped screen area.
+ * @param {number} [tabId] - ID of the tab that requested translation.
+ * @returns {Promise<void>}
+ */
+async function queueCapturedTranslation(requestId: string, dataUrl: string, tabId?: number): Promise<void> {
+  const response = await fetch(dataUrl);
+  const blob = await response.blob();
+  const srcUrl = `kites-capture:${requestId}`;
+
+  console.log('[Background] Queuing captured screen area:', srcUrl);
+  const jobId = (await db.translationJobs.add({
+    timestamp: Date.now(),
+    status: 'queued',
+    srcUrl,
+    tabId,
+  })) as number;
+
+  await db.images.add({
+    jobId,
+    rawImageBlob: blob,
+  });
+
   processQueue();
 }
 
@@ -559,18 +717,21 @@ async function processQueue() {
  */
 async function processImageTranslation(jobId: number, srcUrl: string, tabId?: number) {
   try {
-    console.log(`[Background] Fetching image for job ${jobId} from URL: ${srcUrl}`);
-    const response = await fetch(srcUrl);
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+    const existingImage = await db.images.where('jobId').equals(jobId).first();
+    if (!existingImage) {
+      console.log(`[Background] Fetching image for job ${jobId} from URL: ${srcUrl}`);
+      const response = await fetch(srcUrl);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const blob = await response.blob();
+      
+      console.log(`[Background] Saving blob for job ${jobId} to IndexedDB...`);
+      await db.images.add({
+        jobId: jobId,
+        rawImageBlob: blob
+      });
     }
-    const blob = await response.blob();
-    
-    console.log(`[Background] Saving blob for job ${jobId} to IndexedDB...`);
-    await db.images.add({
-      jobId: jobId,
-      rawImageBlob: blob
-    });
     
     await db.translationJobs.update(jobId, { status: 'processing' });
     
@@ -586,14 +747,27 @@ async function processImageTranslation(jobId: number, srcUrl: string, tabId?: nu
     console.log(`[Background] Offscreen completed job ${jobId} with status:`, offscreenResponse?.status);
     
     if (offscreenResponse?.status === 'success' && offscreenResponse?.bakedBase64 && tabId) {
-      console.log(`[Background] Sending IMAGE_TRANSLATED back to tab ${tabId}...`);
-      chrome.tabs.sendMessage(tabId, {
-        type: 'IMAGE_TRANSLATED',
-        payload: {
-          originalUrl: srcUrl,
-          bakedBase64: offscreenResponse.bakedBase64
-        }
-      }).catch(() => {});
+      if (srcUrl.startsWith('kites-capture:')) {
+        const requestId = srcUrl.replace('kites-capture:', '');
+        console.log(`[Background] Sending CAPTURE_TRANSLATED to tab ${tabId} for request ${requestId}...`);
+        chrome.tabs.sendMessage(tabId, {
+          type: 'CAPTURE_TRANSLATED',
+          payload: {
+            requestId,
+            jobId,
+            bakedBase64: offscreenResponse.bakedBase64
+          }
+        }).catch(() => {});
+      } else {
+        console.log(`[Background] Sending IMAGE_TRANSLATED back to tab ${tabId}...`);
+        chrome.tabs.sendMessage(tabId, {
+          type: 'IMAGE_TRANSLATED',
+          payload: {
+            originalUrl: srcUrl,
+            bakedBase64: offscreenResponse.bakedBase64
+          }
+        }).catch(() => {});
+      }
     } else if (offscreenResponse?.status === 'error') {
       throw new Error(offscreenResponse.error || 'Offscreen translation pipeline failed');
     }
@@ -606,10 +780,21 @@ async function processImageTranslation(jobId: number, srcUrl: string, tabId?: nu
     await db.translationJobs.update(jobId, { status: 'error' });
     
     if (tabId) {
-      chrome.tabs.sendMessage(tabId, {
-        type: 'TRANSLATION_ERROR',
-        payload: { originalUrl: srcUrl }
-      }).catch(() => {});
+      if (srcUrl.startsWith('kites-capture:')) {
+        const requestId = srcUrl.replace('kites-capture:', '');
+        chrome.tabs.sendMessage(tabId, {
+          type: 'CAPTURE_TRANSLATION_ERROR',
+          payload: {
+            requestId,
+            error: error instanceof Error ? error.message : String(error)
+          }
+        }).catch(() => {});
+      } else {
+        chrome.tabs.sendMessage(tabId, {
+          type: 'TRANSLATION_ERROR',
+          payload: { originalUrl: srcUrl }
+        }).catch(() => {});
+      }
     }
 
     // Trigger queue again so slots opened up by this error are immediately reclaimed

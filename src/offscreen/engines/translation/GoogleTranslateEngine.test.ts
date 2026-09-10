@@ -110,4 +110,18 @@ describe('GoogleTranslateEngine', () => {
 
     expect(results).toEqual(['こんにちは']);
   });
+
+  it('aborts stalled client attempts before returning the original text', async () => {
+    vi.useFakeTimers();
+    global.fetch = vi.fn((_url, options) => new Promise((_resolve, reject) => {
+      options?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+    })) as typeof fetch;
+
+    const translation = engine.translate(['こんにちは'], 'ja', 'en');
+    await vi.advanceTimersByTimeAsync(16_000);
+
+    await expect(translation).resolves.toEqual(['こんにちは']);
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
 });
