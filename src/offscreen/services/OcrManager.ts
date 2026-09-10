@@ -39,6 +39,47 @@ export function isValuableText(text: string): boolean {
 }
 
 /**
+ * Determines whether speech bubbles on a page should be ordered Right-to-Left (Japanese manga order)
+ * or Left-to-Right (Western comic / Webtoon order).
+ * Ported 1:1 from Cotrans `sort_regions(regions, right_to_left=True/False)` in textblock.py:423.
+ *
+ * @param sourceLang - Source language code if provided (e.g. 'ja', 'en', 'vi', 'ko').
+ * @param mergedDirections - Majority directions of the merged bubbles ('h' | 'v').
+ * @param mergedTexts - Text contents of the merged speech bubbles.
+ * @returns True for RTL reading order (manga), false for LTR reading order (western comics/webtoons).
+ */
+export function isRightToLeftReadingOrder(
+  sourceLang?: string,
+  mergedDirections?: ('h' | 'v')[],
+  mergedTexts?: string[]
+): boolean {
+  if (sourceLang) {
+    const lang = sourceLang.trim().toLowerCase();
+    if (lang.startsWith('ja') || lang === 'jpn') {
+      return true;
+    }
+    // Explicit RTL writing systems (Arabic, Hebrew, Persian, Urdu)
+    if (['ar', 'ara', 'he', 'heb', 'fa', 'pes', 'ur', 'urd'].includes(lang)) {
+      return true;
+    }
+    // Explicit non-Japanese / LTR languages (English, Vietnamese, Korean, Chinese, European languages)
+    return false;
+  }
+
+  // Fallback when sourceLang is 'auto' or undefined:
+  // If vertical text blocks exist, or Japanese kana characters are detected, treat as Japanese manga (RTL).
+  if (mergedDirections && mergedDirections.some(d => d === 'v')) {
+    return true;
+  }
+  if (mergedTexts && mergedTexts.some(t => /[\u3040-\u30ff]/.test(t))) {
+    return true;
+  }
+
+  // Default to LTR for pure horizontal text without Japanese indicators
+  return false;
+}
+
+/**
  * Available OCR tiers. Defaults to 'v6-small'.
  * Dynamically maps to any preset registered in ocrRegistry.
  */
@@ -746,11 +787,13 @@ export class OcrManager {
       mergedLineCounts.push(groupIndices.length);
     }
 
-    // Cotrans sort_regions (textblock.py:423): order blocks top-to-bottom, right-to-left.
+    // Cotrans sort_regions (textblock.py:423): order blocks top-to-bottom, right-to-left for manga
+    // or top-to-bottom, left-to-right for western comics, webtoons, and LTR scripts.
     // Graph connected-component order is arbitrary; without this, translation receives
     // bubbles in random spatial order which breaks cross-bubble context quality.
     // Candidates MUST be pre-sorted by centerY ascending (Cotrans line 426) — the
     // insertion logic below is only correct under that precondition.
+    const rightToLeft = isRightToLeftReadingOrder(sourceLang, mergedDirections, mergedTexts);
     const rows: number[] = []; // indices into mergedBoxes, in panel reading order
     const candidates = mergedBoxes
       .map((b, index) => ({ index, centerY: b.y + b.h / 2 }))
@@ -769,9 +812,9 @@ export class OcrManager {
           placed = true;
           break;
         }
-        // Same row band: right-to-left for manga reading order
+        // Same row band: right-to-left for manga reading order, or left-to-right for western/webtoon reading order
         const rCenterX = r.x + r.w / 2;
-        if (centerX > rCenterX) {
+        if (rightToLeft ? centerX > rCenterX : centerX < rCenterX) {
           rows.splice(i, 0, cand);
           placed = true;
           break;

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { OcrManager, isValuableChar, isValuableText } from './OcrManager';
+import { OcrManager, isValuableChar, isValuableText, isRightToLeftReadingOrder } from './OcrManager';
 import { PaddleOcrEngine } from '../engines/ocr/PaddleOcrEngine';
 
 vi.mock('../engines/ocr/PaddleOcrEngine', () => {
@@ -331,6 +331,92 @@ describe('OcrManager', () => {
       const engine = vi.mocked(PaddleOcrEngine).mock.results.at(-1)?.value;
       await ocrManager.cleanup();
       expect(engine.destroy).toHaveBeenCalled();
+    });
+  });
+
+  describe('isRightToLeftReadingOrder', () => {
+    it('returns true for Japanese source language', () => {
+      expect(isRightToLeftReadingOrder('ja')).toBe(true);
+      expect(isRightToLeftReadingOrder('JA')).toBe(true);
+      expect(isRightToLeftReadingOrder('jpn')).toBe(true);
+    });
+
+    it('returns true for explicit RTL languages', () => {
+      expect(isRightToLeftReadingOrder('ar')).toBe(true);
+      expect(isRightToLeftReadingOrder('he')).toBe(true);
+      expect(isRightToLeftReadingOrder('fa')).toBe(true);
+      expect(isRightToLeftReadingOrder('ur')).toBe(true);
+    });
+
+    it('returns false for Western/Latin and other LTR languages', () => {
+      expect(isRightToLeftReadingOrder('en')).toBe(false);
+      expect(isRightToLeftReadingOrder('vi')).toBe(false);
+      expect(isRightToLeftReadingOrder('ko')).toBe(false);
+      expect(isRightToLeftReadingOrder('zh')).toBe(false);
+      expect(isRightToLeftReadingOrder('fr')).toBe(false);
+      expect(isRightToLeftReadingOrder('es')).toBe(false);
+    });
+
+    it('infers RTL when sourceLang is undefined but vertical text or kana is present', () => {
+      expect(isRightToLeftReadingOrder(undefined, ['v', 'h'], ['Hello', 'World'])).toBe(true);
+      expect(isRightToLeftReadingOrder(undefined, ['h'], ['こんにちは'])).toBe(true);
+    });
+
+    it('infers LTR when sourceLang is undefined and no vertical text or kana exists', () => {
+      expect(isRightToLeftReadingOrder(undefined, ['h', 'h'], ['Hello', 'World'])).toBe(false);
+    });
+  });
+
+  describe('speech bubble reading order (Cotrans sort_regions)', () => {
+    function mockSideBySideBubbles(engineResult: { leftText: string; rightText: string }) {
+      (PaddleOcrEngine as any).mockImplementation(function () {
+        return {
+          preset: 'v6-small',
+          init: vi.fn().mockResolvedValue(undefined),
+          recognize: vi.fn().mockResolvedValue({
+            texts: [engineResult.leftText, engineResult.rightText],
+            polygons: [
+              // Bubble 1 on Left: x=50, y=100, w=100, h=50 -> centerX=100, centerY=125
+              [{ x: 50, y: 100 }, { x: 150, y: 100 }, { x: 150, y: 150 }, { x: 50, y: 150 }],
+              // Bubble 2 on Right: x=400, y=100, w=100, h=50 -> centerX=450, centerY=125
+              [{ x: 400, y: 100 }, { x: 500, y: 100 }, { x: 500, y: 150 }, { x: 400, y: 150 }]
+            ],
+            scores: [0.95, 0.95],
+            detectionScores: [0.98, 0.98],
+            boxes: [
+              { x: 50, y: 100, w: 100, h: 50 },
+              { x: 400, y: 100, w: 100, h: 50 }
+            ]
+          }),
+          destroy: vi.fn().mockResolvedValue(undefined)
+        };
+      });
+    }
+
+    it('orders side-by-side bubbles Right-to-Left (manga) when sourceLang is ja', async () => {
+      mockSideBySideBubbles({ leftText: '左のセリフ', rightText: '右のセリフ' });
+      const result = await ocrManager.processImage(new ArrayBuffer(16), 'v6-small', { sourceLang: 'ja' });
+      expect(result.texts).toHaveLength(2);
+      // In Japanese manga, Right bubble comes first!
+      expect(result.texts[0]).toBe('右のセリフ');
+      expect(result.texts[1]).toBe('左のセリフ');
+    });
+
+    it('orders side-by-side bubbles Left-to-Right (western) when sourceLang is en', async () => {
+      mockSideBySideBubbles({ leftText: 'Left bubble text', rightText: 'Right bubble text' });
+      const result = await ocrManager.processImage(new ArrayBuffer(16), 'v6-small', { sourceLang: 'en' });
+      expect(result.texts).toHaveLength(2);
+      // In Western comics, Left bubble comes first!
+      expect(result.texts[0]).toBe('Left bubble text');
+      expect(result.texts[1]).toBe('Right bubble text');
+    });
+
+    it('orders side-by-side bubbles Left-to-Right when sourceLang is vi', async () => {
+      mockSideBySideBubbles({ leftText: 'Bong bóng bên trái', rightText: 'Bong bóng bên phải' });
+      const result = await ocrManager.processImage(new ArrayBuffer(16), 'v6-small', { sourceLang: 'vi' });
+      expect(result.texts).toHaveLength(2);
+      expect(result.texts[0]).toBe('Bong bóng bên trái');
+      expect(result.texts[1]).toBe('Bong bóng bên phải');
     });
   });
 });
