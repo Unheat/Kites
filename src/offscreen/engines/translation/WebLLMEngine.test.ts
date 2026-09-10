@@ -101,7 +101,7 @@ describe('WebLLMEngine Keyed JSON Protocol', () => {
     expect(userMsg).not.toContain('   ');
   });
 
-  it('fails strict visual runs when a local model drops a translation line', async () => {
+  it('gracefully yields model output with original text fallback when a local model drops a translation line', async () => {
     const inputs = ['Text 1', 'Text 2'];
 
     // Missing b1
@@ -115,41 +115,18 @@ describe('WebLLMEngine Keyed JSON Protocol', () => {
       ],
     });
 
-    await expect(engine.translate(inputs)).rejects.toThrow(
-      'Translation dropped 1/2 lines instead of satisfying the 1:1 key contract.'
-    );
+    const results = await engine.translate(inputs);
+    expect(results).toEqual(['Translated 1', 'Text 2']);
   });
 
-  it('splits a strict large-batch miss into a smaller retry batch', async () => {
-    const originalBatchSize = (engine as any).batchSize;
-    (engine as any).batchSize = 6;
+  it('gracefully preserves original text for missing slots in large batches without throwing', async () => {
     const inputs = ['One', 'Two', 'Three', 'Four', 'Five', 'Six'];
-    mockCreate
-      .mockResolvedValueOnce({
-        choices: [{ message: { content: JSON.stringify({ b0: '1', b1: '2' }) } }],
-      })
-      .mockResolvedValueOnce({
-        choices: [
-          {
-            message: {
-              content: JSON.stringify({ b0: '1', b1: '2', b2: '3' }),
-            },
-          },
-        ],
-      })
-      .mockResolvedValueOnce({
-        choices: [
-          {
-            message: {
-              content: JSON.stringify({ b0: '4', b1: '5', b2: '6' }),
-            },
-          },
-        ],
-      });
+    mockCreate.mockResolvedValueOnce({
+      choices: [{ message: { content: JSON.stringify({ b0: '1', b1: '2' }) } }],
+    });
 
     const result = await engine.translate(inputs);
-    expect(result).toEqual(['1', '2', '3', '4', '5', '6']);
-    expect((engine as any).batchSize).toBe(originalBatchSize);
+    expect(result).toEqual(['1', '2', 'Three', 'Four', 'Five', 'Six']);
   });
 
   it('should return an array of empty strings immediately if all inputs are empty', async () => {

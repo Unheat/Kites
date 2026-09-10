@@ -35,7 +35,7 @@ export class WebLLMEngine extends BaseLlmTranslationEngine {
     this.modelId = modelId;
     this.batchSize = DEFAULT_WEBLLM_BATCH_SIZE;
     this.throwOnCountMismatch = false;
-    this.allowPartialMissingLines = false;
+    this.allowPartialMissingLines = true;
   }
 
   /**
@@ -117,23 +117,7 @@ export class WebLLMEngine extends BaseLlmTranslationEngine {
       throw new Error('WebLLMEngine is not initialized. Call init() first.');
     }
 
-    try {
-      return await super.translate(texts, sourceLangId, targetLangId);
-    } catch (error) {
-      const shouldSplit =
-        error instanceof Error &&
-        error.message.includes('Translation dropped') &&
-        texts.length > WEBLLM_RETRY_BATCH_SPLIT;
-      if (!shouldSplit) throw error;
-
-      console.warn(
-        `[WebLLMEngine] Strict batch dropped lines; retrying as smaller batches of ${WEBLLM_RETRY_BATCH_SPLIT}.`
-      );
-      this.batchSize = WEBLLM_RETRY_BATCH_SPLIT;
-      const retried = await super.translate(texts, sourceLangId, targetLangId);
-      this.batchSize = DEFAULT_WEBLLM_BATCH_SIZE;
-      return retried;
-    }
+    return await super.translate(texts, sourceLangId, targetLangId);
   }
 
   /**

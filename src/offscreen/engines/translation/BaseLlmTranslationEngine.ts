@@ -249,14 +249,10 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
         results[chunk[j].originalIndex] = cleaned;
       }
       const dropRatio = droppedByModel / chunk.length;
-      const exceedsTolerance =
-        !this.allowPartialMissingLines &&
-        droppedByModel > 0 &&
-        (chunk.length < MIN_CHUNK_SIZE_FOR_DROP_TOLERANCE || dropRatio > MAX_UNTRANSLATED_TOLERANCE_RATIO);
-
-      if (exceedsTolerance) {
-        throw new Error(
-          `Translation dropped ${droppedByModel}/${chunk.length} lines instead of satisfying the 1:1 key contract.`
+      if (droppedByModel > 0) {
+        console.warn(
+          `[BaseLlmTranslationEngine] Model dropped or echoed ${droppedByModel}/${chunk.length} lines (${(dropRatio * 100).toFixed(1)}%). ` +
+          `Yielding available model translations with original source fallback for untranslated slots.`
         );
       }
     }

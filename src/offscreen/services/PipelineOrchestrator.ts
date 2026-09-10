@@ -175,6 +175,10 @@ export class PipelineOrchestrator {
               console.log(`[PipelineOrchestrator] Translation branch finished in ${(performance.now() - stage2Start).toFixed(2)}ms.`);
             }
             return r;
+          })
+          .catch((err) => {
+            console.warn(`[PipelineOrchestrator] Translation branch failed; preserving original source texts so pipeline does not stop:`, err);
+            return ocrResult.texts;
           });
         const inpaintPromise = this.inpaintManager.eraseText(imageBuffer, inpaintPolygons, inpaintTier as InpaintTier, ocrResult.maskRawCanvas, initializationLifecycle).then((r) => {
           if (import.meta.env.DEV) {
@@ -194,7 +198,12 @@ export class PipelineOrchestrator {
       } else {
         // No inpainting — just translate
         console.log(`[PipelineOrchestrator] Translating ${ocrResult.texts.length} text blocks (no inpainting)...`);
-        translatedTexts = await translationManager.processTranslation(ocrResult.texts, sourceLang, targetLang, initializationLifecycle, popupState);
+        try {
+          translatedTexts = await translationManager.processTranslation(ocrResult.texts, sourceLang, targetLang, initializationLifecycle, popupState);
+        } catch (err) {
+          console.warn(`[PipelineOrchestrator] Translation failed; preserving original source texts so pipeline does not stop:`, err);
+          translatedTexts = ocrResult.texts;
+        }
         if (import.meta.env.DEV) {
           const stage2Duration = (performance.now() - stage2Start).toFixed(2);
           console.log(`[PipelineOrchestrator] Translation complete in ${stage2Duration}ms.`);

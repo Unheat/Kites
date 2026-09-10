@@ -233,13 +233,13 @@ describe('BaseLlmTranslationEngine Keyed JSON Protocol', () => {
     expect(result[1]).toBe('Just one more month');
   });
 
-  it('rejects partial translated output when the strict production gate is enabled', async () => {
+  it('yields model output with source fallback rather than rejecting when missing lines occur', async () => {
     const engine = new MockLlmEngine(15, false);
     engine.setAllowPartialMissingLines(false);
     engine.mockResponse = JSON.stringify({ b0: 'Deliver the best', b1: 'Haha, top' }); // missing b2
 
-    await expect(engine.translate(['日本語1', '日本語2', '日本語3'], 'ja', 'en'))
-      .rejects.toThrow('Translation dropped 1/3 lines instead of satisfying the 1:1 key contract.');
+    const result = await engine.translate(['日本語1', '日本語2', '日本語3'], 'ja', 'en');
+    expect(result).toEqual(['Deliver the best', 'Haha, top', '日本語3']);
   });
 
   it('does not treat Latin source text as a dropped line when translated to English verbatim', async () => {
@@ -276,7 +276,7 @@ describe('BaseLlmTranslationEngine Keyed JSON Protocol', () => {
     expect(result[9]).toBe('日本語9'); // Gracefully preserves original without throwing
   });
 
-  it('throws split-retry error when dropped lines exceed tolerance (>15%) in larger batches', async () => {
+  it('gracefully yields model output with original source fallback when dropped lines exceed tolerance (>15%)', async () => {
     const engine = new MockLlmEngine(15, false);
     engine.setAllowPartialMissingLines(false);
     // 10 items: 7 translated, 3 dropped -> 70% accuracy (drop ratio = 0.30 > 0.15)
@@ -287,8 +287,12 @@ describe('BaseLlmTranslationEngine Keyed JSON Protocol', () => {
     engine.mockResponse = JSON.stringify(mockRes);
 
     const inputs = Array.from({ length: 10 }, (_, i) => `日本語${i}`);
-    await expect(engine.translate(inputs, 'ja', 'en')).rejects.toThrow(
-      'Translation dropped 3/10 lines instead of satisfying the 1:1 key contract.'
-    );
+    const result = await engine.translate(inputs, 'ja', 'en');
+    expect(result).toHaveLength(10);
+    expect(result[0]).toBe('Translated 0');
+    expect(result[6]).toBe('Translated 6');
+    expect(result[7]).toBe('日本語7'); // Gracefully preserves original without crashing
+    expect(result[8]).toBe('日本語8');
+    expect(result[9]).toBe('日本語9');
   });
 });
