@@ -9,37 +9,23 @@ const registryPath = path.resolve(__dirname, '../src/shared/models-registry.json
 
 // Ordered list of verified model IDs (Recommended lightweight first, then high-fidelity)
 const approvedModelIds = [
-  // Tier 1: Recommended Fast & Lightweight (Under 2.5 GB VRAM)
-  'Qwen2.5-3B-Instruct-q4f16_1-MLC',
-  'Qwen2.5-1.5B-Instruct-q4f16_1-MLC',
-  'Llama-3.2-3B-Instruct-q4f16_1-MLC',
-  'gemma-2-2b-jpn-it-q4f16_1-MLC',
-  'gemma-2-2b-it-q4f16_1-MLC',
-  'Llama-3.2-1B-Instruct-q4f16_1-MLC',
-  'Qwen2.5-0.5B-Instruct-q4f16_1-MLC',
-  'SmolLM2-1.7B-Instruct-q4f16_1-MLC',
-  'Phi-3.5-mini-instruct-q4f16_1-MLC-1k',
+  // Current multilingual models, ordered by translation usefulness and browser cost.
+  'Qwen3.5-2B-q4f16_1-MLC',
+  'Qwen3-1.7B-q4f16_1-MLC',
+  'Qwen3.5-0.8B-q4f16_1-MLC',
+  'gemma3-1b-it-q4f16_1-MLC',
+  'Qwen3-4B-q4f16_1-MLC',
+  'Qwen3.5-4B-q4f16_1-MLC',
+  'Phi-4-mini-instruct-q4f16_1-MLC',
+  'Qwen3-8B-q4f16_1-MLC',
 
-  // Tier 2: High Fidelity (4 GB - 5.5 GB VRAM)
-  'DeepSeek-R1-Distill-Qwen-7B-q4f16_1-MLC',
-  'Qwen2.5-7B-Instruct-q4f16_1-MLC',
-  'Llama-3.1-8B-Instruct-q4f16_1-MLC-1k',
-  'Mistral-7B-Instruct-v0.3-q4f16_1-MLC',
-
-  // Compatibility float32 fallbacks (for GPUs without shader-f16 support)
-  'Qwen2.5-3B-Instruct-q4f32_1-MLC',
-  'Qwen2.5-1.5B-Instruct-q4f32_1-MLC',
-  'Llama-3.2-3B-Instruct-q4f32_1-MLC',
-  'gemma-2-2b-jpn-it-q4f32_1-MLC',
-  'gemma-2-2b-it-q4f32_1-MLC',
-  'Llama-3.2-1B-Instruct-q4f32_1-MLC',
-  'Qwen2.5-0.5B-Instruct-q4f32_1-MLC',
-  'SmolLM2-1.7B-Instruct-q4f32_1-MLC',
-  'Phi-3.5-mini-instruct-q4f32_1-MLC-1k',
-  'DeepSeek-R1-Distill-Qwen-7B-q4f32_1-MLC',
-  'Qwen2.5-7B-Instruct-q4f32_1-MLC',
-  'Llama-3.1-8B-Instruct-q4f32_1-MLC-1k',
-  'Mistral-7B-Instruct-v0.3-q4f32_1-MLC',
+  // Float32 compatibility variants for adapters without shader-f16.
+  'Qwen3.5-2B-q4f32_1-MLC',
+  'Qwen3-1.7B-q4f32_1-MLC',
+  'Qwen3.5-0.8B-q4f32_1-MLC',
+  'Qwen3-4B-q4f32_1-MLC',
+  'Qwen3.5-4B-q4f32_1-MLC',
+  'Phi-4-mini-instruct-q4f32_1-MLC',
 ];
 
 const modelMap = new Map();

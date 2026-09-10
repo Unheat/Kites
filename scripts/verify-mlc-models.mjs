@@ -37,7 +37,7 @@ async function verifyModel(model) {
   const rawBase = getRawBaseUrl(model.model);
   const wasmUrl = model.model_lib;
   const configUrl = `${rawBase}mlc-chat-config.json`;
-  const tensorCacheUrl = `${rawBase}ndarray-cache.json`;
+  const tensorCacheUrl = `${rawBase}tensor-cache.json`;
   const shard0Url = `${rawBase}params_shard_0.bin`;
 
   const [wasmCheck, configCheck, tensorCheck, shardCheck] = await Promise.all([
@@ -81,14 +81,10 @@ async function run() {
     if (m.vram_required_MB && m.vram_required_MB > 6500) return false;
 
     return (
-      id.startsWith('Qwen2.5-') ||
-      id.startsWith('Llama-3.2-') ||
-      id.startsWith('Llama-3.1-') ||
-      id.startsWith('gemma-2-') ||
-      id.startsWith('Phi-3.5-mini-') ||
-      id.startsWith('Mistral-7B-Instruct-v0.3') ||
-      id.startsWith('DeepSeek-R1-Distill-Qwen') ||
-      id.startsWith('SmolLM2-1.7B-Instruct')
+      id.startsWith('Qwen3.5-') ||
+      id.startsWith('Qwen3-') ||
+      id.startsWith('gemma3-1b-it') ||
+      id.startsWith('Phi-4-mini-instruct')
     );
   });
 
