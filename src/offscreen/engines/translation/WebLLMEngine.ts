@@ -27,7 +27,8 @@ export class WebLLMEngine extends BaseLlmTranslationEngine {
     super();
     this.modelId = modelId;
     this.batchSize = DEFAULT_WEBLLM_BATCH_SIZE;
-    this.throwOnCountMismatch = false; // Preserve successful lines; missing tags fall back only their own source slots
+    this.throwOnCountMismatch = false;
+    this.allowPartialMissingLines = false;
   }
 
   /**
