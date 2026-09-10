@@ -457,9 +457,10 @@ describe('OcrManager', () => {
       expect(result.texts).toHaveLength(2);
 
       // Speedline polygons must NOT be in rawPolygons (so inpainter never erases them)
-      expect(result.rawPolygons).toHaveLength(2);
-      const hasSpeedlinePoly = result.rawPolygons.some(p => p[0].x === 150 && p[0].y === 50);
-      const hasSlashPoly = result.rawPolygons.some(p => p[0].x === 300 && p[0].y === 100);
+      expect(result.rawPolygons).toBeDefined();
+      expect(result.rawPolygons!).toHaveLength(2);
+      const hasSpeedlinePoly = result.rawPolygons!.some(p => p[0].x === 150 && p[0].y === 50);
+      const hasSlashPoly = result.rawPolygons!.some(p => p[0].x === 300 && p[0].y === 100);
       expect(hasSpeedlinePoly).toBe(false);
       expect(hasSlashPoly).toBe(false);
     });

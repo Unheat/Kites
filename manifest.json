@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "Kites: Spatial Manga Translator",
-  "version": "1.0.2",
+  "name": "Kites: Spatial Manga Translator Extension",
+  "version": "1.0.3",
   "description": "Translate manga and images with spatial awareness.",
   "icons": {
     "16": "icons/icon16.png",
