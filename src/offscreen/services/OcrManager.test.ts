@@ -419,4 +419,76 @@ describe('OcrManager', () => {
       expect(result.texts[1]).toBe('Bong bóng bên phải');
     });
   });
+
+  describe('speedline noise stroke filtering', () => {
+    it('filters out standalone speedline strokes and excludes their polygons from rawPolygons', async () => {
+      vi.mocked(PaddleOcrEngine).mockImplementationOnce(function () {
+        return {
+          preset: 'v6-small',
+          init: vi.fn().mockResolvedValue(undefined),
+          recognize: vi.fn().mockResolvedValue({
+            texts: ['こんにちは', '一', '丨', '一人で走る'],
+            polygons: [
+              [{ x: 10, y: 10 }, { x: 100, y: 10 }, { x: 100, y: 40 }, { x: 10, y: 40 }],
+              [{ x: 150, y: 50 }, { x: 250, y: 50 }, { x: 250, y: 55 }, { x: 150, y: 55 }], // speedline "一"
+              [{ x: 300, y: 100 }, { x: 305, y: 100 }, { x: 305, y: 200 }, { x: 300, y: 200 }], // vertical slash "丨"
+              [{ x: 50, y: 100 }, { x: 150, y: 100 }, { x: 150, y: 140 }, { x: 50, y: 140 }], // legitimate dialogue "一人で走る"
+            ],
+            scores: [0.95, 0.92, 0.88, 0.94],
+            detectionScores: [0.98, 0.95, 0.90, 0.97],
+            boxes: [
+              { x: 10, y: 10, w: 90, h: 30 },
+              { x: 150, y: 50, w: 100, h: 5 },
+              { x: 300, y: 100, w: 5, h: 100 },
+              { x: 50, y: 100, w: 100, h: 40 }
+            ]
+          }),
+          destroy: vi.fn().mockResolvedValue(undefined)
+        } as any;
+      });
+
+      const result = await ocrManager.processImage(new ArrayBuffer(16), 'v6-small', { sourceLang: 'ja' });
+
+      // Only real dialogue survives
+      expect(result.texts).toContain('こんにちは');
+      expect(result.texts).toContain('一人で走る');
+      expect(result.texts).not.toContain('一');
+      expect(result.texts).not.toContain('丨');
+      expect(result.texts).toHaveLength(2);
+
+      // Speedline polygons must NOT be in rawPolygons (so inpainter never erases them)
+      expect(result.rawPolygons).toHaveLength(2);
+      const hasSpeedlinePoly = result.rawPolygons.some(p => p[0].x === 150 && p[0].y === 50);
+      const hasSlashPoly = result.rawPolygons.some(p => p[0].x === 300 && p[0].y === 100);
+      expect(hasSpeedlinePoly).toBe(false);
+      expect(hasSlashPoly).toBe(false);
+    });
+
+    it('returns empty result when image only contains speedline strokes', async () => {
+      vi.mocked(PaddleOcrEngine).mockImplementationOnce(function () {
+        return {
+          preset: 'v6-small',
+          init: vi.fn().mockResolvedValue(undefined),
+          recognize: vi.fn().mockResolvedValue({
+            texts: ['一', '───'],
+            polygons: [
+              [{ x: 10, y: 10 }, { x: 100, y: 10 }, { x: 100, y: 15 }, { x: 10, y: 15 }],
+              [{ x: 150, y: 50 }, { x: 250, y: 50 }, { x: 250, y: 55 }, { x: 150, y: 55 }]
+            ],
+            scores: [0.92, 0.90],
+            detectionScores: [0.95, 0.93],
+            boxes: [
+              { x: 10, y: 10, w: 90, h: 5 },
+              { x: 150, y: 50, w: 100, h: 5 }
+            ]
+          }),
+          destroy: vi.fn().mockResolvedValue(undefined)
+        } as any;
+      });
+
+      const result = await ocrManager.processImage(new ArrayBuffer(16), 'v6-small', { sourceLang: 'ja' });
+      expect(result.texts).toHaveLength(0);
+      expect(result.rawPolygons).toHaveLength(0);
+    });
+  });
 });

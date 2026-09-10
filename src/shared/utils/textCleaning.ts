@@ -49,6 +49,27 @@ export function isStandaloneDigitOrOrnamentNoise(text: string): boolean {
   return false;
 }
 
+/**
+ * Standalone speedline and sword slash strokes frequently misread by OCR as single-stroke kanji/symbols.
+ * Matches strings consisting entirely of single-stroke CJK radicals, box-drawing lines, or stroke noise:
+ * 一 (one), 丨 (vertical), 丶 (dot), 丿 (slash), 乙 (bend), 亅 (hook), 乚 (bend), 乛 (hook),
+ * ─ (box h), ━ (heavy box h), │ (box v), ┃ (heavy box v), | (pipe), ︱/︳ (vertical forms), 二, ニ.
+ * Ported from XianScan `text_clean.rs:45` and shonen action manga speedline mitigation.
+ */
+export const STANDALONE_SPEEDLINE_STROKES_REGEX = /^[一丨丶丿乙亅乚乛─━│┃|︱︳二ニ\s]+$/;
+
+/**
+ * Checks if text is an isolated speedline stroke or slash artifact from manga artwork.
+ *
+ * @param text - Raw OCR text candidate.
+ * @returns True if text is exclusively speedline/stroke noise.
+ */
+export function isStandaloneNoiseStroke(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  return STANDALONE_SPEEDLINE_STROKES_REGEX.test(trimmed);
+}
+
 /** Trailing digit-noise run after an ellipsis/dot ("ちょっと…200000"). */
 const ELLIPSIS_TAIL_DIGIT_NOISE = /([.．…·。])[0oO23589]{3,8}$/;
 

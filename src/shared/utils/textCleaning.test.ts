@@ -10,6 +10,7 @@ import {
   isNonLatinSource,
   hasNativeScriptForLang,
   stripTrailingWatermarkDebris,
+  isStandaloneNoiseStroke,
   CJK_SCRIPT_REGEX,
 } from './textCleaning';
 
@@ -169,6 +170,46 @@ describe('textCleaning', () => {
       expect(isStandaloneDigitOrOrnamentNoise('365')).toBe(false);
       expect(isStandaloneDigitOrOrnamentNoise('100')).toBe(false);
       expect(isStandaloneDigitOrOrnamentNoise('Ch 100')).toBe(false);
+    });
+  });
+
+  describe('isStandaloneNoiseStroke (speedline noise mitigation)', () => {
+    it('detects single and repeated CJK / box-drawing stroke noise', () => {
+      // Single-stroke CJK kanji / radicals misread on sword slashes and speedlines
+      expect(isStandaloneNoiseStroke('一')).toBe(true);
+      expect(isStandaloneNoiseStroke('丨')).toBe(true);
+      expect(isStandaloneNoiseStroke('丿')).toBe(true);
+      expect(isStandaloneNoiseStroke('丶')).toBe(true);
+      expect(isStandaloneNoiseStroke('乙')).toBe(true);
+      expect(isStandaloneNoiseStroke('亅')).toBe(true);
+      expect(isStandaloneNoiseStroke('乚')).toBe(true);
+      expect(isStandaloneNoiseStroke('乛')).toBe(true);
+      expect(isStandaloneNoiseStroke('二')).toBe(true);
+      expect(isStandaloneNoiseStroke('ニ')).toBe(true);
+
+      // Box drawing and pipe strokes
+      expect(isStandaloneNoiseStroke('─')).toBe(true);
+      expect(isStandaloneNoiseStroke('━')).toBe(true);
+      expect(isStandaloneNoiseStroke('│')).toBe(true);
+      expect(isStandaloneNoiseStroke('┃')).toBe(true);
+      expect(isStandaloneNoiseStroke('|')).toBe(true);
+
+      // Repeated strokes with whitespace
+      expect(isStandaloneNoiseStroke('一一')).toBe(true);
+      expect(isStandaloneNoiseStroke(' 一 ')).toBe(true);
+      expect(isStandaloneNoiseStroke('─━')).toBe(true);
+      expect(isStandaloneNoiseStroke('│┃')).toBe(true);
+    });
+
+    it('rejects legitimate text and numbers containing 一', () => {
+      expect(isStandaloneNoiseStroke('一人')).toBe(false);
+      expect(isStandaloneNoiseStroke('一日')).toBe(false);
+      expect(isStandaloneNoiseStroke('第一話')).toBe(false);
+      expect(isStandaloneNoiseStroke('世界一')).toBe(false);
+      expect(isStandaloneNoiseStroke('こんにちは')).toBe(false);
+      expect(isStandaloneNoiseStroke('Hello')).toBe(false);
+      expect(isStandaloneNoiseStroke('123')).toBe(false);
+      expect(isStandaloneNoiseStroke('')).toBe(false);
     });
   });
 

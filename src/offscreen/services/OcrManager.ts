@@ -12,6 +12,7 @@ import {
   isNonLatinSource,
   hasNativeScriptForLang,
   stripTrailingWatermarkDebris,
+  isStandaloneNoiseStroke,
 } from '../../shared/utils/textCleaning';
 
 /**
@@ -448,6 +449,17 @@ export class OcrManager {
       // speedlines and clothing folds with low score (< 0.65) is background artifact.
       // SFX/shout exemption: real sound effects ("GO!", "KYAA") must survive.
       let trimmedTxt = txt.trim();
+
+      // XianScan noise rule: standalone speedline and sword slash strokes
+      // (e.g. "一", "丨", "丿", "─━") misread by OCR as single-stroke CJK kanji.
+      if (isStandaloneNoiseStroke(trimmedTxt)) {
+        console.log(`[OcrManager] Filtered out speedline stroke noise "${trimmedTxt}"`);
+        continue;
+      }
+
+      // XianScan noise rule: standalone 1-2 char Latin/digit noise (e.g. "er", "u", "N") on
+      // speedlines and clothing folds with low score (< 0.65) is background artifact.
+      // SFX/shout exemption: real sound effects ("GO!", "KYAA") must survive.
       const isShortLatinNoise = trimmedTxt.length <= 2
         && /^[a-zA-Z0-9]+$/.test(trimmedTxt)
         && (rawScores[i] || 0) < 0.65
