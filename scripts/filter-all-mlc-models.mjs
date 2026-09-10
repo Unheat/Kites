@@ -69,40 +69,57 @@ async function verifyModel(model) {
 // Programmatic filter rules
 function isCandidateForTranslation(model) {
   const id = model.model_id;
+  const lower = id.toLowerCase();
 
   // 1. Exclude embeddings (cannot generate text)
-  if (id.includes('embed')) return { keep: false, reason: 'embedding model' };
+  if (lower.includes('embed')) return { keep: false, reason: 'embedding model' };
 
-  // 2. Exclude code specialists (not for natural language translation)
-  if (id.includes('Coder') || id.includes('CodeLlama')) return { keep: false, reason: 'code specialist' };
+  // 2. Exclude vision-language models (different input schema / multimodal pipeline)
+  if (lower.includes('vision')) return { keep: false, reason: 'vision multimodal model' };
 
-  // 3. Exclude math specialists
-  if (id.includes('Math')) return { keep: false, reason: 'math specialist' };
+  // 3. Exclude code specialists (not for natural language translation)
+  if (lower.includes('coder') || lower.includes('codellama')) return { keep: false, reason: 'code specialist' };
 
-  // 4. Must be 4-bit (or 3-bit) quantized. Reject unquantized float models (q0f16, q0f32)
-  const isQuantized = id.includes('q4f16') || id.includes('q4f32') || id.includes('q3f16');
+  // 4. Exclude math specialists
+  if (lower.includes('math')) return { keep: false, reason: 'math specialist' };
+
+  // 5. Exclude reasoning models (unsuited for strict JSON schema translation)
+  if (lower.includes('reasoning') || lower.includes('r1')) return { keep: false, reason: 'reasoning model' };
+
+  // 6. Must be 4-bit (or 3-bit) quantized. Reject unquantized float models (q0f16, q0f32)
+  const isQuantized = lower.includes('q4f16') || lower.includes('q4f32') || lower.includes('q3f16');
   if (!isQuantized) return { keep: false, reason: 'unquantized float weights' };
 
-  // 5. Must fit within browser WebGPU allocations (<= 6500 MB VRAM)
+  // 7. Must fit within browser WebGPU allocations (<= 6500 MB VRAM)
   if (model.vram_required_MB && model.vram_required_MB > 6500) {
     return { keep: false, reason: `VRAM exceeds WebGPU allocation limit (${model.vram_required_MB.toFixed(0)} MB)` };
   }
 
-  // 6. Must be an instruction/chat tuned model (not a raw base model)
-  const isInstructOrChat =
-    id.includes('Instruct') ||
-    id.includes('Chat') ||
-    id.includes('chat') ||
-    id.includes('-it') ||
-    id.includes('zephyr') ||
-    id.includes('Hermes');
-
+  // 8. Must be an instruction/chat tuned model (not a raw base model)
+  const isInstructOrChat = lower.includes('instruct') || lower.includes('chat') || lower.includes('-it');
   if (!isInstructOrChat) {
     return { keep: false, reason: 'raw base model without instruction tuning' };
   }
 
-  // 7. Reject explicit Base tags even if another word matches
-  if (id.includes('-Base-')) return { keep: false, reason: 'explicit base model' };
+  // 9. Reject explicit Base tags even if another word matches
+  if (lower.includes('-base-')) return { keep: false, reason: 'explicit base model' };
+
+  // 10. Multilingual Translation Capability Filtering:
+  // Reject architectures that lack multilingual training or have zero CJK tokenizer support.
+  // Kites requires models capable of translating across our supported languages (ja, zh, ko, en, fr, de, es, it, pt, ru, ar, vi, th, etc.).
+  if (lower.includes('tinyllama')) return { keep: false, reason: 'English-only pretraining (SlimPajama, no CJK vocab)' };
+  if (lower.includes('redpajama')) return { keep: false, reason: 'English-only pretraining (archaic 2023 model)' };
+  if (lower.includes('smollm')) return { keep: false, reason: 'English-only pretraining (FineWeb-Edu, non-multilingual)' };
+  if (lower.includes('olmo')) return { keep: false, reason: 'English-only pretraining (Dolma dataset)' };
+  if (lower.includes('stablelm')) return { keep: false, reason: 'European only (0 Asian/CJK tokens in vocabulary)' };
+  if (lower.includes('llama-2-')) return { keep: false, reason: 'English-only (89.7% English, obsolete Llama-2)' };
+  if (lower.includes('gemma-2b-it')) return { keep: false, reason: 'English-only (Gemma 1, superseded by Gemma 2)' };
+  if (lower.includes('hermes')) return { keep: false, reason: 'English agentic fine-tune (catastrophic multilingual forgetting)' };
+  if (id.startsWith('Llama-3-')) return { keep: false, reason: 'English-primary (superseded by multilingual Llama 3.1)' };
+  if (lower.includes('mistral')) return { keep: false, reason: 'European only (32k vocab, byte-splits CJK into gibberish)' };
+  if (lower.includes('phi-1') || lower.includes('phi-2') || id.startsWith('Phi-3-')) {
+    return { keep: false, reason: 'English-only (superseded by multilingual Phi-3.5/Phi-4)' };
+  }
 
   return { keep: true };
 }
