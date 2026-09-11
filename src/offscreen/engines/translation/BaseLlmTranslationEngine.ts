@@ -382,8 +382,10 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
   protected parseKeyedOutput(rawOutput: string, chunk: LlmTranslationSegment[]): string[] {
     const parsedMap = new Map<string, string>();
 
+    // 0. Strip reasoning/thinking tags emitted by models like DeepSeek-R1 or QwQ
+    let cleanJson = rawOutput.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+
     // 1. Direct JSON parse or markdown-fence stripped parse
-    let cleanJson = rawOutput.trim();
     if (cleanJson.startsWith('```')) {
       cleanJson = cleanJson.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
     }
@@ -422,7 +424,7 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
     if (parsedMap.size === 0) {
       const lineRe = /"?b(\d+)"?\s*[:\t]\s*"?([^"\r\n]+)"?/gi;
       let match: RegExpExecArray | null;
-      while ((match = lineRe.exec(rawOutput)) !== null) {
+      while ((match = lineRe.exec(cleanJson)) !== null) {
         const slotKey = `b${match[1]}`;
         const text = cleanTranslatedLine(match[2] || '');
         if (text) {

@@ -3,7 +3,42 @@ import { CustomApiEngine } from './CustomApiEngine';
 import type { CustomApiConfig } from '../../../shared/types';
 
 const openAiConfig: CustomApiConfig = { id: 'api-openai', provider: 'openai', modelName: 'gpt-test', apiKey: 'secret' };
-const validDelimitedReply = { choices: [{ message: { content: '<|1|>bonjour\n<|2|>monde' } }] };
+
+const validOpenAiReply = {
+  id: 'chatcmpl-test',
+  object: 'chat.completion',
+  choices: [
+    {
+      index: 0,
+      message: { role: 'assistant', content: '<|1|>bonjour\n<|2|>monde' },
+      finish_reason: 'stop',
+    },
+  ],
+  usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
+};
+
+const validClaudeReply = {
+  id: 'msg_test',
+  type: 'message',
+  role: 'assistant',
+  model: 'gpt-test',
+  content: [{ type: 'text', text: '<|1|>bonjour' }],
+  stop_reason: 'end_turn',
+  usage: { input_tokens: 10, output_tokens: 5 },
+};
+
+const validGeminiReply = {
+  candidates: [
+    {
+      content: {
+        role: 'model',
+        parts: [{ text: '<|1|>bonjour' }],
+      },
+      finishReason: 'STOP',
+    },
+  ],
+  usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5, totalTokenCount: 15 },
+};
 
 /**
  * Creates an initialized engine for a provider test.
@@ -26,32 +61,30 @@ async function createEngine(config = openAiConfig): Promise<CustomApiEngine> {
  */
 function jsonResponse(payload: unknown, status = 200): Response {
   const textBody = typeof payload === 'string' ? payload : JSON.stringify(payload);
-  return {
-    ok: status >= 200 && status < 300,
+  return new Response(textBody, {
     status,
-    json: vi.fn().mockResolvedValue(typeof payload === 'string' ? JSON.parse(payload) : payload),
-    text: vi.fn().mockResolvedValue(textBody),
-  } as unknown as Response;
+    headers: {
+      'content-type': 'application/json',
+    },
+  });
 }
 
 describe('CustomApiEngine', () => {
   beforeEach(() => vi.restoreAllMocks());
 
   it('translates text using line delimiter prompt and maps results', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse(validDelimitedReply));
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse(validOpenAiReply));
     const engine = await createEngine();
 
     const result = await engine.translate(['hello', 'world'], 'en', 'fr');
     expect(result).toEqual(['bonjour', 'monde']);
     expect(fetchMock).toHaveBeenCalledWith('https://api.openai.com/v1/chat/completions', expect.objectContaining({
-      headers: expect.objectContaining({ Authorization: 'Bearer secret' })
+      headers: expect.objectContaining({ authorization: 'Bearer secret' })
     }));
   });
 
   it('handles Gemini generateContent endpoint correctly', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({
-      candidates: [{ content: { parts: [{ text: '<|1|>bonjour' }] } }]
-    }));
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse(validGeminiReply));
     const engine = await createEngine({ ...openAiConfig, provider: 'gemini' });
 
     await expect(engine.translate(['hello'], 'en', 'fr')).resolves.toEqual(['bonjour']);
@@ -62,19 +95,17 @@ describe('CustomApiEngine', () => {
   });
 
   it('handles Claude Messages endpoint correctly', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({
-      content: [{ type: 'text', text: '<|1|>bonjour' }]
-    }));
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse(validClaudeReply));
     const engine = await createEngine({ ...openAiConfig, provider: 'claude' });
 
     await expect(engine.translate(['hello'], 'en', 'fr')).resolves.toEqual(['bonjour']);
     expect(fetchMock).toHaveBeenCalledWith('https://api.anthropic.com/v1/messages', expect.objectContaining({
-      headers: expect.objectContaining({ 'x-api-key': 'secret', 'anthropic-version': '2023-06-01' })
+      headers: expect.objectContaining({ 'x-api-key': 'secret' })
     }));
   });
 
   it('handles openai-compatible base URL routing', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse(validDelimitedReply));
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse(validOpenAiReply));
     const engine = await createEngine({
       ...openAiConfig,
       provider: 'openai-compatible',
@@ -87,7 +118,9 @@ describe('CustomApiEngine', () => {
 
   it('falls back to newline split if delimiter is missing from response', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({
-      choices: [{ message: { content: 'bonjour\nmonde' } }]
+      id: 'chatcmpl-test',
+      choices: [{ index: 0, message: { role: 'assistant', content: 'bonjour\nmonde' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
     }));
     const engine = await createEngine();
 
@@ -96,7 +129,9 @@ describe('CustomApiEngine', () => {
 
   it('throws error when provider response cannot match expected line count', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({
-      choices: [{ message: { content: '<|1|>only one line' } }]
+      id: 'chatcmpl-test',
+      choices: [{ index: 0, message: { role: 'assistant', content: '<|1|>only one line' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
     }));
     const engine = await createEngine();
 
@@ -106,7 +141,11 @@ describe('CustomApiEngine', () => {
   it('retries on transient failure', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(jsonResponse({ error: { message: 'upstream unavailable' } }, 503))
-      .mockResolvedValueOnce(jsonResponse({ choices: [{ message: { content: '<|1|>bonjour' } }] }));
+      .mockResolvedValueOnce(jsonResponse({
+        id: 'chatcmpl-test',
+        choices: [{ index: 0, message: { role: 'assistant', content: '<|1|>bonjour' }, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+      }));
     const engine = await createEngine();
 
     await expect(engine.translate(['hello'], 'en', 'fr')).resolves.toEqual(['bonjour']);

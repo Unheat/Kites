@@ -21,8 +21,12 @@
     "test:visual:webllm": "npm run build:dev && tsx src/test/pipelineVisualTestWebLlm.ts"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.117",
+    "@ai-sdk/google": "^3.0.122",
+    "@ai-sdk/openai": "^3.0.112",
     "@mlc-ai/web-llm": "^0.2.84",
     "@paddleocr/paddleocr-js": "^0.4.2",
+    "ai": "^6.0.280",
     "clipper-lib": "^6.4.2",
     "dexie": "^4.4.4",
     "hyphenation.en-us": "^0.2.1",

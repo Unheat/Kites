@@ -1,24 +1,24 @@
+import { generateText, type ModelMessage } from 'ai';
+import { createOpenAI } from '@ai-sdk/openai';
+import { createAnthropic } from '@ai-sdk/anthropic';
+import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import type { CustomApiConfig } from '../../../shared/types';
 import { BaseLlmTranslationEngine, type LlmChatMessage } from './BaseLlmTranslationEngine';
 
+/** Network request timeout in milliseconds */
 const REQUEST_TIMEOUT_MS = 45_000;
+
+/** Maximum attempts for transient network failures */
 const MAX_ATTEMPTS = 2;
-const ANTHROPIC_VERSION = '2023-06-01';
-const GEMINI_API_ROOT = 'https://generativelanguage.googleapis.com/v1beta';
-const OPENAI_API_ROOT = 'https://api.openai.com/v1';
-const ANTHROPIC_API_ROOT = 'https://api.anthropic.com/v1';
 
 /** Default batch size for custom API requests */
-const DEFAULT_CUSTOM_API_BATCH_SIZE = 15;
+export const DEFAULT_CUSTOM_API_BATCH_SIZE = 15;
 
-/** Sampling temperature for translation fidelity (greedy decoding) */
-const DEFAULT_TEMPERATURE = 0;
-
-/** Default max completion tokens when unspecified by caller */
-const DEFAULT_MAX_COMPLETION_TOKENS = 1024;
+/** Default token floor for custom API completions ensuring reasoning models have room to think */
+export const CUSTOM_API_DEFAULT_MAX_TOKENS = 2048;
 
 /**
- * Translates OCR text through one configured remote API provider using delimiter line tagging.
+ * Translates OCR text through one configured remote API provider using Vercel AI SDK.
  * Extends BaseLlmTranslationEngine for shared prompt assembly, batching, and parsing.
  *
  * @param config - The saved provider, model, credential, and optional compatible API root.
@@ -54,6 +54,11 @@ export class CustomApiEngine extends BaseLlmTranslationEngine {
   /**
    * Translates nonblank texts in bounded batches using numbered delimiter format.
    * Ensures the engine has been initialized before proceeding.
+   *
+   * @param texts - Array of source text strings.
+   * @param sourceLangId - BCP-47 language code or natural name (default 'auto').
+   * @param targetLangId - BCP-47 language code or natural name (default 'en').
+   * @returns Array of translated strings aligned with the input array.
    */
   override async translate(texts: string[], sourceLangId = 'auto', targetLangId = 'en'): Promise<string[]> {
     if (!this.initialized) throw new Error('CustomApiEngine is not initialized. Call init() first.');
@@ -102,11 +107,49 @@ export class CustomApiEngine extends BaseLlmTranslationEngine {
   }
 
   /**
+   * Resolves the appropriate Vercel AI SDK LanguageModel instance based on configured provider.
+   *
+   * @returns LanguageModelV1 instance ready for generation.
+   */
+  private getLanguageModel() {
+    switch (this.config.provider) {
+      case 'openai': {
+        const openai = createOpenAI({ apiKey: this.config.apiKey });
+        return openai.chat(this.config.modelName);
+      }
+      case 'openai-compatible': {
+        const baseURL = this.getCompatibleApiRoot();
+        const customOpenAi = createOpenAI({
+          baseURL,
+          apiKey: this.config.apiKey,
+          headers: {
+            'HTTP-Referer': 'https://kites.ai',
+            'X-Title': 'Kites Manga Translator',
+          },
+        });
+        return customOpenAi.chat(this.config.modelName);
+      }
+      case 'claude': {
+        const anthropic = createAnthropic({ apiKey: this.config.apiKey });
+        return anthropic(this.config.modelName);
+      }
+      case 'gemini': {
+        const google = createGoogleGenerativeAI({ apiKey: this.config.apiKey });
+        return google(this.config.modelName);
+      }
+      default:
+        throw new Error(`Unsupported Custom API provider: ${this.config.provider}`);
+    }
+  }
+
+  /**
    * Implements the abstract requestLlm method with retry logic for transient errors.
    *
    * @param prompt - The assembled batch prompt string fallback.
    * @param messages - Optional structured ChatMessage array.
+   * @param _schema - Optional strict JSON schema.
    * @param signal - Optional AbortSignal.
+   * @param maxTokens - Optional maximum tokens allowed.
    * @returns Raw response content from the remote provider.
    */
   protected async requestLlm(
@@ -138,11 +181,12 @@ export class CustomApiEngine extends BaseLlmTranslationEngine {
   }
 
   /**
-   * Routes prompt or structured messages to the corresponding provider client.
+   * Routes prompt or structured messages to the corresponding provider client using Vercel AI SDK.
+   * Normalizes reasoning parameters and enforces a safe token floor for remote reasoning models.
    *
    * @param prompt - Prompt string.
    * @param messages - Optional structured ChatMessage array.
-   * @param signal - Optional AbortSignal.
+   * @param signal - AbortSignal.
    * @param maxTokens - Optional maximum tokens allowed.
    * @returns Provider response text.
    */
@@ -152,199 +196,48 @@ export class CustomApiEngine extends BaseLlmTranslationEngine {
     signal?: AbortSignal,
     maxTokens?: number
   ): Promise<string> {
-    const effectiveMaxTokens = maxTokens ?? DEFAULT_MAX_COMPLETION_TOKENS;
-    const abortSignal = signal ?? new AbortController().signal;
-    if (this.config.provider === 'gemini') return this.requestGemini(prompt, messages, abortSignal, effectiveMaxTokens);
-    if (this.config.provider === 'claude') return this.requestClaude(prompt, messages, abortSignal, effectiveMaxTokens);
-    return this.requestOpenAi(prompt, messages, abortSignal, effectiveMaxTokens);
-  }
+    const effectiveMaxTokens = Math.max(maxTokens ?? CUSTOM_API_DEFAULT_MAX_TOKENS, CUSTOM_API_DEFAULT_MAX_TOKENS);
+    const model = this.getLanguageModel();
 
-  /**
-   * Sends Chat Completions request to OpenAI or OpenAI-compatible endpoint.
-   *
-   * @param prompt - Prompt string.
-   * @param messages - Optional structured ChatMessage array.
-   * @param signal - AbortSignal.
-   * @returns Response text content.
-   */
-  private async requestOpenAi(
-    prompt: string,
-    messages: LlmChatMessage[] | undefined,
-    signal: AbortSignal,
-    maxTokens: number
-  ): Promise<string> {
-    const root = this.config.provider === 'openai' ? OPENAI_API_ROOT : this.getCompatibleApiRoot();
-    const payloadMessages =
-      messages && messages.length > 0
-        ? messages
+    const systemMsg = messages?.find((m) => m.role === 'system');
+    const nonSystemMsgs = messages
+      ? messages.filter((m) => m.role !== 'system')
+      : [{ role: 'user' as const, content: prompt }];
+
+    const formattedMessages: ModelMessage[] =
+      nonSystemMsgs.length > 0
+        ? (nonSystemMsgs as ModelMessage[])
         : [{ role: 'user', content: prompt }];
 
-    const body: Record<string, unknown> = {
-      model: this.config.modelName,
-      temperature: DEFAULT_TEMPERATURE,
-      max_tokens: maxTokens,
-      messages: payloadMessages,
-    };
+    const isReasoning = /^(o1|o3|o4|deepseek-reasoner|.*-r1(-.*)?|.*qwq.*|.*thinking.*)/i.test(
+      this.config.modelName.trim()
+    );
 
-    const headers: Record<string, string> = {
-      Authorization: `Bearer ${this.config.apiKey}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': 'https://kites.ai',
-      'X-Title': 'Kites Manga Translator',
-    };
-
-    const payload = await this.readResponse(await fetch(`${root}/chat/completions`, {
-      method: 'POST',
-      signal,
-      headers,
-      body: JSON.stringify(body),
-    }));
-
-    const choice = payload?.choices?.[0];
-    const message = choice?.message;
-    if (typeof message?.refusal === 'string') throw new Error(`Provider refused translation: ${message.refusal}`);
-
-    const content = message?.content ?? choice?.text;
-    if (typeof content !== 'string') {
-      const snippet = JSON.stringify(payload).slice(0, 300);
-      throw new Error(`Provider response did not contain chat completion text: ${snippet}`);
-    }
-    return content;
-  }
-
-  /**
-   * Sends request to Google Gemini generateContent endpoint.
-   *
-   * @param prompt - Prompt string.
-   * @param messages - Optional structured ChatMessage array.
-   * @param signal - AbortSignal.
-   * @returns Response text content.
-   */
-  private async requestGemini(
-    prompt: string,
-    messages: LlmChatMessage[] | undefined,
-    signal: AbortSignal,
-    maxTokens: number
-  ): Promise<string> {
-    const systemMsg = messages?.find((m) => m.role === 'system');
-    const nonSystemMsgs = messages?.filter((m) => m.role !== 'system');
-
-    const contents =
-      nonSystemMsgs && nonSystemMsgs.length > 0
-        ? nonSystemMsgs.map((m) => ({
-            role: m.role === 'assistant' ? 'model' : 'user',
-            parts: [{ text: m.content }],
-          }))
-        : [{ role: 'user', parts: [{ text: prompt }] }];
-
-    const body: Record<string, unknown> = {
-      contents,
-      generationConfig: {
-        temperature: DEFAULT_TEMPERATURE,
-        maxOutputTokens: maxTokens,
-      },
-    };
-    if (systemMsg) {
-      body.systemInstruction = {
-        parts: [{ text: systemMsg.content }],
-      };
+    const providerOptions: Record<string, Record<string, unknown>> = {};
+    if (isReasoning) {
+      if (this.config.provider === 'openai' || this.config.provider === 'openai-compatible') {
+        providerOptions.openai = { reasoningEffort: 'low' };
+      } else if (this.config.provider === 'claude') {
+        providerOptions.anthropic = { effort: 'low' };
+      } else if (this.config.provider === 'gemini') {
+        providerOptions.google = { thinkingConfig: { thinkingLevel: 'low' } };
+      }
     }
 
-    const payload = await this.readResponse(await fetch(`${GEMINI_API_ROOT}/models/${encodeURIComponent(this.config.modelName)}:generateContent`, {
-      method: 'POST',
-      signal,
-      headers: {
-        'Content-Type': 'application/json',
-        'x-goog-api-key': this.config.apiKey,
-      },
-      body: JSON.stringify(body),
-    }));
+    const result = await generateText({
+      model,
+      system: systemMsg?.content,
+      messages: formattedMessages,
+      maxOutputTokens: effectiveMaxTokens,
+      providerOptions: Object.keys(providerOptions).length > 0 ? (providerOptions as any) : undefined,
+      abortSignal: signal,
+    });
 
-    const content = payload?.candidates?.[0]?.content?.parts
-      ?.map((part: { text?: unknown }) => part.text)
-      .filter((text: unknown): text is string => typeof text === 'string')
-      .join('');
-
-    if (!content) {
-      const snippet = JSON.stringify(payload).slice(0, 300);
-      throw new Error(`Gemini response did not contain generated text: ${snippet}`);
+    const text = result.text;
+    if (typeof text !== 'string') {
+      throw new Error(`Provider response did not contain text content.`);
     }
-    return content;
-  }
-
-  /**
-   * Sends request to Anthropic Claude Messages endpoint.
-   *
-   * @param prompt - Prompt string.
-   * @param messages - Optional structured ChatMessage array.
-   * @param signal - AbortSignal.
-   * @returns Response text content.
-   */
-  private async requestClaude(
-    prompt: string,
-    messages: LlmChatMessage[] | undefined,
-    signal: AbortSignal,
-    maxTokens: number
-  ): Promise<string> {
-    const systemMsg = messages?.find((m) => m.role === 'system');
-    const nonSystemMsgs = messages?.filter((m) => m.role !== 'system');
-    const claudeMessages =
-      nonSystemMsgs && nonSystemMsgs.length > 0
-        ? nonSystemMsgs.map((m) => ({ role: m.role, content: m.content }))
-        : [{ role: 'user', content: prompt }];
-
-    const payload = await this.readResponse(await fetch(`${ANTHROPIC_API_ROOT}/messages`, {
-      method: 'POST',
-      signal,
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': this.config.apiKey,
-        'anthropic-version': ANTHROPIC_VERSION,
-      },
-      body: JSON.stringify({
-        model: this.config.modelName,
-        max_tokens: maxTokens,
-        temperature: DEFAULT_TEMPERATURE,
-        ...(systemMsg ? { system: systemMsg.content } : {}),
-        messages: claudeMessages,
-      }),
-    }));
-
-    const content = payload?.content
-      ?.filter((block: { type?: unknown; text?: unknown }) => block.type === 'text' && typeof block.text === 'string')
-      .map((block: { text: string }) => block.text)
-      .join('');
-
-    if (!content) {
-      const snippet = JSON.stringify(payload).slice(0, 300);
-      throw new Error(`Claude response did not contain generated text: ${snippet}`);
-    }
-    return content;
-  }
-
-  /**
-   * Parses HTTP response as text first, then JSON, preserving provider error details.
-   *
-   * @param response - Fetch response.
-   * @returns Parsed JSON body.
-   */
-  private async readResponse(response: Response): Promise<any> {
-    const rawText = await response.text();
-    let payload: any;
-    try {
-      payload = JSON.parse(rawText);
-    } catch {
-      const preview = rawText.trim().slice(0, 200);
-      throw new Error(`Provider returned invalid JSON (HTTP ${response.status}): ${preview || '(empty response)'}`);
-    }
-
-    if (response.ok) return payload;
-
-    const providerError = payload?.error ?? payload;
-    const rawMsg = providerError?.message ?? payload?.message ?? `HTTP ${response.status}`;
-    const error = new Error(`Provider request failed (${response.status}): ${String(rawMsg)}`) as Error & { status?: number };
-    error.status = response.status;
-    return Promise.reject(error);
+    return text;
   }
 
   /**
@@ -354,9 +247,17 @@ export class CustomApiEngine extends BaseLlmTranslationEngine {
    * @returns Whether error is transient.
    */
   private isTransientFailure(error: unknown): boolean {
-    const status = (error as { status?: number })?.status;
-    if (error instanceof DOMException) return error.name !== 'AbortError';
-    if (error instanceof TypeError) return true;
-    return status === 408 || status === 409 || status === 500 || status === 502 || status === 503 || status === 504;
+    if (!error) return false;
+    const err = error as { status?: number; statusCode?: number; name?: string; message?: string };
+    if (err.name === 'AbortError') return false;
+    const status = err.status ?? err.statusCode;
+    if (typeof status === 'number') {
+      return status === 408 || status === 429 || status >= 500;
+    }
+    const msg = String(err.message || '');
+    if (msg.includes('429') || msg.includes('500') || msg.includes('502') || msg.includes('503') || msg.includes('504')) {
+      return true;
+    }
+    return false;
   }
 }

@@ -159,7 +159,6 @@ export class WebLLMEngine extends BaseLlmTranslationEngine {
       top_p: 1,
       repetition_penalty: 1,
       max_tokens: dynamicMaxTokens,
-      stop: ['\n\n\n'],
     };
 
     if (schema) {
@@ -192,7 +191,15 @@ export class WebLLMEngine extends BaseLlmTranslationEngine {
       const reply = await this.engine.chat.completions.create(completionOptions);
       clearTimeout(runawayTimer);
 
-      const rawOutput = reply.choices[0]?.message?.content || '';
+      const choice = reply.choices[0];
+      const finishReason = choice?.finish_reason;
+      if (finishReason === 'length') {
+        console.warn(
+          `[WebLLMEngine] Generation hit max_tokens limit (${dynamicMaxTokens}). Output may be truncated.`
+        );
+      }
+
+      const rawOutput = choice?.message?.content || '';
       if (import.meta.env.DEV) {
         const chunkMs = performance.now() - chunkStart;
         const completionTokens = (reply as any).usage?.completion_tokens;

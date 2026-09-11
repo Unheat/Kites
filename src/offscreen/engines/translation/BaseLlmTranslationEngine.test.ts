@@ -276,6 +276,26 @@ describe('BaseLlmTranslationEngine Keyed JSON Protocol', () => {
     expect(result[9]).toBe('日本語9'); // Gracefully preserves original without throwing
   });
 
+  it('sanitizes <think> tags from reasoning models and parses real JSON payload', async () => {
+    const engine = new MockLlmEngine();
+    // Model output containing thought chain with internal braces and formatting
+    engine.mockResponse =
+      '<think>\n' +
+      'Thinking about translating b0...\n' +
+      'The source text is "こんにちは". A literal translation would be { "b0": "good day" },\n' +
+      'but "Hello" fits manga speech better.\n' +
+      '</think>\n' +
+      '```json\n' +
+      '{\n' +
+      '  "b0": "Hello",\n' +
+      '  "b1": "World"\n' +
+      '}\n' +
+      '```';
+
+    const result = await engine.translate(['こんにちは', '世界'], 'ja', 'en');
+    expect(result).toEqual(['Hello', 'World']);
+  });
+
   it('gracefully yields model output with original source fallback when dropped lines exceed tolerance (>15%)', async () => {
     const engine = new MockLlmEngine(15, false);
     engine.setAllowPartialMissingLines(false);
