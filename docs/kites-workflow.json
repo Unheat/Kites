@@ -185,7 +185,7 @@
       "col": 3,
       "type": "cloud",
       "label": "Index-Safe Translation",
-      "sublabel": "GTX 1800 chars · LLM batch 15",
+      "sublabel": "GTX · WebLLM · Cloud Pool",
       "width": 164
     },
     {
@@ -194,7 +194,7 @@
       "col": 3,
       "type": "backend",
       "label": "Polygon-Only Inpaint",
-      "sublabel": "median · FMM r=3 · neural 512²",
+      "sublabel": "median · FMM · dynamic patch",
       "yOffset": 60,
       "width": 164
     },
@@ -344,7 +344,7 @@
       "title": "Parallel Compute + Output Contract",
       "items": [
         "Translation: Google GTX chunks ≤1800 chars with ⟦index⟧ delimiters; LLM batches 15 tagged segments and writes results back by tag index.",
-        "Inpaint: raw surviving line polygons only; Simple uses luminance ≥180 RGB median, Telea-like FMM radius 3, neural tiers use 512² patches.",
+        "Inpaint: raw surviving line polygons only; Simple uses luminance ≥180 RGB median, Telea-like FMM radius 3, neural tiers (LaMa/AOT-GAN) use 64px dynamic patch bucketing with UNCLIP 1.8 stroke expansion.",
         "Promise.all waits for translated text and clean plate; raw DBNet mask forwarding remains rejected to avoid erasing non-text bubble art.",
         "Persist clean image plus editable fitted lines in Dexie; return a separate baked PNG data URL for immediate DOM replacement."
       ]

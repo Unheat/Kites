@@ -148,6 +148,16 @@ npm run build
 
 ---
 
+## 🤝 Contributing & Documentation
+
+We warmly welcome contributions from developers, translators, and comic lovers!
+
+- 📖 **[Documentation Hub](docs/README.md)** — Architectural diagrams, pipeline specifications, and runtime contracts.
+- 📐 **[Interactive Pipeline Map](docs/workflow.html)** — Standalone interactive visualization of Kites' detection, inpainting, and typesetting algorithm.
+- 🛠️ **[Contribution Guide](CONTRIBUTING.md)** — How to set up your dev environment, run tests, and submit PRs.
+
+---
+
 ## 📜 License & Acknowledgements
 
 Kites is licensed under the **[GNU General Public License v3.0](LICENSE)**.
