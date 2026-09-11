@@ -10,7 +10,7 @@ const validOpenAiReply = {
   choices: [
     {
       index: 0,
-      message: { role: 'assistant', content: '<|1|>bonjour\n<|2|>monde' },
+      message: { role: 'assistant', content: JSON.stringify({ b0: 'bonjour', b1: 'monde' }) },
       finish_reason: 'stop',
     },
   ],
@@ -22,7 +22,7 @@ const validClaudeReply = {
   type: 'message',
   role: 'assistant',
   model: 'gpt-test',
-  content: [{ type: 'text', text: '<|1|>bonjour' }],
+  content: [{ type: 'text', text: JSON.stringify({ b0: 'bonjour' }) }],
   stop_reason: 'end_turn',
   usage: { input_tokens: 10, output_tokens: 5 },
 };
@@ -32,7 +32,7 @@ const validGeminiReply = {
     {
       content: {
         role: 'model',
-        parts: [{ text: '<|1|>bonjour' }],
+        parts: [{ text: JSON.stringify({ b0: 'bonjour' }) }],
       },
       finishReason: 'STOP',
     },
@@ -72,7 +72,7 @@ function jsonResponse(payload: unknown, status = 200): Response {
 describe('CustomApiEngine', () => {
   beforeEach(() => vi.restoreAllMocks());
 
-  it('translates text using line delimiter prompt and maps results', async () => {
+  it('translates text using Keyed JSON protocol and maps results', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse(validOpenAiReply));
     const engine = await createEngine();
 
@@ -83,7 +83,7 @@ describe('CustomApiEngine', () => {
     }));
   });
 
-  it('handles Gemini generateContent endpoint correctly', async () => {
+  it('handles Gemini generateContent endpoint correctly with Keyed JSON', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse(validGeminiReply));
     const engine = await createEngine({ ...openAiConfig, provider: 'gemini' });
 
@@ -94,7 +94,7 @@ describe('CustomApiEngine', () => {
     );
   });
 
-  it('handles Claude Messages endpoint correctly', async () => {
+  it('handles Claude Messages endpoint correctly with Keyed JSON', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse(validClaudeReply));
     const engine = await createEngine({ ...openAiConfig, provider: 'claude' });
 
@@ -116,7 +116,31 @@ describe('CustomApiEngine', () => {
     expect(fetchMock).toHaveBeenCalledWith('https://openrouter.ai/api/v1/chat/completions', expect.any(Object));
   });
 
-  it('falls back to newline split if delimiter is missing from response', async () => {
+  it('sanitizes <think> tags from reasoning model completions before parsing JSON', async () => {
+    const thinkingReply = {
+      id: 'chatcmpl-test',
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: 'assistant',
+            content: '<think>\nTranslating b0 and b1 into French...\nb0 is hello -> bonjour\n</think>\n' +
+              JSON.stringify({ b0: 'bonjour', b1: 'monde' }),
+          },
+          finish_reason: 'stop',
+        },
+      ],
+      usage: { prompt_tokens: 10, completion_tokens: 25, total_tokens: 35 },
+    };
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse(thinkingReply));
+    const engine = await createEngine();
+
+    const result = await engine.translate(['hello', 'world'], 'en', 'fr');
+    expect(result).toEqual(['bonjour', 'monde']);
+  });
+
+  it('falls back to newline split if JSON is missing from response', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({
       id: 'chatcmpl-test',
       choices: [{ index: 0, message: { role: 'assistant', content: 'bonjour\nmonde' }, finish_reason: 'stop' }],
@@ -130,12 +154,12 @@ describe('CustomApiEngine', () => {
   it('throws error when provider response cannot match expected line count', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({
       id: 'chatcmpl-test',
-      choices: [{ index: 0, message: { role: 'assistant', content: '<|1|>only one line' }, finish_reason: 'stop' }],
+      choices: [{ index: 0, message: { role: 'assistant', content: JSON.stringify({ b0: 'only one line' }) }, finish_reason: 'stop' }],
       usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
     }));
     const engine = await createEngine();
 
-    await expect(engine.translate(['line1', 'line2'], 'en', 'fr')).rejects.toThrow('Delimiter parsing failed');
+    await expect(engine.translate(['line1', 'line2'], 'en', 'fr')).rejects.toThrow('Keyed parsing failed');
   });
 
   it('retries on transient failure', async () => {
@@ -143,7 +167,7 @@ describe('CustomApiEngine', () => {
       .mockResolvedValueOnce(jsonResponse({ error: { message: 'upstream unavailable' } }, 503))
       .mockResolvedValueOnce(jsonResponse({
         id: 'chatcmpl-test',
-        choices: [{ index: 0, message: { role: 'assistant', content: '<|1|>bonjour' }, finish_reason: 'stop' }],
+        choices: [{ index: 0, message: { role: 'assistant', content: JSON.stringify({ b0: 'bonjour' }) }, finish_reason: 'stop' }],
         usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
       }));
     const engine = await createEngine();
