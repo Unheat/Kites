@@ -129,21 +129,32 @@ Choose how Kites activates while browsing your favorite comic sites:
 
 ## 🚀 Quick Start
 
-### Build & Install (2 Minutes)
+### Option 1: Quick Install (Pre-Built Zip — Zero Terminal Required)
+
+1. Download **[`kites-v1.0.3.zip`](https://github.com/Unheat/Kites/releases/latest)** from the latest GitHub Release.
+2. Unzip the downloaded `.zip` file into a folder on your computer.
+3. In Chrome, open `chrome://extensions/`.
+4. Enable **Developer mode** (toggle in the top-right corner).
+5. Click **Load unpacked** and select the unzipped folder.
+6. Pin **Kites** to your browser toolbar and start reading immediately!
+
+---
+
+### Option 2: Build from Source (Developers)
 
 ```bash
-# 1. Clone repo
+# 1. Clone repository
 git clone https://github.com/Unheat/Kites.git
 cd Kites
 
-# 2. Install dependencies & build
+# 2. Install dependencies & build extension
 npm ci
 npm run build
 ```
 
 1. In Chrome, open `chrome://extensions/`.
 2. Enable **Developer mode** (top-right toggle).
-3. Click **Load unpacked** and select the `dist/` folder.
+3. Click **Load unpacked** and select the generated `dist/` folder.
 4. Pin **Kites** to your toolbar and start reading!
 
 ---
