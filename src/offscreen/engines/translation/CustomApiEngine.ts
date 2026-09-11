@@ -182,7 +182,7 @@ export class CustomApiEngine extends BaseLlmTranslationEngine {
 
   /**
    * Routes prompt or structured messages to the corresponding provider client using Vercel AI SDK.
-   * Normalizes reasoning parameters and enforces a safe token floor for remote reasoning models.
+   * Enforces a safe token floor so both standard and reasoning models have ample completion headroom.
    *
    * @param prompt - Prompt string.
    * @param messages - Optional structured ChatMessage array.
@@ -209,27 +209,11 @@ export class CustomApiEngine extends BaseLlmTranslationEngine {
         ? (nonSystemMsgs as ModelMessage[])
         : [{ role: 'user', content: prompt }];
 
-    const isReasoning = /^(o1|o3|o4|deepseek-reasoner|.*-r1(-.*)?|.*qwq.*|.*thinking.*)/i.test(
-      this.config.modelName.trim()
-    );
-
-    const providerOptions: Record<string, Record<string, unknown>> = {};
-    if (isReasoning) {
-      if (this.config.provider === 'openai' || this.config.provider === 'openai-compatible') {
-        providerOptions.openai = { reasoningEffort: 'low' };
-      } else if (this.config.provider === 'claude') {
-        providerOptions.anthropic = { effort: 'low' };
-      } else if (this.config.provider === 'gemini') {
-        providerOptions.google = { thinkingConfig: { thinkingLevel: 'low' } };
-      }
-    }
-
     const result = await generateText({
       model,
       system: systemMsg?.content,
       messages: formattedMessages,
       maxOutputTokens: effectiveMaxTokens,
-      providerOptions: Object.keys(providerOptions).length > 0 ? (providerOptions as any) : undefined,
       abortSignal: signal,
     });
 
