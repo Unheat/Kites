@@ -91,6 +91,7 @@ describe('WebLLMEngine Keyed JSON Protocol', () => {
     // Verify completion call parameters
     const callArg = mockCreate.mock.calls[0][0];
     expect(callArg.temperature).toBe(0);
+    expect(callArg.stop).toBeUndefined(); // \n\n\n stop sequence must not be passed
     expect(callArg.response_format.type).toBe('json_object');
     expect(callArg.response_format.schema).toContain('"b0"');
     expect(callArg.response_format.schema).toContain('"b1"');
@@ -136,5 +137,23 @@ describe('WebLLMEngine Keyed JSON Protocol', () => {
 
     expect(results).toEqual(['', '', '']);
     expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it('handles finish_reason: length cleanly and falls back to original text for missing slots', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockCreate.mockResolvedValueOnce({
+      choices: [
+        {
+          message: { content: JSON.stringify({ b0: 'translated' }) },
+          finish_reason: 'length',
+        },
+      ],
+    });
+
+    const results = await engine.translate(['First text', 'Second text']);
+    expect(results).toEqual(['translated', 'Second text']);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('hit max_tokens limit')
+    );
   });
 });

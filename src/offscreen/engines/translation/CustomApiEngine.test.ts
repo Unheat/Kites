@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { CustomApiEngine } from './CustomApiEngine';
+import {
+  CustomApiEngine,
+  DEFAULT_CUSTOM_API_BATCH_SIZE,
+  CUSTOM_API_DEFAULT_MAX_TOKENS,
+} from './CustomApiEngine';
 import type { CustomApiConfig } from '../../../shared/types';
 
 const openAiConfig: CustomApiConfig = { id: 'api-openai', provider: 'openai', modelName: 'gpt-test', apiKey: 'secret' };
@@ -181,5 +185,25 @@ describe('CustomApiEngine', () => {
     const engine = new CustomApiEngine({ ...openAiConfig, provider: 'openai-compatible', baseUrl: 'http://example.com' });
     await expect(engine.init()).rejects.toThrow('must be HTTPS');
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('enforces the 4096 token floor so completion and reasoning never starve', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse(validOpenAiReply));
+    const engine = await createEngine();
+
+    await engine.translate(['hello'], 'en', 'fr');
+    expect(CUSTOM_API_DEFAULT_MAX_TOKENS).toBe(4096);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.openai.com/v1/chat/completions',
+      expect.objectContaining({
+        body: expect.stringContaining('"max_tokens":4096'),
+      })
+    );
+  });
+
+  it('configures default batch size to 25 to fit dense manga pages in a single request', async () => {
+    const engine = await createEngine();
+    expect(DEFAULT_CUSTOM_API_BATCH_SIZE).toBe(25);
+    expect((engine as any).batchSize).toBe(25);
   });
 });

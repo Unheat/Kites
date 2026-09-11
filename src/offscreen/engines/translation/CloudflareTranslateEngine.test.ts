@@ -160,4 +160,24 @@ describe('CloudflareTranslateEngine Keyed JSON Protocol', () => {
 
     expect(tokenSpy).toHaveBeenCalledTimes(2);
   });
+
+  it('configures default batch size to 15 to translate standard manga pages in 1 pass', async () => {
+    expect((engine as any).batchSize).toBe(15);
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ b0: 't' }) } }] }), { status: 200 })
+    );
+
+    // 15 items should fit into exactly 1 batch HTTP call
+    const fifteenItems = Array.from({ length: 15 }, (_, i) => `item ${i}`);
+    await engine.translate(fifteenItems);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    fetchSpy.mockClear();
+
+    // 16 items should be chunked into 2 batches (15 + 1)
+    const sixteenItems = Array.from({ length: 16 }, (_, i) => `item ${i}`);
+    await engine.translate(sixteenItems);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
 });

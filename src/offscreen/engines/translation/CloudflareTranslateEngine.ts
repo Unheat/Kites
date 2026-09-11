@@ -22,8 +22,8 @@ const REQUEST_TIMEOUT_MS = 15_000;
 /** Cache OAuth tokens below Google's one-hour token lifetime. */
 const TOKEN_CACHE_TTL_MS = 45 * 60 * 1000;
 
-/** Default batch size for Cloudflare worker translation (sweet spot: 6 bubbles) */
-const DEFAULT_CLOUDFLARE_BATCH_SIZE = 6;
+/** Default batch size for Cloudflare worker translation (15 bubbles fits standard manga page in 1 pass) */
+const DEFAULT_CLOUDFLARE_BATCH_SIZE = 15;
 
 /** LLM generation sampling temperature (greedy decoding) */
 const DEFAULT_TEMPERATURE = 0;

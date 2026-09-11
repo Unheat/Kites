@@ -11,11 +11,11 @@ const REQUEST_TIMEOUT_MS = 45_000;
 /** Maximum attempts for transient network failures */
 const MAX_ATTEMPTS = 2;
 
-/** Default batch size for custom API requests */
-export const DEFAULT_CUSTOM_API_BATCH_SIZE = 15;
+/** Default batch size for custom API requests (dense pages fit in 1 pass) */
+export const DEFAULT_CUSTOM_API_BATCH_SIZE = 25;
 
-/** Default token floor for custom API completions ensuring reasoning models have room to think */
-export const CUSTOM_API_DEFAULT_MAX_TOKENS = 2048;
+/** Default token floor for custom API completions ensuring large batches and reasoning models have room */
+export const CUSTOM_API_DEFAULT_MAX_TOKENS = 4096;
 
 /**
  * Translates OCR text through one configured remote API provider using Vercel AI SDK.
