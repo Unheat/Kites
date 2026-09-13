@@ -2,14 +2,24 @@ export const MIN_MEDIA_WIDTH_PX = 150;
 export const MIN_MEDIA_HEIGHT_PX = 150;
 const MAX_SURFACE_ANCESTOR_DEPTH = 3;
 const RECT_SIZE_TOLERANCE_RATIO = 0.2;
+const POINTER_TOLERANCE_PX = 3;
 const SRCSET_URL_SEPARATOR = ',';
 const SRCSET_DESCRIPTOR_SEPARATOR = /\s+/;
 const SRCSET_WIDTH_DESCRIPTOR = /^(\d+(?:\.\d+)?)w$/;
 const SRCSET_DENSITY_DESCRIPTOR = /^(\d+(?:\.\d+)?)x$/;
+const LAZY_SOURCE_ATTRIBUTE = /(?:^|[-_:])(src|srcset|url|image|original|highres|full)(?:$|[-_:])/i;
+const PLACEHOLDER_SOURCE = /(?:blank|placeholder|spacer|spinner|loading|shimmer|blurhash|1x1)/i;
+const MEDIA_SELECTOR = 'img, svg image';
+const CSS_IMAGE_URL = /url\(["']?([^"')]+)["']?\)/g;
+
+export type MediaTargetKind = 'img' | 'background' | 'svg-image';
 
 export interface MediaTarget {
-  imgElement: HTMLImageElement;
+  kind: MediaTargetKind;
+  imgElement?: HTMLImageElement;
+  sourceElement: Element;
   surfaceElement: HTMLElement;
+  anchorElement: HTMLElement;
   srcUrl: string;
   hiddenBacking: boolean;
 }
@@ -53,8 +63,20 @@ export function normalizeMediaUrl(url: string): string {
 }
 
 /**
+ * Tests whether a URL is a known loading or empty placeholder.
+ *
+ * @param url - Candidate image URL.
+ * @returns Whether the URL should be ignored in favor of another source.
+ */
+function isPlaceholderSource(url: string): boolean {
+  if (!url) return true;
+  if (url.startsWith('data:image/svg+xml') && url.length < 300) return true;
+  if (url.startsWith('data:image/gif;base64,R0lGODlhAQAB')) return true;
+  return PLACEHOLDER_SOURCE.test(url);
+}
+
+/**
  * Selects the highest-value URL candidate from an image srcset value.
- * Width descriptors rank by pixels and density descriptors rank by scale, independent of input order.
  *
  * @param srcset - Responsive source candidate list.
  * @returns Highest-value candidate URL, or an empty string when no candidate exists.
@@ -73,41 +95,51 @@ function resolveBestSrcsetUrl(srcset: string): string {
 }
 
 /**
+ * Resolves an image-like element's best native, responsive, SVG, or lazy source.
+ *
+ * @param element - Image or SVG image whose source should be resolved.
+ * @returns Best usable source URL, or an empty string.
+ */
+export function resolveElementSource(element: Element): string {
+  const directCandidates: string[] = [];
+  if (element instanceof HTMLImageElement) {
+    directCandidates.push(element.currentSrc, element.src, element.getAttribute('src') || '');
+  } else {
+    directCandidates.push(element.getAttribute('href') || '', element.getAttribute('xlink:href') || '');
+  }
+
+  const realDirect = directCandidates.find((candidate) => candidate && !isPlaceholderSource(candidate));
+  if (realDirect) return realDirect;
+
+  const srcsets = [element.getAttribute('srcset') || ''];
+  if (element.parentElement instanceof HTMLPictureElement) {
+    for (const source of Array.from(element.parentElement.querySelectorAll('source'))) {
+      srcsets.push(source.srcset, source.getAttribute('data-srcset') || '');
+    }
+  }
+  for (const srcset of srcsets) {
+    const candidate = resolveBestSrcsetUrl(srcset);
+    if (candidate && !isPlaceholderSource(candidate)) return candidate;
+  }
+
+  for (const attribute of Array.from(element.attributes)) {
+    if (!LAZY_SOURCE_ATTRIBUTE.test(attribute.name)) continue;
+    const candidate = attribute.name.toLowerCase().includes('srcset')
+      ? resolveBestSrcsetUrl(attribute.value)
+      : attribute.value.trim();
+    if (candidate && !isPlaceholderSource(candidate)) return candidate;
+  }
+  return directCandidates.find(Boolean) || '';
+}
+
+/**
  * Resolves the best available original source from native and lazy image attributes.
  *
  * @param img - Image whose source should be resolved.
  * @returns First usable currentSrc, src, srcset, or lazy-load URL.
  */
 export function resolveImageSource(img: HTMLImageElement): string {
-  const isBlankPlaceholder = (url: string) => {
-    if (!url) return true;
-    if (url.startsWith('data:image/svg+xml') && url.length < 300) return true;
-    if (url.startsWith('data:image/gif;base64,R0lGODlhAQAB')) return true;
-    return false;
-  };
-
-  const directCandidates = [img.currentSrc, img.src, img.getAttribute('src') || ''].filter(Boolean);
-  const realDirect = directCandidates.find((candidate) => !isBlankPlaceholder(candidate));
-  if (realDirect) return realDirect;
-
-  const responsiveCandidate = resolveBestSrcsetUrl(img.srcset || img.getAttribute('srcset') || '');
-  if (responsiveCandidate && !isBlankPlaceholder(responsiveCandidate)) return responsiveCandidate;
-
-  const lazyAttributes = [
-    'data-src',
-    'data-original',
-    'data-lazy-src',
-    'data-actual-src',
-    'data-url',
-    'data-origin',
-    'data-full-image',
-    'data-real-src',
-  ];
-  for (const attribute of lazyAttributes) {
-    const value = img.getAttribute(attribute);
-    if (value && !isBlankPlaceholder(value)) return value;
-  }
-  return directCandidates[0] || '';
+  return resolveElementSource(img);
 }
 
 /**
@@ -127,15 +159,14 @@ function hasEligibleRect(element: Element): boolean {
  * @param element - Rendered element whose rectangle should be tested.
  * @param clientX - Horizontal viewport coordinate.
  * @param clientY - Vertical viewport coordinate.
- * @returns Whether the point falls within the element rectangle, including its edges.
+ * @returns Whether the point falls within the element rectangle.
  */
 export function surfaceContainsPoint(element: Element, clientX: number, clientY: number): boolean {
   const rect = element.getBoundingClientRect();
-  const TOLERANCE_PX = 3;
-  return clientX >= rect.left - TOLERANCE_PX &&
-         clientX <= rect.right + TOLERANCE_PX &&
-         clientY >= rect.top - TOLERANCE_PX &&
-         clientY <= rect.bottom + TOLERANCE_PX;
+  return clientX >= rect.left - POINTER_TOLERANCE_PX
+    && clientX <= rect.right + POINTER_TOLERANCE_PX
+    && clientY >= rect.top - POINTER_TOLERANCE_PX
+    && clientY <= rect.bottom + POINTER_TOLERANCE_PX;
 }
 
 /**
@@ -150,13 +181,19 @@ function isVisibleElement(element: Element): boolean {
 }
 
 /**
- * Extracts normalized URL values from a CSS background-image declaration.
+ * Extracts URL values from a CSS image declaration.
  *
- * @param backgroundImage - Computed or inline background-image value.
- * @returns Normalized image URLs found in the declaration.
+ * @param backgroundImage - Computed image declaration.
+ * @returns Absolute image URLs found in the declaration.
  */
-function getBackgroundUrls(backgroundImage: string): string[] {
-  return Array.from(backgroundImage.matchAll(/url\(["']?([^"')]+)["']?\)/g), (match) => normalizeMediaUrl(match[1]));
+export function getBackgroundUrls(backgroundImage: string): string[] {
+  return Array.from(backgroundImage.matchAll(CSS_IMAGE_URL), (match) => {
+    try {
+      return new URL(match[1], window.location.href).href;
+    } catch {
+      return match[1];
+    }
+  }).filter((url) => !isPlaceholderSource(url));
 }
 
 /**
@@ -176,7 +213,6 @@ function haveSimilarSize(first: DOMRect, second: DOMRect): boolean {
 
 /**
  * Finds a visible ancestor surface structurally associated with a hidden backing image.
- * Association requires either a matching background URL or approximately matching media geometry.
  *
  * @param img - Hidden backing image candidate.
  * @param srcUrl - Resolved backing image source.
@@ -187,15 +223,12 @@ function findAssociatedSurface(img: HTMLImageElement, srcUrl: string): HTMLEleme
   const imageRect = img.getBoundingClientRect();
   let ancestor = img.parentElement;
   let depth = 0;
-
   while (ancestor && depth < MAX_SURFACE_ANCESTOR_DEPTH) {
     const style = window.getComputedStyle(ancestor);
-    const backgroundMatches = getBackgroundUrls(style.backgroundImage).includes(normalizedSource);
+    const backgroundMatches = getBackgroundUrls(style.backgroundImage).some((url) => normalizeMediaUrl(url) === normalizedSource);
     const geometryMatches = imageRect.width > 0 && imageRect.height > 0
       && haveSimilarSize(imageRect, ancestor.getBoundingClientRect());
-    if (isVisibleElement(ancestor) && hasEligibleRect(ancestor) && (backgroundMatches || geometryMatches)) {
-      return ancestor;
-    }
+    if (isVisibleElement(ancestor) && hasEligibleRect(ancestor) && (backgroundMatches || geometryMatches)) return ancestor;
     ancestor = ancestor.parentElement;
     depth += 1;
   }
@@ -203,84 +236,136 @@ function findAssociatedSurface(img: HTMLImageElement, srcUrl: string): HTMLEleme
 }
 
 /**
+ * Resolves a document-tree anchor for CSS anchor positioning.
+ *
+ * @param surface - Actual visible media surface.
+ * @returns Surface, SVG container, or Shadow DOM host visible to Kites' overlay root.
+ */
+function resolveAnchorElement(surface: Element): HTMLElement | null {
+  let anchor: Element = surface instanceof SVGElement ? surface.ownerSVGElement || surface : surface;
+  let root = anchor.getRootNode();
+  while (root instanceof ShadowRoot) {
+    anchor = root.host;
+    root = anchor.getRootNode();
+  }
+  return anchor instanceof HTMLElement ? anchor : null;
+}
+
+/**
  * Converts an image element into a validated media target.
- * Ordinary visible images preserve their existing image-as-surface behavior; hidden backing images
- * require structural association with a visible ancestor surface.
  *
  * @param img - Candidate image element.
- * @returns Validated media target, or null when the image is unsupported.
+ * @returns Validated media target, or null when unsupported.
  */
 export function createMediaTarget(img: HTMLImageElement): MediaTarget | null {
   const srcUrl = resolveImageSource(img);
   if (!srcUrl) return null;
-
-  if (isVisibleElement(img) && hasEligibleRect(img)) {
-    return { imgElement: img, surfaceElement: img, srcUrl, hiddenBacking: false };
-  }
-
-  const surfaceElement = findAssociatedSurface(img, srcUrl);
-  return surfaceElement
-    ? { imgElement: img, surfaceElement, srcUrl, hiddenBacking: true }
-    : null;
+  const surfaceElement = isVisibleElement(img) && hasEligibleRect(img) ? img : findAssociatedSurface(img, srcUrl);
+  if (!surfaceElement) return null;
+  const anchorElement = resolveAnchorElement(surfaceElement);
+  return anchorElement ? {
+    kind: 'img',
+    imgElement: img,
+    sourceElement: img,
+    surfaceElement,
+    anchorElement,
+    srcUrl,
+    hiddenBacking: surfaceElement !== img,
+  } : null;
 }
 
 /**
- * Discovers document media targets and removes duplicates sharing one backing image or surface.
+ * Converts a CSS background or SVG image into a validated media target.
+ *
+ * @param element - Candidate rendered element.
+ * @returns Validated target, or null when no usable image exists.
+ */
+function createNonHtmlImageTarget(element: Element): MediaTarget | null {
+  if (!hasEligibleRect(element) || !isVisibleElement(element)) return null;
+  const isSvgImage = element instanceof SVGElement
+    && element.localName === 'image'
+    && element.namespaceURI === 'http://www.w3.org/2000/svg';
+  const sourceElement = element;
+  const surfaceElement = isSvgImage ? element.ownerSVGElement?.parentElement : element;
+  if (!(surfaceElement instanceof HTMLElement)) return null;
+  const srcUrl = isSvgImage
+    ? resolveElementSource(element)
+    : getBackgroundUrls(window.getComputedStyle(element).backgroundImage)[0]
+      || getBackgroundUrls(window.getComputedStyle(element, '::before').backgroundImage)[0]
+      || getBackgroundUrls(window.getComputedStyle(element, '::after').backgroundImage)[0]
+      || '';
+  const anchorElement = resolveAnchorElement(surfaceElement);
+  if (!srcUrl || !anchorElement) return null;
+  return {
+    kind: isSvgImage ? 'svg-image' : 'background',
+    sourceElement,
+    surfaceElement,
+    anchorElement,
+    srcUrl,
+    hiddenBacking: false,
+  };
+}
+
+/**
+ * Recursively yields normal DOM and open Shadow DOM roots.
+ *
+ * @param root - Root whose descendants should be inspected.
+ * @returns Every reachable query root.
+ */
+export function collectQueryRoots(root: ParentNode): ParentNode[] {
+  const roots: ParentNode[] = [root];
+  for (const element of Array.from(root.querySelectorAll('*'))) {
+    if (element.shadowRoot) roots.push(...collectQueryRoots(element.shadowRoot));
+  }
+  return roots;
+}
+
+/**
+ * Discovers document media targets and removes duplicates sharing one source or surface.
  *
  * @param root - Document or subtree to scan.
  * @returns Unique validated media targets.
  */
 export function discoverMediaTargets(root: ParentNode = document): MediaTarget[] {
-  const seenImages = new Set<HTMLImageElement>();
   const seenSurfaces = new Set<HTMLElement>();
   const targets: MediaTarget[] = [];
-
-  for (const img of Array.from(root.querySelectorAll('img'))) {
-    const target = createMediaTarget(img);
-    if (!target || seenImages.has(target.imgElement) || seenSurfaces.has(target.surfaceElement)) continue;
-    seenImages.add(target.imgElement);
-    seenSurfaces.add(target.surfaceElement);
-    targets.push(target);
+  for (const queryRoot of collectQueryRoots(root)) {
+    for (const element of Array.from(queryRoot.querySelectorAll('*'))) {
+      const target = element instanceof HTMLImageElement ? createMediaTarget(element) : createNonHtmlImageTarget(element);
+      if (!target || seenSurfaces.has(target.surfaceElement)) continue;
+      seenSurfaces.add(target.surfaceElement);
+      targets.push(target);
+    }
   }
   return targets;
 }
 
 /**
- * Resolves the best media target for a hover event using direct, composed-path, point-hit,
- * and wrapper-descendant candidates, preferring the largest eligible surface.
+ * Resolves hover media using composed paths, point hit-testing, descendants, and CSS backgrounds.
  *
  * @param event - Mouse event used for target and pointer information.
- * @returns Largest matching media target, or null when no supported media exists.
+ * @returns Largest matching media target, or null.
  */
 export function resolveHoverMediaTarget(event: MouseEvent): MediaTarget | null {
-  // Fast path: direct hover over an HTMLImageElement within surface bounds
-  if (event.target instanceof HTMLImageElement) {
-    const directTarget = createMediaTarget(event.target);
-    if (directTarget && surfaceContainsPoint(directTarget.surfaceElement, event.clientX, event.clientY)) {
-      return directTarget;
-    }
-  }
-
   const elements = new Set<Element>();
   if (event.target instanceof Element) elements.add(event.target);
-  for (const node of event.composedPath()) {
-    if (node instanceof Element) elements.add(node);
-  }
-  for (const element of document.elementsFromPoint?.(event.clientX, event.clientY) || []) {
-    elements.add(element);
-  }
+  for (const node of event.composedPath()) if (node instanceof Element) elements.add(node);
+  for (const element of document.elementsFromPoint?.(event.clientX, event.clientY) || []) elements.add(element);
 
-  const images = new Set<HTMLImageElement>();
+  const targets: MediaTarget[] = [];
   for (const element of elements) {
-    if (element instanceof HTMLImageElement) images.add(element);
-    for (const img of Array.from(element.querySelectorAll<HTMLImageElement>('img, picture img'))) {
-      images.add(img);
+    const directTarget = element instanceof HTMLImageElement
+      ? createMediaTarget(element)
+      : createNonHtmlImageTarget(element);
+    if (directTarget) targets.push(directTarget);
+    for (const child of Array.from(element.querySelectorAll(MEDIA_SELECTOR))) {
+      const childTarget = child instanceof HTMLImageElement ? createMediaTarget(child) : createNonHtmlImageTarget(child);
+      if (childTarget) targets.push(childTarget);
     }
   }
 
-  return Array.from(images)
-    .map(createMediaTarget)
-    .filter((target): target is MediaTarget => target !== null)
+  return targets
+    .filter((target, index) => targets.findIndex((candidate) => candidate.surfaceElement === target.surfaceElement) === index)
     .filter((target) => surfaceContainsPoint(target.surfaceElement, event.clientX, event.clientY))
     .sort((first, second) => {
       const firstRect = first.surfaceElement.getBoundingClientRect();

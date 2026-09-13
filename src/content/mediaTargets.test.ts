@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createMediaTarget,
   discoverMediaTargets,
+  getBackgroundUrls,
   reapplyMediaTargetStyles,
   resolveHoverMediaTarget,
   resolveImageSource,
@@ -63,6 +64,20 @@ describe('media target source resolution', () => {
     lazyWithPlaceholder.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
     lazyWithPlaceholder.setAttribute('data-src', 'https://i7.nhentai.net/galleries/123/1.jpg');
     expect(resolveImageSource(lazyWithPlaceholder)).toBe('https://i7.nhentai.net/galleries/123/1.jpg');
+
+    const customLazy = document.createElement('img');
+    customLazy.src = '/placeholder-1x1.gif';
+    customLazy.setAttribute('data-runner-src', '/custom-lazy.webp');
+    expect(resolveImageSource(customLazy)).toBe('/custom-lazy.webp');
+  });
+});
+
+describe('CSS background source resolution', () => {
+  it('extracts image URLs from gradient and multiple-background declarations', () => {
+    expect(getBackgroundUrls('linear-gradient(#0008, #0008), url("/page.webp")'))
+      .toEqual(['http://localhost:3000/page.webp']);
+    expect(getBackgroundUrls('url("https://cdn.example/a.webp"), url(https://cdn.example/b.webp)'))
+      .toEqual(['https://cdn.example/a.webp', 'https://cdn.example/b.webp']);
   });
 });
 
@@ -91,6 +106,36 @@ describe('media target discovery', () => {
 
     surface.style.backgroundImage = 'url("/different.jpg")';
     expect(createMediaTarget(img)).toBeNull();
+  });
+
+  it('discovers a CSS background without a backing image', () => {
+    const surface = document.createElement('div');
+    surface.style.backgroundImage = 'url("/background-page.webp")';
+    setRect(surface, LARGE_RECT);
+    document.body.append(surface);
+
+    expect(discoverMediaTargets()).toContainEqual(expect.objectContaining({
+      kind: 'background',
+      sourceElement: surface,
+      surfaceElement: surface,
+    }));
+  });
+
+  it('discovers images inside an open Shadow DOM and anchors to its host', () => {
+    const host = document.createElement('div');
+    setRect(host, LARGE_RECT);
+    const shadow = host.attachShadow({ mode: 'open' });
+    const image = document.createElement('img');
+    image.src = '/shadow-page.webp';
+    setRect(image, LARGE_RECT);
+    shadow.append(image);
+    document.body.append(host);
+
+    expect(discoverMediaTargets()).toContainEqual(expect.objectContaining({
+      imgElement: image,
+      surfaceElement: image,
+      anchorElement: host,
+    }));
   });
 
   it('deduplicates multiple backing images sharing one visible surface', () => {

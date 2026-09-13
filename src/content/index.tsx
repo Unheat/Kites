@@ -12,6 +12,7 @@ import {
   type CropDragHandle,
 } from './captureArea';
 import {
+  collectQueryRoots,
   discoverMediaTargets,
   normalizeMediaUrl,
   resolveHoverMediaTarget,
@@ -101,11 +102,11 @@ function getNormalizedBaseUrl(url: string): string {
  * @returns The assigned tracking ID.
  */
 function registerMediaTarget(target: MediaTarget): string {
-  const { imgElement, srcUrl } = target;
-  let kitesId = imgElement.getAttribute('data-kites-id');
+  const { sourceElement, srcUrl } = target;
+  let kitesId = sourceElement.getAttribute('data-kites-id');
   if (!kitesId) {
     kitesId = `kites-${Math.random().toString(36).substring(2, 11)}`;
-    imgElement.setAttribute('data-kites-id', kitesId);
+    sourceElement.setAttribute('data-kites-id', kitesId);
   }
   mediaTargetRegistry.set(srcUrl, target);
   const normalized = getNormalizedBaseUrl(srcUrl);
@@ -128,14 +129,14 @@ function registerMediaTarget(target: MediaTarget): string {
 function resolveTargetMedia(originalUrl: string): MediaTarget | null {
   // Tier 1: Check in-memory registry
   const registered = mediaTargetRegistry.get(originalUrl);
-  if (registered && document.contains(registered.imgElement) && document.contains(registered.surfaceElement)) {
+  if (registered && registered.sourceElement.isConnected && registered.surfaceElement.isConnected) {
     return registered;
   }
 
   const normalized = getNormalizedBaseUrl(originalUrl);
   if (normalized) {
     const normRegistered = mediaTargetRegistry.get(normalized);
-    if (normRegistered && document.contains(normRegistered.imgElement) && document.contains(normRegistered.surfaceElement)) {
+    if (normRegistered && normRegistered.sourceElement.isConnected && normRegistered.surfaceElement.isConnected) {
       return normRegistered;
     }
   }
@@ -147,7 +148,7 @@ function resolveTargetMedia(originalUrl: string): MediaTarget | null {
   if (exactMatch) return exactMatch;
 
   // Tier 3: Match on data-kites-orig-src attribute
-  const origAttrMatch = targets.find((target) => target.imgElement.getAttribute('data-kites-orig-src') === originalUrl);
+  const origAttrMatch = targets.find((target) => target.sourceElement.getAttribute('data-kites-orig-src') === originalUrl);
   if (origAttrMatch) return origAttrMatch;
 
   // Tier 4: Match on normalized base URL
@@ -329,35 +330,43 @@ function attachReversionShield(img: HTMLImageElement, safeUrl: string, surfaceEl
  * @param originalUrl - The original image URL for logging and attribution.
  */
 function replaceImageWithTranslation(target: MediaTarget, bakedBase64: string, originalUrl: string): void {
-  const { imgElement: targetImg, surfaceElement, hiddenBacking } = target;
-  const previousUrl = targetImg.getAttribute('data-kites-applied-src');
+  const { imgElement: targetImg, sourceElement, surfaceElement, hiddenBacking, kind } = target;
+  const previousUrl = sourceElement.getAttribute('data-kites-applied-src');
   const safeUrl = createSafeBlobUrlFromData(bakedBase64);
 
   runSelfMutation(() => {
-    sanitizeImageAttributes(targetImg);
-    targetImg.setAttribute('data-kites-applied-src', safeUrl);
-    targetImg.setAttribute('data-kites-translated', 'true');
-    targetImg.src = safeUrl;
-    targetImg.style.display = '';
-    targetImg.style.filter = 'none';
-    if (hiddenBacking) {
-      if (!targetImg.hasAttribute('data-kites-orig-style')) targetImg.setAttribute('data-kites-orig-style', targetImg.getAttribute('style') || '');
-      targetImg.setAttribute('data-kites-applied-opacity', REVEALED_BACKING_OPACITY);
-      targetImg.setAttribute('data-kites-applied-z-index', REVEALED_BACKING_Z_INDEX);
-      targetImg.setAttribute('data-kites-applied-pointer-events', REVEALED_BACKING_POINTER_EVENTS);
-      targetImg.style.opacity = REVEALED_BACKING_OPACITY;
-      targetImg.style.visibility = 'visible';
-      targetImg.style.zIndex = REVEALED_BACKING_Z_INDEX;
-      targetImg.style.pointerEvents = REVEALED_BACKING_POINTER_EVENTS;
+    sourceElement.setAttribute('data-kites-applied-src', safeUrl);
+    sourceElement.setAttribute('data-kites-translated', 'true');
+    if (targetImg) {
+      sanitizeImageAttributes(targetImg);
+      targetImg.src = safeUrl;
+      targetImg.style.display = '';
+      targetImg.style.filter = 'none';
+      if (hiddenBacking) {
+        if (!targetImg.hasAttribute('data-kites-orig-style')) targetImg.setAttribute('data-kites-orig-style', targetImg.getAttribute('style') || '');
+        targetImg.setAttribute('data-kites-applied-opacity', REVEALED_BACKING_OPACITY);
+        targetImg.setAttribute('data-kites-applied-z-index', REVEALED_BACKING_Z_INDEX);
+        targetImg.setAttribute('data-kites-applied-pointer-events', REVEALED_BACKING_POINTER_EVENTS);
+        targetImg.style.opacity = REVEALED_BACKING_OPACITY;
+        targetImg.style.visibility = 'visible';
+        targetImg.style.zIndex = REVEALED_BACKING_Z_INDEX;
+        targetImg.style.pointerEvents = REVEALED_BACKING_POINTER_EVENTS;
+      }
+      suppressParentBackgroundImage(targetImg, surfaceElement);
+      attachReversionShield(targetImg, safeUrl, surfaceElement);
+    } else if (kind === 'background') {
+      if (!surfaceElement.hasAttribute('data-kites-orig-bg')) surfaceElement.setAttribute('data-kites-orig-bg', surfaceElement.style.backgroundImage);
+      surfaceElement.style.backgroundImage = `url("${safeUrl}")`;
+    } else {
+      sourceElement.setAttribute('href', safeUrl);
+      sourceElement.setAttributeNS('http://www.w3.org/1999/xlink', 'href', safeUrl);
     }
-    suppressParentBackgroundImage(targetImg, surfaceElement);
   });
 
   if (previousUrl?.startsWith('blob:') && previousUrl !== safeUrl) {
     URL.revokeObjectURL(previousUrl);
     activeObjectUrls.delete(previousUrl);
   }
-  attachReversionShield(targetImg, safeUrl, surfaceElement);
   console.log(`[Content Script] Successfully replaced image for: ${originalUrl}`);
 }
 
@@ -371,11 +380,11 @@ type OverlayImage = MediaTarget & {
  * @param img - Image element receiving an anchor.
  * @returns The image's CSS anchor name.
  */
-function getAnchorName(img: HTMLElement): string {
-  let anchorName = img.style.getPropertyValue('anchor-name');
+function getAnchorName(element: HTMLElement): string {
+  let anchorName = element.style.getPropertyValue('anchor-name');
   if (!anchorName) {
     anchorName = `--kites-img-${Math.random().toString(36).substring(2, 11)}`;
-    img.style.setProperty('anchor-name', anchorName);
+    element.style.setProperty('anchor-name', anchorName);
   }
   return anchorName;
 }
@@ -1088,14 +1097,15 @@ function GlobalOverlay() {
     if (!isEnabled || !autoTranslate) return;
 
     const queuedUrls = new Set<string>();
-    const translatedImages = new WeakSet<HTMLImageElement>();
+    const translatedSources = new WeakSet<Element>();
     const observedSurfaces = new WeakSet<HTMLElement>();
     const targetsBySurface = new WeakMap<HTMLElement, MediaTarget>();
+    const observedMutationRoots = new WeakSet<Node>();
     let timeoutId: number | null = null;
 
     const queueVisibleImage = (target: MediaTarget) => {
-      const { imgElement, srcUrl } = target;
-      if (translatedImages.has(imgElement) || queuedUrls.has(srcUrl)) return;
+      const { sourceElement, srcUrl } = target;
+      if (translatedSources.has(sourceElement) || queuedUrls.has(srcUrl)) return;
       registerMediaTarget(target);
       queuedUrls.add(srcUrl);
       console.log('[Content Script] Auto-Translating visible image:', srcUrl);
@@ -1122,6 +1132,11 @@ function GlobalOverlay() {
           intersectionObserver.observe(target.surfaceElement);
         }
       }
+      for (const root of collectQueryRoots(document)) {
+        if (root === document || observedMutationRoots.has(root)) continue;
+        observedMutationRoots.add(root);
+        mutationObserver.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['src', 'srcset', 'style', 'href'] });
+      }
     };
 
     const scheduleObserve = () => {
@@ -1135,7 +1150,7 @@ function GlobalOverlay() {
         if (mutation.type === 'attributes' && mutation.target instanceof HTMLImageElement && mutation.attributeName === 'src') {
           const target = mutation.target;
           if (target.getAttribute('data-kites-translated') === 'true' || target.src.startsWith('blob:') || target.src.startsWith('data:')) {
-            translatedImages.add(target);
+            translatedSources.add(target);
           }
         }
       }
@@ -1143,7 +1158,7 @@ function GlobalOverlay() {
     });
 
     observeImages();
-    mutationObserver.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
+    mutationObserver.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['src', 'srcset', 'style', 'href'] });
     window.addEventListener('resize', scheduleObserve, { passive: true });
 
     return () => {
@@ -1161,10 +1176,16 @@ function GlobalOverlay() {
       return;
     }
 
+    const observedMutationRoots = new WeakSet<Node>();
     let timeoutId: number | null = null;
     const updateImages = () => {
       setConsistentImages(discoverMediaTargets()
-        .map((target) => ({ ...target, anchorName: getAnchorName(target.surfaceElement) })));
+        .map((target) => ({ ...target, anchorName: getAnchorName(target.anchorElement) })));
+      for (const root of collectQueryRoots(document)) {
+        if (root === document || observedMutationRoots.has(root)) continue;
+        observedMutationRoots.add(root);
+        observer.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['src', 'srcset', 'style', 'href'] });
+      }
     };
     const scheduleUpdate = () => {
       if (timeoutId !== null) window.clearTimeout(timeoutId);
