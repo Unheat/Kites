@@ -139,35 +139,51 @@ async function run() {
           height: auto;
           display: block;
         }
+
+        /* Highlight Ring around Button */
+        .hover-target-ring {
+          position: absolute;
+          top: 46px;
+          left: 91px;
+          width: 88px;
+          height: 88px;
+          border-radius: 50%;
+          border: 2px solid rgba(255, 45, 117, 0.8);
+          box-shadow: 0 0 25px rgba(255, 45, 117, 0.9), inset 0 0 15px rgba(255, 45, 117, 0.4);
+          pointer-events: none;
+          z-index: 8;
+        }
         
         /* Floating Pointer & Callout */
         .cursor-pointer {
           position: absolute;
-          top: 26px;
-          left: 64px;
+          top: 76px;
+          left: 128px;
           z-index: 10;
           display: flex;
-          align-items: center;
-          gap: 8px;
+          align-items: flex-start;
+          gap: 12px;
           pointer-events: none;
         }
         .cursor-icon {
-          width: 26px;
-          height: 26px;
-          filter: drop-shadow(0 3px 10px rgba(0, 0, 0, 0.9));
+          width: 28px;
+          height: 28px;
+          filter: drop-shadow(0 3px 12px rgba(0, 0, 0, 0.95));
+          transform: rotate(-5deg);
         }
         .tooltip-tag {
           background: #ff2d75;
           color: #fff;
-          font-size: 12px;
+          font-size: 13px;
           font-weight: 800;
           letter-spacing: 0.5px;
           text-transform: uppercase;
-          padding: 5px 12px;
+          padding: 6px 14px;
           border-radius: 8px;
-          box-shadow: 0 4px 18px rgba(255, 45, 117, 0.65);
+          box-shadow: 0 4px 20px rgba(255, 45, 117, 0.7);
           white-space: nowrap;
-          border: 1px solid rgba(255, 255, 255, 0.3);
+          border: 1px solid rgba(255, 255, 255, 0.35);
+          margin-top: 10px;
         }
 
         .preview-footer {
@@ -260,6 +276,8 @@ async function run() {
           <div class="image-stage">
             <img src="${hoverImg}" />
             
+            <div class="hover-target-ring"></div>
+
             <div class="cursor-pointer">
               <svg class="cursor-icon" viewBox="0 0 24 24" fill="#ffffff" stroke="#000000" stroke-width="1.8">
                 <path d="M3 3l7 18 3-7 7-3L3 3z"/>
