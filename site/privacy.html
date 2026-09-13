@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Privacy Policy — Kites: Local-First Manga Translator</title>
+  <meta name="description" content="Privacy Policy for Kites: Local-First Manga Translator Chrome Extension (pcaokchkdgnmfgjkljfpghlfohbdjcmj)." />
+  <link rel="icon" type="image/svg+xml" href="assets/icon.svg" />
+  <style>
+    :root {
+      --bg: #090d16;
+      --card-bg: #131b2e;
+      --text: #f1f5f9;
+      --text-muted: #94a3b8;
+      --accent: #38bdf8;
+      --border: #222f4c;
+      --tag-bg: rgba(56, 189, 248, 0.12);
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #f8fafc;
+        --card-bg: #ffffff;
+        --text: #0f172a;
+        --text-muted: #475569;
+        --accent: #0284c7;
+        --border: #e2e8f0;
+        --tag-bg: rgba(2, 132, 199, 0.1);
+      }
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      line-height: 1.65;
+      padding: 40px 20px;
+    }
+    .container {
+      max-width: 840px;
+      margin: 0 auto;
+      background-color: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 48px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+    }
+    header {
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 24px;
+      margin-bottom: 32px;
+    }
+    .badge {
+      display: inline-block;
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--accent);
+      background-color: var(--tag-bg);
+      border: 1px solid var(--accent);
+      padding: 4px 12px;
+      border-radius: 9999px;
+      margin-bottom: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    h1 {
+      font-size: 32px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      margin-bottom: 8px;
+    }
+    .meta-box {
+      background: rgba(0, 0, 0, 0.2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 18px;
+      font-size: 14px;
+      color: var(--text-muted);
+      line-height: 1.6;
+      margin-top: 12px;
+    }
+    .meta-box strong {
+      color: var(--text);
+    }
+    h2 {
+      font-size: 20px;
+      font-weight: 700;
+      margin-top: 32px;
+      margin-bottom: 12px;
+      color: var(--accent);
+    }
+    h3 {
+      font-size: 16px;
+      font-weight: 700;
+      margin-top: 20px;
+      margin-bottom: 8px;
+      color: var(--text);
+    }
+    p, ul {
+      margin-bottom: 16px;
+      font-size: 15px;
+    }
+    ul {
+      padding-left: 24px;
+    }
+    li {
+      margin-bottom: 8px;
+    }
+    code {
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      font-size: 13px;
+      background: var(--tag-bg);
+      color: var(--accent);
+      padding: 2px 6px;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+    }
+    a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+    a:hover {
+      text-decoration: underline;
+    }
+    .nav-back {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--accent);
+      margin-bottom: 20px;
+      text-decoration: none;
+    }
+    footer {
+      border-top: 1px solid var(--border);
+      margin-top: 40px;
+      padding-top: 20px;
+      font-size: 13px;
+      color: var(--text-muted);
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <a href="/" class="nav-back">← Back to Kites Homepage</a>
+    <header>
+      <div class="badge">Official Legal Document</div>
+      <h1>Privacy Policy</h1>
+      <div class="meta-box">
+        <strong>Application Name:</strong> Kites: Local-First Manga Translator<br />
+        <strong>Extension ID:</strong> <code>pcaokchkdgnmfgjkljfpghlfohbdjcmj</code><br />
+        <strong>Effective Date:</strong> September 13, 2026<br />
+        <strong>Developer Contact:</strong> <a href="mailto:andangtruong085@gmail.com">andangtruong085@gmail.com</a>
+      </div>
+    </header>
+
+    <main>
+      <h2>1. Overview & Core Philosophy</h2>
+      <p>
+        <strong>Kites: Local-First Manga Translator</strong> ("we", "our", or "the extension") is an open-source browser extension designed to translate comic and manga images directly inside your web browser. We operate under a strict <strong>local-first, privacy-by-design</strong> architecture.
+      </p>
+      <p>
+        The core of Kites runs client-side using hardware-accelerated WebGPU and WebAssembly. Your images, reading history, and browsing data remain entirely under your control and never leave your local device.
+      </p>
+
+      <h2>2. What User Data We Handle</h2>
+      
+      <h3>A. Comic and Manga Images (100% Local)</h3>
+      <p>
+        Kites performs Optical Character Recognition (PaddleOCR) and AI background inpainting (LaMa Manga / AOT-GAN) <strong>entirely inside your browser's offscreen sandbox via WebGPU/WASM</strong>. 
+      </p>
+      <ul>
+        <li><strong>No Image Uploads:</strong> Original comic pages, background artwork, and cropped image frames are processed in local memory and stored only in your browser's local IndexedDB. They are <strong>never uploaded</strong> to any remote server or external image repository.</li>
+        <li><strong>Automatic 7-Day Pruning:</strong> All locally cached image blobs and workspace states in IndexedDB are automatically deleted after 7 days to preserve device disk space.</li>
+      </ul>
+
+      <h3>B. Extracted Text for Translation</h3>
+      <p>
+        When you choose to translate a comic panel, only the extracted text dialogue strings (without image data) are sent to your configured translation provider:
+      </p>
+      <ul>
+        <li><strong>Local WebGPU (WebLLM):</strong> 100% on-device. No network requests are made.</li>
+        <li><strong>Google Translate (Default):</strong> Extracted text strings are sent directly to Google Translate endpoints to retrieve translated strings.</li>
+        <li><strong>Kites Cloud Shared Pool:</strong> Text strings are sent over encrypted HTTPS to our Cloudflare Worker backend to route through community AI inference models. No user images or reading history are stored on the server.</li>
+        <li><strong>Custom APIs (BYOK):</strong> Text is sent directly to your configured provider (OpenAI, Anthropic Claude, Google Gemini) using your private API key.</li>
+      </ul>
+
+      <h3>C. Authentication Information (Optional Google Sign-in)</h3>
+      <p>
+        Using Kites is completely free and requires no account. If you optionally choose to access the free community <strong>Kites Cloud Shared Pool</strong>, we use <code>chrome.identity</code> (Google OAuth 2.0) to authenticate your Google account.
+      </p>
+      <ul>
+        <li>We only receive a verified public identifier (<code>sub</code>), email address, and display name solely to enforce daily rate-limiting quotas and prevent service abuse.</li>
+        <li>We <strong>never</strong> access your Google password, contacts, Google Drive files, search history, or any other personal Google account data.</li>
+      </ul>
+
+      <h2>3. Chrome Extension Permissions & Justifications</h2>
+      <p>Kites declares only the minimum necessary permissions in <code>manifest.json</code>:</p>
+      <ul>
+        <li><code>activeTab</code> and <code>&lt;all_urls&gt;</code>: Required to discover comic <code>&lt;img&gt;</code> elements across arbitrary reading sites (such as X/Twitter, Pixiv, and comic hosts) and render translated text directly over the artwork without breaking page structure.</li>
+        <li><code>contextMenus</code>: Provides a convenient right-click "Translate Image" option on web images.</li>
+        <li><code>offscreen</code>: Runs memory-intensive neural network models (WebGPU and WebAssembly) inside an isolated offscreen document, preventing browser service worker timeouts.</li>
+        <li><code>storage</code>: Stores your language preferences, engine choices, and private API keys locally on your device via <code>chrome.storage.local</code>.</li>
+        <li><code>identity</code>: Used solely for optional Google OAuth authentication to access the community Cloudflare translation pool.</li>
+      </ul>
+
+      <h2>4. Data Sharing, Sale, and Disclosure</h2>
+      <ul>
+        <li><strong>No Sale of Personal Data:</strong> We do not sell, rent, monetize, or trade any user data, personal information, reading history, or translations to third parties, advertisers, or data brokers.</li>
+        <li><strong>No Analytics or Tracking:</strong> Kites contains zero analytics SDKs, tracking pixels, behavioral cookies, or background telemetry beacons.</li>
+        <li><strong>Compliance with Google Policies:</strong> Kites adheres to the <a href="https://developer.chrome.com/docs/webstore/program-policies/" target="_blank" rel="noopener">Chrome Web Store Developer Program Policies</a>, including the Limited Use and User Data Privacy requirements.</li>
+      </ul>
+
+      <h2>5. Security of Your Information</h2>
+      <p>
+        All communications with external translation APIs and the Cloudflare Shared Pool are conducted over secure HTTPS with TLS 1.3 encryption. User settings and custom API keys reside exclusively in encrypted local browser storage (<code>chrome.storage.local</code>).
+      </p>
+
+      <h2>6. Open Source Verification</h2>
+      <p>
+        Kites is licensed under the <strong>GNU General Public License v3.0 (GPLv3)</strong>. Our complete codebase, including all background scripts, network handlers, and dependencies, is publicly available and auditable on GitHub:
+      </p>
+      <p>
+        <a href="https://github.com/Unheat/Kites" target="_blank" rel="noopener">https://github.com/Unheat/Kites</a>
+      </p>
+
+      <h2>7. Contact & Inquiries</h2>
+      <p>
+        If you have questions, concerns, or requests regarding this Privacy Policy, please contact the developer directly:
+      </p>
+      <ul>
+        <li><strong>Developer Email:</strong> <a href="mailto:andangtruong085@gmail.com">andangtruong085@gmail.com</a></li>
+        <li><strong>GitHub Issue Tracker:</strong> <a href="https://github.com/Unheat/Kites/issues" target="_blank" rel="noopener">https://github.com/Unheat/Kites/issues</a></li>
+      </ul>
+    </main>
+
+    <footer>
+      &copy; 2026 Kites: Local-First Manga Translator. All rights reserved.
+    </footer>
+  </div>
+</body>
+</html>

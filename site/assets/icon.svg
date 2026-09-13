@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-labelledby="kites-title kites-desc">
+  <title id="kites-title">Kites</title>
+  <desc id="kites-desc">A faceted red-rose kite with bold black spars and a flowing ribbon on a black squircle.</desc>
+  <defs>
+    <linearGradient id="kites-light" x1="72" y1="17" x2="63" y2="55" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FF6584"/>
+      <stop offset="1" stop-color="#FF2A6D"/>
+    </linearGradient>
+    <linearGradient id="kites-fold" x1="99" y1="46" x2="62" y2="91" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#D9381E"/>
+      <stop offset="1" stop-color="#BE123C"/>
+    </linearGradient>
+    <linearGradient id="kites-ribbon" x1="65" y1="89" x2="82" y2="116" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FF2A6D"/>
+      <stop offset=".55" stop-color="#FF2A6D"/>
+      <stop offset="1" stop-color="#000000"/>
+    </linearGradient>
+  </defs>
+
+  <rect id="background" width="128" height="128" rx="28" fill="#000000"/>
+
+  <path id="ribbon" fill="url(#kites-ribbon)" d="M63 86 67 88C60 99 49 97 49 103C49 111 77 100 82 109C84 113 81 117 77 119C80 115 80 112 77 111C69 107 46 117 44 106C42 96 59 98 63 86Z"/>
+
+  <g id="kite-body" stroke="none">
+    <path id="upper-left-facet" fill="url(#kites-light)" d="M72 17 65 53 28 56Z"/>
+    <path id="upper-right-facet" fill="#FF2A6D" d="M72 17 106 48 65 53Z"/>
+    <path id="right-fold-facet" fill="url(#kites-fold)" d="M106 48 65 91 65 53Z"/>
+    <path id="lower-shadow-facet" fill="#881337" d="M28 56 65 91 65 53Z"/>
+    <path id="lower-rose-facet" fill="#BE123C" d="M28 56 50 64 65 91Z"/>
+    <path id="top-highlight-facet" fill="#FF6584" d="M72 17 83 39 65 53Z"/>
+  </g>
+
+  <g id="structural-spars" fill="none" stroke="#000000" stroke-width="2.75" stroke-linecap="butt" stroke-linejoin="miter">
+    <path id="spine" d="M72 17 65 53 65 91"/>
+    <path id="crossbar" d="M28 56 65 53 106 48"/>
+  </g>
+</svg>

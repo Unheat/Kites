@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kites — Read Any Manga in Your Language Directly in Browser</title>
+  <meta name="description" content="100% local-first in-browser manga and comic translator. Powered by WebGPU AI inpainting, PaddleOCR, and authentic comic typography with zero servers." />
+  <link rel="icon" type="image/svg+xml" href="assets/icon.svg" />
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <div class="ambient-glow"></div>
+
+  <!-- Sticky Navbar -->
+  <header>
+    <div class="container nav-wrapper">
+      <a href="#" class="brand-link">
+        <img src="assets/icon.svg" alt="Kites Logo" class="brand-logo" />
+        <span class="brand-title">Kites</span>
+      </a>
+      <nav class="nav-links">
+        <a href="#comparisons" class="nav-link">Showcase</a>
+        <a href="#ui-showcase" class="nav-link">Features & UI</a>
+        <a href="#architecture" class="nav-link">Architecture</a>
+        <a href="https://github.com/Unheat/Kites" target="_blank" rel="noopener" class="nav-link">GitHub ⭐</a>
+        <a href="/privacy" class="nav-link">Privacy Policy</a>
+        <a href="https://github.com/Unheat/Kites/releases/latest" class="btn btn-primary" target="_blank" rel="noopener">
+          Get Kites (Free)
+        </a>
+      </nav>
+    </div>
+  </header>
+
+  <!-- Hero Section -->
+  <section class="hero-section">
+    <div class="container">
+      <div class="hero-pill">
+        ⚡ 100% Local-First • WebGPU Accelerated • Zero Cloud Paywalls
+      </div>
+      <h1 class="hero-headline">
+        Read Any Manga in Your Language.<br />Directly in Your Browser.
+      </h1>
+      <p class="hero-subtitle">
+        Zero Python. Zero servers. Kites detects text balloons, cleans foreign lettering with AI inpainting, and typesets authentic comic dialogue right inside the artwork.
+      </p>
+      <div class="hero-actions">
+        <a href="https://github.com/Unheat/Kites/releases/latest" class="btn btn-primary" target="_blank" rel="noopener">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Download v1.0.3 Extension
+        </a>
+        <a href="https://github.com/Unheat/Kites" class="btn btn-secondary" target="_blank" rel="noopener">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+          Source Code on GitHub
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- 1. IMAGE COMPARE FIRST -->
+  <section id="comparisons" class="section">
+    <div class="container">
+      <div class="section-header">
+        <span class="section-tag">Visual Proof</span>
+        <h2 class="section-title">See It in Action: Raw Scan vs. Kites Translation</h2>
+        <p class="section-subtitle">
+          Experience clean polygon inpainting with zero blurred boxes, balanced line-breaks, and authentic comic lettering.
+        </p>
+      </div>
+
+      <div class="comparisons-grid">
+        <!-- Comparison Pair 1: Japanese -> English (Interactive Before/After Slider) -->
+        <div class="compare-box">
+          <div class="compare-badge-bar">
+            <span class="compare-lang-tag">Japanese ➔ English (Interactive Slider)</span>
+            <span class="compare-caption">Story: 佐藤さんは知っていた by <a href="https://x.com/09ra_19ra" target="_blank" rel="noopener">@09ra_19ra</a></span>
+          </div>
+          
+          <div class="slider-container" style="--slider-pos: 50%;">
+            <!-- Base: Raw Scan -->
+            <img src="assets/demo2-input.jpeg" alt="Original Japanese Scan" class="slider-img" />
+            
+            <!-- Overlay: Translated -->
+            <div class="slider-overlay">
+              <img src="assets/demo2-result.png" alt="Kites English Translation" class="slider-img" />
+            </div>
+
+            <!-- Draggable Handle -->
+            <div class="slider-handle-line">
+              <div class="slider-handle-circle">◀ ▶</div>
+            </div>
+
+            <!-- Labels -->
+            <span class="slider-label label-left">Kites Translated</span>
+            <span class="slider-label label-right">Raw Japanese</span>
+
+            <!-- Range input for drag interaction -->
+            <input type="range" min="0" max="100" value="50" class="slider-range-input" aria-label="Before after comparison slider" />
+          </div>
+          <p style="text-align: center; margin-top: 14px; font-size: 13px; color: var(--text-muted);">
+            👈 Drag slider to reveal AI inpainting & typography in real-time 👉
+          </p>
+        </div>
+
+        <!-- Comparison Pair 2: Japanese -> Vietnamese (Side-by-Side 50/50) -->
+        <div class="compare-box">
+          <div class="compare-badge-bar">
+            <span class="compare-lang-tag">Japanese ➔ Vietnamese</span>
+            <span class="compare-caption">Source: <a href="https://www.pixiv.net/en/artworks/145272482" target="_blank" rel="noopener">Pixiv #145272482</a></span>
+          </div>
+
+          <div class="side-compare-pair">
+            <div class="side-compare-col">
+              <span class="side-compare-tag" style="background:#334155; color:#cbd5e1;">RAW SCAN</span>
+              <img src="assets/demo7-input.jpg" alt="Original Japanese Manga" />
+            </div>
+            <div class="side-compare-col">
+              <span class="side-compare-tag" style="background: linear-gradient(135deg, #059669, #10b981); color:#fff;">VIETNAMESE</span>
+              <img src="assets/demo7-result.png" alt="Kites Vietnamese Translation" />
+            </div>
+          </div>
+          <p style="text-align: center; margin-top: 14px; font-size: 13px; color: var(--text-muted);">
+            No white squares. Erases strictly inside character strokes.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2. UI SHOWCASE NEXT (Hover Button ON TOP) -->
+  <section id="ui-showcase" class="section">
+    <div class="container">
+      <div class="section-header">
+        <span class="section-tag">Intuitive Experience</span>
+        <h2 class="section-title">Designed for Frictionless Reading</h2>
+        <p class="section-subtitle">
+          From subtle in-page hover triggers to an interactive full-screen studio editor.
+        </p>
+      </div>
+
+      <!-- ⭐️ TOP OF UI: In-Page Hover Button Feature -->
+      <div class="hover-spotlight">
+        <div>
+          <div class="hover-lead-badge">⭐️ In-Page Hover Button</div>
+          <h3 class="hover-spotlight-title">Instant In-Place Translation Without Clunky Popups</h3>
+          <p class="hover-spotlight-desc">
+            Hover over any comic panel on Twitter/X, Pixiv, or manga reader sites. An unobtrusive floating translation button appears seamlessly using modern CSS Anchor Positioning. Click it, and the panel translates right inside the artwork.
+          </p>
+
+          <div class="modes-pills">
+            <div class="mode-pill">
+              <div class="mode-pill-title">🖱️ Hover Button</div>
+              <div class="mode-pill-sub">Floating badge appears on hovered images with zero page interference.</div>
+            </div>
+            <div class="mode-pill">
+              <div class="mode-pill-title">📌 Persistent Pins</div>
+              <div class="mode-pill-sub">Keep actionable translate pins on all comic images for quick reading.</div>
+            </div>
+            <div class="mode-pill">
+              <div class="mode-pill-title">🚀 Auto-Translate</div>
+              <div class="mode-pill-sub">Viewport observer queues and translates chapters as you scroll.</div>
+            </div>
+            <div class="mode-pill">
+              <div class="mode-pill-title">🎯 Right-Click Menu</div>
+              <div class="mode-pill-sub">Right-click any image on the web and select "Translate Image".</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="hover-visual-wrap">
+          <img src="assets/hover-button.jpg" alt="Kites In-Page Hover Button" />
+        </div>
+      </div>
+
+      <!-- Next in UI: Extension Popup & Settings Side-by-Side -->
+      <div class="extension-panels-row">
+        <div class="panel-card">
+          <div class="panel-card-img-wrap">
+            <img src="assets/main-panel.jpg" alt="Kites Quick Control Popup" />
+          </div>
+          <h4 class="panel-title">Quick Control Popup</h4>
+          <p class="panel-desc">Switch target languages, toggle reading modes, or trigger on-demand viewport translations in one click.</p>
+        </div>
+
+        <div class="panel-card">
+          <div class="panel-card-img-wrap">
+            <img src="assets/setting-panel.jpg" alt="Kites Deep Settings Panel" />
+          </div>
+          <h4 class="panel-title">Deep Engine Presets & Settings</h4>
+          <p class="panel-desc">Configure PaddleOCR models (v3–v6), inpainting algorithms (LaMa / AOT-GAN), WebGPU acceleration, and custom API keys.</p>
+        </div>
+      </div>
+
+      <!-- Then: Kites Studio Interactive Canvas Editor -->
+      <div class="studio-showcase">
+        <div class="studio-header">
+          <div>
+            <span class="section-tag" style="color: var(--accent-indigo);">Interactive Post-Editor</span>
+            <h3 style="font-size: 26px; font-weight: 800;">Kites Studio: Full Creative Control</h3>
+            <p style="font-size: 14px; color: var(--text-muted);">
+              Inspect clean background plates, resize speech balloons with 8-point handles, and export 1:1 lossless PNGs.
+            </p>
+          </div>
+          <div>
+            <span class="btn btn-secondary" style="pointer-events: none; font-size: 12px; padding: 6px 14px;">
+              Triple-View Inspection • 8-Point Bounding Boxes • 1:1 PNG Export
+            </span>
+          </div>
+        </div>
+
+        <div class="studio-window-frame">
+          <div class="studio-title-bar">
+            <span class="window-dot dot-1"></span>
+            <span class="window-dot dot-2"></span>
+            <span class="window-dot dot-3"></span>
+            <span class="window-text">Kites Studio Editor — Live Interactive Workspace</span>
+          </div>
+          <img src="assets/studio-editor.jpg" alt="Kites Studio Full-Screen Editor" />
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. Local AI & WebGPU Architecture -->
+  <section id="architecture" class="section">
+    <div class="container">
+      <div class="section-header">
+        <span class="section-tag">Under the Hood</span>
+        <h2 class="section-title">Built with Cutting-Edge Client-Side AI</h2>
+        <p class="section-subtitle">
+          Kites eliminates heavy Python dependencies and expensive cloud servers by running optimized neural networks directly in Chromium via WebGPU.
+        </p>
+      </div>
+
+      <div class="features-grid">
+        <div class="feature-card">
+          <span class="feature-icon">⚡</span>
+          <h4 class="feature-title">WebGPU Hardware Acceleration</h4>
+          <p class="feature-desc">Runs ONNX Runtime Web directly on your graphics card with seamless WASM fallback. No local CUDA or Python installation needed.</p>
+        </div>
+
+        <div class="feature-card">
+          <span class="feature-icon">📐</span>
+          <h4 class="feature-title">Kruskal-MST Spatial Clustering</h4>
+          <p class="feature-desc">Reconstructs reading order and merges fragmented text lines into unified dialogue balloons using graph-theoretic minimum spanning trees.</p>
+        </div>
+
+        <div class="feature-card">
+          <span class="feature-icon">🎨</span>
+          <h4 class="feature-title">Dynamic 64px Patch Inpainting</h4>
+          <p class="feature-desc">LaMa Manga and AOT-GAN neural inpainters operate on localized dynamic-bucketed crops at 1:1 scale, avoiding ugly gray blur boxes.</p>
+        </div>
+
+        <div class="feature-card">
+          <span class="feature-icon">🔀</span>
+          <h4 class="feature-title">Smart Translation Waterfall</h4>
+          <p class="feature-desc">Automatic failover across on-device WebLLM, our zero-cost Cloudflare community pool, Google Translate, or your private API keys.</p>
+        </div>
+
+        <div class="feature-card">
+          <span class="feature-icon">🔒</span>
+          <h4 class="feature-title">100% Private & Local-First</h4>
+          <p class="feature-desc">Your images never touch our servers. All OCR detections, clean backgrounds, and translations are stored locally in IndexedDB with 7-day TTL pruning.</p>
+        </div>
+
+        <div class="feature-card">
+          <span class="feature-icon">📖</span>
+          <h4 class="feature-title">100% Free & Open Source</h4>
+          <p class="feature-desc">Licensed under GPLv3. Auditable source code, zero hidden analytics, zero telemetry beacons, and zero monthly subscriptions.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer with Prominent Privacy Policy Link -->
+  <footer>
+    <div class="container">
+      <div class="footer-top">
+        <div class="footer-brand">
+          <img src="assets/icon.svg" alt="Kites Logo" width="28" height="28" />
+          <span>Kites</span>
+        </div>
+        <div class="footer-links">
+          <a href="/privacy" class="footer-link footer-privacy-highlight">Privacy Policy</a>
+          <a href="https://github.com/Unheat/Kites" target="_blank" rel="noopener" class="footer-link">GitHub</a>
+          <a href="https://github.com/Unheat/Kites/releases/latest" target="_blank" rel="noopener" class="footer-link">Releases</a>
+          <a href="https://github.com/Unheat/Kites/blob/main/docs/workflow.html" target="_blank" rel="noopener" class="footer-link">Pipeline Map</a>
+          <a href="https://github.com/Unheat/Kites/issues" target="_blank" rel="noopener" class="footer-link">Support & Issues</a>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        <p>&copy; 2026 Kites: Local-First Manga Translator. Licensed under GNU GPLv3.</p>
+        <p style="margin-top: 6px;">Built with ❤️ for manga, comic, and webtoon enthusiasts worldwide.</p>
+      </div>
+    </div>
+  </footer>
+
+  <script src="js/main.js"></script>
+</body>
+</html>
