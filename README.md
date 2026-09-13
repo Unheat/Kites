@@ -76,6 +76,21 @@ Traditional manga translators require installing complex Python scripts, gigabyt
 
 ---
 
+## 🖱️ Instant In-Place Translation
+
+Hover over any comic panel on Twitter/X, Pixiv, or manga sites. An unobtrusive floating badge appears using CSS Anchor Positioning—click it to translate dialogue directly inside the artwork with zero copy-pasting.
+
+<div align="center">
+  <img src="./README_images/UI-feature/hover-inplace-preview.png" alt="Kites In-Page Hover Translation Button" width="620px" />
+</div>
+
+- 🖱️ **Hover:** Translate instantly by hovering over any comic panel.
+- 📌 **Persistent:** Keep translate badges visible on all comic images.
+- 🚀 **Auto-Translate:** Automatically translates new panels as you scroll down the page.
+- 🎯 **Right Click:** Translate any image on the web via the browser context menu.
+
+---
+
 ## 🛠️ Built-in Kites Studio
 
 Need to polish a scanlation or adjust phrasing? Open the full-screen **Kites Studio** straight from the extension.
@@ -89,9 +104,9 @@ Need to polish a scanlation or adjust phrasing? Open the full-screen **Kites Stu
 
 ---
 
-## 🎛️ Read Your Way
+## 🎛️ Extension Controls & Presets
 
-Choose how Kites activates while browsing your favorite comic sites:
+Customize target languages, neural OCR models, and inpainting algorithms from the clean popup:
 
 <div align="center">
 <table>
@@ -109,11 +124,6 @@ Choose how Kites activates while browsing your favorite comic sites:
   </tr>
 </table>
 </div>
-
-- 🖱️ **Hover:** Translate instantly by hovering over any comic panel.
-- 📌 **Persistent:** Keep translate badges visible on all comic images.
-- 🚀 **Auto-Translate:** Automatically translates new panels as you scroll down the page.
-- 🎯 **Right Click:** Translate any image on the web via the browser context menu.
 
 ---
 
