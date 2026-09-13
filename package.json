@@ -10,6 +10,7 @@
     "copy-wasm": "node scripts/copy-wasm.mjs",
     "build": "npm run copy-wasm && tsc -b && vite build",
     "package": "npm run build && cd dist && zip -r -FS ../kites-v$npm_package_version.zip . -x \"*.DS_Store\" && cd ..",
+    "deploy:site": "mkdir -p site/pipeline && cp docs/workflow.html site/pipeline/index.html && npx wrangler pages deploy site --project-name kites-translator --branch main --commit-dirty=true",
     "build:dev": "npm run copy-wasm && tsc -b && vite build --mode development",
     "lint": "oxlint",
     "preview": "vite preview",
