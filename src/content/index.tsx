@@ -1028,11 +1028,23 @@ function GlobalOverlay() {
     };
     loadSettings();
     const handleStorageChange = (changes: { [key: string]: chrome.storage.StorageChange }, area: string) => {
-      if (area === 'local' && changes.popupState) loadSettings();
+      if (area !== 'local' || !changes.popupState?.newValue) return;
+      const state = changes.popupState.newValue as PopupState;
+      setIsEnabled(state.isExtensionEnabled ?? true);
+      setMode(state.manualMode || 'hover');
+      setAutoTranslate(state.isAuto || false);
     };
     chrome.storage.onChanged.addListener(handleStorageChange);
     return () => chrome.storage.onChanged.removeListener(handleStorageChange);
   }, []);
+
+  // Remove every manual control immediately when the extension is disabled.
+  useEffect(() => {
+    if (isEnabled) return;
+    setActiveImg(null);
+    setConsistentImages([]);
+    setTranslatingUrl(null);
+  }, [isEnabled]);
 
   // Receive terminal job events, restore the image, and allow Hover mode to disappear again.
   useEffect(() => {
