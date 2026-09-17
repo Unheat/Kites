@@ -141,7 +141,7 @@ Customize target languages, neural OCR models, and inpainting algorithms from th
 
 ### Option 1: Quick Install (Pre-Built Zip — Zero Terminal Required)
 
-1. Download **[`kites-v1.0.5.zip`](https://github.com/Unheat/Kites/releases/latest)** from the latest GitHub Release.
+1. Download **[`kites-v1.0.5.1.zip`](https://github.com/Unheat/Kites/releases/latest)** from the latest GitHub Release.
 2. Unzip the downloaded `.zip` file into a folder on your computer.
 3. In Chrome, open `chrome://extensions/`.
 4. Enable **Developer mode** (toggle in the top-right corner).
