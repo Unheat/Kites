@@ -108,6 +108,15 @@ header {
   color: var(--text-primary);
 }
 
+@media (max-width: 860px) {
+  .nav-links .nav-link {
+    display: none;
+  }
+  .nav-links {
+    gap: 12px;
+  }
+}
+
 .btn {
   display: inline-flex;
   align-items: center;
@@ -143,6 +152,122 @@ header {
   background: rgba(255, 255, 255, 0.12);
   border-color: rgba(255, 255, 255, 0.2);
   transform: translateY(-2px);
+}
+
+/* Navigation CTA */
+.btn-nav-cta {
+  padding: 8px 18px;
+  font-size: 13px;
+  background: linear-gradient(135deg, #2563eb 0%, #0284c7 100%);
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35);
+}
+
+.nav-chrome-svg {
+  flex-shrink: 0;
+}
+
+/* Chrome Web Store Hero Button */
+.btn-store-hero {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 20px 8px 14px;
+  border-radius: 9999px;
+  text-decoration: none;
+  background: linear-gradient(135deg, #1e40af 0%, #0284c7 60%, #38bdf8 100%);
+  color: #fff;
+  box-shadow: 0 8px 24px -4px rgba(2, 132, 199, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.2) inset;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  cursor: pointer;
+  border: none;
+}
+
+.btn-store-hero:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 32px -4px rgba(2, 132, 199, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.3) inset;
+  color: #fff;
+}
+
+.btn-store-icon-wrap {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+}
+
+.chrome-store-svg {
+  display: block;
+}
+
+.btn-store-copy {
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+  line-height: 1.15;
+}
+
+.btn-store-sub {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  opacity: 0.85;
+}
+
+.btn-store-main {
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: -0.2px;
+}
+
+.btn-store-free-badge {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  padding: 3px 8px;
+  border-radius: 9999px;
+  margin-left: 2px;
+}
+
+.btn-hero-secondary {
+  padding: 12px 20px;
+}
+
+/* Hero Trust Row */
+.hero-trust-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+
+.trust-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.trust-badge svg {
+  color: var(--accent-sky);
+  flex-shrink: 0;
+}
+
+.trust-sep {
+  color: rgba(255, 255, 255, 0.18);
+  font-size: 12px;
 }
 
 /* Hero Section */
@@ -727,4 +852,215 @@ footer {
   color: #64748b;
   border-top: 1px solid rgba(255, 255, 255, 0.05);
   padding-top: 24px;
+}
+
+/* Install & Get Started Section */
+.install-section {
+  background: radial-gradient(ellipse at center top, rgba(30, 41, 70, 0.4) 0%, transparent 70%);
+}
+
+.install-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 28px;
+  align-items: stretch;
+}
+
+@media (min-width: 992px) {
+  .install-grid {
+    grid-template-columns: 1.25fr 1fr 1fr;
+  }
+}
+
+.install-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-card);
+  border-radius: var(--radius-xl);
+  padding: 32px 28px;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.25s, box-shadow 0.25s;
+}
+
+.install-card:hover {
+  transform: translateY(-4px);
+  border-color: var(--border-card-hover);
+  box-shadow: 0 16px 36px -8px rgba(0, 0, 0, 0.5);
+}
+
+.install-card-featured {
+  background: linear-gradient(180deg, #15223c 0%, #0f172a 100%);
+  border: 1px solid rgba(56, 189, 248, 0.45);
+  box-shadow: 0 20px 40px -10px rgba(14, 165, 233, 0.25), 0 0 0 1px rgba(56, 189, 248, 0.15) inset;
+}
+
+.install-card-featured:hover {
+  border-color: rgba(56, 189, 248, 0.7);
+  box-shadow: 0 24px 48px -10px rgba(14, 165, 233, 0.35), 0 0 0 1px rgba(56, 189, 248, 0.25) inset;
+}
+
+.install-card-ribbon {
+  position: absolute;
+  top: 16px;
+  right: 18px;
+  background: linear-gradient(135deg, #0284c7 0%, #38bdf8 100%);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  box-shadow: 0 2px 8px rgba(2, 132, 199, 0.4);
+}
+
+.install-card-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.install-channel-icon {
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.chrome-gradient-icon {
+  background: rgba(56, 189, 248, 0.15);
+  color: var(--accent-sky);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+}
+
+.zip-channel-icon {
+  background: rgba(129, 140, 248, 0.12);
+  color: var(--accent-indigo);
+  border: 1px solid rgba(129, 140, 248, 0.25);
+}
+
+.code-channel-icon {
+  background: rgba(255, 255, 255, 0.06);
+  color: #e2e8f0;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.install-card-title {
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.3px;
+  color: #fff;
+  line-height: 1.2;
+}
+
+.install-card-sub {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent-sky);
+}
+
+.install-card-desc {
+  font-size: 14px;
+  color: var(--text-muted);
+  line-height: 1.55;
+  margin-bottom: 22px;
+}
+
+.install-benefits {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 26px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex-grow: 1;
+}
+
+.install-benefits li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 13px;
+  color: #cbd5e1;
+  line-height: 1.4;
+}
+
+.check-icon {
+  color: var(--accent-emerald);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.install-steps-list {
+  margin: 0 0 24px 20px;
+  padding: 0;
+  font-size: 13px;
+  color: #cbd5e1;
+  line-height: 1.6;
+  flex-grow: 1;
+}
+
+.install-steps-list li {
+  margin-bottom: 8px;
+}
+
+.install-steps-list code {
+  background: rgba(0, 0, 0, 0.35);
+  color: var(--accent-sky);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.install-terminal-snippet {
+  background: #070a12;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 24px;
+  flex-grow: 1;
+}
+
+.install-terminal-snippet code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  color: #a5f3fc;
+  line-height: 1.65;
+  display: block;
+}
+
+.install-card-cta {
+  margin-top: auto;
+}
+
+.btn-store-primary {
+  background: linear-gradient(135deg, #1d4ed8 0%, #0284c7 60%, #38bdf8 100%);
+  color: #fff;
+  box-shadow: 0 4px 18px rgba(2, 132, 199, 0.45);
+  padding: 12px 20px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.btn-store-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(2, 132, 199, 0.65);
+  color: #fff;
+}
+
+.btn-block {
+  width: 100%;
+  justify-content: center;
+  text-align: center;
+}
+
+.footer-store-link {
+  color: var(--accent-sky) !important;
+  font-weight: 700 !important;
 }

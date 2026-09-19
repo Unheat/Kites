@@ -5,10 +5,23 @@
 ### Read Any Manga in Your Language. Directly in Your Browser.
 **Zero Python • Zero Servers • 100% Private In-Browser Extension AI Translation**
 
+[![Chrome Web Store](https://img.shields.io/badge/Chrome_Web_Store-Free_Install-4285F4.svg?style=flat-square&logo=googlechrome&logoColor=white)](https://chromewebstore.google.com/detail/pcaokchkdgnmfgjkljfpghlfohbdjcmj?utm_source=item-share-cb)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg?style=flat-square)](LICENSE)
 [![Chrome MV3](https://img.shields.io/badge/Chrome-Manifest%20V3-success.svg?style=flat-square&logo=googlechrome&logoColor=white)](manifest.json)
 [![WebGPU](https://img.shields.io/badge/Hardware-WebGPU%20Accelerated-orange.svg?style=flat-square&logo=webgpu&logoColor=white)](https://developer.mozilla.org/en-US/docs/Web/API/WebGPU_API)
 [![Vite](https://img.shields.io/badge/Built%20with-React%2019%20%2B%20Vite-646CFF.svg?style=flat-square&logo=vite&logoColor=white)](package.json)
+
+<br/>
+
+<p align="center">
+  <a href="https://chromewebstore.google.com/detail/pcaokchkdgnmfgjkljfpghlfohbdjcmj?utm_source=item-share-cb">
+    <img src="https://img.shields.io/badge/Available_in_the-Chrome_Web_Store-4285F4?style=for-the-badge&logo=googlechrome&logoColor=white" alt="Available in the Chrome Web Store" height="42" />
+  </a>
+  &nbsp;&nbsp;
+  <a href="https://github.com/Unheat/Kites/releases/latest">
+    <img src="https://img.shields.io/badge/GitHub_Releases-Download_.zip-24292e?style=for-the-badge&logo=github&logoColor=white" alt="Download Release .zip" height="42" />
+  </a>
+</p>
 
 <br/>
 
@@ -24,7 +37,7 @@ Traditional manga translators require installing complex Python scripts, gigabyt
 
 **Kites changes that.** It is a lightweight Chrome extension that runs state-of-the-art vision and language models **directly on your graphics card via WebGPU**.
 
-- ⚡ **Zero Setup:** Install the extension and start reading immediately. No terminal, no Python, no dependencies.
+- ⚡ **Zero Setup:** Install with 1-click from the [Chrome Web Store](https://chromewebstore.google.com/detail/pcaokchkdgnmfgjkljfpghlfohbdjcmj?utm_source=item-share-cb) and start reading immediately. No terminal, no Python, no dependencies.
 - 🔒 **100% Local & Private:** Optical character recognition (OCR) and background cleaning happen on your device. Your images never leave your browser.
 - 🎨 **Intelligent Background Repair:** AI inpainting erases foreign text cleanly while preserving linework, screentones, and textures.
 - ✍️ **Natural Typesetting:** Automatically measures speech balloons, balances line breaks, fits font sizes, and adapts font colors.
@@ -137,9 +150,28 @@ Customize target languages, neural OCR models, and inpainting algorithms from th
 
 ---
 
-## 🚀 Quick Start
+## 🚀 Quick Start & Installation
 
-### Option 1: Quick Install (Pre-Built Zip — Zero Terminal Required)
+### Option 1: Chrome Web Store (Recommended • 1-Click Install)
+
+The official and easiest way to install Kites. Includes automatic background updates and Google Web Store security review:
+
+<div align="left">
+  <a href="https://chromewebstore.google.com/detail/pcaokchkdgnmfgjkljfpghlfohbdjcmj?utm_source=item-share-cb">
+    <img src="https://img.shields.io/badge/Add_to_Chrome-Free_Install-4285F4?style=for-the-badge&logo=googlechrome&logoColor=white" alt="Add to Chrome" height="38" />
+  </a>
+</div>
+
+1. Open **[Kites on the Chrome Web Store](https://chromewebstore.google.com/detail/pcaokchkdgnmfgjkljfpghlfohbdjcmj?utm_source=item-share-cb)**.
+2. Click **Add to Chrome** and confirm the prompt.
+3. Pin **Kites** to your browser toolbar for easy access.
+4. Browse any manga or comic page (on Twitter/X, Pixiv, MangaDex, etc.) and hover over a panel to translate!
+
+---
+
+### Option 2: Pre-Built Zip (Manual Unpacked — Zero Terminal Required)
+
+For offline environments, manual testing, or loading specific releases:
 
 1. Download **[`kites-v1.0.5.1.zip`](https://github.com/Unheat/Kites/releases/latest)** from the latest GitHub Release.
 2. Unzip the downloaded `.zip` file into a folder on your computer.
@@ -150,7 +182,7 @@ Customize target languages, neural OCR models, and inpainting algorithms from th
 
 ---
 
-### Option 2: Build from Source (Developers)
+### Option 3: Build from Source (Developers)
 
 ```bash
 # 1. Clone repository
