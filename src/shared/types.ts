@@ -65,11 +65,18 @@ export interface ViewportSelection {
 
 export type CropStatus = 'draft' | 'capturing' | 'translating' | 'completed' | 'failed';
 
+/**
+ * A manual crop window rendered by the content overlay.
+ *
+ * `left`/`top` are viewport CSS pixels (screen-pinned, Xnip-style): the window
+ * stays at the exact on-screen location when the page scrolls and only moves
+ * when the user drags it. They are never derived from document scroll offsets.
+ */
 export interface CropOverlayItem {
   id: string;
   sourceKey: string;
-  pageLeft: number;
-  pageTop: number;
+  left: number;
+  top: number;
   width: number;
   height: number;
   originalDataUrl: string;

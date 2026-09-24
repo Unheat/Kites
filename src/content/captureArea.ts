@@ -27,12 +27,13 @@ export type CropDragHandle = 'move' | 'n' | 'e' | 's' | 'w' | 'nw' | 'ne' | 'se'
 /**
  * Computes a moved or resized crop rectangle from an immutable starting rectangle.
  *
- * @param initial - Rectangle at pointer-down time in page CSS pixels.
+ * @param initial - Rectangle at pointer-down time in viewport CSS pixels.
  * @param handle - Move or directional resize operation.
- * @param deltaX - Horizontal pointer movement in page CSS pixels.
- * @param deltaY - Vertical pointer movement in page CSS pixels.
- * @param bounds - Maximum document width and height.
- * @returns A rectangle clamped to document bounds and the crop minimum size.
+ * @param deltaX - Horizontal pointer movement in viewport CSS pixels.
+ * @param deltaY - Vertical pointer movement in viewport CSS pixels.
+ * @param bounds - Maximum viewport width and height (crop windows are
+ *   screen-pinned, so they clamp to the viewport, never to the document).
+ * @returns A rectangle clamped to viewport bounds and the crop minimum size.
  */
 export function computeCropBounds(
   initial: CropBounds,
