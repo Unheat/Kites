@@ -13,7 +13,7 @@ import { hashUserSubject } from './auth/google';
 import { ipRateLimiter } from './security/rate-limiter';
 export { SharedPoolDO } from './durable/SharedPoolDO';
 
-const MAX_PAYLOAD_CHARS = 1000;
+const MAX_PAYLOAD_CHARS = 2048;
 const MAX_REQUEST_BYTES = 32 * 1024; // 32 KB maximum payload pre-check
 
 /**

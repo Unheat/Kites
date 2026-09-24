@@ -19,7 +19,9 @@
     "test:webllm": "node scripts/test-webllm-user-flow.js",
     "test:visual:custom-api": "tsx src/test/pipelineVisualTestCustomApi.ts",
     "test:visual:cloudflare": "tsx src/test/pipelineVisualTestCloudflare.ts",
-    "test:visual:webllm": "npm run build:dev && tsx src/test/pipelineVisualTestWebLlm.ts"
+    "test:visual:webllm": "npm run build:dev && tsx src/test/pipelineVisualTestWebLlm.ts",
+    "worker:test": "npm run test:providers --prefix worker",
+    "worker:deploy": "npm run deploy --prefix worker"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.117",

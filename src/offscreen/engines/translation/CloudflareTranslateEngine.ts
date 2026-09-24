@@ -168,6 +168,13 @@ export class CloudflareTranslateEngine extends BaseLlmTranslationEngine {
         if (response.status === 401) {
           this.cachedToken = '';
           this.tokenExpiresAt = 0;
+          if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+            chrome.storage.local
+              .remove([STORAGE_KEYS.AUTH_TOKEN, STORAGE_KEYS.AUTH_EXPIRES_AT])
+              .catch((err) => {
+                console.warn('[CloudflareTranslateEngine] Failed to purge 401 token from storage:', err);
+              });
+          }
         }
 
         const errorJson = (await response.json().catch(() => ({}))) as any;
