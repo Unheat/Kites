@@ -21,8 +21,22 @@ import {
   revokeGoogleToken,
 } from './googleAuthUtils';
 
-export const DEFAULT_GOOGLE_CLIENT_ID =
+/**
+ * Google OAuth Web Application Client ID.
+ * Dedicated to `chrome.identity.launchWebAuthFlow` across all Chromium browsers
+ * (Chrome, Brave, Edge, Arc, Opera) with authorized redirect URI support.
+ */
+export const GOOGLE_WEB_CLIENT_ID =
   '13839997652-td8d1oi4ev72shdts4c0ua5gorkoktu2.apps.googleusercontent.com';
+
+/**
+ * Google OAuth Chrome Extension Client ID.
+ * Dedicated to native `chrome.identity.getAuthToken` registered in `manifest.json`.
+ */
+export const GOOGLE_CHROME_EXTENSION_CLIENT_ID =
+  '13839997652-1pfe7h8arhiqlvh3dtn81tc5aibh8pnm.apps.googleusercontent.com';
+
+export const DEFAULT_GOOGLE_CLIENT_ID = GOOGLE_WEB_CLIENT_ID;
 
 export const DEFAULT_GOOGLE_SCOPES = [
   'https://www.googleapis.com/auth/userinfo.email',
@@ -40,16 +54,10 @@ export class GoogleOAuthStrategy implements IOAuthStrategy {
   readonly provider = 'google';
 
   /**
-   * Retrieves the configured OAuth client ID from manifest.json or falls back to default.
+   * Retrieves the Web Application OAuth client ID dedicated to launchWebAuthFlow.
    */
-  private getClientId(): string {
-    if (typeof chrome !== 'undefined' && chrome.runtime?.getManifest) {
-      const manifest = chrome.runtime.getManifest();
-      if (manifest?.oauth2?.client_id) {
-        return manifest.oauth2.client_id;
-      }
-    }
-    return DEFAULT_GOOGLE_CLIENT_ID;
+  private getWebClientId(): string {
+    return GOOGLE_WEB_CLIENT_ID;
   }
 
   /**
@@ -76,7 +84,7 @@ export class GoogleOAuthStrategy implements IOAuthStrategy {
     // Enables multi-account chooser and cross-browser support (Brave, Edge, Arc, etc.)
     if (typeof chrome !== 'undefined' && chrome.identity?.launchWebAuthFlow) {
       try {
-        const clientId = this.getClientId();
+        const clientId = this.getWebClientId();
         const redirectUri = chrome.identity.getRedirectURL();
         const authUrl = buildGoogleAuthUrl({
           clientId,
@@ -214,7 +222,7 @@ export class GoogleOAuthStrategy implements IOAuthStrategy {
     // 3. Attempt silent launchWebAuthFlow with prompt=none (if web session active)
     if (typeof chrome !== 'undefined' && chrome.identity?.launchWebAuthFlow) {
       try {
-        const clientId = this.getClientId();
+        const clientId = this.getWebClientId();
         const redirectUri = chrome.identity.getRedirectURL();
         const authUrl = buildGoogleAuthUrl({
           clientId,
