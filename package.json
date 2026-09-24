@@ -21,7 +21,8 @@
     "test:visual:cloudflare": "tsx src/test/pipelineVisualTestCloudflare.ts",
     "test:visual:webllm": "npm run build:dev && tsx src/test/pipelineVisualTestWebLlm.ts",
     "worker:test": "npm run test:providers --prefix worker",
-    "worker:deploy": "npm run deploy --prefix worker"
+    "worker:deploy": "npm run deploy --prefix worker",
+    "test:e2e:roliascan": "node scripts/verify-roliascan-fix.js"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.117",
@@ -58,6 +59,7 @@
     "jsdom": "^29.1.1",
     "onnxruntime-node": "^1.27.0",
     "oxlint": "^1.71.0",
+    "playwright-core": "^1.63.0",
     "postcss": "^8.5.17",
     "pptxgenjs": "^4.0.1",
     "puppeteer": "^24.43.1",
