@@ -1,4 +1,4 @@
-import { db, cleanupOldJobs, deleteJobs } from '../db';
+import { db, cleanupOldJobs, deleteJobs, type TranslationJob } from '../db';
 import type { ProcessJobMessage, PopupState, PreloadActiveEngineMessage } from '../shared/types';
 import { DEFAULT_POPUP_STATE } from '../shared/types';
 import { CLOUDFLARE_QUOTA_DEFAULT_ENDPOINT, STORAGE_KEYS } from '../shared/constants';
@@ -33,6 +33,19 @@ const SINGLE_JOB_TIMEOUT_MS = 60 * 1000;
  * to finish booting its bundle and registering message listeners.
  */
 const OFFSCREEN_RETRY_INTERVAL_MS = 150;
+
+/**
+ * Probe window used to decide whether an offscreen document that just timed out is
+ * still alive. A live document answers a lightweight ping immediately; a hung or
+ * crashed one does not, which is the signal to tear it down and recreate it.
+ */
+const OFFSCREEN_HEALTH_CHECK_TIMEOUT_MS = 3 * 1000;
+
+/**
+ * Pause between closing an unresponsive offscreen document and recreating it, so
+ * Chrome has settled the teardown before the replacement document is created.
+ */
+const OFFSCREEN_RECREATE_DELAY_MS = 500;
 
 /**
  * Removes translation engines that are no longer supported from stored popup settings
@@ -172,6 +185,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     const jobId = message.payload.jobId as number;
     db.translationJobs.get(jobId).then((job) => {
       if (!job?.tabId || !job.srcUrl) return;
+
+      // Heartbeat: a first-run job can spend minutes downloading model weights before its
+      // pipeline finishes. Refresh the staleness timestamp so stale-job reclamation only
+      // reclaims jobs that show no observable progress for the whole window.
+      db.translationJobs.update(jobId, { timestamp: Date.now() }).catch(() => {});
 
       const isCapture = job.srcUrl.startsWith('kites-capture:');
       const identity = isCapture
@@ -423,7 +441,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
  * When the service worker boots fresh, no previous in-memory offscreen processing
  * promise exists, so any job marked in-flight is guaranteed orphaned.
  */
-async function resetOrphanedInFlightJobs(): Promise<void> {
+export async function resetOrphanedInFlightJobs(): Promise<void> {
   if (typeof indexedDB === 'undefined') return;
   try {
     const inFlight = await db.translationJobs
@@ -435,6 +453,7 @@ async function resetOrphanedInFlightJobs(): Promise<void> {
         `[Background] Failing orphaned in-flight job ${job.id} (was '${job.status}') from previous session.`
       );
       await db.translationJobs.update(job.id!, { status: 'error' });
+      notifyTabJobFailed(job, 'Translation was interrupted because the extension restarted.');
     }
   } catch (err) {
     console.error('[Background] Failed to reset orphaned in-flight jobs:', err);
@@ -510,21 +529,108 @@ async function setupOffscreenDocument(path: string) {
 }
 
 /**
+ * Races a pending operation against a real timer that always settles.
+ *
+ * WORKAROUND: [chrome.runtime sendMessage await can hang forever] -> The sendResponse
+ * callback of chrome.runtime.sendMessage only fires when the receiving context answers
+ * (or when the receiving end is demonstrably gone). An offscreen document that wedged
+ * mid-job never answers and never rejects, so an elapsed-time check *between* attempts
+ * cannot fire either -- the await inside the attempt blocks indefinitely. Racing the
+ * message against a setTimeout guarantees the timeout is honored.
+ *
+ * @param promise - Pending operation to bound.
+ * @param timeoutMs - Maximum wait in milliseconds.
+ * @param label - Label used in the timeout error message.
+ * @returns The settled value of the wrapped promise.
+ * @throws Error when the timer fires before the promise settles.
+ */
+function withHardTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
+    }),
+  ]).finally(() => {
+    if (timer !== null) clearTimeout(timer);
+  });
+}
+
+/**
+ * Probes whether the offscreen document still responds to messages.
+ *
+ * @returns Whether a lightweight ping was answered within OFFSCREEN_HEALTH_CHECK_TIMEOUT_MS.
+ */
+async function isOffscreenResponsive(): Promise<boolean> {
+  try {
+    await withHardTimeout(
+      new Promise<any>((resolve, reject) => {
+        chrome.runtime.sendMessage(
+          { type: 'OFFSCREEN_PING', target: 'offscreen', source: 'background', request: true },
+          (res) => {
+            if (chrome.runtime.lastError) {
+              reject(new Error(chrome.runtime.lastError.message));
+            } else {
+              resolve(res);
+            }
+          }
+        );
+      }),
+      OFFSCREEN_HEALTH_CHECK_TIMEOUT_MS,
+      'Offscreen health check'
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Tears down and recreates the offscreen document after a detected hang.
+ *
+ * Chrome keeps reporting chrome.offscreen.hasDocument() === true for a renderer that
+ * already died or wedged ("zombie offscreen", devlog 017), so a plain setup call would
+ * never repair it. Closing the document first forces the next setup call to create a
+ * fresh one.
+ *
+ * @returns A promise that resolves once a fresh offscreen document is ready.
+ */
+async function recreateOffscreenDocument(): Promise<void> {
+  try {
+    if (await chrome.offscreen.hasDocument()) {
+      console.warn('[Background] Offscreen document is unresponsive; closing it for a clean restart.');
+      await chrome.offscreen.closeDocument();
+    }
+  } catch (err) {
+    console.warn('[Background] Failed to close the unresponsive offscreen document:', err);
+  }
+  await new Promise((resolve) => setTimeout(resolve, OFFSCREEN_RECREATE_DELAY_MS));
+  await setupOffscreenDocument('src/offscreen/offscreen.html');
+  console.log('[Background] Offscreen document recreated after unresponsive state.');
+}
+
+/**
  * Sends a message to the offscreen document, ensuring the document exists and retrying
  * if the offscreen document is still booting and evaluating its module bundle.
+ *
+ * Each attempt is bounded by a hard timer so a hung offscreen response cannot block
+ * forever. When the overall budget expires, the document is probed: a genuinely dead
+ * document is torn down and recreated so later jobs get a clean context instead of
+ * failing against the same zombie forever.
  *
  * @param message - The message object to send to the offscreen document.
  * @param timeoutMs - Maximum milliseconds to wait for the message to be received.
  * @returns A promise resolving to the response from the offscreen document.
  */
-async function sendMessageToOffscreen(message: any, timeoutMs: number = 30000): Promise<any> {
+export async function sendMessageToOffscreen(message: any, timeoutMs: number = 30000): Promise<any> {
   await setupOffscreenDocument('src/offscreen/offscreen.html');
 
   const startTime = performance.now();
 
   while (performance.now() - startTime < timeoutMs) {
+    const remainingMs = timeoutMs - (performance.now() - startTime);
     try {
-      const response = await new Promise<any>((resolve, reject) => {
+      const response = await withHardTimeout(new Promise<any>((resolve, reject) => {
         chrome.runtime.sendMessage({ ...message, target: 'offscreen', source: 'background', request: true }, (res) => {
           if (chrome.runtime.lastError) {
             reject(new Error(chrome.runtime.lastError.message));
@@ -534,13 +640,23 @@ async function sendMessageToOffscreen(message: any, timeoutMs: number = 30000): 
             resolve(res);
           }
         });
-      });
+      }), remainingMs, `Message ${message.type} to offscreen`);
       return response;
     } catch (err: any) {
       // If the receiving end does not exist yet, the offscreen document is still evaluating scripts
       if (err?.message?.includes('Receiving end does not exist')) {
         await new Promise((resolve) => setTimeout(resolve, OFFSCREEN_RETRY_INTERVAL_MS));
         continue;
+      }
+      if (err?.message?.includes('timed out')) {
+        // The document never answered within the budget: it either hung mid-job or died
+        // while chrome.offscreen still reports it as alive. Probe it; only tear it down
+        // when it is truly unresponsive, so a legitimately busy document is left alone
+        // to finish its current work.
+        if (!(await isOffscreenResponsive())) {
+          await recreateOffscreenDocument();
+        }
+        throw err;
       }
       throw err;
     }
@@ -617,18 +733,47 @@ async function queueCapturedTranslation(requestId: string, dataUrl: string, tabI
  * @returns {Promise<void>}
  */
 /**
+ * Reports an involuntary job failure to the tab that requested it so its content script
+ * can reset any pending translation UI (spinner, pinned overlay). Used when a job is
+ * failed without a pipeline response: stale-slot reclamation and orphaned in-flight
+ * resets. Delivery failures are swallowed because the tab may be gone or navigated away
+ * by the time the job is reclaimed.
+ *
+ * @param job - The failed job carrying the requesting tab and the original image URL.
+ * @param error - Human-readable failure reason surfaced to the user.
+ * @returns Nothing.
+ */
+function notifyTabJobFailed(job: TranslationJob, error: string): void {
+  if (!job.tabId || !job.srcUrl) return;
+  if (job.srcUrl.startsWith('kites-capture:')) {
+    const requestId = job.srcUrl.replace('kites-capture:', '');
+    chrome.tabs.sendMessage(job.tabId, {
+      type: 'CAPTURE_TRANSLATION_ERROR',
+      payload: { requestId, error },
+    }).catch(() => {});
+    return;
+  }
+  chrome.tabs.sendMessage(job.tabId, {
+    type: 'TRANSLATION_ERROR',
+    payload: { originalUrl: job.srcUrl, error },
+  }).catch(() => {});
+}
+
+/**
  * Fails any job that has been sitting in an in-flight status ('processing'/'downloading')
  * longer than STALE_JOB_TIMEOUT_MS, so its concurrency slot is released.
  *
- * Such a job cannot genuinely still be running: the offscreen document that owned it is gone
- * (crash, GPU process reset, extension reload), and nothing will ever report its result. The
- * timeout is deliberately generous so a legitimately slow job -- a first run that has to
- * download OCR/LLM weights over a slow connection -- is never killed while it is still making
- * progress.
+ * Such a job cannot genuinely still be tracked: the offscreen document that owned it is
+ * gone (crash, GPU process reset, extension reload), and nothing will ever report its
+ * result. The timeout is deliberately generous so a legitimately slow job -- a first run
+ * that has to download OCR/LLM weights over a slow connection -- is never killed while it
+ * is still making progress; job timestamps are refreshed on every status transition and
+ * model-initialization event, so "stale" means no observable progress for the full window.
+ * Reclaimed jobs also notify their requesting tab so the pending UI does not spin forever.
  *
  * @returns A promise that resolves once any stale jobs have been marked as errored.
  */
-async function reclaimStaleJobs(): Promise<void> {
+export async function reclaimStaleJobs(): Promise<void> {
   try {
     const cutoff = Date.now() - STALE_JOB_TIMEOUT_MS;
     const inFlight = await db.translationJobs
@@ -643,6 +788,7 @@ async function reclaimStaleJobs(): Promise<void> {
         `${Math.round((Date.now() - job.timestamp) / 1000)}s ago). Its owner is gone; freeing the slot.`
       );
       await db.translationJobs.update(job.id!, { status: 'error' });
+      notifyTabJobFailed(job, 'Translation was interrupted because the processing context was lost.');
     }
   } catch (err) {
     // Never let queue maintenance block actual work.
@@ -692,8 +838,9 @@ async function processQueue() {
     for (const job of queuedJobs) {
       if (!job.id || !job.srcUrl) continue;
       
-      // Update status to prevent other queue loops from grabbing it
-      await db.translationJobs.update(job.id, { status: 'downloading' });
+      // Update status to prevent other queue loops from grabbing it. The timestamp is
+      // refreshed here so stale-job reclamation measures "last touched", not enqueue time.
+      await db.translationJobs.update(job.id, { status: 'downloading', timestamp: Date.now() });
       
       // Fire it off asynchronously so we process all available slots in parallel
       processImageTranslation(job.id, job.srcUrl, job.tabId).catch(e => {
@@ -735,7 +882,9 @@ async function processImageTranslation(jobId: number, srcUrl: string, tabId?: nu
       });
     }
     
-    await db.translationJobs.update(jobId, { status: 'processing' });
+    // Mark 'processing' and refresh the staleness heartbeat before handing the job to the
+    // offscreen document, so reclamation measures from the moment work actually starts.
+    await db.translationJobs.update(jobId, { status: 'processing', timestamp: Date.now() });
     
     // Route the Job ID to the Offscreen Document to begin processing with a timeout guard
     const message: ProcessJobMessage = {

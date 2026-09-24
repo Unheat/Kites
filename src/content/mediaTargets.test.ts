@@ -70,6 +70,24 @@ describe('media target source resolution', () => {
     customLazy.setAttribute('data-runner-src', '/custom-lazy.webp');
     expect(resolveImageSource(customLazy)).toBe('/custom-lazy.webp');
   });
+
+  it('skips long inline SVG lazy placeholders in favor of data-src (roliascan.com)', () => {
+    // Reproduces issue #2: manga readers lazy-load with a long Lucide-icon SVG data URL
+    // (over the 300-char placeholder heuristic) plus data-src holding the real page URL.
+    const longSvgPlaceholder = 'data:image/svg+xml;base64,'
+      + 'PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCI+'
+      .repeat(4);
+    const lazyPage = document.createElement('img');
+    lazyPage.src = longSvgPlaceholder;
+    lazyPage.setAttribute('data-src', 'https://roliascan.org/storage/chapters/manhwa_1/page_002.webp');
+    expect(resolveImageSource(lazyPage))
+      .toBe('https://roliascan.org/storage/chapters/manhwa_1/page_002.webp');
+
+    // A genuine inline SVG image with no other source remains usable via the last fallback.
+    const inlineSvgOnly = document.createElement('img');
+    inlineSvgOnly.src = longSvgPlaceholder;
+    expect(resolveImageSource(inlineSvgOnly)).toBe(longSvgPlaceholder);
+  });
 });
 
 describe('CSS background source resolution', () => {
@@ -78,6 +96,16 @@ describe('CSS background source resolution', () => {
       .toEqual(['http://localhost:3000/page.webp']);
     expect(getBackgroundUrls('url("https://cdn.example/a.webp"), url(https://cdn.example/b.webp)'))
       .toEqual(['https://cdn.example/a.webp', 'https://cdn.example/b.webp']);
+  });
+
+  it('filters inline SVG placeholder backgrounds so lazy containers never win hover (roliascan.com)', () => {
+    // Reproduces issue #2's second layer: lazy-container ::before pseudo-elements carry a
+    // 500+ char SVG loading icon as background-image; the container (larger than the img)
+    // won hover resolution and queued the icon instead of the real page URL.
+    const placeholderBg = 'url("data:image/svg+xml;base64,' + 'PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmci'.repeat(6) + '")';
+    expect(getBackgroundUrls(placeholderBg)).toEqual([]);
+    expect(getBackgroundUrls('url("https://roliascan.org/storage/chapters/manhwa_1/page_002.webp")'))
+      .toEqual(['https://roliascan.org/storage/chapters/manhwa_1/page_002.webp']);
   });
 });
 

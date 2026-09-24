@@ -14,6 +14,13 @@ chrome.runtime.onMessage.addListener((message: ProcessJobMessage | any, _sender:
     return false;
   }
 
+  // Lightweight liveness probe. The background pings this before tearing down a document
+  // whose job response timed out, so this must answer instantly and never queue work.
+  if (message.type === 'OFFSCREEN_PING') {
+    sendResponse({ status: 'success', pong: true });
+    return false;
+  }
+
   if (message.type === 'PROCESS_JOB' && message.payload?.jobId) {
     console.log(`[Offscreen] Received project processing request for ID: ${message.payload.jobId}`);
     
