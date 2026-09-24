@@ -50,6 +50,12 @@ export const AUTH_STORAGE_EXPIRES_KEY = 'kites_oauth_token_expires_at';
 /** Safety buffer: refresh token 60 seconds before expiration */
 const EXPIRATION_BUFFER_MS = 60_000;
 
+/** Timeout for silent background web auth flows to avoid blocking interactive flows */
+const SILENT_FLOW_TIMEOUT_MS = 3_000;
+
+/** Concurrency lock to prevent Chrome's "Only one web auth flow is allowed at a time" error */
+let isWebAuthFlowInProgress = false;
+
 export class GoogleOAuthStrategy implements IOAuthStrategy {
   readonly provider = 'google';
 
@@ -95,6 +101,7 @@ export class GoogleOAuthStrategy implements IOAuthStrategy {
 
         console.log(`[GoogleOAuthStrategy] Initiating launchWebAuthFlow (redirectUri: ${redirectUri})`);
 
+        isWebAuthFlowInProgress = true;
         const responseUrl = await new Promise<string>((resolve, reject) => {
           chrome.identity.launchWebAuthFlow({ url: authUrl, interactive: true }, (url) => {
             if (chrome.runtime.lastError || !url) {
@@ -122,6 +129,8 @@ export class GoogleOAuthStrategy implements IOAuthStrategy {
         }
 
         console.warn('[GoogleOAuthStrategy] launchWebAuthFlow failed, attempting fallback to getAuthToken:', flowError);
+      } finally {
+        isWebAuthFlowInProgress = false;
       }
     }
 
@@ -219,9 +228,10 @@ export class GoogleOAuthStrategy implements IOAuthStrategy {
       }
     }
 
-    // 3. Attempt silent launchWebAuthFlow with prompt=none (if web session active)
-    if (typeof chrome !== 'undefined' && chrome.identity?.launchWebAuthFlow) {
+    // 3. Attempt silent launchWebAuthFlow with prompt=none (if web session active and no flow is running)
+    if (!isWebAuthFlowInProgress && typeof chrome !== 'undefined' && chrome.identity?.launchWebAuthFlow) {
       try {
+        isWebAuthFlowInProgress = true;
         const clientId = this.getWebClientId();
         const redirectUri = chrome.identity.getRedirectURL();
         const authUrl = buildGoogleAuthUrl({
@@ -231,7 +241,7 @@ export class GoogleOAuthStrategy implements IOAuthStrategy {
           prompt: 'none',
         });
 
-        const responseUrl = await new Promise<string | undefined>((resolve) => {
+        const flowPromise = new Promise<string | undefined>((resolve) => {
           chrome.identity.launchWebAuthFlow({ url: authUrl, interactive: false }, (url) => {
             if (chrome.runtime.lastError || !url) {
               resolve(undefined);
@@ -240,6 +250,12 @@ export class GoogleOAuthStrategy implements IOAuthStrategy {
             }
           });
         });
+
+        const timeoutPromise = new Promise<undefined>((resolve) => {
+          setTimeout(() => resolve(undefined), SILENT_FLOW_TIMEOUT_MS);
+        });
+
+        const responseUrl = await Promise.race([flowPromise, timeoutPromise]);
 
         if (responseUrl) {
           const parsed = parseOAuthRedirectUrl(responseUrl);
@@ -250,6 +266,8 @@ export class GoogleOAuthStrategy implements IOAuthStrategy {
         }
       } catch {
         // Silent web flow failed
+      } finally {
+        isWebAuthFlowInProgress = false;
       }
     }
 
