@@ -698,8 +698,8 @@ function CropOverlayBox({ crop, onTranslate, onReset, onGeometryChange, onToggle
   const displayUrl = crop.showOriginal ? crop.originalDataUrl : (crop.translatedDataUrl || crop.originalDataUrl);
   const dragRef = useRef<{
     handle: CropDragHandle;
-    startPageX: number;
-    startPageY: number;
+    startClientX: number;
+    startClientY: number;
     initial: { left: number; top: number; width: number; height: number };
   } | null>(null);
 
@@ -720,11 +720,14 @@ function CropOverlayBox({ crop, onTranslate, onReset, onGeometryChange, onToggle
     if (event.button !== 0 || (handle !== 'move' && !isEditable)) return;
     event.preventDefault();
     event.stopPropagation();
+    // Crop windows are screen-pinned (viewport coordinates): pointer deltas use
+    // raw client coordinates so scrolling during or between drags never shifts
+    // the window's on-screen anchor.
     dragRef.current = {
       handle,
-      startPageX: event.clientX + window.scrollX,
-      startPageY: event.clientY + window.scrollY,
-      initial: { left: crop.pageLeft, top: crop.pageTop, width: crop.width, height: crop.height },
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      initial: { left: crop.left, top: crop.top, width: crop.width, height: crop.height },
     };
     event.currentTarget.setPointerCapture(event.pointerId);
   };
@@ -734,14 +737,14 @@ function CropOverlayBox({ crop, onTranslate, onReset, onGeometryChange, onToggle
     if (!drag) return;
     event.preventDefault();
     event.stopPropagation();
-    const documentWidth = Math.max(document.documentElement.scrollWidth, window.innerWidth);
-    const documentHeight = Math.max(document.documentElement.scrollHeight, window.innerHeight);
+    // Clamp to the viewport: a pinned window must stay reachable on screen,
+    // even when the document is far taller than the viewport.
     onGeometryChange(crop.id, computeCropBounds(
       drag.initial,
       drag.handle,
-      event.clientX + window.scrollX - drag.startPageX,
-      event.clientY + window.scrollY - drag.startPageY,
-      { width: documentWidth, height: documentHeight }
+      event.clientX - drag.startClientX,
+      event.clientY - drag.startClientY,
+      { width: window.innerWidth, height: window.innerHeight }
     ));
   };
 
@@ -756,8 +759,8 @@ function CropOverlayBox({ crop, onTranslate, onReset, onGeometryChange, onToggle
     <div
       className={`kites-crop-overlay ${isEditable ? 'kites-crop-editable' : 'kites-crop-frozen'}`}
       style={{
-        left: `${crop.pageLeft}px`,
-        top: `${crop.pageTop}px`,
+        left: `${crop.left}px`,
+        top: `${crop.top}px`,
         width: `${crop.width}px`,
         height: `${crop.height}px`,
       }}
@@ -767,7 +770,7 @@ function CropOverlayBox({ crop, onTranslate, onReset, onGeometryChange, onToggle
       onPointerCancel={endInteraction}
     >
       <div
-        className={`kites-crop-toolbar ${crop.pageTop - window.scrollY < 44 ? 'kites-crop-toolbar-inside' : ''}`}
+        className={`kites-crop-toolbar ${crop.top < 44 ? 'kites-crop-toolbar-inside' : ''}`}
         onPointerDown={(event) => event.stopPropagation()}
       >
         {isEditable && (
@@ -885,11 +888,13 @@ function GlobalOverlay() {
   const handleCropComplete = (selection: ViewportSelection) => {
     setIsSnipping(false);
     const requestId = Math.random().toString(36).substring(2, 11);
+    // Screen-pinned window: keep the exact viewport location the user drew at.
+    // Page scrolling must never move it (issue #1).
     setCrops((prev) => [...prev, {
       id: requestId,
       sourceKey: `kites-capture:${requestId}`,
-      pageLeft: selection.left + window.scrollX,
-      pageTop: selection.top + window.scrollY,
+      left: selection.left,
+      top: selection.top,
       width: selection.width,
       height: selection.height,
       originalDataUrl: '',
@@ -925,9 +930,11 @@ function GlobalOverlay() {
       const crop = crops.find((candidate) => candidate.id === id);
       if (!crop || (crop.status !== 'draft' && crop.status !== 'failed')) return;
 
+      // The window is screen-pinned, so its stored viewport rectangle is
+      // already the capture region; the crop must simply sit fully on screen.
       const selection: ViewportSelection = {
-        left: crop.pageLeft - window.scrollX,
-        top: crop.pageTop - window.scrollY,
+        left: crop.left,
+        top: crop.top,
         width: crop.width,
         height: crop.height,
       };
@@ -994,7 +1001,7 @@ function GlobalOverlay() {
 
   const handleGeometryChange = useCallback((id: string, bounds: { left: number; top: number; width: number; height: number }) => {
     setCrops((prev) => prev.map((candidate) => candidate.id === id
-      ? { ...candidate, pageLeft: bounds.left, pageTop: bounds.top, width: bounds.width, height: bounds.height }
+      ? { ...candidate, left: bounds.left, top: bounds.top, width: bounds.width, height: bounds.height }
       : candidate));
   }, []);
 

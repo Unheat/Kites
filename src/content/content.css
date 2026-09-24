@@ -120,9 +120,11 @@
   visibility: hidden !important;
 }
 
-/* Crop overlay container anchored to page absolute coordinates */
+/* Screen-pinned floating crop window (Xnip-style pin): position: fixed keeps
+   the window at the exact on-screen location while the page scrolls; it only
+   moves when the user drags it. Coordinates are viewport CSS pixels. */
 .kites-crop-overlay {
-  position: absolute;
+  position: fixed;
   z-index: 99999;
   border: 2px solid #ff2d75;
   border-radius: 3px;
