@@ -221,22 +221,19 @@ describe('GoogleOAuthStrategy', () => {
       expect(mockStorage[AUTH_STORAGE_KEY]).toBe('refreshed-chrome-token');
     });
 
-    it('attempts silent launchWebAuthFlow with prompt=none if getAuthToken fails', async () => {
+    it('returns undefined if cached token is expired and getAuthToken fails without launching conflicting web flows', async () => {
+      mockStorage[AUTH_STORAGE_KEY] = 'old-expired-token';
+      mockStorage[AUTH_STORAGE_EXPIRES_KEY] = Date.now() - 1000;
+
       (chrome.identity.getAuthToken as any).mockImplementation((_opts: any, cb: any) => {
         (chrome.runtime as any).lastError = { message: 'Not signed in to Chrome' };
         cb(undefined);
       });
 
-      (chrome.identity.launchWebAuthFlow as any).mockImplementation((opts: any, cb: any) => {
-        (chrome.runtime as any).lastError = null;
-        expect(opts.interactive).toBe(false);
-        expect(opts.url).toContain('prompt=none');
-        cb('https://test-ext-id.chromiumapp.org/#access_token=refreshed-web-token&expires_in=3600');
-      });
-
       const token = await strategy.getValidToken();
-      expect(token).toBe('refreshed-web-token');
-      expect(mockStorage[AUTH_STORAGE_KEY]).toBe('refreshed-web-token');
+      expect(token).toBeUndefined();
+      // Crucial: getValidToken must never call launchWebAuthFlow to avoid blocking interactive flows
+      expect(chrome.identity.launchWebAuthFlow).not.toHaveBeenCalled();
     });
 
     it('returns undefined when all silent refresh attempts fail', async () => {
@@ -244,12 +241,47 @@ describe('GoogleOAuthStrategy', () => {
         cb(undefined);
       });
 
+      const token = await strategy.getValidToken();
+      expect(token).toBeUndefined();
+    });
+  });
+
+  describe('concurrency and active flow handling', () => {
+    it('deduplicates concurrent signIn calls into a single launchWebAuthFlow execution', async () => {
+      let callbackHolder: any;
       (chrome.identity.launchWebAuthFlow as any).mockImplementation((_opts: any, cb: any) => {
+        callbackHolder = cb;
+      });
+
+      (globalThis.fetch as any).mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          email: 'concurrent@example.com',
+          name: 'Concurrent User',
+          sub: 'sub-concurrent',
+        }),
+      });
+
+      const promise1 = strategy.signIn();
+      const promise2 = strategy.signIn();
+
+      expect(chrome.identity.launchWebAuthFlow).toHaveBeenCalledTimes(1);
+
+      callbackHolder('https://test-ext-id.chromiumapp.org/#access_token=token-concurrent&expires_in=3600');
+
+      const [res1, res2] = await Promise.all([promise1, promise2]);
+      expect(res1.email).toBe('concurrent@example.com');
+      expect(res2.email).toBe('concurrent@example.com');
+    });
+
+    it('does not fall back to getAuthToken if launchWebAuthFlow fails with active flow error', async () => {
+      (chrome.identity.launchWebAuthFlow as any).mockImplementation((_opts: any, cb: any) => {
+        (chrome.runtime as any).lastError = { message: 'Only one web auth flow is allowed at a time.' };
         cb(undefined);
       });
 
-      const token = await strategy.getValidToken();
-      expect(token).toBeUndefined();
+      await expect(strategy.signIn()).rejects.toThrow('An authentication window is already in progress');
+      expect(chrome.identity.getAuthToken).not.toHaveBeenCalled();
     });
   });
 });

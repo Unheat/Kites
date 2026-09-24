@@ -50,14 +50,11 @@ export const AUTH_STORAGE_EXPIRES_KEY = 'kites_oauth_token_expires_at';
 /** Safety buffer: refresh token 60 seconds before expiration */
 const EXPIRATION_BUFFER_MS = 60_000;
 
-/** Timeout for silent background web auth flows to avoid blocking interactive flows */
-const SILENT_FLOW_TIMEOUT_MS = 3_000;
-
-/** Concurrency lock to prevent Chrome's "Only one web auth flow is allowed at a time" error */
-let isWebAuthFlowInProgress = false;
-
 export class GoogleOAuthStrategy implements IOAuthStrategy {
   readonly provider = 'google';
+
+  /** In-flight sign-in promise to deduplicate concurrent user clicks */
+  private signInPromise: Promise<UserAccountInfo> | null = null;
 
   /**
    * Retrieves the Web Application OAuth client ID dedicated to launchWebAuthFlow.
@@ -81,8 +78,25 @@ export class GoogleOAuthStrategy implements IOAuthStrategy {
 
   /**
    * Triggers the interactive sign-in flow and returns user profile.
+   * Deduplicates concurrent clicks to guarantee a single WebAuthFlow invocation.
    */
   async signIn(): Promise<UserAccountInfo> {
+    if (this.signInPromise) {
+      return this.signInPromise;
+    }
+
+    this.signInPromise = this.executeSignIn();
+    try {
+      return await this.signInPromise;
+    } finally {
+      this.signInPromise = null;
+    }
+  }
+
+  /**
+   * Internal sign-in execution.
+   */
+  private async executeSignIn(): Promise<UserAccountInfo> {
     let token: string | undefined;
     let expiresInSeconds = 3600;
 
@@ -101,7 +115,6 @@ export class GoogleOAuthStrategy implements IOAuthStrategy {
 
         console.log(`[GoogleOAuthStrategy] Initiating launchWebAuthFlow (redirectUri: ${redirectUri})`);
 
-        isWebAuthFlowInProgress = true;
         const responseUrl = await new Promise<string>((resolve, reject) => {
           chrome.identity.launchWebAuthFlow({ url: authUrl, interactive: true }, (url) => {
             if (chrome.runtime.lastError || !url) {
@@ -128,9 +141,13 @@ export class GoogleOAuthStrategy implements IOAuthStrategy {
           throw new Error('Google sign-in was cancelled');
         }
 
+        // If an authentication flow is already active in the browser, inform the user directly
+        // rather than falling back and triggering an un-skippable Chrome profile prompt
+        if (flowError.message?.includes('Only one web auth flow is allowed')) {
+          throw new Error('An authentication window is already in progress. Please check your open browser windows or reload the extension.');
+        }
+
         console.warn('[GoogleOAuthStrategy] launchWebAuthFlow failed, attempting fallback to getAuthToken:', flowError);
-      } finally {
-        isWebAuthFlowInProgress = false;
       }
     }
 
@@ -225,49 +242,6 @@ export class GoogleOAuthStrategy implements IOAuthStrategy {
       if (token) {
         await this.saveToken(token, 3600);
         return token;
-      }
-    }
-
-    // 3. Attempt silent launchWebAuthFlow with prompt=none (if web session active and no flow is running)
-    if (!isWebAuthFlowInProgress && typeof chrome !== 'undefined' && chrome.identity?.launchWebAuthFlow) {
-      try {
-        isWebAuthFlowInProgress = true;
-        const clientId = this.getWebClientId();
-        const redirectUri = chrome.identity.getRedirectURL();
-        const authUrl = buildGoogleAuthUrl({
-          clientId,
-          redirectUri,
-          scopes: this.getScopes(),
-          prompt: 'none',
-        });
-
-        const flowPromise = new Promise<string | undefined>((resolve) => {
-          chrome.identity.launchWebAuthFlow({ url: authUrl, interactive: false }, (url) => {
-            if (chrome.runtime.lastError || !url) {
-              resolve(undefined);
-            } else {
-              resolve(url);
-            }
-          });
-        });
-
-        const timeoutPromise = new Promise<undefined>((resolve) => {
-          setTimeout(() => resolve(undefined), SILENT_FLOW_TIMEOUT_MS);
-        });
-
-        const responseUrl = await Promise.race([flowPromise, timeoutPromise]);
-
-        if (responseUrl) {
-          const parsed = parseOAuthRedirectUrl(responseUrl);
-          if (parsed.accessToken) {
-            await this.saveToken(parsed.accessToken, parsed.expiresIn || 3600);
-            return parsed.accessToken;
-          }
-        }
-      } catch {
-        // Silent web flow failed
-      } finally {
-        isWebAuthFlowInProgress = false;
       }
     }
 
