@@ -173,7 +173,7 @@ The official and easiest way to install Kites. Includes automatic background upd
 
 For offline environments, manual testing, or loading specific releases:
 
-1. Download **[`kites-v1.0.5.1.zip`](https://github.com/Unheat/Kites/releases/latest)** from the latest GitHub Release.
+1. Download **[`kites.zip`](https://github.com/Unheat/Kites/releases/latest)** from the latest GitHub Release.
 2. Unzip the downloaded `.zip` file into a folder on your computer.
 3. In Chrome, open `chrome://extensions/`.
 4. Enable **Developer mode** (toggle in the top-right corner).
