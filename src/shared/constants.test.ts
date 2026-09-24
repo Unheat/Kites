@@ -3,6 +3,7 @@ import {
   CLOUDFLARE_QUOTA_DEFAULT_ENDPOINT,
   CLOUDFLARE_TRANSLATE_DEFAULT_ENDPOINT,
   CLOUDFLARE_WORKER_BASE_URL,
+  STORAGE_KEYS,
 } from './constants';
 
 describe('Cloudflare shared pool endpoints', () => {
@@ -16,3 +17,13 @@ describe('Cloudflare shared pool endpoints', () => {
     );
   });
 });
+
+describe('Centralized STORAGE_KEYS', () => {
+  it('defines canonical keys for chrome.storage.local', () => {
+    expect(STORAGE_KEYS.POPUP_STATE).toBe('popupState');
+    expect(STORAGE_KEYS.AUTH_TOKEN).toBe('kites_oauth_auth_token');
+    expect(STORAGE_KEYS.AUTH_EXPIRES_AT).toBe('kites_oauth_token_expires_at');
+    expect(STORAGE_KEYS.WEBGPU_SUPPORTED).toBe('hardware_webgpu_supported');
+  });
+});
+

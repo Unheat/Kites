@@ -74,11 +74,20 @@ export default function GpuAccelerationPanel({ state, updateState }: GpuAccelera
                 onClick={async (e) => {
                   e.stopPropagation();
                   updateState({ webgpuSupported: null });
+                  let timedOut = false;
+                  const timer = setTimeout(() => {
+                    timedOut = true;
+                    console.warn('[GpuAccelerationPanel] WebGPU re-check timed out after 3000ms.');
+                    updateState({ webgpuSupported: false });
+                  }, 3000);
                   chrome.runtime.sendMessage(
                     { type: 'CHECK_WEBGPU_SUPPORT', target: 'background', source: 'popup', request: true, payload: { force: true } },
                     (response) => {
+                      if (timedOut) return;
+                      clearTimeout(timer);
                       if (chrome.runtime.lastError || response?.status !== 'success') {
                         console.error('[GpuAccelerationPanel] WebGPU re-check failed:', chrome.runtime.lastError?.message || response?.error);
+                        updateState({ webgpuSupported: false });
                         return;
                       }
                       updateState({ webgpuSupported: response.supported === true });

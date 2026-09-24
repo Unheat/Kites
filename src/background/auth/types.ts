@@ -16,4 +16,9 @@ export interface IOAuthStrategy {
    * Invalidates local/cached tokens and signs out.
    */
   signOut(): Promise<void>;
+
+  /**
+   * Retrieves a valid cached access token without prompting user UI.
+   */
+  getValidToken(): Promise<string | undefined>;
 }

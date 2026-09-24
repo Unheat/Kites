@@ -12,6 +12,7 @@ import { BaseLlmTranslationEngine, type LlmChatMessage } from './BaseLlmTranslat
 import {
   CLOUDFLARE_TRANSLATE_DEFAULT_ENDPOINT,
   CLOUDFLARE_TRANSLATE_MODEL,
+  STORAGE_KEYS,
 } from '../../../shared/constants';
 
 export { CLOUDFLARE_TRANSLATE_DEFAULT_ENDPOINT, CLOUDFLARE_TRANSLATE_MODEL };
@@ -51,20 +52,51 @@ export class CloudflareTranslateEngine extends BaseLlmTranslationEngine {
   }
 
   /**
-   * Acquire Google auth token from the background service worker.
-   * Offscreen documents cannot access chrome.identity directly.
+   * Acquire Google auth token from storage or the background service worker.
+   * Checks direct storage first for instant zero-latency retrieval across contexts,
+   * then falls back to background messaging.
    */
   private async getAuthToken(): Promise<string> {
     if (this.cachedToken && Date.now() < this.tokenExpiresAt) {
       return this.cachedToken;
     }
 
+    // 1. Direct storage retrieval (instant & eliminates inter-process message failure)
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      try {
+        const data = (await chrome.storage.local.get([
+          STORAGE_KEYS.AUTH_TOKEN,
+          STORAGE_KEYS.AUTH_EXPIRES_AT,
+        ])) as Record<string, unknown>;
+        const rawToken = data?.[STORAGE_KEYS.AUTH_TOKEN];
+        const rawExpiresAt = data?.[STORAGE_KEYS.AUTH_EXPIRES_AT];
+        const token = typeof rawToken === 'string' ? rawToken : undefined;
+        const expiresAt = typeof rawExpiresAt === 'number' ? rawExpiresAt : undefined;
+        if (token && (!expiresAt || Date.now() < expiresAt - 60_000)) {
+          this.cachedToken = token;
+          this.tokenExpiresAt = expiresAt || Date.now() + TOKEN_CACHE_TTL_MS;
+          return token;
+        }
+      } catch (err) {
+        console.warn('[CloudflareTranslateEngine] Storage token lookup failed:', err);
+      }
+    }
+
+    // 2. Fallback to background service worker RPC
     if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
       try {
         const response = await new Promise<{ success?: boolean; token?: string }>((resolve) => {
-          chrome.runtime.sendMessage({ type: 'GET_AUTH_TOKEN' }, (res) => {
-            resolve(res || {});
-          });
+          chrome.runtime.sendMessage(
+            { type: 'GET_AUTH_TOKEN', target: 'background', source: 'offscreen', request: true },
+            (res) => {
+              if (chrome.runtime.lastError) {
+                console.warn('[CloudflareTranslateEngine] GET_AUTH_TOKEN warning:', chrome.runtime.lastError.message);
+                resolve({});
+              } else {
+                resolve(res || {});
+              }
+            }
+          );
         });
         if (response.token) {
           this.cachedToken = response.token;
@@ -76,7 +108,7 @@ export class CloudflareTranslateEngine extends BaseLlmTranslationEngine {
       }
     }
     // Return placeholder or test token if mock available in globalThis
-    return (globalThis as any).__KITES_TEST_ID_TOKEN__ || '';
+    return (globalThis as any).__KITES_TEST_ID_TOKEN__ || (process.env.NODE_ENV === 'test' ? 'test-id-token' : '');
   }
 
   /**
@@ -95,6 +127,9 @@ export class CloudflareTranslateEngine extends BaseLlmTranslationEngine {
     maxTokens?: number
   ): Promise<string> {
     const token = await this.getAuthToken();
+    if (!token) {
+      throw new Error('Please sign in with Google in Settings to use Cloudflare Translate.');
+    }
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
@@ -158,9 +193,9 @@ export class CloudflareTranslateEngine extends BaseLlmTranslationEngine {
         const resetsAt = resetHeader ? parseInt(resetHeader, 10) : undefined;
         if (!isNaN(remaining)) {
           chrome.storage.local
-            .get('popupState')
+            .get(STORAGE_KEYS.POPUP_STATE)
             .then((data) => {
-              const current = data?.popupState as any;
+              const current = data?.[STORAGE_KEYS.POPUP_STATE] as any;
               if (current?.userAccount) {
                 const updatedAccount = {
                   ...current.userAccount,
@@ -169,7 +204,7 @@ export class CloudflareTranslateEngine extends BaseLlmTranslationEngine {
                 };
                 chrome.storage.local
                   .set({
-                    popupState: { ...current, userAccount: updatedAccount },
+                    [STORAGE_KEYS.POPUP_STATE]: { ...current, userAccount: updatedAccount },
                   })
                   .catch(() => {});
               }

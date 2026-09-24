@@ -1,8 +1,6 @@
-/**
- * Utility functions for hardware capability detection.
- */
+import { STORAGE_KEYS } from '../../shared/constants';
 
-const WEBGPU_CACHE_KEY = 'hardware_webgpu_supported';
+const WEBGPU_CACHE_KEY = STORAGE_KEYS.WEBGPU_SUPPORTED;
 // WORKAROUND: Chrome may assign an unusable low-power/software adapter to extension
 // offscreen documents when this preference is omitted, freezing LaMa inference. Do not
 // replace this with an unqualified requestAdapter() fallback. See devlog 015.
