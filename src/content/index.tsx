@@ -33,6 +33,9 @@ const TRANSLATE_CONTROL_SELECTOR = '[data-kites-translate-control]';
 // Avoid flashing cold-start copy for model setup that completes quickly.
 const MODEL_INITIALIZATION_LABEL_DELAY_MS = 700;
 const MODEL_INITIALIZATION_LABEL = 'Preparing AI · first use this session';
+// How long the translate button keeps its visible failure state after a terminal error.
+const TRANSLATION_FAILURE_VISIBLE_MS = 3000;
+const TRANSLATION_FAILURE_LABEL = 'Translation failed. Click to retry.';
 
 // Standard lazy-load attributes commonly used by host websites and CMSs
 const LAZY_LOAD_ATTRIBUTES = [
@@ -413,9 +416,14 @@ function TranslateButton({
   const buttonRef = useRef<HTMLDivElement>(null);
   const initializationDelayRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const activeInitializationJobIdRef = useRef<number | null>(null);
+  const failureResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const initializationLabelId = useId();
   const [localTranslating, setLocalTranslating] = useState(false);
   const [showInitializationLabel, setShowInitializationLabel] = useState(false);
+  // Visible failure feedback: terminal errors used to reset silently, so a dead queue
+  // looked like nothing happened. The button shows the failure briefly, then returns to
+  // its idle look so the next click reads as a retry.
+  const [hasFailed, setHasFailed] = useState(false);
   const activeTranslating = isTranslating || localTranslating;
 
   useEffect(() => {
@@ -477,6 +485,19 @@ function TranslateButton({
         if (message.payload.originalUrl === srcUrl) {
           setLocalTranslating(false);
           clearInitializationFeedback();
+          if (failureResetTimeoutRef.current !== null) {
+            clearTimeout(failureResetTimeoutRef.current);
+            failureResetTimeoutRef.current = null;
+          }
+          if (message.type === 'TRANSLATION_ERROR') {
+            setHasFailed(true);
+            failureResetTimeoutRef.current = setTimeout(() => {
+              failureResetTimeoutRef.current = null;
+              setHasFailed(false);
+            }, TRANSLATION_FAILURE_VISIBLE_MS);
+          } else {
+            setHasFailed(false);
+          }
         }
       }
     };
@@ -486,6 +507,10 @@ function TranslateButton({
         chrome.runtime.onMessage.addListener(handleMessage);
         return () => {
           clearInitializationFeedback();
+          if (failureResetTimeoutRef.current !== null) {
+            clearTimeout(failureResetTimeoutRef.current);
+            failureResetTimeoutRef.current = null;
+          }
           try {
             if (chrome.runtime?.id) {
               chrome.runtime.onMessage.removeListener(handleMessage);
@@ -518,6 +543,13 @@ function TranslateButton({
         onClick={(event) => {
           event.preventDefault();
           event.stopPropagation();
+          if (hasFailed) {
+            if (failureResetTimeoutRef.current !== null) {
+              clearTimeout(failureResetTimeoutRef.current);
+              failureResetTimeoutRef.current = null;
+            }
+            setHasFailed(false);
+          }
           setLocalTranslating(true);
           onTranslate(srcUrl);
         }}
@@ -529,7 +561,7 @@ function TranslateButton({
           minWidth: '32px',
           minHeight: '32px',
           borderRadius: '50%',
-          backgroundColor: '#ff2d75',
+          backgroundColor: hasFailed ? '#dc2626' : '#ff2d75',
           border: 'none',
           display: 'flex',
           alignItems: 'center',
@@ -540,16 +572,22 @@ function TranslateButton({
           flexShrink: 0,
           pointerEvents: 'auto',
         }}
-        title="Translate Image"
-        aria-label={showInitializationLabel ? MODEL_INITIALIZATION_LABEL : 'Translate Image'}
-        aria-describedby={showInitializationLabel ? initializationLabelId : undefined}
+        title={hasFailed ? TRANSLATION_FAILURE_LABEL : 'Translate Image'}
+        aria-label={hasFailed
+          ? TRANSLATION_FAILURE_LABEL
+          : showInitializationLabel ? MODEL_INITIALIZATION_LABEL : 'Translate Image'}
+        aria-describedby={showInitializationLabel && !hasFailed ? initializationLabelId : undefined}
       >
-        <Languages
-          size={18}
-          aria-hidden="true"
-          className={activeTranslating ? 'kites-anim-spin' : ''}
-          style={activeTranslating ? { animation: 'kites-spin 1s linear infinite' } : undefined}
-        />
+        {hasFailed ? (
+          <X size={18} aria-hidden="true" />
+        ) : (
+          <Languages
+            size={18}
+            aria-hidden="true"
+            className={activeTranslating ? 'kites-anim-spin' : ''}
+            style={activeTranslating ? { animation: 'kites-spin 1s linear infinite' } : undefined}
+          />
+        )}
       </button>
       {showInitializationLabel && (
         <span
@@ -836,14 +874,32 @@ function GlobalOverlay() {
   const [consistentImages, setConsistentImages] = useState<OverlayImage[]>([]);
   const [mode, setMode] = useState<'hover' | 'persistent'>('hover');
   const [autoTranslate, setAutoTranslate] = useState(false);
-  const [translatingUrl, setTranslatingUrl] = useState<string | null>(null);
+  // Tracks every URL with a pending translation job. A Set (not a single slot) keeps
+  // concurrent jobs from clobbering each other's UI state: with a single value, finishing
+  // job B cleared the spinner that a still-queued job A was showing.
+  const [translatingUrls, setTranslatingUrls] = useState<Set<string>>(new Set());
   const [isSnipping, setIsSnipping] = useState<boolean>(false);
   const [crops, setCrops] = useState<CropOverlayItem[]>([]);
 
   const activeImgRef = useRef(activeImg);
-  const translatingUrlRef = useRef(translatingUrl);
+  const translatingUrlsRef = useRef(translatingUrls);
   activeImgRef.current = activeImg;
-  translatingUrlRef.current = translatingUrl;
+  translatingUrlsRef.current = translatingUrls;
+
+  /**
+   * Marks an image URL as no longer translating so its button leaves the spinner state.
+   *
+   * @param srcUrl - Original image URL whose pending job ended.
+   * @returns Nothing.
+   */
+  const clearTranslatingUrl = (srcUrl: string): void => {
+    setTranslatingUrls((current) => {
+      if (!current.has(srcUrl)) return current;
+      const next = new Set(current);
+      next.delete(srcUrl);
+      return next;
+    });
+  };
 
   /**
    * Sends an image to the background queue and keeps its overlay visible until completion.
@@ -853,29 +909,29 @@ function GlobalOverlay() {
    * @returns Nothing.
    */
   const requestTranslation = (srcUrl: string, image?: OverlayImage): void => {
-    if (!srcUrl || translatingUrlRef.current === srcUrl) return;
+    if (!srcUrl || translatingUrlsRef.current.has(srcUrl)) return;
 
     if (image) {
       setActiveImg(image);
       registerMediaTarget(image);
     }
-    setTranslatingUrl(srcUrl);
+    setTranslatingUrls((current) => new Set(current).add(srcUrl));
     console.log('[Content Script] Sending TRANSLATE_IMAGE to background:', srcUrl);
 
     try {
       if (!chrome.runtime?.id) {
-        setTranslatingUrl(null);
+        clearTranslatingUrl(srcUrl);
         console.warn('[Content Script] Extension context invalidated. Please refresh the page.');
         return;
       }
       chrome.runtime.sendMessage({ type: 'TRANSLATE_IMAGE', url: srcUrl }, (response) => {
         if (chrome.runtime.lastError || response?.status === 'error') {
-          setTranslatingUrl((current) => current === srcUrl ? null : current);
+          clearTranslatingUrl(srcUrl);
           console.error('[Content Script] Message failed:', chrome.runtime.lastError?.message || response?.error);
         }
       });
     } catch (error) {
-      setTranslatingUrl((current) => current === srcUrl ? null : current);
+      clearTranslatingUrl(srcUrl);
       console.warn('[Content Script] Chrome runtime call failed (extension reloaded/invalidated):', error);
     }
   };
@@ -1043,7 +1099,7 @@ function GlobalOverlay() {
     if (isEnabled) return;
     setActiveImg(null);
     setConsistentImages([]);
-    setTranslatingUrl(null);
+    setTranslatingUrls(new Set());
   }, [isEnabled]);
 
   // Receive terminal job events, restore the image, and allow Hover mode to disappear again.
@@ -1086,7 +1142,7 @@ function GlobalOverlay() {
       if (!message.payload || (message.type !== 'IMAGE_TRANSLATED' && message.type !== 'TRANSLATION_ERROR')) return;
 
       const { originalUrl, bakedBase64 } = message.payload;
-      setTranslatingUrl((current) => current === originalUrl ? null : current);
+      clearTranslatingUrl(originalUrl);
       setActiveImg((current) => current?.srcUrl === originalUrl ? null : current);
 
       if (message.type !== 'IMAGE_TRANSLATED' || !bakedBase64) return;
@@ -1230,9 +1286,9 @@ function GlobalOverlay() {
       }
     };
     const scheduleHide = () => {
-      if (hideTimeoutId === null && !translatingUrlRef.current) {
+      if (hideTimeoutId === null && translatingUrlsRef.current.size === 0) {
         hideTimeoutId = window.setTimeout(() => {
-          if (!translatingUrlRef.current) setActiveImg(null);
+          if (translatingUrlsRef.current.size === 0) setActiveImg(null);
           hideTimeoutId = null;
         }, HOVER_LEAVE_DELAY_MS);
       }
@@ -1298,7 +1354,7 @@ function GlobalOverlay() {
           key={image.anchorName}
           srcUrl={image.srcUrl}
           anchorName={image.anchorName}
-          isTranslating={translatingUrl === image.srcUrl}
+          isTranslating={translatingUrls.has(image.srcUrl)}
           onTranslate={(srcUrl) => requestTranslation(srcUrl, image)}
         />
       ))}
@@ -1307,7 +1363,7 @@ function GlobalOverlay() {
         <TranslateButton
           srcUrl={activeImg.srcUrl}
           anchorName={activeImg.anchorName}
-          isTranslating={translatingUrl === activeImg.srcUrl}
+          isTranslating={translatingUrls.has(activeImg.srcUrl)}
           onTranslate={(srcUrl) => requestTranslation(srcUrl, activeImg)}
         />
       )}
