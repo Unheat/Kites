@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { PopupState } from '../../shared/types';
+import { DEFAULT_POPUP_STATE } from '../../shared/types';
 import { Moon, Sun, KeyRound, Network } from 'lucide-react';
 import ApiManagerPanel from './ApiManagerPanel';
 import FallbackConfigPanel from './FallbackConfigPanel';
@@ -29,7 +30,17 @@ export default function SettingsView({ state, updateState }: SettingsViewProps) 
       {/* Google Sign-in & Shared Pool Pass */}
       <AccountCard
         userAccount={state.userAccount}
-        onAccountChange={(account) => updateState({ userAccount: account })}
+        onAccountChange={(account) => {
+          if (!account && state.activeEngineId === 'cloudflare-translate') {
+            updateState({
+              userAccount: undefined,
+              activeEngineId: DEFAULT_POPUP_STATE.activeEngineId,
+              fallbackChain: (state.fallbackChain ?? []).filter((id) => id !== 'cloudflare-translate'),
+            });
+          } else {
+            updateState({ userAccount: account });
+          }
+        }}
       />
 
       <div className="flex items-center justify-between">

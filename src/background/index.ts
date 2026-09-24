@@ -64,7 +64,7 @@ export function normalizePopupState(popupState: Partial<PopupState> | undefined)
   const customApiIds = new Set(uniqueCustomApis.map((api) => api.id));
   const isSupportedEngine = (engineId: string): boolean =>
     engineId === 'gg-translate' ||
-    engineId === 'cloudflare-translate' ||
+    (engineId === 'cloudflare-translate' ? Boolean(completedState.userAccount?.signedIn) : false) ||
     webLlmIds.has(engineId) ||
     customApiIds.has(engineId);
 
@@ -314,8 +314,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           // Continue clearing state even if strategy fails
         }
 
+        const activeEngineId = storedState?.activeEngineId === 'cloudflare-translate'
+          ? DEFAULT_POPUP_STATE.activeEngineId
+          : (storedState?.activeEngineId ?? DEFAULT_POPUP_STATE.activeEngineId);
+        const fallbackChain = (storedState?.fallbackChain ?? []).filter(
+          (engineId) => engineId !== 'cloudflare-translate'
+        );
+
         const updatedState = {
           ...(currentData.popupState || DEFAULT_POPUP_STATE),
+          activeEngineId,
+          fallbackChain,
           userAccount: undefined,
         };
         await chrome.storage.local.set({ popupState: updatedState });

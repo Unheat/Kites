@@ -95,6 +95,20 @@ Resolve Google Sign-In failures (`Error 400: invalid_request`, `bad client id`, 
    * Google sign-in launches account chooser modal, grants token, fetches profile name/picture, and displays remaining quota in popup.
    * Popup opens instantly with `Supported✓` green badge at Frame 0 without any `[...]` loading flash or dev stalls.
 
+### Addendum: Offscreen OAuth Token Retrieval & Sign-Out Fallback
+
+1. **Direct Storage Retrieval for Offscreen Worker:**
+   * In Manifest V3, the translation pipeline executes inside the Offscreen Document (`src/offscreen/`).
+   * Previously, `CloudflareTranslateEngine` requested the Google ID/access token from the Background Service Worker via `chrome.runtime.sendMessage({ type: 'GET_AUTH_TOKEN' })`.
+   * Unaddressed or unrouted inter-process messaging across contexts could fail or resolve to `{}` under high load, causing the translation engine to dispatch HTTP POST requests to `https://api.12094852.xyz/v1/chat/completions` without an `Authorization` header, triggering a cryptic 401 `missing_token` error.
+   * Because both Background and Offscreen share the same extension origin, `CloudflareTranslateEngine.getAuthToken()` now checks `chrome.storage.local` directly (`kites_oauth_auth_token` and `kites_oauth_token_expires_at`). This provides zero-latency synchronous access to valid tokens and eliminates inter-process message drops.
+   * If unauthenticated, `CloudflareTranslateEngine` now throws a clear, actionable error (`Please sign in with Google in Settings to use Cloudflare Translate.`) instead of firing an empty request.
+
+2. **Auto-Fallback on Sign-Out:**
+   * When a user signs out via `SIGN_OUT_GOOGLE` / `SIGN_OUT_AUTH`, `src/background/index.ts` and `SettingsView.tsx` now immediately check if `activeEngineId === 'cloudflare-translate'`.
+   * If so, `activeEngineId` is automatically reset to `DEFAULT_POPUP_STATE.activeEngineId` (`gg-translate`), and `cloudflare-translate` is filtered out of `fallbackChain`.
+   * `normalizePopupState` also asserts that `cloudflare-translate` can only be considered a supported engine if `userAccount.signedIn === true`.
+
 ---
 
 ### Key Takeaways
@@ -102,3 +116,4 @@ Resolve Google Sign-In failures (`Error 400: invalid_request`, `bad client id`, 
 1. **Never conflate Extension and Web OAuth Client IDs:** Chrome's `manifest.json` parser validates client ID types against Google's OAuth2 backend. Keep Extension Client IDs for `getAuthToken` and Web Application Client IDs for `launchWebAuthFlow`.
 2. **Chromium WebAuthFlow is a Singleton:** Never run `launchWebAuthFlow` in background polling loops; reserve it strictly for explicit user gestures.
 3. **Hardware Capabilities are Quasi-Static:** Hardware support rarely changes within a browser session. Probing hardware on every popup mount introduces needless RPC latency and vulnerability to background context lifecycles. Cache verified success and rely on explicit user re-checks for hardware re-probing.
+4. **Share State via `chrome.storage.local` Over Fragile RPCs:** When background, popup, and offscreen contexts need shared credentials or static tokens, read directly from `chrome.storage.local` rather than creating complex, error-prone message-passing bridges.

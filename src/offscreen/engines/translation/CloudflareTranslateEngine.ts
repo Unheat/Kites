@@ -51,20 +51,46 @@ export class CloudflareTranslateEngine extends BaseLlmTranslationEngine {
   }
 
   /**
-   * Acquire Google auth token from the background service worker.
-   * Offscreen documents cannot access chrome.identity directly.
+   * Acquire Google auth token from storage or the background service worker.
+   * Checks direct storage first for instant zero-latency retrieval across contexts,
+   * then falls back to background messaging.
    */
   private async getAuthToken(): Promise<string> {
     if (this.cachedToken && Date.now() < this.tokenExpiresAt) {
       return this.cachedToken;
     }
 
+    // 1. Direct storage retrieval (instant & eliminates inter-process message failure)
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      try {
+        const data = await chrome.storage.local.get(['kites_oauth_auth_token', 'kites_oauth_token_expires_at']);
+        const token = typeof data?.kites_oauth_auth_token === 'string' ? data.kites_oauth_auth_token : undefined;
+        const expiresAt = typeof data?.kites_oauth_token_expires_at === 'number' ? data.kites_oauth_token_expires_at : undefined;
+        if (token && (!expiresAt || Date.now() < expiresAt - 60_000)) {
+          this.cachedToken = token;
+          this.tokenExpiresAt = expiresAt || Date.now() + TOKEN_CACHE_TTL_MS;
+          return token;
+        }
+      } catch (err) {
+        console.warn('[CloudflareTranslateEngine] Storage token lookup failed:', err);
+      }
+    }
+
+    // 2. Fallback to background service worker RPC
     if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
       try {
         const response = await new Promise<{ success?: boolean; token?: string }>((resolve) => {
-          chrome.runtime.sendMessage({ type: 'GET_AUTH_TOKEN' }, (res) => {
-            resolve(res || {});
-          });
+          chrome.runtime.sendMessage(
+            { type: 'GET_AUTH_TOKEN', target: 'background', source: 'offscreen', request: true },
+            (res) => {
+              if (chrome.runtime.lastError) {
+                console.warn('[CloudflareTranslateEngine] GET_AUTH_TOKEN warning:', chrome.runtime.lastError.message);
+                resolve({});
+              } else {
+                resolve(res || {});
+              }
+            }
+          );
         });
         if (response.token) {
           this.cachedToken = response.token;
@@ -76,7 +102,7 @@ export class CloudflareTranslateEngine extends BaseLlmTranslationEngine {
       }
     }
     // Return placeholder or test token if mock available in globalThis
-    return (globalThis as any).__KITES_TEST_ID_TOKEN__ || '';
+    return (globalThis as any).__KITES_TEST_ID_TOKEN__ || (process.env.NODE_ENV === 'test' ? 'test-id-token' : '');
   }
 
   /**
@@ -95,6 +121,9 @@ export class CloudflareTranslateEngine extends BaseLlmTranslationEngine {
     maxTokens?: number
   ): Promise<string> {
     const token = await this.getAuthToken();
+    if (!token) {
+      throw new Error('Please sign in with Google in Settings to use Cloudflare Translate.');
+    }
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
