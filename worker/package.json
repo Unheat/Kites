@@ -7,7 +7,8 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:providers": "npx tsx scripts/probe-providers.ts"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250224.0",

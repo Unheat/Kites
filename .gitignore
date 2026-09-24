@@ -29,6 +29,10 @@ dist-ssr
 !docs/fullplan.md
 .env
 .env*
+.dev.vars
+.dev.vars*
+worker/.dev.vars
+worker/.dev.vars*
 scripts/.env
 PaddleOCR/
 result/
