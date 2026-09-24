@@ -65,12 +65,24 @@ export function normalizeMediaUrl(url: string): string {
 /**
  * Tests whether a URL is a known loading or empty placeholder.
  *
+ * WORKAROUND: [Inline SVG placeholder backgrounds outrank real pages] -> Manga readers
+ * (e.g. roliascan.com) render every lazy page inside a container whose ::before
+ * pseudo-element carries the loading icon as `background-image: url("data:image/svg+xml;base64,...")`.
+ * That icon is 500+ base64 characters, so the old `length < 300` heuristic accepted it as
+ * real content; the container (larger than the img) then won hover resolution and the
+ * placeholder itself was queued for translation -- every lazy page after the first (eager)
+ * one failed to translate. Inline SVG data URLs are always UI icons or placeholders in
+ * this context (real manga pages are raster), so all of them are treated as placeholders
+ * and filtered out of every source tier, including background-image targets. A genuine
+ * inline SVG <img> with no other source is still returned by resolveElementSource's final
+ * direct-candidate fallback.
+ *
  * @param url - Candidate image URL.
  * @returns Whether the URL should be ignored in favor of another source.
  */
 function isPlaceholderSource(url: string): boolean {
   if (!url) return true;
-  if (url.startsWith('data:image/svg+xml') && url.length < 300) return true;
+  if (url.startsWith('data:image/svg+xml')) return true;
   if (url.startsWith('data:image/gif;base64,R0lGODlhAQAB')) return true;
   return PLACEHOLDER_SOURCE.test(url);
 }
@@ -108,7 +120,19 @@ export function resolveElementSource(element: Element): string {
     directCandidates.push(element.getAttribute('href') || '', element.getAttribute('xlink:href') || '');
   }
 
-  const realDirect = directCandidates.find((candidate) => candidate && !isPlaceholderSource(candidate));
+  // WORKAROUND: [Long inline SVG lazy placeholders] -> Manga readers (e.g. roliascan.com)
+  // lazy-load pages with <img src="data:image/svg+xml;base64,..."> icons plus data-src
+  // holding the real page URL. The PLACEHOLDER_SOURCE / 300-char heuristics only recognize
+  // short SVG placeholders, so the long icon URL was accepted as a real source and queued
+  // for translation instead of the actual page -- every lazy-loaded image after the first
+  // (eager) one failed to translate. Two demotions fix the ordering: inline SVG data URLs
+  // fall through to the srcset/lazy-attribute tiers, and the lazy tier ignores the native
+  // src/srcset attributes (they are already the direct candidates; LAZY_SOURCE_ATTRIBUTE's
+  // pattern also matches bare 'src', which let the placeholder re-enter as a "lazy" hit).
+  // A genuine inline SVG image with no other source is still returned by the final
+  // directCandidates fallback.
+  const realDirect = directCandidates.find((candidate) =>
+    candidate && !isPlaceholderSource(candidate) && !candidate.startsWith('data:image/svg+xml'));
   if (realDirect) return realDirect;
 
   const srcsets = [element.getAttribute('srcset') || ''];
@@ -123,6 +147,7 @@ export function resolveElementSource(element: Element): string {
   }
 
   for (const attribute of Array.from(element.attributes)) {
+    if (attribute.name === 'src' || attribute.name === 'srcset') continue;
     if (!LAZY_SOURCE_ATTRIBUTE.test(attribute.name)) continue;
     const candidate = attribute.name.toLowerCase().includes('srcset')
       ? resolveBestSrcsetUrl(attribute.value)
