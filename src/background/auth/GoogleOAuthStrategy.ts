@@ -214,6 +214,8 @@ export class GoogleOAuthStrategy implements IOAuthStrategy {
   /**
    * Retrieves a valid cached access token without prompting user UI.
    * Checks local storage, then attempts silent token refresh if expired.
+   * Targets the specific Google Account ID (sub) if available to refresh
+   * non-primary or multi-account selections without prompting the user.
    */
   async getValidToken(): Promise<string | undefined> {
     // 1. Check local storage
@@ -227,12 +229,39 @@ export class GoogleOAuthStrategy implements IOAuthStrategy {
       }
     }
 
-    // 2. Attempt silent getAuthToken (works seamlessly on signed-in Chrome)
+    // 2. Attempt silent getAuthToken (targeting specific Google Account ID if known)
     if (typeof chrome !== 'undefined' && chrome.identity?.getAuthToken) {
+      let accountOptions: { interactive: boolean; account?: { id: string } } = {
+        interactive: false,
+      };
+
+      try {
+        const storedState = await chrome.storage.local.get([STORAGE_KEYS.POPUP_STATE]);
+        const sub = (storedState?.[STORAGE_KEYS.POPUP_STATE] as any)?.userAccount?.sub;
+        if (sub && typeof sub === 'string') {
+          accountOptions.account = { id: sub };
+        }
+      } catch (err) {
+        console.warn('[GoogleOAuthStrategy] Failed to read account sub for silent refresh:', err);
+      }
+
       const token = await new Promise<string | undefined>((resolve) => {
-        chrome.identity.getAuthToken({ interactive: false }, (tok) => {
+        chrome.identity.getAuthToken(accountOptions, (tok) => {
           if (chrome.runtime.lastError || !tok) {
-            resolve(undefined);
+            // If targeted account refresh failed and an account was specified, try generic fallback
+            if (accountOptions.account) {
+              chrome.identity.getAuthToken({ interactive: false }, (fallbackTok) => {
+                if (chrome.runtime.lastError || !fallbackTok) {
+                  resolve(undefined);
+                } else {
+                  const strToken =
+                    typeof fallbackTok === 'string' ? fallbackTok : (fallbackTok as any)?.token;
+                  resolve(strToken);
+                }
+              });
+            } else {
+              resolve(undefined);
+            }
           } else {
             const strToken = typeof tok === 'string' ? tok : (tok as any)?.token;
             resolve(strToken);

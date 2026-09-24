@@ -3,6 +3,7 @@ import {
   CloudflareTranslateEngine,
   CloudflarePoolExhaustedError,
 } from './CloudflareTranslateEngine';
+import { STORAGE_KEYS } from '../../../shared/constants';
 
 describe('CloudflareTranslateEngine Keyed JSON Protocol', () => {
   let engine: CloudflareTranslateEngine;
@@ -142,6 +143,7 @@ describe('CloudflareTranslateEngine Keyed JSON Protocol', () => {
   });
 
   it('evicts the cached OAuth token after HTTP 401', async () => {
+    const removeSpy = vi.spyOn(chrome.storage.local, 'remove');
     const tokenSpy = vi.spyOn(chrome.runtime, 'sendMessage')
       .mockImplementationOnce(((...args: unknown[]) => {
         const callback = args.find((argument): argument is (response: unknown) => void => typeof argument === 'function');
@@ -156,6 +158,8 @@ describe('CloudflareTranslateEngine Keyed JSON Protocol', () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ b0: 'translated' }) } }] }), { status: 200 }));
 
     await expect((engine as any).requestLlm('first')).rejects.toThrow('401');
+    expect(removeSpy).toHaveBeenCalledWith([STORAGE_KEYS.AUTH_TOKEN, STORAGE_KEYS.AUTH_EXPIRES_AT]);
+
     await expect((engine as any).requestLlm('second')).resolves.toBe(JSON.stringify({ b0: 'translated' }));
 
     expect(tokenSpy).toHaveBeenCalledTimes(2);

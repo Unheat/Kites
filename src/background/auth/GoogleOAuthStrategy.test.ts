@@ -4,6 +4,7 @@ import {
   AUTH_STORAGE_KEY,
   AUTH_STORAGE_EXPIRES_KEY,
 } from './GoogleOAuthStrategy';
+import { STORAGE_KEYS } from '../../shared/constants';
 
 describe('GoogleOAuthStrategy', () => {
   let strategy: GoogleOAuthStrategy;
@@ -36,9 +37,10 @@ describe('GoogleOAuthStrategy', () => {
       },
       storage: {
         local: {
-          get: vi.fn((keys: string[]) => {
+          get: vi.fn((keys: string | string[]) => {
+            const keyList = Array.isArray(keys) ? keys : [keys];
             const result: Record<string, any> = {};
-            for (const k of keys) {
+            for (const k of keyList) {
               if (k in mockStorage) result[k] = mockStorage[k];
             }
             return Promise.resolve(result);
@@ -243,6 +245,60 @@ describe('GoogleOAuthStrategy', () => {
 
       const token = await strategy.getValidToken();
       expect(token).toBeUndefined();
+    });
+
+    it('attempts targeted silent getAuthToken with account ID when userAccount.sub is present in popupState', async () => {
+      mockStorage[AUTH_STORAGE_KEY] = 'old-expired-token';
+      mockStorage[AUTH_STORAGE_EXPIRES_KEY] = Date.now() - 1000;
+      mockStorage[STORAGE_KEYS.POPUP_STATE] = {
+        userAccount: {
+          sub: 'google-sub-user-999',
+          signedIn: true,
+          email: 'custom@gmail.com',
+        },
+      };
+
+      (chrome.identity.getAuthToken as any).mockImplementation((opts: any, cb: any) => {
+        expect(opts).toEqual({
+          account: { id: 'google-sub-user-999' },
+          interactive: false,
+        });
+        cb('refreshed-multi-account-token');
+      });
+
+      const token = await strategy.getValidToken();
+      expect(token).toBe('refreshed-multi-account-token');
+      expect(mockStorage[AUTH_STORAGE_KEY]).toBe('refreshed-multi-account-token');
+    });
+
+    it('falls back to generic getAuthToken if targeted account refresh fails', async () => {
+      mockStorage[AUTH_STORAGE_KEY] = 'old-expired-token';
+      mockStorage[AUTH_STORAGE_EXPIRES_KEY] = Date.now() - 1000;
+      mockStorage[STORAGE_KEYS.POPUP_STATE] = {
+        userAccount: {
+          sub: 'google-sub-user-999',
+          signedIn: true,
+        },
+      };
+
+      let callCount = 0;
+      (chrome.identity.getAuthToken as any).mockImplementation((opts: any, cb: any) => {
+        callCount++;
+        if (callCount === 1) {
+          expect(opts.account?.id).toBe('google-sub-user-999');
+          (chrome.runtime as any).lastError = { message: 'Account not found in profile' };
+          cb(undefined);
+        } else {
+          expect(opts.account).toBeUndefined();
+          expect(opts.interactive).toBe(false);
+          (chrome.runtime as any).lastError = undefined;
+          cb('refreshed-fallback-token');
+        }
+      });
+
+      const token = await strategy.getValidToken();
+      expect(token).toBe('refreshed-fallback-token');
+      expect(callCount).toBe(2);
     });
   });
 

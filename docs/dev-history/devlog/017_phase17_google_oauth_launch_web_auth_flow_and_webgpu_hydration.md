@@ -117,6 +117,11 @@ Resolve Google Sign-In failures (`Error 400: invalid_request`, `bad client id`, 
    * Updated `BaseLlmTranslationEngine.ts` batch translation prompt to maintain dialogue context, conversational tone, and character pronouns across speech bubbles.
    * Kept the instruction ultra-compact (9-10 words / ~12 tokens: `- Use surrounding values for dialogue context, natural tone, and pronouns.`) so it does not degrade WebLLM's strict 1024-token context limit while ensuring character pronoun continuity across panels.
 
+5. **Multi-Account Targeted Silent Refresh & HTTP 401 Purge:**
+   * Leveraged Chrome Identity API's `chrome.identity.getAuthToken({ account: { id: userAccount.sub }, interactive: false })` to silently refresh tokens for specific selected accounts (avoiding the WebAuthFlow singleton constraint while eliminating the 60-minute re-login friction for non-primary accounts).
+   * Added graceful fallback to generic `{ interactive: false }`.
+   * Updated `CloudflareTranslateEngine.ts` to automatically evict revoked/expired tokens from `chrome.storage.local` on HTTP 401 responses.
+
 ---
 
 ### Key Takeaways
