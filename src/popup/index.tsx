@@ -9,6 +9,7 @@ import { Settings, Home, Power, Crop } from 'lucide-react';
 
 import type { PopupState } from '../shared/types';
 import { DEFAULT_POPUP_STATE } from '../shared/types';
+import { STORAGE_KEYS } from '../shared/constants';
 
 /**
  * Completes persisted popup settings and preserves nested WebGPU defaults.
@@ -50,9 +51,9 @@ function PopupApp() {
       // to eliminate loading flash, avoiding zombie offscreen RPC stalls. Transient
       // offscreen failures or timeouts only set RAM state (never persist false). See devlog 015.
       if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-        chrome.storage.local.get('hardware_webgpu_supported', (data) => {
+        chrome.storage.local.get(STORAGE_KEYS.WEBGPU_SUPPORTED, (data) => {
           if (!isMounted) return;
-          if (data?.hardware_webgpu_supported === true) {
+          if (data?.[STORAGE_KEYS.WEBGPU_SUPPORTED] === true) {
             setState(prev => ({ ...prev, webgpuSupported: true }));
             return;
           }
@@ -88,8 +89,8 @@ function PopupApp() {
       changes: { [key: string]: chrome.storage.StorageChange },
       areaName: string
     ) => {
-      if (areaName === 'local' && changes.popupState?.newValue) {
-        setState(completePopupState(changes.popupState.newValue as Partial<PopupState>));
+      if (areaName === 'local' && changes[STORAGE_KEYS.POPUP_STATE]?.newValue) {
+        setState(completePopupState(changes[STORAGE_KEYS.POPUP_STATE].newValue as Partial<PopupState>));
       }
     };
 
@@ -140,7 +141,7 @@ function PopupApp() {
       storageWriteQueue.current = storageWriteQueue.current
         .catch(() => undefined)
         .then(async () => {
-          await chrome.storage.local.set({ popupState: stateToPersist });
+          await chrome.storage.local.set({ [STORAGE_KEYS.POPUP_STATE]: stateToPersist });
         })
         .catch((error) => {
           console.error('[Popup] Failed to persist popup state:', error);

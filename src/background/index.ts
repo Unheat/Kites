@@ -1,7 +1,7 @@
 import { db, cleanupOldJobs, deleteJobs } from '../db';
 import type { ProcessJobMessage, PopupState, PreloadActiveEngineMessage } from '../shared/types';
 import { DEFAULT_POPUP_STATE } from '../shared/types';
-import { CLOUDFLARE_QUOTA_DEFAULT_ENDPOINT } from '../shared/constants';
+import { CLOUDFLARE_QUOTA_DEFAULT_ENDPOINT, STORAGE_KEYS } from '../shared/constants';
 import modelsRegistryData from '../shared/models-registry.json';
 import { normalizeCustomApiConfig } from '../shared/customApi';
 import { inpaintRegistry } from '../offscreen/engines/inpaint/inpaintRegistry';
@@ -133,8 +133,8 @@ function setupContextMenu(): void {
 
 chrome.contextMenus.onClicked.addListener(async (info: chrome.contextMenus.OnClickData, _tab?: chrome.tabs.Tab) => {
   if (info.menuItemId === 'translate-image' && info.srcUrl) {
-    const data = await chrome.storage.local.get('popupState');
-    const popupState = data.popupState as PopupState | undefined;
+    const data = await chrome.storage.local.get(STORAGE_KEYS.POPUP_STATE);
+    const popupState = data[STORAGE_KEYS.POPUP_STATE] as PopupState | undefined;
     if (popupState && popupState.isExtensionEnabled === false) {
       console.log('[Background] Context menu ignored: Kites extension is disabled.');
       return;
@@ -146,8 +146,8 @@ chrome.contextMenus.onClicked.addListener(async (info: chrome.contextMenus.OnCli
       console.error('[Background] Context menu translation failed:', error);
     }
   } else if (info.menuItemId === 'translate-area' && _tab?.id) {
-    const data = await chrome.storage.local.get('popupState');
-    const popupState = data.popupState as PopupState | undefined;
+    const data = await chrome.storage.local.get(STORAGE_KEYS.POPUP_STATE);
+    const popupState = data[STORAGE_KEYS.POPUP_STATE] as PopupState | undefined;
     if (popupState && popupState.isExtensionEnabled === false) {
       console.log('[Background] Context menu ignored: Kites extension is disabled.');
       return;
@@ -193,12 +193,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === 'GET_POPUP_STATE') {
-    chrome.storage.local.get('popupState').then(async (data) => {
-      const storedState = data.popupState as PopupState | undefined;
+    chrome.storage.local.get(STORAGE_KEYS.POPUP_STATE).then(async (data) => {
+      const storedState = data[STORAGE_KEYS.POPUP_STATE] as PopupState | undefined;
       const { state, changed } = normalizePopupState(storedState);
       if (changed) {
         console.log('[Background] Removed archived translation engines from popup settings.');
-        await chrome.storage.local.set({ popupState: state });
+        await chrome.storage.local.set({ [STORAGE_KEYS.POPUP_STATE]: state });
       }
       sendResponse(state);
     }).catch((error) => {
@@ -211,8 +211,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'TRANSLATE_IMAGE') {
     const srcUrl = message.payload?.srcUrl || message.url || message.srcUrl;
     if (srcUrl) {
-      chrome.storage.local.get('popupState').then((data) => {
-        const popupState = data.popupState as PopupState | undefined;
+      chrome.storage.local.get(STORAGE_KEYS.POPUP_STATE).then((data) => {
+        const popupState = data[STORAGE_KEYS.POPUP_STATE] as PopupState | undefined;
         if (popupState && popupState.isExtensionEnabled === false) {
           console.warn('[Background] Rejected TRANSLATE_IMAGE: Kites extension is disabled.');
           sendResponse({ status: 'error', error: 'Extension is disabled' });
@@ -253,8 +253,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       sendResponse({ status: 'error', error: 'Missing requestId or dataUrl' });
       return false;
     }
-    chrome.storage.local.get('popupState').then(async (data) => {
-      const popupState = data.popupState as PopupState | undefined;
+    chrome.storage.local.get(STORAGE_KEYS.POPUP_STATE).then(async (data) => {
+      const popupState = data[STORAGE_KEYS.POPUP_STATE] as PopupState | undefined;
       if (popupState && popupState.isExtensionEnabled === false) {
         console.warn('[Background] Rejected TRANSLATE_CAPTURED_IMAGE: Kites extension is disabled.');
         sendResponse({ status: 'error', error: 'Extension is disabled' });
@@ -284,12 +284,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         const strategy = oAuthManager.get(provider);
         const userAccount = await strategy.signIn();
 
-        const currentData = await chrome.storage.local.get('popupState');
+        const currentData = await chrome.storage.local.get(STORAGE_KEYS.POPUP_STATE);
         const updatedState = {
-          ...(currentData.popupState || DEFAULT_POPUP_STATE),
+          ...(currentData[STORAGE_KEYS.POPUP_STATE] || DEFAULT_POPUP_STATE),
           userAccount,
         };
-        await chrome.storage.local.set({ popupState: updatedState });
+        await chrome.storage.local.set({ [STORAGE_KEYS.POPUP_STATE]: updatedState });
 
         sendResponse({ success: true, userAccount });
       } catch (err: any) {
@@ -303,8 +303,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'SIGN_OUT_GOOGLE' || message.type === 'SIGN_OUT_AUTH') {
     (async () => {
       try {
-        const currentData = await chrome.storage.local.get('popupState');
-        const storedState = currentData.popupState as PopupState | undefined;
+        const currentData = await chrome.storage.local.get(STORAGE_KEYS.POPUP_STATE);
+        const storedState = currentData[STORAGE_KEYS.POPUP_STATE] as PopupState | undefined;
         const provider = message.provider || storedState?.userAccount?.provider || 'google';
         
         try {
@@ -322,12 +322,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         );
 
         const updatedState = {
-          ...(currentData.popupState || DEFAULT_POPUP_STATE),
+          ...(currentData[STORAGE_KEYS.POPUP_STATE] || DEFAULT_POPUP_STATE),
           activeEngineId,
           fallbackChain,
           userAccount: undefined,
         };
-        await chrome.storage.local.set({ popupState: updatedState });
+        await chrome.storage.local.set({ [STORAGE_KEYS.POPUP_STATE]: updatedState });
 
         sendResponse({ success: true });
       } catch (err: any) {
@@ -367,8 +367,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
         if (res.ok) {
           const quota = await res.json() as any;
-          const currentData = await chrome.storage.local.get('popupState');
-          const current = currentData?.popupState as PopupState | undefined;
+          const currentData = await chrome.storage.local.get(STORAGE_KEYS.POPUP_STATE);
+          const current = currentData?.[STORAGE_KEYS.POPUP_STATE] as PopupState | undefined;
           if (current?.userAccount) {
             const updatedAccount = {
               ...current.userAccount,
@@ -376,7 +376,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
               quotaResetsAt: quota.resetsAt
             };
             await chrome.storage.local.set({
-              popupState: { ...current, userAccount: updatedAccount }
+              [STORAGE_KEYS.POPUP_STATE]: { ...current, userAccount: updatedAccount }
             });
             sendResponse({ success: true, quota });
             return;
@@ -656,8 +656,8 @@ async function processQueue() {
   
   try {
     // Dynamically fetch concurrency setting
-    const stateData = await chrome.storage.local.get('popupState');
-    const popupState = stateData.popupState as PopupState | undefined;
+    const stateData = await chrome.storage.local.get(STORAGE_KEYS.POPUP_STATE);
+    const popupState = stateData[STORAGE_KEYS.POPUP_STATE] as PopupState | undefined;
     const configuredConcurrency = popupState?.concurrency || 3;
     const concurrency = Math.min(5, Math.max(1, configuredConcurrency));
 

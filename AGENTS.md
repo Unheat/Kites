@@ -43,6 +43,7 @@ The developer of this project is a beginner learning full-stack, web extension, 
 *   **Performance vs UX Trade-offs**: Always implement the most efficient, modern approach (e.g., `MutationObserver` over polling, CSS Anchors over JS math) if there is no trade-off. However, if an efficient approach prevents a user feature or lowers the user experience, you MUST stop and ask the user to decide if the performance gain is worth the feature loss.
 *   **Mandatory Docstrings**: Each function must include a docstring detailing its general description/purpose, input parameters, and return value/outputs.
 *   **No Magic Numbers**: Extract magic numbers (like timeouts, minimum dimensions, or thresholds) into named constants at the top of the file with explanatory comments so they are easily adjustable in the future.
+*   **Centralized Storage Keys (No Magic Strings)**: All keys stored in or retrieved from `chrome.storage.local` MUST be registered in `src/shared/constants.ts` under `STORAGE_KEYS`. Never hardcode raw string keys (`'popupState'`, `'kites_oauth_auth_token'`, `'hardware_webgpu_supported'`, etc.) across background, popup, offscreen, or content scripts. Always import and use `STORAGE_KEYS` to maintain a single source of truth and prevent silent key mismatches.
 
 ---
 

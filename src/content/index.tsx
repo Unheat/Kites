@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, useCallback, useId } from 'react';
 import './content.css';
 import { Languages, Eye, EyeOff, ExternalLink, X, Crop, RotateCcw } from 'lucide-react';
 import type { PopupState, CropOverlayItem, ViewportSelection } from '../shared/types';
+import { STORAGE_KEYS } from '../shared/constants';
 import {
   normalizeSelection,
   calculateCaptureSourceRect,
@@ -1017,8 +1018,8 @@ function GlobalOverlay() {
   // Load user settings and react to popup updates.
   useEffect(() => {
     const loadSettings = () => {
-      chrome.storage.local.get('popupState', (data) => {
-        const state = data.popupState as PopupState | undefined;
+      chrome.storage.local.get(STORAGE_KEYS.POPUP_STATE, (data) => {
+        const state = data[STORAGE_KEYS.POPUP_STATE] as PopupState | undefined;
         if (state) {
           setIsEnabled(state.isExtensionEnabled ?? true);
           setMode(state.manualMode || 'hover');
@@ -1028,8 +1029,8 @@ function GlobalOverlay() {
     };
     loadSettings();
     const handleStorageChange = (changes: { [key: string]: chrome.storage.StorageChange }, area: string) => {
-      if (area !== 'local' || !changes.popupState?.newValue) return;
-      const state = changes.popupState.newValue as PopupState;
+      if (area !== 'local' || !changes[STORAGE_KEYS.POPUP_STATE]?.newValue) return;
+      const state = changes[STORAGE_KEYS.POPUP_STATE].newValue as PopupState;
       setIsEnabled(state.isExtensionEnabled ?? true);
       setMode(state.manualMode || 'hover');
       setAutoTranslate(state.isAuto || false);

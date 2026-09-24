@@ -13,6 +13,7 @@
  */
 
 import type { UserAccountInfo } from '../../shared/types';
+import { STORAGE_KEYS } from '../../shared/constants';
 import type { IOAuthStrategy } from './types';
 import {
   buildGoogleAuthUrl,
@@ -44,8 +45,8 @@ export const DEFAULT_GOOGLE_SCOPES = [
   'openid',
 ];
 
-export const AUTH_STORAGE_KEY = 'kites_oauth_auth_token';
-export const AUTH_STORAGE_EXPIRES_KEY = 'kites_oauth_token_expires_at';
+export const AUTH_STORAGE_KEY = STORAGE_KEYS.AUTH_TOKEN;
+export const AUTH_STORAGE_EXPIRES_KEY = STORAGE_KEYS.AUTH_EXPIRES_AT;
 
 /** Safety buffer: refresh token 60 seconds before expiration */
 const EXPIRATION_BUFFER_MS = 60_000;

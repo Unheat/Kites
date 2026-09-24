@@ -12,6 +12,7 @@ import { BaseLlmTranslationEngine, type LlmChatMessage } from './BaseLlmTranslat
 import {
   CLOUDFLARE_TRANSLATE_DEFAULT_ENDPOINT,
   CLOUDFLARE_TRANSLATE_MODEL,
+  STORAGE_KEYS,
 } from '../../../shared/constants';
 
 export { CLOUDFLARE_TRANSLATE_DEFAULT_ENDPOINT, CLOUDFLARE_TRANSLATE_MODEL };
@@ -63,9 +64,14 @@ export class CloudflareTranslateEngine extends BaseLlmTranslationEngine {
     // 1. Direct storage retrieval (instant & eliminates inter-process message failure)
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
       try {
-        const data = await chrome.storage.local.get(['kites_oauth_auth_token', 'kites_oauth_token_expires_at']);
-        const token = typeof data?.kites_oauth_auth_token === 'string' ? data.kites_oauth_auth_token : undefined;
-        const expiresAt = typeof data?.kites_oauth_token_expires_at === 'number' ? data.kites_oauth_token_expires_at : undefined;
+        const data = (await chrome.storage.local.get([
+          STORAGE_KEYS.AUTH_TOKEN,
+          STORAGE_KEYS.AUTH_EXPIRES_AT,
+        ])) as Record<string, unknown>;
+        const rawToken = data?.[STORAGE_KEYS.AUTH_TOKEN];
+        const rawExpiresAt = data?.[STORAGE_KEYS.AUTH_EXPIRES_AT];
+        const token = typeof rawToken === 'string' ? rawToken : undefined;
+        const expiresAt = typeof rawExpiresAt === 'number' ? rawExpiresAt : undefined;
         if (token && (!expiresAt || Date.now() < expiresAt - 60_000)) {
           this.cachedToken = token;
           this.tokenExpiresAt = expiresAt || Date.now() + TOKEN_CACHE_TTL_MS;
@@ -187,9 +193,9 @@ export class CloudflareTranslateEngine extends BaseLlmTranslationEngine {
         const resetsAt = resetHeader ? parseInt(resetHeader, 10) : undefined;
         if (!isNaN(remaining)) {
           chrome.storage.local
-            .get('popupState')
+            .get(STORAGE_KEYS.POPUP_STATE)
             .then((data) => {
-              const current = data?.popupState as any;
+              const current = data?.[STORAGE_KEYS.POPUP_STATE] as any;
               if (current?.userAccount) {
                 const updatedAccount = {
                   ...current.userAccount,
@@ -198,7 +204,7 @@ export class CloudflareTranslateEngine extends BaseLlmTranslationEngine {
                 };
                 chrome.storage.local
                   .set({
-                    popupState: { ...current, userAccount: updatedAccount },
+                    [STORAGE_KEYS.POPUP_STATE]: { ...current, userAccount: updatedAccount },
                   })
                   .catch(() => {});
               }
