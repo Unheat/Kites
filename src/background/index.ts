@@ -331,12 +331,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'GET_AUTH_TOKEN') {
     (async () => {
       try {
-        const token = await new Promise<string | undefined>((resolve) => {
-          chrome.identity.getAuthToken({ interactive: false }, (tok) => {
-            const strToken = typeof tok === 'string' ? tok : (tok as any)?.token;
-            resolve(strToken);
-          });
-        });
+        const strategy = oAuthManager.get('google');
+        const token = await strategy.getValidToken();
         sendResponse({ success: Boolean(token), token: token || '' });
       } catch (err: any) {
         sendResponse({ success: false, token: '', error: err?.message });
@@ -348,12 +344,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'REFRESH_CLOUD_QUOTA') {
     (async () => {
       try {
-        const token = await new Promise<string | undefined>((resolve) => {
-          chrome.identity.getAuthToken({ interactive: false }, (tok) => {
-            const strToken = typeof tok === 'string' ? tok : (tok as any)?.token;
-            resolve(strToken);
-          });
-        });
+        const strategy = oAuthManager.get('google');
+        const token = await strategy.getValidToken();
 
         if (!token) {
           return sendResponse({ success: false, error: 'No auth token available' });
