@@ -109,6 +109,14 @@ Resolve Google Sign-In failures (`Error 400: invalid_request`, `bad client id`, 
    * If so, `activeEngineId` is automatically reset to `DEFAULT_POPUP_STATE.activeEngineId` (`gg-translate`), and `cloudflare-translate` is filtered out of `fallbackChain`.
    * `normalizePopupState` also asserts that `cloudflare-translate` can only be considered a supported engine if `userAccount.signedIn === true`.
 
+3. **Centralized Storage Keys (`STORAGE_KEYS`):**
+   * Migrated all direct string literals (`'popupState'`, `'kites_oauth_auth_token'`, `'hardware_webgpu_supported'`) to a single centralized enum `STORAGE_KEYS` in `src/shared/constants.ts`.
+   * Enforced single source of truth across Background, Offscreen, Popup, and Content scripts, backed by unit tests in `src/shared/constants.test.ts`.
+
+4. **WebLLM Context-Aware Prompt Refinement:**
+   * Updated `BaseLlmTranslationEngine.ts` batch translation prompt to maintain dialogue context, conversational tone, and character pronouns across speech bubbles.
+   * Kept the instruction ultra-compact (9-10 words / ~12 tokens: `- Use surrounding values for dialogue context, natural tone, and pronouns.`) so it does not degrade WebLLM's strict 1024-token context limit while ensuring character pronoun continuity across panels.
+
 ---
 
 ### Key Takeaways
