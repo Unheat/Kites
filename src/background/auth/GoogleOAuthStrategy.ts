@@ -22,7 +22,7 @@ import {
 } from './googleAuthUtils';
 
 export const DEFAULT_GOOGLE_CLIENT_ID =
-  '13839997652-1pfe7h8arhiqlvh3dtn81tc5aibh8pnm.apps.googleusercontent.com';
+  '13839997652-td8d1oi4ev72shdts4c0ua5gorkoktu2.apps.googleusercontent.com';
 
 export const DEFAULT_GOOGLE_SCOPES = [
   'https://www.googleapis.com/auth/userinfo.email',
