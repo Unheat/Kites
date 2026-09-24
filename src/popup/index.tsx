@@ -45,17 +45,42 @@ function PopupApp() {
       }
       setIsLoaded(true);
 
-      // WORKAROUND: Probe through offscreen after hydration. Popup WebGPU capability can
-      // differ from the inference document, and the stale persisted result must not win
-      // this race or LaMa will silently run on WASM. See devlog 015.
-      chrome.runtime.sendMessage({ type: 'CHECK_WEBGPU_SUPPORT', target: 'background', source: 'popup', request: true }, (response) => {
-        if (!isMounted) return;
-        if (chrome.runtime.lastError || response?.status !== 'success') {
-          console.warn('[Popup] WebGPU support check failed:', chrome.runtime.lastError?.message || response?.error);
-          return;
-        }
-        setState(prev => ({ ...prev, webgpuSupported: response.supported === true }));
-      });
+      // WORKAROUND: Probe through offscreen only when hardware WebGPU capability is not
+      // yet verified in cache. Popup reads cached success from chrome.storage.local (0ms)
+      // to eliminate loading flash, avoiding zombie offscreen RPC stalls. Transient
+      // offscreen failures or timeouts only set RAM state (never persist false). See devlog 015.
+      if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+        chrome.storage.local.get('hardware_webgpu_supported', (data) => {
+          if (!isMounted) return;
+          if (data?.hardware_webgpu_supported === true) {
+            setState(prev => ({ ...prev, webgpuSupported: true }));
+            return;
+          }
+
+          let timedOut = false;
+          const timer = setTimeout(() => {
+            timedOut = true;
+            if (isMounted) {
+              console.warn('[Popup] WebGPU capability probe timed out after 3000ms. Defaulting to false in RAM.');
+              setState(prev => ({ ...prev, webgpuSupported: false }));
+            }
+          }, 3000);
+
+          chrome.runtime.sendMessage(
+            { type: 'CHECK_WEBGPU_SUPPORT', target: 'background', source: 'popup', request: true },
+            (response) => {
+              if (timedOut || !isMounted) return;
+              clearTimeout(timer);
+              if (chrome.runtime.lastError || response?.status !== 'success') {
+                console.warn('[Popup] WebGPU support check failed:', chrome.runtime.lastError?.message || response?.error);
+                setState(prev => ({ ...prev, webgpuSupported: false }));
+                return;
+              }
+              setState(prev => ({ ...prev, webgpuSupported: response.supported === true }));
+            }
+          );
+        });
+      }
     });
 
     // Listen to changes in chrome.storage.local to reactively reflect quota/state updates
@@ -107,10 +132,15 @@ function PopupApp() {
       });
       // WORKAROUND: Serial writes prevent two rapid toggle updates from persisting
       // independent snapshots and restoring stale GPU flags behind the live React UI.
+      // Never persist webgpuSupported as false to chrome.storage.local to avoid permanent WASM fallback.
+      const stateToPersist: PopupState = {
+        ...newState,
+        webgpuSupported: newState.webgpuSupported === true ? true : null,
+      };
       storageWriteQueue.current = storageWriteQueue.current
         .catch(() => undefined)
         .then(async () => {
-          await chrome.storage.local.set({ popupState: newState });
+          await chrome.storage.local.set({ popupState: stateToPersist });
         })
         .catch((error) => {
           console.error('[Popup] Failed to persist popup state:', error);

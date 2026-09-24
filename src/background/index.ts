@@ -86,6 +86,7 @@ export function normalizePopupState(popupState: Partial<PopupState> | undefined)
   const renderFontPresetId = normalizeRenderFontPresetId(completedState.renderFontPresetId);
   const state: PopupState = {
     ...completedState,
+    webgpuSupported: completedState.webgpuSupported === true ? true : null,
     customApis: uniqueCustomApis,
     activeEngineId,
     activeInpaintId,
