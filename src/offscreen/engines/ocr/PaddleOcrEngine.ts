@@ -3,6 +3,14 @@ import { checkWebGPUAvailability } from '../../utils/hardware';
 import { CustomPaddleDetector } from './CustomPaddleDetector';
 import { ocrRegistry, resolveOcrTier } from './ocrRegistry';
 import { OcrCacheManager } from '../../services/OcrCacheManager';
+import {
+  generate1DTileRects,
+  isTallStrip,
+  mergeTileDetections,
+  restoreTileBoxCoordinates,
+  restoreTilePolygonCoordinates,
+  type RawDetectedLine,
+} from './tallStripTiling';
 
 /**
  * Longest-side resize applied to the page before DBNet detection inference.
@@ -254,9 +262,11 @@ export class PaddleOcrEngine implements IOcrEngine {
 
   /**
    * Executes full OCR pipeline (detection + CRNN recognition).
+   * Automatically switches between standard single-pass and XianScan 1D vertical tiled OCR
+   * based on the image's height and aspect ratio.
    * 
    * @param imageBuffer - Raw image ArrayBuffer.
-   * @returns OCR result with texts, boxes, and polygons.
+   * @returns OCR result with texts, boxes, and polygons in full-image coordinates.
    */
   async recognize(imageBuffer: ArrayBuffer): Promise<OcrResult> {
     if (!this.isInitialized || !this.service || !this.customDetector) {
@@ -264,37 +274,17 @@ export class PaddleOcrEngine implements IOcrEngine {
     }
 
     try {
-      const startTime = (import.meta as any).env?.DEV ? performance.now() : 0;
-      console.log('[PaddleOcrEngine] Starting recognition...');
-      
-      const { polygons, scores: detectionScores, maskRawCanvas } = await this.customDetector!.detectPolygons(imageBuffer);
-      
-      console.log(`[PaddleOcrEngine] Extracted ${polygons.length} text polygons. Running custom rotated recognition...`);
+      const rawCanvas = await this.service.platform.canvas.prepareCanvas(imageBuffer);
+      const srcW = rawCanvas.width;
+      const srcH = rawCanvas.height;
 
-      const { texts, scores } = await this.recognizeCrops(imageBuffer, polygons);
-
-      const boxes = polygons.map(poly => {
-        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-        for (const p of poly) {
-          if (p.x < minX) minX = p.x;
-          if (p.x > maxX) maxX = p.x;
-          if (p.y < minY) minY = p.y;
-          if (p.y > maxY) maxY = p.y;
-        }
-        return {
-          x: Math.max(0, Math.round(minX)),
-          y: Math.max(0, Math.round(minY)),
-          w: Math.max(1, Math.round(maxX - minX)),
-          h: Math.max(1, Math.round(maxY - minY))
-        };
-      });
-
-      if ((import.meta as any).env?.DEV) {
-        const totalDuration = (performance.now() - startTime).toFixed(2);
-        console.log(`[PaddleOcrEngine] Recognition complete in ${totalDuration}ms. Found ${texts.length} text blocks.`);
+      // Normal manga images bypass tiling entirely and run the proven single pass
+      if (!isTallStrip(srcW, srcH)) {
+        return await this.recognizeSingle(imageBuffer);
       }
-      
-      return { texts, boxes, scores, detectionScores, polygons, maskRawCanvas };
+
+      // Tall webtoon strips run XianScan-style 1D vertical sliding window OCR
+      return await this.recognizeTallStripTiled(rawCanvas, srcW, srcH);
     } catch (e: any) {
       console.error('[PaddleOcrEngine] Recognition failed:', e?.message || e?.name || e, e?.stack || e);
       throw e;
@@ -302,45 +292,143 @@ export class PaddleOcrEngine implements IOcrEngine {
   }
 
   /**
-   * Recognizes text for arbitrary polygon crops using the CRNN model.
-   *
-   * Deliberately bypasses ppu-paddle-ocr's own `BaseRecognitionService.run()` and its
-   * `'cross-line'` / `'per-line'` batching strategies. Those strategies operate on
-   * axis-aligned boxes and crop internally from a single source canvas; feeding them our
-   * polygons would mean giving up `cropAndWarp`'s rotated-quad deskew and vertical-line
-   * rotation (VERTICAL_CROP_ASPECT) — the two things that make manga text recognizable to a
-   * model trained on horizontal Latin/CJK lines. Batching is a speed optimization; rotation
-   * handling is an accuracy one, and accuracy wins here.
-   *
-   * Instead we call the lower-level `buildContext()` / `recognizeTextViaContext()` once per
-   * pre-warped crop. WebGPU runs its dynamic-width CRNN calls sequentially to avoid overlapping
-   * work on one ONNX session; WASM/CPU retains concurrent `Promise.all` processing. This is
-   * effectively the library's own `'per-box'` strategy (n inferences, its docs call it "most
-   * accurate"), with our own preprocessing in front of it.
-   *
-   * `buildContext` and `recognizeTextViaContext` are typed `private` on the service — this is
-   * a deliberate internal-API dependency. Re-verify this path whenever `ppu-paddle-ocr` is
-   * upgraded.
-   *
+   * Standard single-pass recognition for normal-dimension manga pages.
+   * 
    * @param imageBuffer - Raw image ArrayBuffer.
-   * @param polygons - Array of 4-point quadrilaterals.
-   * @returns Object containing recognized texts array and confidence scores array.
+   * @returns OCR result with texts, boxes, and polygons.
    */
-  async recognizeCrops(imageBuffer: ArrayBuffer, polygons: { x: number; y: number }[][]): Promise<{ texts: string[]; scores: number[] }> {
-    if (!this.isInitialized || !this.service) {
-      await this.init();
+  private async recognizeSingle(imageBuffer: ArrayBuffer): Promise<OcrResult> {
+    const startTime = (import.meta as any).env?.DEV ? performance.now() : 0;
+    console.log('[PaddleOcrEngine] Starting single-pass recognition...');
+    
+    const { polygons, scores: detectionScores, maskRawCanvas } = await this.customDetector!.detectPolygons(imageBuffer);
+    
+    console.log(`[PaddleOcrEngine] Extracted ${polygons.length} text polygons. Running custom rotated recognition...`);
+
+    const { texts, scores } = await this.recognizeCrops(imageBuffer, polygons);
+
+    const boxes = polygons.map(poly => {
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const p of poly) {
+        if (p.x < minX) minX = p.x;
+        if (p.x > maxX) maxX = p.x;
+        if (p.y < minY) minY = p.y;
+        if (p.y > maxY) maxY = p.y;
+      }
+      return {
+        x: Math.max(0, Math.round(minX)),
+        y: Math.max(0, Math.round(minY)),
+        w: Math.max(1, Math.round(maxX - minX)),
+        h: Math.max(1, Math.round(maxY - minY))
+      };
+    });
+
+    if ((import.meta as any).env?.DEV) {
+      const totalDuration = (performance.now() - startTime).toFixed(2);
+      console.log(`[PaddleOcrEngine] Recognition complete in ${totalDuration}ms. Found ${texts.length} text blocks.`);
     }
+    
+    return { texts, boxes, scores, detectionScores, polygons, maskRawCanvas };
+  }
 
-    const rawCanvas = await this.service.platform.canvas.prepareCanvas(imageBuffer);
-    const srcW = rawCanvas.width;
-    const srcH = rawCanvas.height;
+  /**
+   * XianScan 1:1 port of sliding-window 1D vertical tiled OCR for extreme tall webtoon strips.
+   * Slices the continuous canvas into overlapping tiles (1000px high, 300px overlap),
+   * runs DBNet detection + CRNN recognition on each tile at native resolution, restores
+   * full canvas coordinates, and deduplicates boundary overlaps where higher confidence wins.
+   * 
+   * @param rawCanvas - Prepared full-size canvas.
+   * @param srcW - Full image width in native pixels.
+   * @param srcH - Full image height in native pixels.
+   * @returns Unified OCR result covering the entire tall strip in full-image coordinates.
+   */
+  private async recognizeTallStripTiled(rawCanvas: any, srcW: number, srcH: number): Promise<OcrResult> {
+    const startTime = (import.meta as any).env?.DEV ? performance.now() : 0;
+    const tileRects = generate1DTileRects(srcW, srcH);
+    console.log(`[PaddleOcrEngine] Tall webtoon strip detected (${srcW}x${srcH}). Running XianScan 1D vertical tiled OCR across ${tileRects.length} tiles...`);
 
-    // Copy to a new canvas to bypass the sticky GPU context returned by prepareCanvas
+    // Copy to a new canvas to bypass the sticky GPU context
     const sourceCanvas = this.service.platform.createCanvas(srcW, srcH);
     const sourceCtx = sourceCanvas.getContext('2d', { willReadFrequently: true });
     if (sourceCtx) {
       sourceCtx.drawImage(rawCanvas, 0, 0);
     }
+
+    let accumulatedLines: RawDetectedLine[] = [];
+
+    for (let tileIdx = 0; tileIdx < tileRects.length; tileIdx++) {
+      const rect = tileRects[tileIdx];
+      const tileCanvas = this.service.platform.createCanvas(rect.width, rect.height);
+      const tileCtx = tileCanvas.getContext('2d', { willReadFrequently: true });
+      if (tileCtx) {
+        tileCtx.drawImage(sourceCanvas, rect.x, rect.y, rect.width, rect.height, 0, 0, rect.width, rect.height);
+      }
+
+      const { polygons: tilePolygons, scores: tileDetScores } = await this.customDetector!.detectPolygons(tileCanvas);
+      if (tilePolygons.length === 0) {
+        continue;
+      }
+
+      const { texts: tileTexts, scores: tileScores } = await this.recognizeCropsFromCanvas(tileCanvas, tilePolygons);
+
+      const tileLines: RawDetectedLine[] = [];
+      for (let i = 0; i < tilePolygons.length; i++) {
+        const poly = tilePolygons[i];
+        const text = tileTexts[i];
+        const score = tileScores[i];
+        const detScore = tileDetScores ? tileDetScores[i] : 0.5;
+
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const p of poly) {
+          if (p.x < minX) minX = p.x;
+          if (p.x > maxX) maxX = p.x;
+          if (p.y < minY) minY = p.y;
+          if (p.y > maxY) maxY = p.y;
+        }
+        const localBox = {
+          x: Math.max(0, Math.round(minX)),
+          y: Math.max(0, Math.round(minY)),
+          w: Math.max(1, Math.round(maxX - minX)),
+          h: Math.max(1, Math.round(maxY - minY)),
+        };
+
+        tileLines.push({
+          text,
+          score,
+          detectionScore: detScore,
+          box: restoreTileBoxCoordinates(localBox, rect.x, rect.y),
+          polygon: restoreTilePolygonCoordinates(poly, rect.x, rect.y),
+        });
+      }
+
+      accumulatedLines = mergeTileDetections(accumulatedLines, tileLines);
+    }
+
+    const texts = accumulatedLines.map(l => l.text);
+    const boxes = accumulatedLines.map(l => l.box);
+    const scores = accumulatedLines.map(l => l.score);
+    const detectionScores = accumulatedLines.map(l => l.detectionScore ?? 0.5);
+    const polygons = accumulatedLines.map(l => l.polygon);
+
+    if ((import.meta as any).env?.DEV) {
+      const totalDuration = (performance.now() - startTime).toFixed(2);
+      console.log(`[PaddleOcrEngine] Tiled OCR complete in ${totalDuration}ms. Found ${texts.length} unique text blocks across ${tileRects.length} tiles.`);
+    }
+
+    return { texts, boxes, scores, detectionScores, polygons };
+  }
+
+  /**
+   * Recognizes text for arbitrary polygon crops from an already prepared source Canvas.
+   * 
+   * @param sourceCanvas - Pre-rendered Canvas instance containing the target image/tile pixels.
+   * @param polygons - Array of 4-point quadrilaterals in sourceCanvas pixel coordinates.
+   * @returns Object containing recognized texts array and confidence scores array.
+   */
+  async recognizeCropsFromCanvas(sourceCanvas: any, polygons: { x: number; y: number }[][]): Promise<{ texts: string[]; scores: number[] }> {
+    const srcW = sourceCanvas.width;
+    const srcH = sourceCanvas.height;
+    const sourceCtx = sourceCanvas.getContext('2d', { willReadFrequently: true });
     const sourcePixels = sourceCtx ? sourceCtx.getImageData(0, 0, srcW, srcH).data : new Uint8ClampedArray(0);
 
     const recognitor = this.service.recognitor;
@@ -383,6 +471,33 @@ export class PaddleOcrEngine implements IOcrEngine {
       texts: results.map(result => result.text),
       scores: results.map(result => result.confidence)
     };
+  }
+
+  /**
+   * Recognizes text for arbitrary polygon crops using the CRNN model.
+   * Prepares the source Canvas from ArrayBuffer and delegates to recognizeCropsFromCanvas.
+   *
+   * @param imageBuffer - Raw image ArrayBuffer.
+   * @param polygons - Array of 4-point quadrilaterals.
+   * @returns Object containing recognized texts array and confidence scores array.
+   */
+  async recognizeCrops(imageBuffer: ArrayBuffer, polygons: { x: number; y: number }[][]): Promise<{ texts: string[]; scores: number[] }> {
+    if (!this.isInitialized || !this.service) {
+      await this.init();
+    }
+
+    const rawCanvas = await this.service.platform.canvas.prepareCanvas(imageBuffer);
+    const srcW = rawCanvas.width;
+    const srcH = rawCanvas.height;
+
+    // Copy to a new canvas to bypass the sticky GPU context returned by prepareCanvas
+    const sourceCanvas = this.service.platform.createCanvas(srcW, srcH);
+    const sourceCtx = sourceCanvas.getContext('2d', { willReadFrequently: true });
+    if (sourceCtx) {
+      sourceCtx.drawImage(rawCanvas, 0, 0);
+    }
+
+    return await this.recognizeCropsFromCanvas(sourceCanvas, polygons);
   }
 
   /**
