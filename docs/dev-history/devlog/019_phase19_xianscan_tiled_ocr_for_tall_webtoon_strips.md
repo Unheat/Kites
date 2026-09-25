@@ -76,12 +76,4 @@ Fixes (root cause: hover state was derived exclusively from pointer boundary eve
 
 Verified live (800×14,080 strip): button at anchor position when hovering the image top (68px), rides at the 16px viewport inset through 4,500px of scrolling, releases back to anchor position at the page top. 310 unit tests pass.
 
-### Follow-up Fix 2 (2026-09-25): speed-dependent hover hide
-
-User report: moving the cursor OUT of an image hid the button only at moderate/fast speed — a slow exit left the button stuck on screen forever.
-
-**Root cause (instrumented event trace):** `surfaceContainsPoint` forgives up to `POINTER_TOLERANCE_PX` (3px), so a cursor that just left the image still resolves to it when the resolver inspects a container's img descendants. On a SLOW exit, that halo `mouseover` fires after `mouseout` and cancels the pending hide (button never hides); on a FAST exit, Chrome coalesces events and the delivered mouseover lands beyond the halo, so the hide fires. Pure event-granularity lottery.
-
-**Fix:** in `handleMouseOver`, when the resolver returns the SAME surface that is already active but the cursor is strictly outside that surface's rect, treat it as a genuine leave and let the pending hide run (do not `cancelHide`).
-
-Verified live: fast/slow exits both hide consistently (2 rounds), re-entry re-shows, scrolling keeps the button riding the strip, and a genuine leave after scrolling hides. 310 unit tests pass.
+*(For detailed analysis of the subsequent speed-dependent hover boundary race and subpixel halo fix, see [Devlog 020](020_phase20_hover_boundary_race_and_pointer_halo_fix.md)).*
