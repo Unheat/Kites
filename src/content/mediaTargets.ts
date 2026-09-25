@@ -366,17 +366,19 @@ export function discoverMediaTargets(root: ParentNode = document): MediaTarget[]
 }
 
 /**
- * Resolves hover media using composed paths, point hit-testing, descendants, and CSS backgrounds.
+ * Builds media targets from candidate elements, deduplicates by surface, keeps only
+ * targets containing the point, and returns the largest by rendered area.
  *
- * @param event - Mouse event used for target and pointer information.
+ * @param elements - Candidate elements (event targets, composed path, elementsFromPoint hits).
+ * @param clientX - Horizontal viewport coordinate.
+ * @param clientY - Vertical viewport coordinate.
  * @returns Largest matching media target, or null.
  */
-export function resolveHoverMediaTarget(event: MouseEvent): MediaTarget | null {
-  const elements = new Set<Element>();
-  if (event.target instanceof Element) elements.add(event.target);
-  for (const node of event.composedPath()) if (node instanceof Element) elements.add(node);
-  for (const element of document.elementsFromPoint?.(event.clientX, event.clientY) || []) elements.add(element);
-
+function pickLargestTargetFromElements(
+  elements: Iterable<Element>,
+  clientX: number,
+  clientY: number
+): MediaTarget | null {
   const targets: MediaTarget[] = [];
   for (const element of elements) {
     const directTarget = element instanceof HTMLImageElement
@@ -391,10 +393,43 @@ export function resolveHoverMediaTarget(event: MouseEvent): MediaTarget | null {
 
   return targets
     .filter((target, index) => targets.findIndex((candidate) => candidate.surfaceElement === target.surfaceElement) === index)
-    .filter((target) => surfaceContainsPoint(target.surfaceElement, event.clientX, event.clientY))
+    .filter((target) => surfaceContainsPoint(target.surfaceElement, clientX, clientY))
     .sort((first, second) => {
       const firstRect = first.surfaceElement.getBoundingClientRect();
       const secondRect = second.surfaceElement.getBoundingClientRect();
       return secondRect.width * secondRect.height - firstRect.width * firstRect.height;
     })[0] || null;
+}
+
+/**
+ * Resolves hover media using composed paths, point hit-testing, descendants, and CSS backgrounds.
+ *
+ * @param event - Mouse event used for target and pointer information.
+ * @returns Largest matching media target, or null.
+ */
+export function resolveHoverMediaTarget(event: MouseEvent): MediaTarget | null {
+  const elements = new Set<Element>();
+  if (event.target instanceof Element) elements.add(event.target);
+  for (const node of event.composedPath()) if (node instanceof Element) elements.add(node);
+  for (const element of document.elementsFromPoint?.(event.clientX, event.clientY) || []) elements.add(element);
+
+  return pickLargestTargetFromElements(elements, event.clientX, event.clientY);
+}
+
+/**
+ * Resolves the media target at a raw viewport point without a mouse event.
+ *
+ * WORKAROUND: [Scrolling fires no boundary events] -> mouseover/mouseout only fire when the
+ * pointer crosses element edges. When a tall page scrolls under a stationary cursor, no
+ * event fires, so hover state silently went stale (button vanished mid-scroll and never
+ * returned until the cursor physically re-entered). Callers re-resolve the target from the
+ * last known cursor position on scroll using this function.
+ *
+ * @param clientX - Horizontal viewport coordinate.
+ * @param clientY - Vertical viewport coordinate.
+ * @returns Largest matching media target at the point, or null.
+ */
+export function resolveMediaTargetAtPoint(clientX: number, clientY: number): MediaTarget | null {
+  if (typeof document.elementsFromPoint !== 'function') return null;
+  return pickLargestTargetFromElements(document.elementsFromPoint(clientX, clientY), clientX, clientY);
 }

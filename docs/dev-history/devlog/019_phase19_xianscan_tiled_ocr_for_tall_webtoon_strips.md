@@ -58,3 +58,20 @@ Chromium 153's `max(anchor(top), 20px)` does **not** clamp (verified empirically
 * **Takeaway:** "Pipeline completed with 0 blocks" on extreme aspect ratios is silent by design (Cotrans no-text semantics); aspect-ratio gating for OCR strategy belongs inside the OCR engine, where native dimensions are authoritative.
 * **Takeaway:** Chromium's CSS anchor positioning has no working pure-CSS viewport clamp for `anchor(top)` (max/clamp do not evaluate as hoped in 153); a tiny scroll-driven pin is the robust fallback.
 * **Next:** extend the same generator to a 2D grid (wide double-spreads / huge canvases) — only `generate1DTileRects` needs a second axis. Revisit tile sizes if PP-OCRv6 recalibration changes `DETECTION_MAX_SIDE`.
+
+---
+
+### Follow-up Fixes (2026-09-25, live user feedback)
+
+The first scroll-pin implementation shipped in PR #10 had three defects reported during real use on roliascan.com:
+
+1. **Button vanished ~150ms into scrolling** — the hover-mode hide timer fired because scrolling moves content under a stationary cursor, generating `mouseout` without any pointer movement.
+2. **Pinned position looked broken on normal images** — the button pinned to the *screen's* top-left corner, detached from the image.
+3. **No recovery after scroll** — once hidden, the button never reappeared until the cursor physically left and re-entered the image, because browsers fire no boundary events when content scrolls under a stationary pointer.
+
+Fixes (root cause: hover state was derived exclusively from pointer boundary events, which scroll does not emit):
+
+* **Visible-edge clamp:** the button's scroll listener now reads the anchor element's rect directly and clamps the button to the image's *visible top edge* (`max(16, anchorTop)`, bounded by image bottom and viewport). It rides the image while scrolling instead of floating over page chrome, and releases to pure CSS `anchor(top)` once the real top edge is on-screen. Critical detail: the un-clamp path must RE-SET the inline `top: anchor(top)` — `removeProperty` deletes the positioning effect's declaration and drops CSS anchoring entirely (button fell into document flow at the page bottom).
+* **Scroll-driven hover re-resolution:** scrolling cancels the pending hover-hide; ~120ms after scrolling settles, Kites re-resolves the media target at the last cursor position (`resolveMediaTargetAtPoint` in `mediaTargets.ts`, sharing the hover resolver's picking tail). The button follows the image actually under the cursor and hides only when that point has no media.
+
+Verified live (800×14,080 strip): button at anchor position when hovering the image top (68px), rides at the 16px viewport inset through 4,500px of scrolling, releases back to anchor position at the page top. 310 unit tests pass.

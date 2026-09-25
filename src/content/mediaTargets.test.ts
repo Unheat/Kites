@@ -7,6 +7,7 @@ import {
   reapplyMediaTargetStyles,
   resolveHoverMediaTarget,
   resolveImageSource,
+  resolveMediaTargetAtPoint,
 } from './mediaTargets';
 
 const LARGE_RECT = { x: 0, y: 0, top: 0, left: 0, right: 400, bottom: 300, width: 400, height: 300, toJSON: () => ({}) };
@@ -87,6 +88,26 @@ describe('media target source resolution', () => {
     const inlineSvgOnly = document.createElement('img');
     inlineSvgOnly.src = longSvgPlaceholder;
     expect(resolveImageSource(inlineSvgOnly)).toBe(longSvgPlaceholder);
+  });
+});
+
+describe('point-based media target resolution', () => {
+  it('resolves the target at a raw viewport point without a mouse event', () => {
+    const img = document.createElement('img');
+    img.src = 'https://roliascan.org/storage/chapters/manhwa_1/page_001.webp';
+    setRect(img, LARGE_RECT);
+    document.body.appendChild(img);
+    vi.mocked(document.elementsFromPoint).mockReturnValue([img]);
+
+    const target = resolveMediaTargetAtPoint(200, 150);
+    expect(target).not.toBeNull();
+    expect(target?.surfaceElement).toBe(img);
+    expect(target?.srcUrl).toBe('https://roliascan.org/storage/chapters/manhwa_1/page_001.webp');
+  });
+
+  it('returns null when the point has no eligible media (scrolling into a gap)', () => {
+    vi.mocked(document.elementsFromPoint).mockReturnValue([]);
+    expect(resolveMediaTargetAtPoint(200, 150)).toBeNull();
   });
 });
 

@@ -18,6 +18,7 @@ import {
   normalizeMediaUrl,
   resolveHoverMediaTarget,
   resolveImageSource,
+  resolveMediaTargetAtPoint,
   reapplyMediaTargetStyles,
   type MediaTarget,
 } from './mediaTargets';
@@ -399,6 +400,7 @@ function getAnchorName(element: HTMLElement): string {
  * @param props - Button state and callbacks.
  * @param props.srcUrl - Image URL to translate.
  * @param props.anchorName - CSS anchor assigned to target image.
+ * @param props.anchorElement - The anchor element whose viewport rect drives the scroll clamp.
  * @param props.isTranslating - Whether this image has a pending translation job.
  * @param props.onTranslate - Queues translation for this image.
  * @returns Floating translate button.
@@ -406,11 +408,13 @@ function getAnchorName(element: HTMLElement): string {
 function TranslateButton({
   srcUrl,
   anchorName,
+  anchorElement,
   isTranslating,
   onTranslate,
 }: {
   srcUrl: string;
   anchorName: string;
+  anchorElement: HTMLElement;
   isTranslating: boolean;
   onTranslate: (srcUrl: string) => void;
 }) {
@@ -435,52 +439,54 @@ function TranslateButton({
     }
   }, [anchorName]);
 
-  // WORKAROUND: [Tall strip anchor scroll-off] -> CSS anchor(top) positions the translate
-  // button at the image's top edge. On extreme tall webtoon strips (e.g. 14,000px manhwa),
-  // the image top scrolls thousands of pixels above the viewport, dragging the button
-  // off-screen with it. Chromium 153's max(anchor(top), 20px) does NOT clamp (verified
-  // empirically — the raw negative anchor value wins). So we add a passive scroll-driven
-  // clamp: when the anchored button is scrolled above the viewport top, we pin it to a
-  // small viewport inset until the anchor scrolls back into view. Normal-size images are
-  // unaffected because their anchor top stays within the viewport.
+  // WORKAROUND: [Tall strip anchor scroll-off] -> CSS anchor(top) glues the button to the
+  // image's top edge. On tall strips (pages taller than the viewport, e.g. 14,000px
+  // manhwa) that edge scrolls far above the screen, dragging the button out of reach —
+  // and Chromium 153 ignores max(anchor(top), Npx) clamping (verified empirically). A
+  // passive scroll listener clamps the button to the image's VISIBLE top edge instead: it
+  // rides the image while scrolling, stays inside the image bounds (never floating over
+  // page chrome), and hands back to pure CSS anchor positioning once the real top edge is
+  // on-screen again. Fully visible images keep the exact previous behavior.
+  //
+  // The un-clamp path must RE-SET 'top: anchor(top)' rather than removeProperty — the
+  // positioning effect owns that inline declaration, and removing it drops CSS anchoring
+  // entirely, throwing the button into document flow at the bottom of the page.
   useEffect(() => {
     const button = buttonRef.current;
-    if (!button) return;
+    if (!button || !anchorElement) return;
 
-    const BUTTON_VIEWPORT_INSET_PX = 16;
-    let pinned = false;
+    const BUTTON_INSET_PX = 16;
+    const BUTTON_SLOT_PX = 48; // 32px button + 8px margins + breathing room
+    let clamped = false;
 
-    const updatePin = (): void => {
-      const rect = button.getBoundingClientRect();
-      if (!pinned && rect.top < BUTTON_VIEWPORT_INSET_PX) {
-        pinned = true;
-        button.style.setProperty('top', `${BUTTON_VIEWPORT_INSET_PX}px`);
-      } else if (pinned && rect.top >= BUTTON_VIEWPORT_INSET_PX) {
-        pinned = false;
-        button.style.removeProperty('top');
+    const updateClamp = (): void => {
+      const rect = anchorElement.getBoundingClientRect();
+      const shouldClamp = rect.top < BUTTON_INSET_PX && rect.bottom > BUTTON_INSET_PX;
+      if (shouldClamp) {
+        clamped = true;
+        // Ride the image's visible top edge: never above the viewport inset, never below
+        // the image's bottom edge, never past the viewport bottom.
+        const clampedTop = Math.min(
+          Math.max(rect.top, BUTTON_INSET_PX),
+          Math.max(rect.bottom - BUTTON_SLOT_PX, BUTTON_INSET_PX),
+          window.innerHeight - BUTTON_SLOT_PX
+        );
+        button.style.setProperty('top', `${clampedTop}px`);
+      } else if (clamped) {
+        clamped = false;
+        button.style.setProperty('top', 'anchor(top)');
       }
     };
 
-    const handleScroll = (): void => {
-      if (pinned) {
-        // While pinned, check the anchor element's live position via CSS anchor resolution.
-        // Removing the override lets anchor(top) re-resolve; if it's still above the
-        // viewport, the next frame re-pins. Doing this only while pinned avoids churn.
-        button.style.removeProperty('top');
-        pinned = false;
-      }
-      updatePin();
-    };
-
-    window.addEventListener('scroll', handleScroll, { passive: true, capture: true });
-    window.addEventListener('resize', handleScroll, { passive: true });
-    updatePin();
-
+    updateClamp();
+    window.addEventListener('scroll', updateClamp, { passive: true, capture: true });
+    window.addEventListener('resize', updateClamp, { passive: true });
     return () => {
-      window.removeEventListener('scroll', handleScroll, { capture: true } as any);
-      window.removeEventListener('resize', handleScroll);
+      window.removeEventListener('scroll', updateClamp, { capture: true } as any);
+      window.removeEventListener('resize', updateClamp);
+      button.style.setProperty('top', 'anchor(top)');
     };
-  }, [anchorName]);
+  }, [anchorElement]);
 
   useEffect(() => {
     /**
@@ -934,6 +940,9 @@ function GlobalOverlay() {
 
   const activeImgRef = useRef(activeImg);
   const translatingUrlsRef = useRef(translatingUrls);
+  // Last known pointer position for scroll-driven hover re-resolution (scroll fires no
+  // mouse events, so the hover target must be re-derived from the last cursor position).
+  const lastCursorPositionRef = useRef<{ x: number; y: number } | null>(null);
   activeImgRef.current = activeImg;
   translatingUrlsRef.current = translatingUrls;
 
@@ -1349,6 +1358,7 @@ function GlobalOverlay() {
       }
     };
     const handleMouseOver = (event: MouseEvent) => {
+      lastCursorPositionRef.current = { x: event.clientX, y: event.clientY };
       const target = event.target as HTMLElement;
       if (activeImgRef.current && (target === activeImgRef.current.surfaceElement || activeImgRef.current.surfaceElement.contains(target) || target.closest(TRANSLATE_CONTROL_SELECTOR))) {
         cancelHide();
@@ -1361,6 +1371,7 @@ function GlobalOverlay() {
       setActiveImg({ ...mediaTarget, anchorName: getAnchorName(mediaTarget.surfaceElement) });
     };
     const handleMouseOut = (event: MouseEvent) => {
+      lastCursorPositionRef.current = { x: event.clientX, y: event.clientY };
       const current = activeImgRef.current;
       if (!current) return;
       const target = event.target as HTMLElement;
@@ -1372,12 +1383,49 @@ function GlobalOverlay() {
       if (target === current.surfaceElement || current.surfaceElement.contains(target) || target.closest(TRANSLATE_CONTROL_SELECTOR)) scheduleHide();
     };
 
+    // WORKAROUND: [Scrolling fires no boundary events] -> mouseover/mouseout only fire when
+    // the pointer crosses element edges, so scrolling a tall page under a stationary cursor
+    // went unnoticed: the pending hover-hide killed the button mid-scroll and nothing
+    // re-showed it until the cursor physically re-entered the image. While scrolling,
+    // cancel the pending hide; once scrolling settles, re-resolve the media target at the
+    // last cursor position — the button follows the image actually under the cursor, and
+    // hides only when that point genuinely has no media (a gap or outside the reader).
+    const SCROLL_RESOLVE_DEBOUNCE_MS = 120;
+    let scrollResolveTimeoutId: number | null = null;
+
+    const resolveHoverAtCursor = (): void => {
+      const cursor = lastCursorPositionRef.current;
+      if (!cursor) return;
+      const mediaTarget = resolveMediaTargetAtPoint(cursor.x, cursor.y);
+      if (mediaTarget) {
+        cancelHide();
+        if (!activeImgRef.current || activeImgRef.current.surfaceElement !== mediaTarget.surfaceElement) {
+          registerMediaTarget(mediaTarget);
+          setActiveImg({ ...mediaTarget, anchorName: getAnchorName(mediaTarget.surfaceElement) });
+        }
+      } else if (activeImgRef.current) {
+        scheduleHide();
+      }
+    };
+
+    const handleScroll = (): void => {
+      cancelHide();
+      if (scrollResolveTimeoutId !== null) window.clearTimeout(scrollResolveTimeoutId);
+      scrollResolveTimeoutId = window.setTimeout(() => {
+        scrollResolveTimeoutId = null;
+        resolveHoverAtCursor();
+      }, SCROLL_RESOLVE_DEBOUNCE_MS);
+    };
+
     document.addEventListener('mouseover', handleMouseOver, { passive: true });
     document.addEventListener('mouseout', handleMouseOut, { passive: true });
+    window.addEventListener('scroll', handleScroll, { passive: true, capture: true });
     return () => {
       cancelHide();
+      if (scrollResolveTimeoutId !== null) window.clearTimeout(scrollResolveTimeoutId);
       document.removeEventListener('mouseover', handleMouseOver);
       document.removeEventListener('mouseout', handleMouseOut);
+      window.removeEventListener('scroll', handleScroll, { capture: true } as any);
     };
   }, [isEnabled, mode]);
 
@@ -1409,6 +1457,7 @@ function GlobalOverlay() {
           key={image.anchorName}
           srcUrl={image.srcUrl}
           anchorName={image.anchorName}
+          anchorElement={image.anchorElement}
           isTranslating={translatingUrls.has(image.srcUrl)}
           onTranslate={(srcUrl) => requestTranslation(srcUrl, image)}
         />
@@ -1418,6 +1467,7 @@ function GlobalOverlay() {
         <TranslateButton
           srcUrl={activeImg.srcUrl}
           anchorName={activeImg.anchorName}
+          anchorElement={activeImg.surfaceElement}
           isTranslating={translatingUrls.has(activeImg.srcUrl)}
           onTranslate={(srcUrl) => requestTranslation(srcUrl, activeImg)}
         />
