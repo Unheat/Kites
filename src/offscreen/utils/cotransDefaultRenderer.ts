@@ -2,6 +2,7 @@ import type { Point2D } from '../../shared/utils/geometry';
 import { syllables } from './hyphenation';
 import { fitFontSizeWithLines, fontSpec } from './typesetLayout';
 import { sanitizeTypesetText } from '../../shared/utils/textCleaning';
+import { getFontSizeMinimumBase } from '../engines/ocr/tallStripTiling';
 
 /**
  * @file cotransDefaultRenderer.ts
@@ -590,7 +591,11 @@ export function resizeRegionToFontSize(
   pageWidth: number,
   pageHeight: number
 ): { dstPoints: Point2D[]; fontSize: number } {
-  const fontSizeMinimum = Math.max(1, Math.round((pageWidth + pageHeight) / FONT_SIZE_MINIMUM_DIVISOR));
+  // WORKAROUND: [Tall strip font floor inflation] -> on extreme tall strips the Cotrans
+  // (pageWidth + pageHeight)/200 floor balloons (800x14080 -> 74px) and inflates every
+  // dialogue region. Tall strips derive the floor from width only. See tallStripTiling.ts.
+  const fontSizeMinimumBase = getFontSizeMinimumBase(pageWidth, pageHeight);
+  const fontSizeMinimum = Math.max(1, Math.round(fontSizeMinimumBase / FONT_SIZE_MINIMUM_DIVISOR));
 
   const center = polygonCenter(region.polygon);
   // Unrotate the box to axis-aligned space to measure size and to scale on clean axes.

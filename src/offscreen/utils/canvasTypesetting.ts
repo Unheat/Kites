@@ -7,6 +7,7 @@ import {
 } from './cotransDefaultRenderer';
 import { fitFontSizeWithLines, decollideBoxes, fontSpec } from './typesetLayout';
 import { pickTextColor } from '../../shared/utils/textColor';
+import { getFontSizeMinimumBase } from '../engines/ocr/tallStripTiling';
 
 /**
  * Batch driver for translated-text rendering.
@@ -502,7 +503,11 @@ function renderTextBlocksDefault(
   fontFamily: string = DEFAULT_RENDER_FONT_FAMILY
 ): (RenderedBlockInfo | null)[] {
   const results: (RenderedBlockInfo | null)[] = blocks.map(() => null);
-  const fontSizeMinimum = Math.max(1, Math.round((pageWidth + pageHeight) / FONT_SIZE_MINIMUM_DIVISOR));
+  // WORKAROUND: [Tall strip font floor inflation] -> on extreme tall strips the Cotrans
+  // (pageWidth + pageHeight)/200 floor balloons (800x14080 -> 74px) and inflates every
+  // dialogue region. Tall strips derive the floor from width only. See tallStripTiling.ts.
+  const fontSizeMinimumBase = getFontSizeMinimumBase(pageWidth, pageHeight);
+  const fontSizeMinimum = Math.max(1, Math.round(fontSizeMinimumBase / FONT_SIZE_MINIMUM_DIVISOR));
 
   // XianScan typeset.ts two-pass harmonization. Pass 1: fit every multi-word dialogue
   // block independently and collect its ideal font size; the page MEDIAN becomes the

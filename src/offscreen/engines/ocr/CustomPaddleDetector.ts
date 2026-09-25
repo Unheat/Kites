@@ -36,11 +36,12 @@ export class CustomPaddleDetector {
   /**
    * Runs the underlying ONNX detection model and returns extracted text polygons.
    * Raw DBNet mask generation is skipped because the locked inpaint contract consumes polygons only.
+   * Accepts either an ArrayBuffer or a prepared canvas (e.g. for tiled sub-image detection).
    *
-   * @param imageBuffer - The raw ArrayBuffer of the image.
+   * @param imageInput - The raw ArrayBuffer of the image, or an existing Canvas instance.
    * @returns A promise that resolves to polygons, scores, and an undefined legacy mask field.
    */
-  async detectPolygons(imageBuffer: ArrayBuffer): Promise<DetectionOutput> {
+  async detectPolygons(imageInput: ArrayBuffer | any): Promise<DetectionOutput> {
     if (!this.service || !this.service.detector) {
       throw new Error('CustomPaddleDetector: PaddleOcrService is not initialized.');
     }
@@ -48,9 +49,11 @@ export class CustomPaddleDetector {
     const detector = this.service.detector;
     const platform = this.service.platform;
 
-    // 1. Load image and preprocess it into the tensor format
+    // 1. Load image and preprocess it into the tensor format (reuse existing canvas if provided)
     console.log('[CustomPaddleDetector] Preprocessing image for WebGPU/WASM...');
-    const canvas = await platform.canvas.prepareCanvas(imageBuffer);
+    const canvas = (imageInput && typeof imageInput.width === 'number' && typeof imageInput.height === 'number')
+      ? imageInput
+      : await platform.canvas.prepareCanvas(imageInput);
     const input = await detector.preprocessDetection(canvas);
 
     // 2. Run inference (this executes on WebGPU if available, or WASM fallback)

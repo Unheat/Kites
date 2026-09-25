@@ -435,6 +435,53 @@ function TranslateButton({
     }
   }, [anchorName]);
 
+  // WORKAROUND: [Tall strip anchor scroll-off] -> CSS anchor(top) positions the translate
+  // button at the image's top edge. On extreme tall webtoon strips (e.g. 14,000px manhwa),
+  // the image top scrolls thousands of pixels above the viewport, dragging the button
+  // off-screen with it. Chromium 153's max(anchor(top), 20px) does NOT clamp (verified
+  // empirically — the raw negative anchor value wins). So we add a passive scroll-driven
+  // clamp: when the anchored button is scrolled above the viewport top, we pin it to a
+  // small viewport inset until the anchor scrolls back into view. Normal-size images are
+  // unaffected because their anchor top stays within the viewport.
+  useEffect(() => {
+    const button = buttonRef.current;
+    if (!button) return;
+
+    const BUTTON_VIEWPORT_INSET_PX = 16;
+    let pinned = false;
+
+    const updatePin = (): void => {
+      const rect = button.getBoundingClientRect();
+      if (!pinned && rect.top < BUTTON_VIEWPORT_INSET_PX) {
+        pinned = true;
+        button.style.setProperty('top', `${BUTTON_VIEWPORT_INSET_PX}px`);
+      } else if (pinned && rect.top >= BUTTON_VIEWPORT_INSET_PX) {
+        pinned = false;
+        button.style.removeProperty('top');
+      }
+    };
+
+    const handleScroll = (): void => {
+      if (pinned) {
+        // While pinned, check the anchor element's live position via CSS anchor resolution.
+        // Removing the override lets anchor(top) re-resolve; if it's still above the
+        // viewport, the next frame re-pins. Doing this only while pinned avoids churn.
+        button.style.removeProperty('top');
+        pinned = false;
+      }
+      updatePin();
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true, capture: true });
+    window.addEventListener('resize', handleScroll, { passive: true });
+    updatePin();
+
+    return () => {
+      window.removeEventListener('scroll', handleScroll, { capture: true } as any);
+      window.removeEventListener('resize', handleScroll);
+    };
+  }, [anchorName]);
+
   useEffect(() => {
     /**
      * Clears pending and visible model-initialization feedback for this image.
