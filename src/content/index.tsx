@@ -1352,8 +1352,36 @@ function GlobalOverlay() {
     const scheduleHide = () => {
       if (hideTimeoutId === null && translatingUrlsRef.current.size === 0) {
         hideTimeoutId = window.setTimeout(() => {
-          if (translatingUrlsRef.current.size === 0) setActiveImg(null);
           hideTimeoutId = null;
+          if (translatingUrlsRef.current.size > 0) return;
+          // WORKAROUND: [Event-ordering lottery on fast cursor exits] -> whether the button
+          // hides depends on which coalesced mouseover/mouseout/mousemove events Chrome
+          // delivers, not on where the cursor actually is (fast exits can skip the re-show,
+          // edge-crossing oscillations can cancel the hide, and rapid moves coalesce so the
+          // last delivered mousemove position is stale at the surface edge). Decide from the
+          // UA's own :hover chain instead — Chromium recomputes it after every move and
+          // scroll regardless of event delivery. Its recomputation can also LAG a burst of
+          // coalesced moves (stale true at fire time), so a "still hovered" verdict
+          // re-schedules the check instead of keeping the button indefinitely: the state
+          // settles within a frame or two and the next poll hides.
+          const surface = activeImgRef.current?.surfaceElement;
+          let surfaceHovered = false;
+          try {
+            surfaceHovered = surface ? (surface.matches(':hover') || surface.querySelector(':hover') !== null) : false;
+          } catch {
+            // :hover unsupported in this environment — fall back to the last cursor
+            // position against the surface rect (strict bounds, no tolerance).
+            const cursor = lastCursorPositionRef.current;
+            if (cursor && surface) {
+              const rect = surface.getBoundingClientRect();
+              surfaceHovered = cursor.x >= rect.left && cursor.x <= rect.right && cursor.y >= rect.top && cursor.y <= rect.bottom;
+            }
+          }
+          if (surfaceHovered) {
+            scheduleHide();
+            return;
+          }
+          setActiveImg(null);
         }, HOVER_LEAVE_DELAY_MS);
       }
     };
@@ -1366,6 +1394,18 @@ function GlobalOverlay() {
       }
       const mediaTarget = resolveHoverMediaTarget(event);
       if (!mediaTarget) return;
+      // WORKAROUND: [Tolerance halo cancels hide on exit] -> surfaceContainsPoint forgives
+      // up to POINTER_TOLERANCE_PX (3px), so a cursor that just LEFT the image can still
+      // resolve to it via a container's img descendant. Slow exits emit a mouseover inside
+      // that halo which cancels the pending hide (button never hides); fast exits skip past
+      // the halo between coalesced events (button hides) — the reported speed-dependence.
+      // When the resolver returns the SAME surface but the cursor is strictly outside its
+      // rect, treat it as a genuine leave and let the pending hide run.
+      if (activeImgRef.current && mediaTarget.surfaceElement === activeImgRef.current.surfaceElement) {
+        const rect = mediaTarget.surfaceElement.getBoundingClientRect();
+        const strictlyOutside = event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom;
+        if (strictlyOutside) return;
+      }
       cancelHide();
       registerMediaTarget(mediaTarget);
       setActiveImg({ ...mediaTarget, anchorName: getAnchorName(mediaTarget.surfaceElement) });
@@ -1419,12 +1459,20 @@ function GlobalOverlay() {
 
     document.addEventListener('mouseover', handleMouseOver, { passive: true });
     document.addEventListener('mouseout', handleMouseOut, { passive: true });
+    // Keep the cursor position continuously fresh — the hide-time position check and the
+    // scroll re-resolve both rely on it, and boundary events alone leave it stale while
+    // the pointer glides within one element.
+    const handleMouseMove = (event: MouseEvent): void => {
+      lastCursorPositionRef.current = { x: event.clientX, y: event.clientY };
+    };
+    document.addEventListener('mousemove', handleMouseMove, { passive: true });
     window.addEventListener('scroll', handleScroll, { passive: true, capture: true });
     return () => {
       cancelHide();
       if (scrollResolveTimeoutId !== null) window.clearTimeout(scrollResolveTimeoutId);
       document.removeEventListener('mouseover', handleMouseOver);
       document.removeEventListener('mouseout', handleMouseOut);
+      document.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('scroll', handleScroll, { capture: true } as any);
     };
   }, [isEnabled, mode]);
