@@ -91,6 +91,10 @@ The permissions, disclaimers, and copyright notices of all upstream authors are 
     - Line pre-filter battery: Geometric aspect ratio and confidence score pruning (`src/fusion.rs`).
     - Non-Latin source noise pruning: Latin debris removal in CJK text (`src/builder.rs`).
     - Low-confidence neighborhood-gated suppression.
+  - `src/offscreen/engines/ocr/tallStripTiling.ts`:
+    - Sliding-window vertical tile generation, tile-to-image coordinate restoration, and IoU-based overlap deduplication with confidence-preferring replacement (`src/ml/ocr/engine.rs` tiled recognition passes).
+  - `src/offscreen/engines/ocr/PaddleOcrEngine.ts`:
+    - Automatic 1D vertical tiled OCR routing for extreme tall webtoon strips (`detect_and_recognize_tiled`).
   - `src/offscreen/engines/inpaint/LamaMangaInpaintEngine.ts`:
     - Localized dynamic patch grouping (`inpaint_patch_mode`) from `src/ml/inpaint/lama.rs`.
     - Bubble bounding-box clustering with 24px padding and 64px multiple snapping to avoid WebGPU shader recompilation.
