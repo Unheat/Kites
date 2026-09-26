@@ -2,7 +2,7 @@ import type { ITranslationEngine } from '../engines/translation/BaseEngine';
 import { WebLLMEngine } from '../engines/translation/WebLLMEngine';
 import { GoogleTranslateEngine } from '../engines/translation/GoogleTranslateEngine';
 import { CustomApiEngine } from '../engines/translation/CustomApiEngine';
-import { CloudflareTranslateEngine, CloudflarePoolExhaustedError } from '../engines/translation/CloudflareTranslateEngine';
+import { CloudflareTranslateEngine } from '../engines/translation/CloudflareTranslateEngine';
 import type { CustomApiConfig, PopupState } from '../../shared/types';
 import modelsRegistryData from '../../shared/models-registry.json';
 import type { InitializationLifecycleCallback } from './OcrManager';
@@ -111,24 +111,12 @@ export class TranslationManager {
         }
         return results;
       } catch (error) {
-        console.error(`[TranslationManager] Engine ${engineId} failed:`, error);
-
-        if (error instanceof CloudflarePoolExhaustedError) {
-          console.warn(`[TranslationManager] Cloudflare shared pool exhausted (${error.code}). Pruning external cloud fallbacks to protect user.`);
-          const remainingLocalEngines = engineSequence.slice(i + 1).filter((id) => {
-            const isLocalWebLLM =
-              modelsRegistryData.some((model) => model.id === id && model.engine === 'webllm') ||
-              id.endsWith('-MLC');
-            return isLocalWebLLM || id === 'chrome-translator';
-          });
-          engineSequence = [...engineSequence.slice(0, i + 1), ...remainingLocalEngines];
-        }
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        console.warn(`[TranslationManager] Engine ${engineId} failed: ${errorMsg}. Falling back to next engine in chain...`, error);
 
         if (i === engineSequence.length - 1) {
-          throw new Error(`All engines in the waterfall chain failed. Last error: ${error instanceof Error ? error.message : String(error)}`);
+          throw new Error(`All engines in the waterfall chain failed. Last error: ${errorMsg}`);
         }
-
-        console.log('[TranslationManager] Falling back to next engine in chain...');
       } finally {
         lease?.release();
       }

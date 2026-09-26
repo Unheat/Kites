@@ -89,6 +89,23 @@ vi.mock('../engines/translation/GoogleTranslateEngine', () => ({
   },
 }));
 
+vi.mock('../engines/translation/CloudflareTranslateEngine', () => ({
+  CloudflareTranslateEngine: class {
+    private readonly mock = createMockEngine('cloudflare-translate');
+    init = this.mock.init;
+    translate = this.mock.translate;
+    destroy = this.mock.destroy;
+  },
+  CloudflarePoolExhaustedError: class extends Error {
+    code: string;
+    constructor(code: string, message: string) {
+      super(message);
+      this.name = 'CloudflarePoolExhaustedError';
+      this.code = code;
+    }
+  },
+}));
+
 vi.mock('../engines/translation/WebLLMEngine', () => ({
   WebLLMEngine: class {
     private readonly mock;
@@ -188,6 +205,15 @@ describe('TranslationManager Waterfall Logic', () => {
 
     await expect(manager.processTranslation(['Hello'])).resolves.toEqual(['Mock translated from fallback']);
     expect(mocks.instantiatedIds).toEqual(['custom-api', 'gg-translate']);
+  });
+
+  it('falls back to custom API when Cloudflare pool fails without pruning cloud engines', async () => {
+    const customApis = [{ id: 'api-1', provider: 'openai', modelName: 'gpt-4o', apiKey: 'key' }];
+    respondWith('cloudflare-translate', ['api-1'], customApis);
+    mocks.failFirstTranslate = true;
+
+    await expect(manager.processTranslation(['Hello'])).resolves.toEqual(['Mock translated from fallback']);
+    expect(mocks.instantiatedIds).toEqual(['cloudflare-translate', 'custom-api']);
   });
 
   it.each([
