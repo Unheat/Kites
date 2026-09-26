@@ -33,6 +33,9 @@ export class SharedPoolDO extends DurableObject {
   // In-memory circuit breakers & latency tracker (0 SQLite writes)
   private providerCircuits = new Map<string, ProviderCircuitState>();
 
+  // In-memory cache for provider speed metrics (synced from SQLite)
+  private providerMetricsCache = new Map<string, { emaMsPerToken: number; sampleCount: number }>();
+
   // In-memory global daily counter
   private globalDailyCount = 0;
   private currentUtcDay = '';
@@ -41,11 +44,12 @@ export class SharedPoolDO extends DurableObject {
     super(ctx, env);
     this.env = env;
     this.initSqlite();
+    this.loadProviderMetrics();
     this.initDayCounter();
   }
 
   /**
-   * Initialize SQLite schema for user quotas.
+   * Initialize SQLite schema for user quotas and persistent provider metrics.
    */
   private initSqlite() {
     this.ctx.storage.sql.exec(`
@@ -54,7 +58,32 @@ export class SharedPoolDO extends DurableObject {
         window_start INTEGER NOT NULL,
         used_count INTEGER NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS provider_metrics (
+        route_id TEXT PRIMARY KEY,
+        ema_ms_per_token REAL NOT NULL,
+        sample_count INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
     `);
+  }
+
+  /**
+   * Preload persisted provider EMA rates and sample counts into memory on DO startup.
+   */
+  private loadProviderMetrics() {
+    try {
+      const cursor = this.ctx.storage.sql.exec(
+        `SELECT route_id, ema_ms_per_token, sample_count FROM provider_metrics`
+      );
+      for (const row of cursor) {
+        const routeId = row.route_id as string;
+        const emaMsPerToken = Number(row.ema_ms_per_token);
+        const sampleCount = Number(row.sample_count);
+        this.providerMetricsCache.set(routeId, { emaMsPerToken, sampleCount });
+      }
+    } catch (err) {
+      console.warn('[SharedPoolDO] Failed to preload provider_metrics from SQLite:', err);
+    }
   }
 
   /**
@@ -174,11 +203,14 @@ export class SharedPoolDO extends DurableObject {
     if (!this.providerCircuits.has(routeId)) {
       const now = Date.now();
       const currentUtcDay = new Date().toISOString().slice(0, 10);
+      const metrics = this.providerMetricsCache.get(routeId);
       this.providerCircuits.set(routeId, {
         state: 'CLOSED',
         cooldownUntil: 0,
         consecutiveFailures: 0,
         emaLatencyMs: defaultTimeout,
+        emaMsPerToken: metrics?.emaMsPerToken ?? 12,
+        sampleCount: metrics?.sampleCount ?? 0,
         currentSecondWindow: Math.floor(now / 1000),
         secondCount: 0,
         currentMinuteWindow: Math.floor(now / 60000),
@@ -255,10 +287,23 @@ export class SharedPoolDO extends DurableObject {
   }
 
   /**
-   * Calculate adaptive timeout using exponential moving average (EMA).
+   * Calculate adaptive timeout scaled by estimated token count.
+   * - During learning phase (<3 samples): uses route.defaultTimeoutMs.
+   * - Once trained (>=3 samples): scales by estimated tokens with base network overhead.
    */
-  private calculateAdaptiveTimeout(circuit: ProviderCircuitState): number {
-    const dynamic = circuit.emaLatencyMs * 1.5 + 500;
+  private calculateAdaptiveTimeout(
+    circuit: ProviderCircuitState,
+    route: ProviderRouteConfig,
+    estimatedTokens: number
+  ): number {
+    // 3-sample warm-up safety guard: use conservative route default
+    if (circuit.sampleCount < 3) {
+      return route.defaultTimeoutMs ?? 3500;
+    }
+
+    const baseOverheadMs = 600;
+    const expectedTime = baseOverheadMs + estimatedTokens * circuit.emaMsPerToken;
+    const dynamic = Math.round(expectedTime * 1.5);
     return Math.round(Math.min(Math.max(dynamic, MIN_TIMEOUT_MS), MAX_TIMEOUT_MS));
   }
 
@@ -271,7 +316,9 @@ export class SharedPoolDO extends DurableObject {
     statusCode: number,
     latencyMs: number,
     errorText?: string,
-    retryAfterSeconds?: number
+    retryAfterSeconds?: number,
+    promptChars: number = 0,
+    outputChars: number = 0
   ) {
     const circuit = this.getCircuit(route.id, route.defaultTimeoutMs ?? 3500);
     const now = Date.now();
@@ -279,12 +326,53 @@ export class SharedPoolDO extends DurableObject {
     if (success) {
       circuit.state = 'CLOSED';
       circuit.consecutiveFailures = 0;
-      // EMA smoothing (alpha = 0.3)
+      // Legacy EMA latency smoothing
       circuit.emaLatencyMs = Math.round(circuit.emaLatencyMs * 0.7 + latencyMs * 0.3);
+
+      // Token-normalized rate smoothing
+      const promptTokens = Math.ceil(promptChars / 4);
+      const completionTokens = Math.ceil(outputChars / 4);
+      const totalTokens = Math.max(promptTokens + completionTokens, 15);
+      const rawMsPerToken = latencyMs / totalTokens;
+
+      // Outlier guard: clamp single-run speed between 2ms/token and 50ms/token
+      const currentMsPerToken = Math.min(Math.max(rawMsPerToken, 2), 50);
+
+      if (circuit.sampleCount === 0) {
+        circuit.emaMsPerToken = currentMsPerToken;
+      } else {
+        circuit.emaMsPerToken = Number(
+          (circuit.emaMsPerToken * 0.7 + currentMsPerToken * 0.3).toFixed(2)
+        );
+      }
+      circuit.sampleCount += 1;
+
+      // Sync in-memory metrics cache & persist to DO SQLite
+      this.providerMetricsCache.set(route.id, {
+        emaMsPerToken: circuit.emaMsPerToken,
+        sampleCount: circuit.sampleCount,
+      });
+
+      try {
+        this.ctx.storage.sql.exec(
+          `INSERT INTO provider_metrics (route_id, ema_ms_per_token, sample_count, updated_at)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT(route_id) DO UPDATE SET
+             ema_ms_per_token = excluded.ema_ms_per_token,
+             sample_count = excluded.sample_count,
+             updated_at = excluded.updated_at;`,
+          route.id,
+          circuit.emaMsPerToken,
+          circuit.sampleCount,
+          now
+        );
+      } catch (err) {
+        console.warn(`[SharedPoolDO] Failed to persist provider_metrics for ${route.id}:`, err);
+      }
       return;
     }
 
-    // Failure / Cooldown trigger
+    // Failure / Cooldown trigger: do NOT update emaMsPerToken or sampleCount
     circuit.consecutiveFailures += 1;
 
     let cooldownMs = 30_000; // default 30s
@@ -402,6 +490,14 @@ export class SharedPoolDO extends DurableObject {
 
     // 4. Waterfall Dispatch Loop
     const waterfallDeadline = now + MAX_TOTAL_WATERFALL_MS;
+    // Estimate prompt tokens and translation tokens for token-scaled adaptive timeout
+    const promptChars = request.messages.reduce(
+      (sum, m) => sum + (m.content ? m.content.length : 0),
+      0
+    );
+    const promptTokens = Math.max(Math.ceil(promptChars / 4), 10);
+    const estimatedTokens = promptTokens * 2;
+
     let lastError = 'No providers succeeded';
     for (const route of sortedRoutes) {
       const remainingBudget = waterfallDeadline - Date.now();
@@ -426,7 +522,7 @@ export class SharedPoolDO extends DurableObject {
       circuit.minuteCount += 1;
       circuit.dayCount += 1;
 
-      const adaptiveTimeout = this.calculateAdaptiveTimeout(circuit);
+      const adaptiveTimeout = this.calculateAdaptiveTimeout(circuit, route, estimatedTokens);
       const timeoutMs = Math.min(adaptiveTimeout, remainingBudget);
       const startTime = Date.now();
 
@@ -444,7 +540,19 @@ export class SharedPoolDO extends DurableObject {
       const elapsed = Date.now() - startTime;
 
       if (result && result.success && result.data) {
-        this.recordRouteOutcome(route, true, 200, elapsed);
+        const outputContent = result.data?.choices?.[0]?.message?.content || '';
+        const outputChars = typeof outputContent === 'string' ? outputContent.length : 0;
+
+        this.recordRouteOutcome(
+          route,
+          true,
+          200,
+          elapsed,
+          undefined,
+          undefined,
+          promptChars,
+          outputChars
+        );
         this.globalDailyCount += 1;
 
         return {
@@ -461,7 +569,9 @@ export class SharedPoolDO extends DurableObject {
         result?.statusCode || 500,
         elapsed,
         result?.error,
-        result?.retryAfterSeconds
+        result?.retryAfterSeconds,
+        promptChars,
+        0
       );
       lastError = result?.error || 'Unknown error';
     }

@@ -55,6 +55,8 @@ export interface ProviderCircuitState {
   cooldownUntil: number;
   consecutiveFailures: number;
   emaLatencyMs: number;
+  emaMsPerToken: number;
+  sampleCount: number;
   // Layer 1 Proactive sliding window counters (in-memory)
   currentSecondWindow: number;
   secondCount: number;
