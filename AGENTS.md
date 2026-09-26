@@ -98,3 +98,17 @@ Complete technical documentation and rationale for all mitigations live in [`doc
 
 ## 10 before implement code:
 - check docs for /Users/dangtruongan/study/Kites/docs/development and /Users/dangtruongan/study/Kites/docs/dev-history to avoid making previous mistake, or making new mistake that can be avoided. also update/add dev-history, development, after you implement new feature, handle bugs,... etc
+## 11 Subagent spawn for zcode
+- spawn "reaserch" model when searching internet or local references for tools, solutions, ...
+-spawn "code-explore" model when plan to make change to code or analyze code.
+
+-avoid use defaule "explore" or "general-purpose" agent due to lack of tools access
+
+## 12 Cloudflare Worker Pre-Deploy Testing
+Never deploy directly to live production users without pre-verification:
+1. **Isolated Preview Version**:
+   Run `npx wrangler versions upload --cwd worker` to get a private preview URL without affecting live users or production DB.
+2. **Staging Environment**:
+   Use `npx wrangler deploy --env staging --cwd worker` for end-to-end tests against an isolated staging DO SQLite database.
+3. **Production Promotion**:
+   Only after preview/staging passes and tests succeed (`npm --prefix worker test`), deploy to production (`npm --prefix worker run deploy` or `npx wrangler versions deploy`).
