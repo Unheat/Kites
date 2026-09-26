@@ -122,5 +122,4 @@ export async function executeGemini(
   } finally {
     clearTimeout(timer);
   }
-  }
 }

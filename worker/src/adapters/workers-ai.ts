@@ -108,5 +108,4 @@ export async function executeWorkersAI(
   } finally {
     if (timer) clearTimeout(timer);
   }
-  }
 }

@@ -87,5 +87,4 @@ export async function executeOpenAICompatible(
   } finally {
     clearTimeout(timer);
   }
-  }
 }
