@@ -22,6 +22,7 @@ const MAX_USER_QUOTA = 100;
 const GLOBAL_DAILY_CAP = 70_000;
 const MIN_TIMEOUT_MS = 2000;
 const MAX_TIMEOUT_MS = 6000;
+const MAX_TOTAL_WATERFALL_MS = 12_500;
 
 export class SharedPoolDO extends DurableObject {
   private env: Env;
@@ -289,7 +290,12 @@ export class SharedPoolDO extends DurableObject {
     let cooldownMs = 30_000; // default 30s
     const lowerError = (errorText || '').toLowerCase();
 
-    if (statusCode === 429 || statusCode === 402) {
+    if (statusCode === 408) {
+      // 408 Timeout: transient delay, assign measured cooldown rather than 5xx crash backoff
+      cooldownMs = circuit.consecutiveFailures === 1 ? 5_000 : 15_000;
+      // Adjust EMA latency upward to reflect slow upstream
+      circuit.emaLatencyMs = Math.round(circuit.emaLatencyMs * 0.7 + latencyMs * 0.3);
+    } else if (statusCode === 429 || statusCode === 402) {
       // 1. Check upstream Retry-After header
       if (retryAfterSeconds && retryAfterSeconds > 0) {
         cooldownMs = retryAfterSeconds * 1000;
@@ -395,8 +401,15 @@ export class SharedPoolDO extends DurableObject {
     }
 
     // 4. Waterfall Dispatch Loop
+    const waterfallDeadline = now + MAX_TOTAL_WATERFALL_MS;
     let lastError = 'No providers succeeded';
     for (const route of sortedRoutes) {
+      const remainingBudget = waterfallDeadline - Date.now();
+      if (remainingBudget < MIN_TIMEOUT_MS) {
+        lastError = `Waterfall total time budget exhausted (${remainingBudget}ms remaining)`;
+        break;
+      }
+
       const circuit = this.getCircuit(route.id, route.defaultTimeoutMs ?? 3500);
 
       // Re-verify rate limit window right before calling in case concurrent requests occurred
@@ -413,7 +426,8 @@ export class SharedPoolDO extends DurableObject {
       circuit.minuteCount += 1;
       circuit.dayCount += 1;
 
-      const timeoutMs = this.calculateAdaptiveTimeout(circuit);
+      const adaptiveTimeout = this.calculateAdaptiveTimeout(circuit);
+      const timeoutMs = Math.min(adaptiveTimeout, remainingBudget);
       const startTime = Date.now();
 
       let result: any;

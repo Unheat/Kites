@@ -8,8 +8,12 @@ describe('Layer 1 & Layer 2 Rate Limiting & Cooldown Logic', () => {
     route: ProviderRouteConfig,
     statusCode: number,
     errorText: string,
-    retryAfterSeconds?: number
+    retryAfterSeconds?: number,
+    consecutiveFailures: number = 1
   ): number {
+    if (statusCode === 408) {
+      return consecutiveFailures === 1 ? 5_000 : 15_000;
+    }
     if (statusCode === 429 || statusCode === 402) {
       if (retryAfterSeconds && retryAfterSeconds > 0) {
         return retryAfterSeconds * 1000;
@@ -97,6 +101,23 @@ describe('Layer 1 & Layer 2 Rate Limiting & Cooldown Logic', () => {
 
     const cd = calculateSmartCooldown(route, 429, 'Slow down', 15);
     expect(cd).toBe(15_000); // 15 seconds
+  });
+
+  it('calculates brief cooldown for transient HTTP 408 timeouts', () => {
+    const route: ProviderRouteConfig = {
+      id: 'test-model',
+      name: 'Test',
+      enabled: true,
+      priority: 1,
+      type: 'openai-compatible',
+      modelName: 'test',
+    };
+
+    const firstCooldown = calculateSmartCooldown(route, 408, 'Timeout after 3000ms', undefined, 1);
+    expect(firstCooldown).toBe(5_000);
+
+    const secondCooldown = calculateSmartCooldown(route, 408, 'Timeout after 3000ms', undefined, 2);
+    expect(secondCooldown).toBe(15_000);
   });
 
   it('correctly handles optional limit fields when omitted', () => {

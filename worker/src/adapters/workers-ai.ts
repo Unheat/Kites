@@ -36,8 +36,14 @@ export async function executeWorkersAI(
   // Extract prompt text from last user message
   const userMsg = request.messages.findLast((m) => m.role === 'user')?.content || '';
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      const err = new Error(`Workers AI timeout after ${timeoutMs}ms`);
+      err.name = 'AbortError';
+      reject(err);
+    }, timeoutMs);
+  });
 
   try {
     let resultText = '';
@@ -45,21 +51,25 @@ export async function executeWorkersAI(
     if (route.modelName.includes('m2m100')) {
       // Translation-specific parameter shape for m2m100
       // Default to English target if unspecified
-      const aiResult = await aiBinding.run(route.modelName, {
-        text: userMsg,
-        target_lang: 'en',
-      });
+      const aiResult: any = await Promise.race([
+        aiBinding.run(route.modelName, {
+          text: userMsg,
+          target_lang: 'en',
+        }),
+        timeoutPromise,
+      ]);
       resultText = aiResult?.translated_text || '';
     } else {
       // General LLM prompt shape
-      const aiResult = await aiBinding.run(route.modelName, {
-        messages: request.messages,
-        max_tokens: request.max_tokens ?? 1024,
-      });
+      const aiResult: any = await Promise.race([
+        aiBinding.run(route.modelName, {
+          messages: request.messages,
+          max_tokens: request.max_tokens ?? 1024,
+        }),
+        timeoutPromise,
+      ]);
       resultText = aiResult?.response || '';
     }
-
-    clearTimeout(timer);
 
     const syntheticResponse: OpenAIChatResponse = {
       id: `cf-ai-${Date.now()}`,
@@ -89,12 +99,14 @@ export async function executeWorkersAI(
       data: syntheticResponse,
     };
   } catch (err: any) {
-    clearTimeout(timer);
     const isTimeout = err?.name === 'AbortError';
     return {
       success: false,
       statusCode: isTimeout ? 408 : 500,
       error: isTimeout ? `Workers AI timeout after ${timeoutMs}ms` : (err?.message || 'Workers AI error'),
     };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
   }
 }

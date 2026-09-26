@@ -58,8 +58,6 @@ export async function executeOpenAICompatible(
       signal: controller.signal,
     });
 
-    clearTimeout(timer);
-
     if (!response.ok) {
       const errorText = await response.text();
       const retryAfterHeader = response.headers.get('Retry-After');
@@ -80,12 +78,14 @@ export async function executeOpenAICompatible(
       data,
     };
   } catch (err: any) {
-    clearTimeout(timer);
     const isTimeout = err?.name === 'AbortError';
     return {
       success: false,
       statusCode: isTimeout ? 408 : 500,
       error: isTimeout ? `Timeout after ${timeoutMs}ms` : (err?.message || 'Network error'),
     };
+  } finally {
+    clearTimeout(timer);
+  }
   }
 }

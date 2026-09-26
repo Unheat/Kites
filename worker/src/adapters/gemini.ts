@@ -64,8 +64,6 @@ export async function executeGemini(
       signal: controller.signal,
     });
 
-    clearTimeout(timer);
-
     if (!response.ok) {
       const errorText = await response.text();
       return {
@@ -115,12 +113,14 @@ export async function executeGemini(
       data: syntheticResponse,
     };
   } catch (err: any) {
-    clearTimeout(timer);
     const isTimeout = err?.name === 'AbortError';
     return {
       success: false,
       statusCode: isTimeout ? 408 : 500,
       error: isTimeout ? `Gemini timeout after ${timeoutMs}ms` : (err?.message || 'Gemini error'),
     };
+  } finally {
+    clearTimeout(timer);
+  }
   }
 }
