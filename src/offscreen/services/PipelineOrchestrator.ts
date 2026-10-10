@@ -162,6 +162,10 @@ export class PipelineOrchestrator {
       // 3.1 Acquire original bubble geometry only. Final layout waits for translated text/fonts.
       let bubbleGeometry: BubbleGeometry | undefined;
       const bubbleMode = popupState?.bubbleMode ?? 'heuristic';
+      // Cleanly evict cached neural ONNX session if user switched to heuristic or disabled
+      if (bubbleMode !== 'neural' && NeuralBubbleDetector.hasActiveSession()) {
+        void NeuralBubbleDetector.dispose();
+      }
       // Legacy CJK/RTL rendering does not honor fixed bubble rectangles.
       const supportsBubbleLayout = (LANGUAGE_ORIENTATION_PRESETS[targetLang.toLowerCase().trim()] ?? 'h') === 'h';
       if (bubbleMode !== 'off' && supportsBubbleLayout && ocrResult.boxes && ocrResult.boxes.length > 0 && !ocrResult.typesetBoxes) {

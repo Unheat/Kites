@@ -18,6 +18,32 @@ export class NeuralBubbleDetector {
   private static activeProvider: 'webgpu' | 'wasm' | null = null;
 
   /**
+   * Releases and disposes the cached ONNX session to free GPU VRAM and WASM memory.
+   */
+  static async dispose(): Promise<void> {
+    if (this.session) {
+      console.log('[NeuralBubbleDetector] Disposing cached ONNX session and releasing VRAM.');
+      try {
+        if (typeof this.session.release === 'function') {
+          await this.session.release();
+        }
+      } catch (err) {
+        console.warn('[NeuralBubbleDetector] Failed to cleanly release session:', err);
+      } finally {
+        this.session = null;
+        this.activeProvider = null;
+      }
+    }
+  }
+
+  /**
+   * Checks whether an ONNX session is currently cached in memory.
+   */
+  static hasActiveSession(): boolean {
+    return Boolean(this.session);
+  }
+
+  /**
    * Preprocesses canvas/image pixel data into float32 planar RGB tensor [1, 3, inputSize, inputSize].
    *
    * @param rawRgba - Raw RGBA pixel array from 2D canvas scaled to inputSize x inputSize.
@@ -156,6 +182,9 @@ export class NeuralBubbleDetector {
     try {
       // Lazily create or re-create session if provider changed
       if (!this.session || this.activeProvider !== requestedProvider) {
+        if (this.session) {
+          await this.dispose();
+        }
         console.log(`[NeuralBubbleDetector] Loading model session (provider: ${requestedProvider})...`);
         const modelBuffer = await BubbleCacheManager.getModelBuffer(entry.onnxUrl);
 

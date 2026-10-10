@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { NeuralBubbleDetector } from './NeuralBubbleDetector';
 
 describe('NeuralBubbleDetector container safety', () => {
@@ -19,5 +19,17 @@ describe('NeuralBubbleDetector container safety', () => {
     const enough = { x: 25, y: 0, w: 50, h: 100 };
     expect(NeuralBubbleDetector.matchBubble(text, [low])).toBeNull();
     expect(NeuralBubbleDetector.matchBubble(text, [enough])).toBe(enough);
+  });
+
+  it('manages session lifecycle and cleanly disposes cached session', async () => {
+    expect(NeuralBubbleDetector.hasActiveSession()).toBe(false);
+    // Simulate active session
+    (NeuralBubbleDetector as any).session = { release: vi.fn(async () => {}) };
+    (NeuralBubbleDetector as any).activeProvider = 'wasm';
+    expect(NeuralBubbleDetector.hasActiveSession()).toBe(true);
+
+    await NeuralBubbleDetector.dispose();
+    expect(NeuralBubbleDetector.hasActiveSession()).toBe(false);
+    expect((NeuralBubbleDetector as any).activeProvider).toBeNull();
   });
 });
