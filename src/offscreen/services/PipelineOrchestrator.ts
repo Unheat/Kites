@@ -184,7 +184,7 @@ export class PipelineOrchestrator {
                   typesetBoxes[i] = computeTypesetBox(box, matched, isVert, rawBitmap.height, false);
                 } else {
                   // Fallback to heuristic for bubbles missed by neural proposals
-                  const carrier = HeuristicBubbleExtractor.extractCarrierBox(rawImageData, box);
+                  const carrier = HeuristicBubbleExtractor.extractCarrierBox(rawImageData, box, { allTextBoxes: ocrResult.boxes });
                   typesetBoxes[i] = carrier ? computeTypesetBox(box, carrier, isVert, rawBitmap.height, true) : undefined;
                 }
               }
@@ -193,7 +193,7 @@ export class PipelineOrchestrator {
               for (let i = 0; i < ocrResult.boxes.length; i++) {
                 const box = ocrResult.boxes[i];
                 const isVert = (ocrResult.directions && ocrResult.directions[i]) === 'v';
-                const carrier = HeuristicBubbleExtractor.extractCarrierBox(rawImageData, box);
+                const carrier = HeuristicBubbleExtractor.extractCarrierBox(rawImageData, box, { allTextBoxes: ocrResult.boxes });
                 if (carrier) {
                   const typesetBox = computeTypesetBox(box, carrier, isVert, rawBitmap.height, true);
                   typesetBoxes[i] = typesetBox;

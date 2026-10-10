@@ -113,7 +113,7 @@ async function runPipelineVisualBubbleTest() {
     for (let i = 0; i < boxes.length; i++) {
       const b = boxes[i];
       const isVert = (ocrResult.directions && ocrResult.directions[i]) === 'v';
-      const carrier = HeuristicBubbleExtractor.extractCarrierBox(rawImageData, b);
+      const carrier = HeuristicBubbleExtractor.extractCarrierBox(rawImageData, b, { allTextBoxes: boxes });
       if (carrier) {
         const tb = computeTypesetBox(b, carrier, isVert, pageHeight, true);
         heuristicTypesetBoxes.push(tb);
@@ -193,7 +193,7 @@ async function runPipelineVisualBubbleTest() {
           neuralTypesetBoxes.push(tb);
         } else {
           // Fallback to heuristic if neural did not propose a container
-          const carrier = HeuristicBubbleExtractor.extractCarrierBox(rawImageData, b);
+          const carrier = HeuristicBubbleExtractor.extractCarrierBox(rawImageData, b, { allTextBoxes: boxes });
           if (carrier) {
             neuralTypesetBoxes.push(computeTypesetBox(b, carrier, isVert, pageHeight));
           } else {

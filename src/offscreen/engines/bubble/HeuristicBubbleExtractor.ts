@@ -13,6 +13,8 @@ export interface HeuristicExtractionOptions {
   baseErodeRadius?: number;
   /** Minimum luminance threshold (0..255) for white bubble interior. Default 200. */
   luminanceThreshold?: number;
+  /** Optional array of all detected text boxes to treat as interior whitespace (prevents un-erased sibling text from acting as fake walls). */
+  allTextBoxes?: BoxRect[];
 }
 
 /**
@@ -66,8 +68,16 @@ export class HeuristicBubbleExtractor {
 
     const lumThresh = options.luminanceThreshold ?? 200;
 
+    // Filter nearby text boxes that intersect the patch so their dark glyph pixels
+    // are treated as interior whitespace rather than artificial obstacle walls.
+    const nearbyBoxes = options.allTextBoxes && options.allTextBoxes.length > 0
+      ? options.allTextBoxes.filter((b) =>
+          b.x + b.w > minX && b.x < maxX && b.y + b.h > minY && b.y < maxY
+        )
+      : [textBox];
+
     // 3. Build binary mask of bubble interior
-    // Pixel is interior if inside text box or has light luminance (white bubble)
+    // Pixel is interior if inside any known text box or has light luminance (white bubble)
     const mask = new Uint8Array(patchW * patchH);
 
     for (let py = 0; py < patchH; py++) {
@@ -75,11 +85,14 @@ export class HeuristicBubbleExtractor {
       for (let px = 0; px < patchW; px++) {
         const origX = Math.min(imgW - 1, minX + Math.floor(px / scale));
 
-        const inText =
-          origX >= textBox.x &&
-          origX < textBox.x + textBox.w &&
-          origY >= textBox.y &&
-          origY < textBox.y + textBox.h;
+        let inText = false;
+        for (let bi = 0; bi < nearbyBoxes.length; bi++) {
+          const b = nearbyBoxes[bi];
+          if (origX >= b.x && origX < b.x + b.w && origY >= b.y && origY < b.y + b.h) {
+            inText = true;
+            break;
+          }
+        }
 
         const pIdx = (origY * imgW + origX) * channels;
         const r = data[pIdx];
