@@ -11,7 +11,7 @@ import { renderTextBlocksBatch, type TextBlockItem, type RenderedBlockInfo } fro
 import { resolveRenderFontFamily } from '../../shared/renderFontPresets';
 import { HeuristicBubbleExtractor } from '../engines/bubble/HeuristicBubbleExtractor';
 import { NeuralBubbleDetector } from '../engines/bubble/NeuralBubbleDetector';
-import { computeTypesetBox, applySiblingBoundaryConstraints } from '../utils/bubbleExpansion';
+import { computeTypesetBox, applySiblingBoundaryConstraints, groupBoxesBySharedContainer, partitionSharedContainer, type BoxRect } from '../utils/bubbleExpansion';
 import type { OcrBox } from '../engines/ocr/BaseOcrEngine';
 
 export class PipelineOrchestrator {
@@ -172,34 +172,69 @@ export class PipelineOrchestrator {
             rawCtx.drawImage(rawBitmap, 0, 0);
             const typesetBoxes: (OcrBox | undefined)[] = [];
 
+            // Pass 1: acquire each utterance's bubble container — neural match with heuristic
+            // fallback, or pure heuristic flood-fill. Matching is intentionally non-exclusive:
+            // several utterances may resolve to the SAME container (single YOLO box covering a
+            // connected multi-lobe balloon, or a merged heuristic carrier), which pass 2 handles.
+            const carriers: (BoxRect | null)[] = new Array(ocrResult.boxes.length).fill(null);
+            const carrierIsNeuralProposal: boolean[] = new Array(ocrResult.boxes.length).fill(false);
+
             if (bubbleMode === 'neural') {
               const neuralBubbles = await NeuralBubbleDetector.detect(rawCanvas, popupState);
               const rawImageData = rawCtx.getImageData(0, 0, rawBitmap.width, rawBitmap.height);
 
               for (let i = 0; i < ocrResult.boxes.length; i++) {
-                const box = ocrResult.boxes[i];
-                const isVert = (ocrResult.directions && ocrResult.directions[i]) === 'v';
-                const matched = neuralBubbles ? NeuralBubbleDetector.matchBubble(box, neuralBubbles) : null;
+                const matched = neuralBubbles ? NeuralBubbleDetector.matchBubble(ocrResult.boxes[i], neuralBubbles) : null;
                 if (matched) {
-                  typesetBoxes[i] = computeTypesetBox(box, matched, isVert, rawBitmap.height, false);
+                  carriers[i] = matched;
+                  carrierIsNeuralProposal[i] = true;
                 } else {
                   // Fallback to heuristic for bubbles missed by neural proposals
-                  const carrier = HeuristicBubbleExtractor.extractCarrierBox(rawImageData, box, { allTextBoxes: ocrResult.boxes });
-                  typesetBoxes[i] = carrier ? computeTypesetBox(box, carrier, isVert, rawBitmap.height, true) : undefined;
+                  carriers[i] = HeuristicBubbleExtractor.extractCarrierBox(rawImageData, ocrResult.boxes[i], { allTextBoxes: ocrResult.boxes });
                 }
               }
             } else {
               const rawImageData = rawCtx.getImageData(0, 0, rawBitmap.width, rawBitmap.height);
               for (let i = 0; i < ocrResult.boxes.length; i++) {
-                const box = ocrResult.boxes[i];
-                const isVert = (ocrResult.directions && ocrResult.directions[i]) === 'v';
-                const carrier = HeuristicBubbleExtractor.extractCarrierBox(rawImageData, box, { allTextBoxes: ocrResult.boxes });
-                if (carrier) {
-                  const typesetBox = computeTypesetBox(box, carrier, isVert, rawBitmap.height, true);
-                  typesetBoxes[i] = typesetBox;
-                } else {
-                  typesetBoxes[i] = undefined;
+                carriers[i] = HeuristicBubbleExtractor.extractCarrierBox(rawImageData, ocrResult.boxes[i], { allTextBoxes: ocrResult.boxes });
+              }
+            }
+
+            // Pass 2: utterances sharing ONE container (IoU-grouped carriers) get the container
+            // partitioned into per-utterance sub-chambers BEFORE expansion — each utterance expands
+            // strictly within its own territory with its own anchor, instead of both ballooning into
+            // the full chamber and being re-centered on the shared container center.
+            const groupByIndex = new Map<number, number[]>();
+            for (const members of groupBoxesBySharedContainer(carriers)) {
+              for (const idx of members) groupByIndex.set(idx, members);
+            }
+
+            for (let i = 0; i < ocrResult.boxes.length; i++) {
+              const box = ocrResult.boxes[i];
+              const isVert = (ocrResult.directions && ocrResult.directions[i]) === 'v';
+              const carrier = carriers[i];
+              if (!carrier) {
+                typesetBoxes[i] = undefined;
+                continue;
+              }
+              const group = groupByIndex.get(i);
+              if (group && group.length >= 2) {
+                // Container rect = union of the (near-identical) per-box carriers of this group
+                let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+                for (const idx of group) {
+                  const c = carriers[idx]!;
+                  minX = Math.min(minX, c.x);
+                  minY = Math.min(minY, c.y);
+                  maxX = Math.max(maxX, c.x + c.w);
+                  maxY = Math.max(maxY, c.y + c.h);
                 }
+                const container: BoxRect = { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+                const subChambers = partitionSharedContainer(container, group.map((idx) => ocrResult.boxes[idx]));
+                typesetBoxes[i] = computeTypesetBox(box, subChambers[group.indexOf(i)], isVert, rawBitmap.height, true, true);
+              } else if (carrierIsNeuralProposal[i]) {
+                typesetBoxes[i] = computeTypesetBox(box, carrier, isVert, rawBitmap.height, false);
+              } else {
+                typesetBoxes[i] = computeTypesetBox(box, carrier, isVert, rawBitmap.height, true);
               }
             }
             // Sibling clearance: partition connected/adjacent bubbles so they never collide
