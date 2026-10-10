@@ -51,7 +51,7 @@ async function runPipelineVisualBubbleTest() {
     console.warn(`[Neural] Model not found at ${neuralModelPath}. Skipping neural tier.`);
   }
 
-  const testFiles = ['image1.jpg', 'image2.jpg', 'image3.jpg', 'image4.jpg', 'image5.png', 'image6.jpg', 'image7.jpg'];
+  const testFiles = ['image1.jpg', 'image2.jpg', 'image3.jpg', 'image4.jpg', 'image5.png', 'image6.jpg', 'image7.jpg', 'image8.png'];
 
   for (const testFile of testFiles) {
     console.log(`\n================================`);
