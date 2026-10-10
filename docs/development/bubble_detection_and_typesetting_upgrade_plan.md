@@ -193,21 +193,20 @@ Tier 1 requires zero network downloads and runs purely on the Offscreen Canvas `
 
 #### Algorithm Specification:
 1. **Text Line Spatial Seeds:** Each detected OCR text line polygon provides a centroid coordinate $(cx_i, cy_i)$.
-2. **Adaptive Background Sampling ($\Delta E$ Color Distance):**
-   - Sample pixel colors within a $12\times 12$px patch around the seed, filtering out dark text pixels ($Luminance < 110$).
-   - Compute baseline background color $C_{bg} = (R_0, G_0, B_0)$.
-   - Compute WCAG luminance of $C_{bg}$. If $Luminance < 0.20$, the bubble is flagged as **Inverted Dark Bubble**; otherwise, it is a **Standard Light Bubble**.
+2. **Adaptive Background Luminance Sampling (Phase 24):**
+   - 16 samples on a ring `ADAPTIVE_LUM_SAMPLE_OFFSET = 4`px outside the text box (5 top / 3 right / 5 bottom / 3 left); per-sample value is $\min(R, G, B)$ to align with the per-channel binarization test.
+   - Median of the samples yields the background luminance $L_{bg}$, robust against glyph tips, bubble strokes, and art lines behind translucent bubbles.
+   - Dynamic binarization threshold: $\text{Threshold} = \max(ADAPTIVE\_LUM\_FLOOR{=}130,\ L_{bg} - ADAPTIVE\_LUM\_MARGIN{=}35)$; legacy fallback $200$ when no sample lands inside the patch; explicit `luminanceThreshold` option overrides.
+   - *Why:* translucent bubbles over dark artwork render their interior grey (RGB ~130-190); the original hardcoded 200 threshold severed them mid-chamber.
 3. **Normalized Downscale Patch (Resolution Invariance & O(1) Speed):**
    - Extract a bounding patch around the text cluster expanded by $80$px on all sides.
    - Downscale the patch to a maximum resolution of $200 \times 200$px onto a temporary canvas.
    - Scaling factor: $s = \min(200 / W_{orig}, 200 / H_{orig}, 1.0)$.
    - *Why:* Guarantees execution time is $< 1$ ms regardless of whether the source page is 720p or 4K webtoon strip.
-4. **Adaptive Flood Fill (Boundary Tracing):**
-   - A pixel $P(x, y)$ is classified as bubble interior if:
-     $$\Delta E(P, C_{bg}) = \sqrt{(R - R_0)^2 + (G - G_0)^2 + (B - B_0)^2} \le 35$$
-   - Flood fill propagates outward from the scaled text centroid using a 4-connected BFS queue.
-   - Propagation halts upon reaching dark border strokes ($\Delta E > 35$).
-   - **Leak Guard:** If flood fill touches the boundary of the expanded patch without encountering a closed contour, the region is determined to be **FreeText in open artwork** $\to$ abort bubble creation and preserve original tight OCR box.
+4. **Binarization + Flood Fill:**
+   - A pixel $P(x, y)$ is classified as bubble interior iff $R, G, B$ are each $\ge$ the adaptive threshold. All OCR text boxes intersecting the patch are force-marked interior so dark glyph pixels never act as artificial barrier walls.
+   - Flood fill propagates from the scaled text centroid (nearest eroded-mask pixel) using a 4-connected BFS queue, halting at mask walls (dark border strokes).
+   - **Leak Guard:** if the reconstructed component fills $\ge 96\%$ of the patch in BOTH dimensions, the region is determined to be **FreeText in open artwork** $\to$ abort bubble creation and preserve the original tight OCR box.
 5. **Resolution-Invariant Morphological Disk Opening (Tail Severing):**
    - Execute erosion on the interior binary mask using disk kernel:
      $$R_{erode} = \text{clamp}\left(\text{round}(14 \times s), 8, 16\right)$$
@@ -262,6 +261,19 @@ Inside a single speech balloon, characters may speak two distinct lines separate
   2. Vertical gap $\Delta Y = Top(L_{i+1}) - Bottom(L_i) \ge (1.35 \times \text{median\_thickness})$.
 - If conditions met $\rightarrow$ split into two independent utterances ($U_1, U_2$).
 
+### Step 3.5: Shared-Container Sub-Chamber Partitioning (Kites upgrade, no XianScan equivalent)
+When >= 2 split utterances resolve to the SAME physical container (a single YOLO box covering a connected multi-lobe balloon, or a heuristic flood-fill carrier merged across lobes), each utterance previously expanded into the FULL chamber and was re-centered on the shared container center — causing cross-lobe drift (top text pulled onto the bubble waist / artwork) and mutual over-push. Partitioning runs BEFORE expansion:
+
+1. **Shared-container grouping (`groupBoxesBySharedContainer`):** per-box carriers are grouped by pairwise IoU >= `SHARED_CONTAINER_IOU` (0.7) via transitive union-find; `null` carriers (free text) never group.
+2. **All-pairs Separating-Axis dividers (`partitionSharedContainer`):** sub-chambers are carved from the container's safe core:
+   - Y ranges overlap but X ranges are disjoint (diagonal stagger, figure-8) -> vertical wall at the X midpoint.
+   - X ranges overlap but Y ranges are disjoint (vertical chain) -> horizontal wall at the Y midpoint.
+   - Disjoint on both axes (true diagonal) -> horizontal wall on the Y side only.
+   - Overlapping on both axes -> no wall; the floor invariant dominates (see below).
+   $$X_{divider} = \frac{B_{right} + A_{left}}{2} \pm \frac{SIBLING\_GAP}{2}$$
+3. **Floor invariant:** every sub-chamber is a superset of its own original text box (a divider midpoint falling inside an original box is clamped back — "no text cut" wins over "no overlap"; `applySiblingBoundaryConstraints` remains the collision safety net).
+4. **Sub-chamber expansion (`computeTypesetBox(..., isSubChamber = true)`):** no second 12% inset (territories were carved from the parent's safe core — a double inset would over-shrink tight lobes) and vertical growth capped at $1.35 \times$ the utterance's own text height (`SHARED_CHAMBER_MAX_V_GROWTH`), preventing font inflation for short utterances ("HUH?") and cross-lobe over-push.
+
 ### Step 4: Sibling Boundary Constraints (Port from `expansion.rs:230-269`)
 When a bubble contains multiple sibling utterances ($U_1, U_2$):
 - They dynamically limit each other's expansion room.
@@ -269,6 +281,8 @@ When a bubble contains multiple sibling utterances ($U_1, U_2$):
   $$\text{SIBLING\_GAP} = 6\text{ px}$$
 - Utterance $U_1$ cannot expand downward past $Top(U_2) - \text{SIBLING\_GAP}$.
 - Utterance $U_2$ cannot expand upward past $Bottom(U_1) + \text{SIBLING\_GAP}$.
+
+Since Phase 24 this pass runs AFTER the proactive sub-chamber partitioning (Step 3.5) and acts as the final cross-container collision safety net rather than the primary multi-utterance partitioner.
 
 ### Step 5: Carrier Chamber Derivation (Tail Severing)
 - Run Tier 1 Morphological Erosion on the bubble patch.
@@ -281,9 +295,9 @@ When a bubble contains multiple sibling utterances ($U_1, U_2$):
 - **Validation Guard (`valid_tail_cut_carrier`):** If bubble touches canvas boundary ($B_y \le 12$ or $B_y + B_h \ge H - 12$), tail cut is aborted to prevent cropping edge-sliced panels.
 
 ### Step 6: Safe Core Inscription (Port from `expansion.rs:26-38`)
-Compute safe inner boundary by insetting the carrier chamber by $8\%$:
-$$m_x = \text{clamp}(carrier.w \times 0.08, 4, 24)$$
-$$m_y = \text{clamp}(carrier.h \times 0.08, 4, 24)$$
+Compute safe inner boundary by insetting the carrier chamber by $12\%$ (dynamic margins, clamped $[8, 48]$px):
+$$m_x = \text{clamp}(carrier.w \times 0.12, 8, 48)$$
+$$m_y = \text{clamp}(carrier.h \times 0.12, 8, 48)$$
 $$\text{SafeCore} = [carrier.x + m_x, carrier.y + m_y, carrier.w - 2m_x, carrier.h - 2m_y]$$
 
 ### Step 7: Damped Slack Expansion (Port from `expansion.rs:273-318`)

@@ -30,8 +30,6 @@ export const SHARED_CHAMBER_MAX_V_GROWTH = 1.35;
 // Two per-box carriers with IoU >= this value are considered the SAME physical bubble container
 // (heuristic BFS from different seeds yields near-identical, not identical, merged rects).
 export const SHARED_CONTAINER_IOU = 0.7;
-// Y-tolerance (px) when deterministically ordering utterances inside a shared container partition.
-export const PARTITION_SORT_TOLERANCE = 15;
 
 /**
  * Computes the safe inscribed core of a bubble, avoiding strokes and borders.
