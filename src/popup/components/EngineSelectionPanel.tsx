@@ -1,11 +1,37 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { Download, ChevronDown, Plus, Search, Check } from 'lucide-react';
-import type { PopupState } from '../../shared/types';
+import type { PopupState, BubbleDetectionMode } from '../../shared/types';
 import AddApiForm from './AddApiForm';
 import MiniSearch from 'minisearch';
 import { ModelRegistry } from '../services/ModelRegistry';
 import { isLlmGpuAvailable } from '../../shared/utils/hardwareUtils';
 import { RENDER_FONT_PRESETS, normalizeRenderFontPresetId } from '../../shared/renderFontPresets';
+
+export interface BubbleModeOption {
+  id: BubbleDetectionMode;
+  name: string;
+  tooltip: string;
+  isModel?: boolean;
+}
+
+export const BUBBLE_MODE_OPTIONS: BubbleModeOption[] = [
+  {
+    id: 'off',
+    name: 'Disabled',
+    tooltip: 'Tightly hugs source text lines without bubble expansion (Cotrans MST).',
+  },
+  {
+    id: 'heuristic',
+    name: 'Heuristic',
+    tooltip: 'Expands into white bubble whitespace with tail severing. Fast (<1ms), zero download.',
+  },
+  {
+    id: 'neural',
+    name: 'YOLO Bubble',
+    tooltip: 'AI object detector for spiky shock bubbles, dark backgrounds, and complex manga art (~11 MB).',
+    isModel: true,
+  },
+];
 
 interface DownloadAcknowledgement {
   status?: 'success' | 'error';
@@ -46,6 +72,8 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
   const [isOpenInpaint, setIsOpenInpaint] = useState(false);
   const [isOpenOcr, setIsOpenOcr] = useState(false);
   const [isOpenRenderFont, setIsOpenRenderFont] = useState(false);
+  const [isOpenBubbleMode, setIsOpenBubbleMode] = useState(false);
+  const [isNeuralDownloaded, setIsNeuralDownloaded] = useState(false);
   const [showAddApi, setShowAddApi] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [downloads, setDownloads] = useState<Record<string, { progress: number; status: string }>>({});
@@ -63,7 +91,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
    * @param category - Model subsystem that owns the download.
    * @returns A promise resolved after background/offscreen acknowledgement.
    */
-  const requestDownload = async (modelId: string, category: 'translation' | 'inpaint' | 'ocr'): Promise<void> => {
+  const requestDownload = async (modelId: string, category: 'translation' | 'inpaint' | 'ocr' | 'bubble'): Promise<void> => {
     if (pendingDownloadIds.has(modelId) || downloads[modelId]?.status === 'Queued') return;
     setPendingDownloadIds(prev => new Set(prev).add(modelId));
     setDownloads(prev => ({ ...prev, [modelId]: { progress: 0, status: 'Queued' } }));
@@ -146,6 +174,9 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
             )
             : prev
           );
+          if (message.payload.modelId === 'bubble-yolo') {
+            setIsNeuralDownloaded(true);
+          }
         }
       }
 
@@ -210,6 +241,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
         ...engines.filter(engine => engine.hardware === 'WebGPU').map(engine => engine.id),
         ...inpaintBaseEngines.map(engine => engine.id),
         ...ocrBaseEngines.map(engine => engine.id),
+        'bubble-yolo',
       ];
       chrome.runtime.sendMessage({ type: 'GET_MODEL_STATUSES', target: 'background', source: 'popup', request: true, payload: { modelIds } }, (response) => {
         if (chrome.runtime.lastError || response?.status !== 'success') {
@@ -217,6 +249,9 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
           return;
         }
         setDownloads(prev => ({ ...prev, ...response.downloads }));
+        const isBubbleYoloReady = Boolean(readyModelIds.current.has('bubble-yolo') || response.statuses['bubble-yolo']);
+        setIsNeuralDownloaded(isBubbleYoloReady);
+
         const hydrate = (items: Engine[]) => items.map(engine => ({
           ...engine,
           isDownloaded: Boolean(engine.isDownloaded || readyModelIds.current.has(engine.id) || response.statuses[engine.id]),
@@ -235,10 +270,12 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
         const inpaintUnavailable = Boolean(selectedInpaint && !selectedInpaint.isDownloaded);
         const selectedOcr = hydratedOcr.find((engine) => engine.id === (currentState.activeOcrId || 'v6-small'));
         const ocrUnavailable = Boolean(selectedOcr && !selectedOcr.isDownloaded);
+        const bubbleUnavailable = currentState.bubbleMode === 'neural' && !isBubbleYoloReady;
         const repairs: Partial<PopupState> = {};
         if (translationUnavailable) repairs.activeEngineId = 'gg-translate';
         if (inpaintUnavailable) repairs.activeInpaintId = 'simple';
         if (ocrUnavailable) repairs.activeOcrId = 'v6-small';
+        if (bubbleUnavailable) repairs.bubbleMode = 'off';
         if (Object.keys(repairs).length > 0) {
           console.warn('[EngineSelectionPanel] Resetting unavailable local model selections.', repairs);
           updateState(repairs);
@@ -750,7 +787,128 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
           )}
         </div>
       </div>
-    </div>
 
+      {/* Layout & Bubble Fit Selector */}
+      {(() => {
+        const activeBubbleMode = state.bubbleMode ?? 'off';
+
+        return (
+          <div className="flex flex-col gap-1.5">
+            <div className="flex items-center gap-1.5 mb-1 relative">
+              <h2 className="text-sm font-medium">Layout & Bubble Fit</h2>
+              <div className="peer w-4 h-4 rounded-full border border-[var(--color-dust)] flex items-center justify-center text-[10px] text-[var(--color-dust)] cursor-help hover:bg-[var(--color-dust)] hover:text-[var(--color-paper)] transition-colors">?</div>
+              
+              <div className="absolute left-0 top-full pt-1.5 w-[280px] max-w-[85vw] z-50 opacity-0 pointer-events-none peer-hover:opacity-100 transition-opacity">
+                <div className="p-2.5 bg-[var(--color-ink)] text-[var(--color-paper)] text-xs rounded-md shadow-xl">
+                  Speech bubbles expand horizontal layout space and center translated text inside the balloon chamber, preventing tiny 6px fonts.
+                </div>
+              </div>
+            </div>
+
+            <div className="relative flex flex-col">
+              <button
+                aria-label="Layout and Bubble Fit"
+                aria-expanded={isOpenBubbleMode}
+                onClick={() => setIsOpenBubbleMode(!isOpenBubbleMode)}
+                className="w-full flex items-center justify-between p-3 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md hover:border-[var(--color-ink)] transition-colors cursor-pointer"
+              >
+                <span className="font-medium truncate pr-2">
+                  {activeBubbleMode === 'neural' && isNeuralDownloaded
+                    ? 'YOLO Bubble'
+                    : activeBubbleMode === 'heuristic'
+                      ? 'Heuristic'
+                      : 'Disabled'}
+                </span>
+                <ChevronDown size={16} className={`text-[var(--color-dust)] transition-transform ${isOpenBubbleMode ? 'rotate-180' : ''}`} />
+              </button>
+
+              {/* Inline progress bar for YOLO bubble detector download */}
+              {(() => {
+                const dl = downloads['bubble-yolo'];
+                if (!dl || dl.progress >= 1) return null;
+                return (
+                  <div className="mt-2 p-2 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md animate-in fade-in duration-200">
+                    <div className="flex justify-between items-end mb-1.5">
+                      <span className="text-[10px] font-medium text-[var(--color-dust)] uppercase tracking-wider truncate max-w-[80%]">
+                        YOLO Bubble: {dl.status}
+                      </span>
+                      <span className="text-xs font-bold text-[var(--color-ink)]">
+                        {Math.round(dl.progress * 100)}%
+                      </span>
+                    </div>
+                    <div className="h-1.5 w-full bg-[var(--color-paper)] rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-[var(--color-editorial)] transition-all duration-300 ease-out" 
+                        style={{ width: `${dl.progress * 100}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {isOpenBubbleMode && (
+                <div className="mt-1 bg-[var(--color-paper)] border border-[var(--color-dust)] rounded-md shadow-sm overflow-hidden flex flex-col max-h-[350px] z-50">
+                  <div className="overflow-y-auto flex-1 p-1 custom-scrollbar">
+                    {BUBBLE_MODE_OPTIONS.map((opt) => {
+                      const isUninstalled = opt.isModel && !isNeuralDownloaded;
+                      const isActive = activeBubbleMode === opt.id && !isUninstalled;
+                      return (
+                        <button
+                          key={opt.id}
+                          onClick={() => {
+                            if (isUninstalled) return;
+                            updateState({ bubbleMode: opt.id });
+                            setIsOpenBubbleMode(false);
+                          }}
+                          className={`w-full flex items-center justify-between p-2 text-left rounded-sm transition-colors ${
+                            isActive
+                              ? 'bg-[var(--color-vellum)] text-[var(--color-editorial)] font-semibold cursor-pointer'
+                              : isUninstalled
+                                ? 'text-[var(--color-dust)] opacity-50 cursor-not-allowed'
+                                : 'hover:bg-[var(--color-vellum)] cursor-pointer'
+                          }`}
+                        >
+                          <div className="flex items-center gap-1.5 overflow-hidden">
+                            <span className="truncate pr-1 text-sm">{opt.name}</span>
+                            {opt.tooltip && (
+                              <div className="relative group/tip inline-flex items-center" onClick={(e) => e.stopPropagation()}>
+                                <div className="w-3.5 h-3.5 rounded-full border border-[var(--color-dust)]/60 flex items-center justify-center text-[9px] text-[var(--color-dust)] cursor-help hover:border-[var(--color-ink)] hover:text-[var(--color-ink)] transition-colors">
+                                  ?
+                                </div>
+                                <div className="absolute left-0 bottom-full mb-1.5 w-[220px] max-w-[80vw] z-50 opacity-0 pointer-events-none group-hover/tip:opacity-100 transition-opacity">
+                                  <div className="p-2 bg-[var(--color-ink)] text-[var(--color-paper)] text-[11px] rounded shadow-xl font-normal leading-tight">
+                                    {opt.tooltip}
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex-shrink-0 ml-2">
+                            {isActive ? (
+                              <Check size={14} className="text-[var(--color-editorial)]" />
+                            ) : isUninstalled ? (
+                              <div
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void requestDownload('bubble-yolo', 'bubble');
+                                }}
+                                className="p-1 -mr-1 rounded hover:bg-[var(--color-vellum)] transition-colors cursor-pointer text-[var(--color-ink)] opacity-100"
+                                title="Download model"
+                              >
+                                <Download size={14} />
+                              </div>
+                            ) : null}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+    </div>
   );
 }

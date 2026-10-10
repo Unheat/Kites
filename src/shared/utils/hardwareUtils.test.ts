@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isWebLlmModel, isLlmGpuAvailable, isInpaintGpuAvailable, isOcrGpuAvailable } from './hardwareUtils';
+import { isWebLlmModel, isLlmGpuAvailable, isInpaintGpuAvailable, isOcrGpuAvailable, isBubbleGpuAvailable } from './hardwareUtils';
 import type { PopupState } from '../types';
 import { DEFAULT_POPUP_STATE } from '../types';
 
@@ -21,7 +21,7 @@ describe('hardwareUtils', () => {
         ...DEFAULT_POPUP_STATE,
         webgpuSupported: true,
         webgpuMaster: true,
-        webgpuOverrides: { llm: true, inpaint: true, ocr: true }
+        webgpuOverrides: { llm: true, inpaint: true, ocr: true, bubble: true }
       };
       expect(isLlmGpuAvailable(state)).toBe(true);
 
@@ -37,16 +37,22 @@ describe('hardwareUtils', () => {
     });
   });
 
-  describe('isInpaintGpuAvailable & isOcrGpuAvailable', () => {
-    it('evaluates inpaint and ocr GPU readiness', () => {
+  describe('isInpaintGpuAvailable & isOcrGpuAvailable & isBubbleGpuAvailable', () => {
+    it('evaluates inpaint, ocr, and bubble GPU readiness', () => {
       const state: PopupState = {
         ...DEFAULT_POPUP_STATE,
         webgpuSupported: true,
         webgpuMaster: true,
-        webgpuOverrides: { llm: true, inpaint: false, ocr: true }
+        webgpuOverrides: { llm: true, inpaint: false, ocr: true, bubble: false }
       };
       expect(isInpaintGpuAvailable(state)).toBe(false);
       expect(isOcrGpuAvailable(state)).toBe(true);
+      expect(isBubbleGpuAvailable(state)).toBe(false);
+
+      expect(isBubbleGpuAvailable({
+        ...state,
+        webgpuOverrides: { ...state.webgpuOverrides, bubble: true }
+      })).toBe(true);
     });
   });
 });

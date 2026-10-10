@@ -4,6 +4,7 @@ import { db } from '../../db';
 import { InpaintCacheManager } from './InpaintCacheManager';
 import { createCanvas, Canvas } from 'canvas';
 import { resolveRenderFontFamily } from '../../shared/renderFontPresets';
+import * as canvasTypesetting from '../utils/canvasTypesetting';
 
 // vi.hoisted lifts the mock above the module imports. PipelineOrchestrator.ts constructs an
 // OcrManager at module scope (`export const pipelineOrchestrator = ...`), so the mock class
@@ -101,6 +102,7 @@ global.FileReader = class {
 describe('PipelineOrchestrator', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(global.createImageBitmap).mockImplementation(() => Promise.resolve(createCanvas(100, 100)) as any);
     processImageMock.mockResolvedValue({
       texts: ['こんにちは', '世界'],
       boxes: [{ x: 10, y: 10, w: 100, h: 50 }, { x: 10, y: 70, w: 100, h: 50 }],
@@ -260,5 +262,103 @@ describe('PipelineOrchestrator', () => {
     );
 
     blobSpy.mockRestore();
+  });
+
+  it('fits translated text in an enclosed single bubble before persisting accepted fixed geometry', async () => {
+    ((db.images as any).first as any).mockResolvedValue({ id: 5, jobId: 500,
+      rawImageBlob: new Blob(['fake image data'], { type: 'image/png' }) });
+    vi.spyOn(chrome.runtime, 'sendMessage').mockImplementation((_message: any, callback: any) => {
+      callback?.({ activeInpaintId: 'none', bubbleMode: 'heuristic', targetLang: 'en' });
+    });
+    const source = createCanvas(200, 200);
+    const context = source.getContext('2d');
+    context.fillStyle = '#222'; context.fillRect(0, 0, 200, 200);
+    context.fillStyle = '#fff'; context.fillRect(50, 50, 100, 100);
+    const bitmapSpy = vi.spyOn(global, 'createImageBitmap').mockResolvedValue(source as any);
+    processImageMock.mockResolvedValue({ texts: ['テスト'], boxes: [{ x: 90, y: 80, w: 20, h: 40 }],
+      directions: ['v'], fontSizes: [18], angles: [0],
+      polygons: [[{ x: 90, y: 80 }, { x: 110, y: 80 }, { x: 110, y: 120 }, { x: 90, y: 120 }]] });
+    const blobSpy = vi.spyOn(pipelineOrchestrator as any, 'blobToArrayBuffer').mockResolvedValue(new ArrayBuffer(8));
+    const measureSpy = vi.spyOn(canvasTypesetting, 'measureBubbleLayoutFontSize');
+    const renderSpy = vi.spyOn(canvasTypesetting, 'renderTextBlocksBatch');
+    await pipelineOrchestrator.runPipeline(500);
+    expect(measureSpy).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ text: 'Hello', fontSize: 18 }),
+      expect.any(Object), expect.any(String));
+    const fixed = renderSpy.mock.calls[0][1][0].typesetBox!;
+    expect(fixed).toBeDefined();
+    expect(fixed.w).toBeGreaterThan(20);
+    expect(db.textBlocks.bulkAdd).toHaveBeenCalledWith(expect.arrayContaining([expect.objectContaining({
+      posX: fixed.x, posY: fixed.y, width: fixed.w, height: fixed.h
+    })]));
+    bitmapSpy.mockRestore(); blobSpy.mockRestore(); measureSpy.mockRestore(); renderSpy.mockRestore();
+  });
+
+  it('passes uncertain bubble fallback to renderer exactly like Disabled and preserves raw inpaint polygons', async () => {
+    ((db.images as any).first as any).mockResolvedValue({ id: 4, jobId: 400,
+      rawImageBlob: new Blob(['fake image data'], { type: 'image/png' }) });
+    let mode = 'off';
+    vi.spyOn(chrome.runtime, 'sendMessage').mockImplementation((_message: any, callback: any) => {
+      callback?.({ activeInpaintId: 'simple', bubbleMode: mode, targetLang: 'en' });
+    });
+    const original = {
+      texts: ['テスト'], boxes: [{ x: 20, y: 20, w: 30, h: 40 }], fontSizes: [16], angles: [0],
+      polygons: [[{ x: 20, y: 20 }, { x: 50, y: 20 }, { x: 50, y: 60 }, { x: 20, y: 60 }]],
+      rawPolygons: [[{ x: 25, y: 25 }, { x: 45, y: 25 }, { x: 45, y: 55 }, { x: 25, y: 55 }]]
+    };
+    processImageMock.mockImplementation(async () => structuredClone(original));
+    const blobSpy = vi.spyOn(pipelineOrchestrator as any, 'blobToArrayBuffer').mockResolvedValue(new ArrayBuffer(8));
+    const renderSpy = vi.spyOn(canvasTypesetting, 'renderTextBlocksBatch');
+    const eraseSpy = vi.spyOn((pipelineOrchestrator as any).inpaintManager, 'eraseText');
+    await pipelineOrchestrator.runPipeline(400);
+    const disabledBlocks = structuredClone(renderSpy.mock.calls[0][1]);
+    mode = 'heuristic';
+    await pipelineOrchestrator.runPipeline(400);
+    expect(renderSpy.mock.calls[1][1]).toEqual(disabledBlocks);
+    expect(renderSpy.mock.calls[1][1][0].typesetBox).toBeUndefined();
+    expect(eraseSpy.mock.calls[0][1]).toEqual(original.rawPolygons);
+    expect(eraseSpy.mock.calls[1][1]).toEqual(original.rawPolygons);
+    blobSpy.mockRestore();
+    renderSpy.mockRestore();
+    eraseSpy.mockRestore();
+  });
+
+  it('persists typesetBox coordinates to db.textBlocks when bubble carrier is extracted', async () => {
+    const mockImageRecord = {
+      id: 3,
+      jobId: 300,
+      rawImageBlob: new Blob(['fake image data'], { type: 'image/png' })
+    };
+    ((db.images as any).first as any).mockResolvedValue(mockImageRecord);
+
+    vi.spyOn(chrome.runtime, 'sendMessage').mockImplementation((_message: any, callback: any) => {
+      callback({ activeInpaintId: 'simple', bubbleMode: 'heuristic', targetLang: 'en' });
+    });
+
+    const blobSpy = vi.spyOn(pipelineOrchestrator as any, 'blobToArrayBuffer').mockResolvedValue(new ArrayBuffer(8));
+
+    // Mock OCR result with an explicitly attached typesetBox
+    const ocrSpy = vi.spyOn((pipelineOrchestrator as any).ocrManager, 'processImage').mockResolvedValue({
+      texts: ['テスト'],
+      boxes: [{ x: 50, y: 50, w: 30, h: 80 }],
+      typesetBoxes: [{ x: 30, y: 40, w: 70, h: 100 }],
+      directions: ['v']
+    });
+
+    await pipelineOrchestrator.runPipeline(300);
+
+    expect(db.textBlocks.bulkAdd).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          imageId: 3,
+          posX: 30,
+          posY: 40,
+          width: 70,
+          height: 100
+        })
+      ])
+    );
+
+    blobSpy.mockRestore();
+    ocrSpy.mockRestore();
   });
 });

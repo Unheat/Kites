@@ -3,6 +3,7 @@ import { PaddleOcrEngine } from '../engines/ocr/PaddleOcrEngine';
 import { resolveOcrTier } from '../engines/ocr/ocrRegistry';
 import type { Point2D } from '../../shared/utils/geometry';
 import { Quadrilateral, Graph, calculateBoundingBox, computeMinAreaRect, polygonArea, quadrilateralCanMergeRegion, splitTextRegion, calculateRotationAngle } from '../../shared/utils/geometry';
+import { clusterLinesIntoUtterances } from '../utils/utteranceSplitter';
 import {
   isScanlatorWatermark,
   isThoughtBubbleTailOrnament,
@@ -746,9 +747,34 @@ export class OcrManager {
       }
     }
 
+    // Step 2b: post-merge utterance splitting (XianScan cluster_lines_into_utterances port).
+    // Splits multi-utterance connected speech balloons (e.g. staggered vertical lobes) into independent groups.
+    const postSplitGroups: number[][] = [];
+    for (const groupIndices of finalGroups) {
+      if (groupIndices.length <= 1) {
+        postSplitGroups.push(groupIndices);
+        continue;
+      }
+      const linesForCluster = groupIndices.map((idx) => ({
+        id: idx,
+        polygon: workingQuads[idx].pts,
+        text: workingTexts[idx] || '',
+      }));
+      const fullText = groupIndices.map((idx) => workingTexts[idx] || '').join('');
+      const isCjk = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]/.test(fullText);
+      const groupQuads = groupIndices.map((idx) => workingQuads[idx]);
+      const dir = this.majorityDirection(groupQuads);
+      const isVert = dir === 'v';
+
+      const splitResults = clusterLinesIntoUtterances(linesForCluster, isCjk, isVert);
+      for (const res of splitResults) {
+        postSplitGroups.push(res.map((l) => l.id));
+      }
+    }
+
     // Step 3: emit one merged region per final group that contains non-empty text
     const validFinalGroups: number[][] = [];
-    for (const groupIndices of finalGroups) {
+    for (const groupIndices of postSplitGroups) {
       const groupQuads = groupIndices.map(idx => workingQuads[idx]);
 
       // Majority direction vote with Cotrans top-2 tie-break
