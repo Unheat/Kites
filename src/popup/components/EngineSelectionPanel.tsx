@@ -10,30 +10,22 @@ import { RENDER_FONT_PRESETS, normalizeRenderFontPresetId } from '../../shared/r
 export interface BubbleModeOption {
   id: BubbleDetectionMode;
   name: string;
-  badge?: string;
-  tooltip: string;
   isModel?: boolean;
-  modelId?: string;
 }
 
 export const BUBBLE_MODE_OPTIONS: BubbleModeOption[] = [
   {
     id: 'off',
-    name: 'Disabled (Default)',
-    tooltip: 'Tightly hugs original text lines without bubble expansion. Preserves classic OCR layout.',
+    name: 'Disabled',
   },
   {
     id: 'heuristic',
-    name: 'Smart Bubble (Instant)',
-    tooltip: 'Expands text into speech bubble white space and centers lines. Fast (<1ms) with zero download.',
+    name: 'Heuristic',
   },
   {
     id: 'neural',
-    name: 'AI Bubble Detector (YOLO)',
-    badge: 'WebGPU',
-    tooltip: 'Uses AI to detect complex speech balloons and dark manga art (~11 MB download).',
+    name: 'YOLO Bubble',
     isModel: true,
-    modelId: 'bubble-yolo',
   },
 ];
 
@@ -818,15 +810,15 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
               >
                 <span className="font-medium truncate pr-2">
                   {activeBubbleMode === 'neural' && isNeuralDownloaded
-                    ? 'AI Bubble Detector (YOLO)'
+                    ? 'YOLO Bubble'
                     : activeBubbleMode === 'heuristic'
-                      ? 'Smart Bubble (Instant)'
-                      : 'Disabled (Default)'}
+                      ? 'Heuristic'
+                      : 'Disabled'}
                 </span>
                 <ChevronDown size={16} className={`text-[var(--color-dust)] transition-transform ${isOpenBubbleMode ? 'rotate-180' : ''}`} />
               </button>
 
-              {/* Inline progress bar for Neural YOLO bubble detector download */}
+              {/* Inline progress bar for YOLO bubble detector download */}
               {(() => {
                 const dl = downloads['bubble-yolo'];
                 if (!dl || dl.progress >= 1) return null;
@@ -834,7 +826,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                   <div className="mt-2 p-2 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md animate-in fade-in duration-200">
                     <div className="flex justify-between items-end mb-1.5">
                       <span className="text-[10px] font-medium text-[var(--color-dust)] uppercase tracking-wider truncate max-w-[80%]">
-                        AI Bubble Detector (YOLO): {dl.status}
+                        YOLO Bubble: {dl.status}
                       </span>
                       <span className="text-xs font-bold text-[var(--color-ink)]">
                         {Math.round(dl.progress * 100)}%
@@ -851,75 +843,50 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
               })()}
 
               {isOpenBubbleMode && (
-                <div className="mt-1 bg-[var(--color-paper)] border border-[var(--color-dust)] rounded-md shadow-sm z-50 p-1 flex flex-col">
-                  {BUBBLE_MODE_OPTIONS.map((opt) => {
-                    const isUninstalled = opt.isModel && !isNeuralDownloaded;
-                    const isActive = activeBubbleMode === opt.id && !isUninstalled;
-                    return (
-                      <div key={opt.id} className="relative">
-                        <div className="flex items-center">
-                          <button
-                            disabled={isUninstalled}
-                            onClick={() => {
-                              if (isUninstalled) return;
-                              updateState({ bubbleMode: opt.id });
-                              setIsOpenBubbleMode(false);
-                            }}
-                            className={`min-w-0 flex-1 flex items-center justify-between p-2 text-left rounded-sm transition-colors ${
-                              isActive
-                                ? 'bg-[var(--color-vellum)] text-[var(--color-editorial)] font-semibold cursor-pointer'
-                                : isUninstalled
-                                  ? 'text-[var(--color-dust)] opacity-50 cursor-not-allowed'
-                                  : 'hover:bg-[var(--color-vellum)] cursor-pointer'
-                            }`}
-                          >
-                            <div className="flex items-center gap-1.5 overflow-hidden">
-                              <span className="truncate pr-1 text-sm">{opt.name}</span>
-                              {opt.badge && (
-                                <span className="text-[10px] font-bold uppercase tracking-wider">
-                                  [{opt.badge}]
-                                </span>
-                              )}
-                            </div>
-                            <div className="flex-shrink-0 ml-2">
-                              {isActive ? (
-                                <Check size={14} className="text-[var(--color-editorial)]" />
-                              ) : null}
-                            </div>
-                          </button>
-
-                          {/* Sibling download button for uninstalled model */}
-                          {isUninstalled ? (
-                            <button
-                              type="button"
-                              disabled={pendingDownloadIds.has('bubble-yolo') || downloads['bubble-yolo']?.status === 'Queued'}
-                              onClick={() => void requestDownload('bubble-yolo', 'bubble')}
-                              className="p-2 rounded hover:bg-[var(--color-vellum)] transition-colors cursor-pointer text-[var(--color-ink)] disabled:cursor-not-allowed disabled:opacity-50"
-                              title="Download model (~11 MB)"
-                              aria-label={`Download ${opt.name}`}
-                            >
-                              <Download size={14} />
-                            </button>
-                          ) : null}
-
-                          {/* ? Help icon & tooltip, using exact Cloudflare pattern */}
-                          <div 
-                            className="p-2 flex items-center relative"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <div className="peer w-3.5 h-3.5 rounded-full border border-[var(--color-dust)] flex items-center justify-center text-[9px] text-[var(--color-dust)] cursor-help hover:bg-[var(--color-dust)] hover:text-[var(--color-paper)] transition-colors flex-shrink-0">
-                              ?
-                            </div>
-                            <div className="absolute right-0 top-full mt-1.5 w-[210px] z-50 opacity-0 pointer-events-none peer-hover:opacity-100 transition-opacity">
-                              <div className="p-2 bg-[var(--color-ink)] text-[var(--color-paper)] text-[11px] leading-snug rounded-md shadow-xl border border-[var(--color-dust)]/20">
-                                {opt.tooltip}
-                              </div>
-                            </div>
+                <div className="mt-1 bg-[var(--color-paper)] border border-[var(--color-dust)] rounded-md shadow-sm overflow-hidden flex flex-col max-h-[350px] z-50">
+                  <div className="overflow-y-auto flex-1 p-1 custom-scrollbar">
+                    {BUBBLE_MODE_OPTIONS.map((opt) => {
+                      const isUninstalled = opt.isModel && !isNeuralDownloaded;
+                      const isActive = activeBubbleMode === opt.id && !isUninstalled;
+                      return (
+                        <button
+                          key={opt.id}
+                          onClick={() => {
+                            if (isUninstalled) return;
+                            updateState({ bubbleMode: opt.id });
+                            setIsOpenBubbleMode(false);
+                          }}
+                          className={`w-full flex items-center justify-between p-2 text-left rounded-sm transition-colors ${
+                            isActive
+                              ? 'bg-[var(--color-vellum)] text-[var(--color-editorial)] font-semibold cursor-pointer'
+                              : isUninstalled
+                                ? 'text-[var(--color-dust)] opacity-50 cursor-not-allowed'
+                                : 'hover:bg-[var(--color-vellum)] cursor-pointer'
+                          }`}
+                        >
+                          <div className="flex flex-col overflow-hidden">
+                            <span className="truncate pr-2 text-sm">{opt.name}</span>
                           </div>
-                        </div>
-                      </div>
-                    );
-                  })}
+                          <div className="flex-shrink-0 ml-2">
+                            {isActive ? (
+                              <Check size={14} className="text-[var(--color-editorial)]" />
+                            ) : isUninstalled ? (
+                              <div
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void requestDownload('bubble-yolo', 'bubble');
+                                }}
+                                className="p-1 -mr-1 rounded hover:bg-[var(--color-vellum)] transition-colors cursor-pointer text-[var(--color-ink)] opacity-100"
+                                title="Download model"
+                              >
+                                <Download size={14} />
+                              </div>
+                            ) : null}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
             </div>

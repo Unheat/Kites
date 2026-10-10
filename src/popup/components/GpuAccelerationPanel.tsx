@@ -19,8 +19,8 @@ const INPAINT_VRAM_MAP: Record<string, string> = {
 
 const BUBBLE_VRAM_MAP: Record<string, string> = {
   off: 'Disabled • 0 MB',
-  heuristic: 'Smart Bubble • 0 MB',
-  neural: 'AI Bubble Detector • ~15 MB',
+  heuristic: 'Heuristic • 0 MB',
+  neural: 'YOLO Bubble • ~15 MB',
 };
 
 export default function GpuAccelerationPanel({ state, updateState }: GpuAccelerationPanelProps) {
