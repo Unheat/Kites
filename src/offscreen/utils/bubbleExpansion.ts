@@ -26,18 +26,30 @@ export const MAX_EXPANSION_SCALE_VERTICAL = 2.20;
  * Computes the safe inscribed core of a bubble, avoiding strokes and borders.
  *
  * @param b - The bounding box of the speech bubble or carrier chamber.
+ * @param textReference - Optional text box within the bubble to ensure core does not cut into existing text.
  * @returns Bounding edges { left, right, top, bottom }, or null if too small.
  */
-export function bubbleCore(b: BoxRect): { left: number; right: number; top: number; bottom: number } | null {
+export function bubbleCore(
+  b: BoxRect,
+  textReference?: BoxRect
+): { left: number; right: number; top: number; bottom: number } | null {
   const mx = Math.min(BUUBLE_INSET_MAX_CLAMP(b.w * BUBBLE_INSET_FRAC), BUBBLE_INSET_MAX);
   const clampedMx = Math.max(mx, BUBBLE_INSET_MIN);
   const my = Math.min(BUUBLE_INSET_MAX_CLAMP(b.h * BUBBLE_INSET_FRAC), BUBBLE_INSET_MAX);
   const clampedMy = Math.max(my, BUBBLE_INSET_MIN);
 
-  const left = b.x + clampedMx;
-  const right = b.x + b.w - clampedMx;
-  const top = b.y + clampedMy;
-  const bottom = b.y + b.h - clampedMy;
+  let left = b.x + clampedMx;
+  let right = b.x + b.w - clampedMx;
+  let top = b.y + clampedMy;
+  let bottom = b.y + b.h - clampedMy;
+
+  if (textReference) {
+    // Ensure safe core accommodates text already present in this chamber without cutting it off
+    top = Math.min(top, Math.max(b.y + BUBBLE_INSET_MIN, textReference.y - 12));
+    bottom = Math.max(bottom, Math.min(b.y + b.h - BUBBLE_INSET_MIN, textReference.y + textReference.h + 12));
+    left = Math.min(left, Math.max(b.x + BUBBLE_INSET_MIN, textReference.x - 12));
+    right = Math.max(right, Math.min(b.x + b.w - BUBBLE_INSET_MIN, textReference.x + textReference.w + 12));
+  }
 
   if (right - left <= 8 || bottom - top <= 8) {
     return null;
@@ -251,7 +263,7 @@ export function dampedSlackExpansion(
 export function computeTypesetBox(
   textBox: BoxRect,
   bubbleOrCarrierBox: BoxRect,
-  _isVertical: boolean,
+  isVertical: boolean,
   pageH: number,
   isAlreadySeveredCarrier: boolean = false
 ): BoxRect {
@@ -262,7 +274,7 @@ export function computeTypesetBox(
         return validTailCutCarrier(derived, bubbleOrCarrierBox, pageH) ? derived : bubbleOrCarrierBox;
       })();
 
-  const core = bubbleCore(carrier) ?? bubbleCore(bubbleOrCarrierBox);
+  const core = bubbleCore(carrier, textBox) ?? bubbleCore(bubbleOrCarrierBox, textBox);
   if (!core) {
     return textBox;
   }
@@ -275,14 +287,26 @@ export function computeTypesetBox(
   const expandedW = Math.min(coreW, Math.max(Math.round(textBox.w * 1.25), Math.round(coreW * 0.80)));
   const expandedH = Math.min(coreH, Math.max(Math.round(textBox.h), Math.round(coreH * 0.70)));
 
-  // Optical Chamber Centering: center expanded box on carrier chamber center
+  const textCx = Math.round(textBox.x + textBox.w / 2);
+  const textCy = Math.round(textBox.y + textBox.h / 2);
   const carrierCx = Math.round(carrier.x + carrier.w / 2);
-  const carrierCy = Math.round(carrier.y + carrier.h / 2);
+
+  // For vertical CJK columns, parallel lines are drawn side-by-side inside the same bubble chamber,
+  // so translated horizontal text should center at the chamber's horizontal center (carrierCx).
+  // For already-horizontal text (like English dialogue), off-center boxes belong to distinct lobes
+  // and must stay anchored at textCx so they are not pulled into adjacent lobes.
+  const targetCx = isVertical
+    ? carrierCx
+    : (Math.abs(textCx - carrierCx) / Math.max(1, carrier.w) > 0.15 ? textCx : carrierCx);
+
+  const targetW = (!isVertical && Math.abs(textCx - carrierCx) / Math.max(1, carrier.w) > 0.15)
+    ? Math.min(expandedW, Math.round(textBox.w * 1.35))
+    : expandedW;
 
   const centered: BoxRect = {
-    x: carrierCx - Math.round(expandedW / 2),
-    y: carrierCy - Math.round(expandedH / 2),
-    w: expandedW,
+    x: targetCx - Math.round(targetW / 2),
+    y: textCy - Math.round(expandedH / 2),
+    w: targetW,
     h: expandedH
   };
 
@@ -317,6 +341,8 @@ export function applySiblingBoundaryConstraints(
 
     for (let j = 0; j < typesetBoxes.length; j++) {
       if (i === j) continue;
+      const tbJ = typesetBoxes[j];
+      if (!tbJ) continue;
       const origJ = originalBoxes[j];
       const cxJ = origJ.x + origJ.w / 2;
       const cyJ = origJ.y + origJ.h / 2;
@@ -325,8 +351,8 @@ export function applySiblingBoundaryConstraints(
       const dy = Math.abs(cyI - cyJ);
       const isPrimarilyVertical = dy > dx * 1.25;
 
-      // 1. Horizontal influence: when vertical spans overlap AND they are not primarily vertically staggered
-      const yOverlap = (origI.y + origI.h) > origJ.y && (origJ.y + origJ.h) > origI.y;
+      // 1. Horizontal influence: only for primarily side-by-side sibling boxes (e.g. separate bubbles)
+      const yOverlap = (tbI.y + tbI.h) > tbJ.y && (tbJ.y + tbJ.h) > tbI.y;
       if (yOverlap && !isPrimarilyVertical) {
         // If box J is to the left of box I
         if (cxJ < cxI) {
@@ -348,25 +374,24 @@ export function applySiblingBoundaryConstraints(
         }
       }
 
-      // 2. Vertical influence: when horizontal spans overlap OR when primarily vertically staggered
-      const xOverlap = (origI.x + origI.w) > origJ.x && (origJ.x + origJ.w) > origI.x;
-      if (xOverlap || isPrimarilyVertical) {
+      // 2. Vertical influence: when boxes share vertical space (e.g. top and bottom utterances in the same bubble)
+      const xOverlap = (tbI.x + tbI.w) > tbJ.x && (tbJ.x + tbJ.w) > tbI.x;
+      if ((xOverlap || isPrimarilyVertical) && cyJ !== cyI) {
         // If box J is above box I
         if (cyJ < cyI) {
-          const dividerY = Math.round((origJ.y + origJ.h + origI.y) / 2);
-          const minTop = dividerY + halfGap;
+          const minTop = tbJ.y + tbJ.h + siblingGap;
           if (tbI.y < minTop) {
-            const shift = minTop - tbI.y;
+            const origBottom = tbI.y + tbI.h;
             tbI.y = minTop;
-            tbI.h = Math.max(origI.h, tbI.h - shift);
+            // Height must shrink so the bottom does not expand downward into bottom artwork
+            tbI.h = Math.max(24, origBottom - tbI.y);
           }
         }
         // If box J is below box I
         else if (cyJ > cyI) {
-          const dividerY = Math.round((origI.y + origI.h + origJ.y) / 2);
-          const maxBottom = dividerY - halfGap;
+          const maxBottom = tbJ.y - siblingGap;
           if (tbI.y + tbI.h > maxBottom) {
-            tbI.h = Math.max(origI.h, maxBottom - tbI.y);
+            tbI.h = Math.max(24, maxBottom - tbI.y);
           }
         }
       }
