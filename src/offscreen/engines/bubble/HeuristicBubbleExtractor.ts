@@ -1,5 +1,18 @@
 import type { BoxRect } from '../../utils/bubbleExpansion';
 
+// Adaptive luminance tuning: the binarization threshold is anchored to the background sampled on a
+// ring just outside the text box (see sampleBackgroundLuminance). FLOOR guards against dark artwork
+// fooling the extractor into calling every pixel interior; MARGIN keeps anti-aliased glyph edges and
+// faint screentones from being swallowed into the bubble mask.
+/** Ring distance in pixels outside the text box where background samples are taken. */
+export const ADAPTIVE_LUM_SAMPLE_OFFSET = 4;
+/** Subtracted from the sampled background luminance to derive the dynamic threshold. */
+export const ADAPTIVE_LUM_MARGIN = 35;
+/** Lower bound of the derived dynamic threshold (never binarize below this). */
+export const ADAPTIVE_LUM_FLOOR = 130;
+/** Fallback binarization threshold when no background sample is available (legacy hardcoded value). */
+export const DEFAULT_LUMINANCE_THRESHOLD = 200;
+
 export interface ImagePatchData {
   width: number;
   height: number;
@@ -11,7 +24,7 @@ export interface HeuristicExtractionOptions {
   maxPatchDimension?: number;
   /** Disk erosion radius at standard resolution. Default 14. */
   baseErodeRadius?: number;
-  /** Minimum luminance threshold (0..255) for white bubble interior. Default 200. */
+  /** Manual binarization threshold (0..255) override. Default: adaptive — sampled background ring minus ADAPTIVE_LUM_MARGIN, floored at ADAPTIVE_LUM_FLOOR (fallback DEFAULT_LUMINANCE_THRESHOLD). */
   luminanceThreshold?: number;
   /** Optional array of all detected text boxes to treat as interior whitespace (prevents un-erased sibling text from acting as fake walls). */
   allTextBoxes?: BoxRect[];
@@ -66,7 +79,23 @@ export class HeuristicBubbleExtractor {
     const patchW = Math.max(10, Math.round(origPatchW * scale));
     const patchH = Math.max(10, Math.round(origPatchH * scale));
 
-    const lumThresh = options.luminanceThreshold ?? 200;
+    // Adaptive luminance: anchor the binarization threshold to the actual background ring around
+    // the text. Translucent bubbles over dark artwork render as grey (RGB ~130-190) and the legacy
+    // hardcoded 200 threshold cut them apart mid-chamber; sampling the background keeps them one
+    // connected chamber. An explicit options.luminanceThreshold override still wins, and the legacy
+    // DEFAULT_LUMINANCE_THRESHOLD applies when no ring sample is available (e.g. text box hugging
+    // the image edge).
+    let lumThresh = DEFAULT_LUMINANCE_THRESHOLD;
+    if (options.luminanceThreshold !== undefined) {
+      lumThresh = options.luminanceThreshold;
+    } else {
+      const bgLum = HeuristicBubbleExtractor.sampleBackgroundLuminance(
+        data, imgW, imgH, channels, textBox, minX, minY, maxX, maxY
+      );
+      if (bgLum !== null) {
+        lumThresh = Math.max(ADAPTIVE_LUM_FLOOR, bgLum - ADAPTIVE_LUM_MARGIN);
+      }
+    }
 
     // Filter nearby text boxes that intersect the patch so their dark glyph pixels
     // are treated as interior whitespace rather than artificial obstacle walls.
@@ -277,5 +306,63 @@ export class HeuristicBubbleExtractor {
       w: Math.min(imgW - finalX, finalW),
       h: Math.min(imgH - finalY, finalH)
     };
+  }
+
+  /**
+   * Samples the median background channel-min luminance on a ring just outside the text box.
+   *
+   * 16 samples are taken ADAPTIVE_LUM_SAMPLE_OFFSET pixels outside the box: 5 along the top edge,
+   * 3 along the right, 5 along the bottom, 3 along the left. Per-sample value is min(r, g, b) so the
+   * metric aligns with the per-channel binarization test that consumes the result; the median makes
+   * the estimate robust against individual samples landing on glyph tips, bubble strokes, or
+   * background artwork lines behind translucent bubbles.
+   *
+   * @param data - Full-image pixel buffer (RGBA or RGB).
+   * @param imgW - Image width in pixels.
+   * @param imgH - Image height in pixels.
+   * @param channels - Bytes per pixel (3 or 4).
+   * @param textBox - Bounding box of the text block whose surrounding background is sampled.
+   * @param minX - Patch left bound (samples outside the patch are skipped).
+   * @param minY - Patch top bound.
+   * @param maxX - Patch right bound.
+   * @param maxY - Patch bottom bound.
+   * @returns Median background luminance in 0..255, or null when no sample landed inside the patch.
+   */
+  static sampleBackgroundLuminance(
+    data: Uint8ClampedArray | Uint8Array,
+    imgW: number,
+    imgH: number,
+    channels: number,
+    textBox: BoxRect,
+    minX: number,
+    minY: number,
+    maxX: number,
+    maxY: number
+  ): number | null {
+    const off = ADAPTIVE_LUM_SAMPLE_OFFSET;
+    const samples: number[] = [];
+
+    const push = (rawX: number, rawY: number) => {
+      const x = Math.round(rawX);
+      const y = Math.round(rawY);
+      if (x < minX || x >= maxX || y < minY || y >= maxY) return;
+      if (x < 0 || x >= imgW || y < 0 || y >= imgH) return;
+      const idx = (y * imgW + x) * channels;
+      samples.push(Math.min(data[idx], data[idx + 1], data[idx + 2]));
+    };
+
+    for (let k = 0; k <= 4; k++) {
+      push(textBox.x + (textBox.w * k) / 4, textBox.y - off);
+      push(textBox.x + (textBox.w * k) / 4, textBox.y + textBox.h + off);
+    }
+    for (let k = 1; k <= 3; k++) {
+      push(textBox.x + textBox.w + off, textBox.y + (textBox.h * k) / 4);
+      push(textBox.x - off, textBox.y + (textBox.h * k) / 4);
+    }
+
+    if (samples.length === 0) return null;
+    samples.sort((a, b) => a - b);
+    const mid = samples.length >> 1;
+    return samples.length % 2 === 1 ? samples[mid] : Math.round((samples[mid - 1] + samples[mid]) / 2);
   }
 }

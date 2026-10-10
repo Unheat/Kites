@@ -82,4 +82,63 @@ describe('HeuristicBubbleExtractor', () => {
     // Leak guard detects boundary touch and rejects
     expect(carrier).toBeNull();
   });
+
+  it('samples median background luminance on the ring outside the text box', () => {
+    const W = 100;
+    const H = 100;
+    const data = new Uint8ClampedArray(W * H * 4).fill(170);
+    const lum = HeuristicBubbleExtractor.sampleBackgroundLuminance(
+      data, W, H, 4, { x: 40, y: 40, w: 20, h: 20 }, 0, 0, W, H
+    );
+    expect(lum).toBe(170);
+  });
+
+  it('detects a translucent grey bubble via adaptive luminance (legacy 200 threshold fails)', () => {
+    const W = 120;
+    const H = 120;
+    // Translucent bubble interior over dark artwork renders as grey (~170), not white
+    const data = new Uint8ClampedArray(W * H * 4).fill(170);
+    // Dark bubble border disc (radius 45) so the chamber is enclosed
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const dist = (x - 100) ** 2 + (y - 100) ** 2;
+        if (dist > 45 ** 2) {
+          const idx = (y * W + x) * 4;
+          data[idx] = 40;
+          data[idx + 1] = 40;
+          data[idx + 2] = 40;
+        }
+      }
+    }
+    const image: ImagePatchData = { width: W, height: H, data };
+    const textBox: BoxRect = { x: 90, y: 90, w: 20, h: 20 };
+
+    // Adaptive: background 170 -> threshold max(130, 170-35) = 135 -> grey interior detected
+    const adaptive = HeuristicBubbleExtractor.extractCarrierBox(image, textBox);
+    expect(adaptive).not.toBeNull();
+    if (adaptive) {
+      expect(adaptive.x).toBeLessThanOrEqual(textBox.x);
+      expect(adaptive.y).toBeLessThanOrEqual(textBox.y);
+      expect(adaptive.x + adaptive.w).toBeGreaterThanOrEqual(textBox.x + textBox.w);
+      expect(adaptive.y + adaptive.h).toBeGreaterThanOrEqual(textBox.y + textBox.h);
+      // Chamber reflects the real bubble body, not just the text rect
+      expect(adaptive.w).toBeGreaterThan(40);
+      expect(adaptive.h).toBeGreaterThan(40);
+    }
+
+    // Legacy hardcoded 200: grey 170 < 200 -> only the text rect is interior -> erosion wipes it
+    const legacy = HeuristicBubbleExtractor.extractCarrierBox(image, textBox, { luminanceThreshold: 200 });
+    expect(legacy).toBeNull();
+  });
+
+  it('rejects dark artwork under adaptive luminance (threshold floor + erosion guard)', () => {
+    const W = 120;
+    const H = 120;
+    // Dark artwork with no bubble: bgLum 30 -> threshold floors at 130 -> only text rect is interior
+    const data = new Uint8ClampedArray(W * H * 4).fill(30);
+    const image: ImagePatchData = { width: W, height: H, data };
+    const textBox: BoxRect = { x: 50, y: 50, w: 20, h: 20 };
+
+    expect(HeuristicBubbleExtractor.extractCarrierBox(image, textBox)).toBeNull();
+  });
 });
