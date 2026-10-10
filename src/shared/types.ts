@@ -194,7 +194,7 @@ export const DEFAULT_POPUP_STATE: PopupState = {
   activeInpaintId: 'simple',
   activeOcrId: 'v6-small',
   renderFontPresetId: 'standard',
-  bubbleMode: 'heuristic',
+  bubbleMode: 'off',
   fallbackChain: [],
   customApis: [],
   webgpuSupported: null,

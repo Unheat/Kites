@@ -48,7 +48,7 @@ describe('GpuAccelerationPanel', () => {
 
     // Verify Bubble Detection row exists
     expect(container.textContent).toContain('Bubble Detection');
-    expect(container.textContent).toContain('Neural YOLO • ~15 MB');
+    expect(container.textContent).toContain('AI Bubble Detector • ~15 MB');
 
     // Find all switches in granular config
     const switches = Array.from(container.querySelectorAll<HTMLButtonElement>('.kites-switch-sm'));

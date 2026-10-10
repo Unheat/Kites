@@ -66,7 +66,7 @@ describe('normalizePopupState', () => {
     expect(result.state.renderFontPresetId).toBe('comic');
   });
 
-  it('normalizes missing or invalid bubbleMode to heuristic', () => {
+  it('normalizes missing or invalid bubbleMode to off', () => {
     const legacyState = {
       ...DEFAULT_POPUP_STATE,
       bubbleMode: undefined as any,
@@ -74,7 +74,7 @@ describe('normalizePopupState', () => {
 
     const result = normalizePopupState(legacyState);
     expect(result.changed).toBe(true);
-    expect(result.state.bubbleMode).toBe('heuristic');
+    expect(result.state.bubbleMode).toBe('off');
 
     const invalidState = {
       ...DEFAULT_POPUP_STATE,
@@ -83,16 +83,16 @@ describe('normalizePopupState', () => {
 
     const invalidResult = normalizePopupState(invalidState);
     expect(invalidResult.changed).toBe(true);
-    expect(invalidResult.state.bubbleMode).toBe('heuristic');
+    expect(invalidResult.state.bubbleMode).toBe('off');
   });
 
   it('preserves valid bubbleMode options without flagging changed', () => {
-    const offState: PopupState = {
+    const heuristicState: PopupState = {
       ...DEFAULT_POPUP_STATE,
-      bubbleMode: 'off',
+      bubbleMode: 'heuristic',
     };
-    expect(normalizePopupState(offState).changed).toBe(false);
-    expect(normalizePopupState(offState).state.bubbleMode).toBe('off');
+    expect(normalizePopupState(heuristicState).changed).toBe(false);
+    expect(normalizePopupState(heuristicState).state.bubbleMode).toBe('heuristic');
 
     const neuralState: PopupState = {
       ...DEFAULT_POPUP_STATE,

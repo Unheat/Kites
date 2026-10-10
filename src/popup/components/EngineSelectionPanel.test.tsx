@@ -124,13 +124,13 @@ describe('WebLLM download control', () => {
 
     const bubbleButton = container.querySelector<HTMLButtonElement>('button[aria-label="Layout and Bubble Fit"]');
     expect(bubbleButton).not.toBeNull();
-    expect(bubbleButton?.textContent).toContain('Heuristic');
+    expect(bubbleButton?.textContent).toContain('Smart Bubble (Instant)');
 
     await act(async () => {
       bubbleButton?.click();
     });
 
-    const offButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('Disabled (Classic)'));
+    const offButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('Disabled (Default)'));
     expect(offButton).toBeDefined();
 
     await act(async () => {
@@ -165,11 +165,11 @@ describe('WebLLM download control', () => {
       bubbleButton?.click();
     });
 
-    const downloadIcon = container.querySelector<HTMLElement>('div[title="Download model (~11 MB)"]');
-    expect(downloadIcon).not.toBeNull();
+    const downloadButton = container.querySelector<HTMLButtonElement>('button[title="Download model (~11 MB)"]');
+    expect(downloadButton).not.toBeNull();
 
     await act(async () => {
-      downloadIcon?.click();
+      downloadButton?.click();
       await Promise.resolve();
     });
 

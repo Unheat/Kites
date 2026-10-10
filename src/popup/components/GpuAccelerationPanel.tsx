@@ -19,8 +19,8 @@ const INPAINT_VRAM_MAP: Record<string, string> = {
 
 const BUBBLE_VRAM_MAP: Record<string, string> = {
   off: 'Disabled • 0 MB',
-  heuristic: 'Heuristic • 0 MB',
-  neural: 'Neural YOLO • ~15 MB',
+  heuristic: 'Smart Bubble • 0 MB',
+  neural: 'AI Bubble Detector • ~15 MB',
 };
 
 export default function GpuAccelerationPanel({ state, updateState }: GpuAccelerationPanelProps) {
@@ -36,7 +36,7 @@ export default function GpuAccelerationPanel({ state, updateState }: GpuAccelera
     ? `${activeEngine.name} • ${activeEngine.vramEstimate || '0 MB'}` 
     : 'Google Translate • 0 MB';
   const inpaintVramText = INPAINT_VRAM_MAP[state.activeInpaintId] || 'Inpaint Engine • ~50 MB';
-  const bubbleVramText = BUBBLE_VRAM_MAP[state.bubbleMode ?? 'heuristic'] || 'Heuristic • 0 MB';
+  const bubbleVramText = BUBBLE_VRAM_MAP[state.bubbleMode ?? 'off'] || 'Disabled • 0 MB';
 
   return (
     <div className="flex flex-col gap-1.5">
