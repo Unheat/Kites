@@ -29,18 +29,18 @@
           "parallel_trans",
           "parallel_inpaint"
         ],
-        "note": "Inspect DBNet polygon extraction, projective crop recognition, the 14-stage noise battery, and text-ink polygon output."
+        "note": "Inspect 1D webtoon tiling, DBNet polygon extraction, projective crop recognition, the 14-stage noise battery, and text polygons."
       },
       {
         "id": "typeset-algorithm",
-        "label": "Font Search",
+        "label": "Bubble & Typeset",
         "focus": [
           "ocr_post_filter",
           "parallel_trans",
           "typeset_bake",
           "dom_swap"
         ],
-        "note": "Follow four-pass font fitting, balanced-wrap width search, median dialogue sizing, decollision, and affine text placement."
+        "note": "Follow speech bubble safe-core expansion, four-pass font fitting, balanced-wrap width search, and locked affine text placement."
       },
       {
         "id": "dual-compute",
@@ -165,8 +165,8 @@
       "lane": "offscreen",
       "col": 2,
       "type": "backend",
-      "label": "PP-OCRv6 DBNet",
-      "sublabel": "polygon detect + warp recognize",
+      "label": "PP-OCRv6 + 1D Tiler",
+      "sublabel": "h≥2500px tiles · DBNet + CRNN",
       "width": 164
     },
     {
@@ -203,8 +203,8 @@
       "lane": "offscreen",
       "col": 4,
       "type": "backend",
-      "label": "4-Pass Font Search",
-      "sublabel": "binary 6px…max · width search",
+      "label": "Bubble Fit & Typeset",
+      "sublabel": "Heuristic/YOLO · 4-pass fit",
       "width": 164
     },
     {
@@ -310,13 +310,13 @@
   "cards": [
     {
       "dot": "cyan",
-      "title": "OCR Detection + 14-Layer Noise Battery",
+      "title": "OCR Detection, 1D Tiling & 14-Layer Noise Battery",
       "items": [
+        "1D Webtoon Tiler: images with h ≥2500 px are sliced into 1000 px vertical tiles with 300 px overlap, merging boundary polygons via IoU dedup.",
         "DBNet: max side 960 → probability ≥0.3 → 4-connected blobs ≥15 px → convex hull + minimum-area rectangle → score ≥0.5 → unclip 1.5.",
         "Crop recognition: projective homography + bicubic sampling; rotate vertical crops 90° when height/width ≥1.5.",
         "1–5 Geometry: stray cleanup; giant ≥60% width and ≥120 px; tilt 12°/10°; margin ≤5 px; thin-sliver overlap rejection.",
-        "6–11 Text noise: punctuation recovery; valuable text + area ≥16; short ASCII confidence gate; watermark suffix rescale; scanlator and ornament pruning.",
-        "12–14 Language/dedup: furigana <0.45×; pure-Latin prune after native-script evidence; ≥50% smaller-box coverage dedup + weak-neighbor suppression."
+        "6–14 Text & Language: punctuation recovery; valuable text; short ASCII gate; watermark suffix rescale; furigana <0.45×; pure-Latin prune; weak-neighbor suppression."
       ]
     },
     {
@@ -331,12 +331,13 @@
     },
     {
       "dot": "violet",
-      "title": "Typesetting — Two Binary Searches + Affine Render",
+      "title": "Bubble Expansion & Typesetting Layout",
       "items": [
+        "Bubble expansion: Tier 1 Heuristic (adaptive luminance, erosion R=14, 12% safe core) + Tier 2 Neural YOLO (detector-v4-s_int8 WebGPU, class 0 only).",
+        "BubbleLayoutService: single-bubble expansion with font fit gate; clean single-axis X/Y partition for connected lobes (gap ≥6px); diagonal/complex lobes fall back to Disabled.",
         "Font fitter: 5% inset, line height 1.2, search 6 px…max; Pass 1 clean binary fit; Pass 2 tall-box geometric cap when H/W ≥2.0.",
         "Pass 3 scans down with six-stage hyphenation for words ≥7 chars when H/W ≥1.5; Pass 4 runs fallback binary search to the 6 px floor.",
-        "Balanced wrap: greedy line count N → binary-search the minimum width preserving ≤N lines → centered diamond/inverted-pyramid stanza.",
-        "Median dialogue cap max(18, round(median×1.25)) → decollide boxes → sample central 20–80% for color → exact lines → aspect pad → affine warp."
+        "Balanced wrap: greedy line count N → binary-search minimum width preserving ≤N lines; locked axis-aligned typesetBox (0°) bypasses decollision shifts."
       ]
     },
     {
