@@ -41,14 +41,14 @@ export function isValuableText(text: string): boolean {
 }
 
 /**
- * Determines whether speech bubbles on a page should be ordered Right-to-Left (Japanese manga order)
- * or Left-to-Right (Western comic / Webtoon order).
+ * Determines whether speech bubbles on a page should be ordered Right-to-Left (Japanese manga, traditional Chinese vertical manhua)
+ * or Left-to-Right (Western comics, webtoons, horizontal manhua/manhwa).
  * Ported 1:1 from Cotrans `sort_regions(regions, right_to_left=True/False)` in textblock.py:423.
  *
- * @param sourceLang - Source language code if provided (e.g. 'ja', 'en', 'vi', 'ko').
+ * @param sourceLang - Source language code if provided (e.g. 'ja', 'zh', 'en', 'vi', 'ko').
  * @param mergedDirections - Majority directions of the merged bubbles ('h' | 'v').
  * @param mergedTexts - Text contents of the merged speech bubbles.
- * @returns True for RTL reading order (manga), false for LTR reading order (western comics/webtoons).
+ * @returns True for RTL reading order (manga / vertical manhua), false for LTR reading order (western comics/webtoons).
  */
 export function isRightToLeftReadingOrder(
   sourceLang?: string,
@@ -64,17 +64,34 @@ export function isRightToLeftReadingOrder(
     if (['ar', 'ara', 'he', 'heb', 'fa', 'pes', 'ur', 'urd'].includes(lang)) {
       return true;
     }
-    // Explicit non-Japanese / LTR languages (English, Vietnamese, Korean, Chinese, European languages)
+    // Chinese (Simplified or Traditional):
+    // Traditional manhua / Taiwanese & Hong Kong comics formatted vertically read Right-to-Left (manga order).
+    // Modern digital webtoons formatted horizontally read Left-to-Right.
+    if (lang.startsWith('zh')) {
+      if (mergedDirections && mergedDirections.length > 0) {
+        const vCount = mergedDirections.filter(d => d === 'v').length;
+        const hCount = mergedDirections.length - vCount;
+        return vCount > 0 && vCount >= hCount;
+      }
+      return false;
+    }
+    // Explicit non-Japanese / non-RTL languages (English, Vietnamese, Korean, European languages)
     return false;
   }
 
   // Fallback when sourceLang is 'auto' or undefined:
-  // If vertical text blocks exist, or Japanese kana characters are detected, treat as Japanese manga (RTL).
-  if (mergedDirections && mergedDirections.some(d => d === 'v')) {
-    return true;
-  }
+  // If Japanese kana characters are detected, treat as Japanese manga (RTL).
   if (mergedTexts && mergedTexts.some(t => /[\u3040-\u30ff]/.test(t))) {
     return true;
+  }
+  // If vertical text blocks are predominant, treat as traditional vertical manga/manhua (RTL).
+  // A majority check protects horizontal webtoons containing a lone vertical SFX from being inverted.
+  if (mergedDirections && mergedDirections.length > 0) {
+    const vCount = mergedDirections.filter(d => d === 'v').length;
+    const hCount = mergedDirections.length - vCount;
+    if (vCount > 0 && vCount >= hCount) {
+      return true;
+    }
   }
 
   // Default to LTR for pure horizontal text without Japanese indicators

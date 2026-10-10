@@ -352,18 +352,39 @@ describe('OcrManager', () => {
       expect(isRightToLeftReadingOrder('en')).toBe(false);
       expect(isRightToLeftReadingOrder('vi')).toBe(false);
       expect(isRightToLeftReadingOrder('ko')).toBe(false);
-      expect(isRightToLeftReadingOrder('zh')).toBe(false);
       expect(isRightToLeftReadingOrder('fr')).toBe(false);
       expect(isRightToLeftReadingOrder('es')).toBe(false);
     });
 
-    it('infers RTL when sourceLang is undefined but vertical text or kana is present', () => {
+    it('handles Chinese reading order based on text orientation', () => {
+      // Pure vertical manhua (traditional / Taiwanese / Hong Kong) -> RTL
+      expect(isRightToLeftReadingOrder('zh', ['v', 'v'])).toBe(true);
+      expect(isRightToLeftReadingOrder('zh-TW', ['v', 'v'])).toBe(true);
+      expect(isRightToLeftReadingOrder('zh-HK', ['v', 'v'])).toBe(true);
+      expect(isRightToLeftReadingOrder('zh-CN', ['v', 'v'])).toBe(true);
+
+      // Pure horizontal webtoon / modern digital manhua -> LTR
+      expect(isRightToLeftReadingOrder('zh', ['h', 'h'])).toBe(false);
+      expect(isRightToLeftReadingOrder('zh-TW', ['h', 'h'])).toBe(false);
+
+      // Horizontal webtoon with a single vertical SFX -> stays LTR
+      expect(isRightToLeftReadingOrder('zh', ['h', 'h', 'h', 'v'])).toBe(false);
+
+      // Default when no directions are available -> LTR
+      expect(isRightToLeftReadingOrder('zh')).toBe(false);
+      expect(isRightToLeftReadingOrder('zh', [])).toBe(false);
+    });
+
+    it('infers RTL when sourceLang is undefined and vertical text or kana is predominant', () => {
       expect(isRightToLeftReadingOrder(undefined, ['v', 'h'], ['Hello', 'World'])).toBe(true);
+      expect(isRightToLeftReadingOrder(undefined, ['v', 'v'], ['Hello', 'World'])).toBe(true);
       expect(isRightToLeftReadingOrder(undefined, ['h'], ['こんにちは'])).toBe(true);
     });
 
-    it('infers LTR when sourceLang is undefined and no vertical text or kana exists', () => {
+    it('infers LTR when sourceLang is undefined and horizontal text is predominant', () => {
       expect(isRightToLeftReadingOrder(undefined, ['h', 'h'], ['Hello', 'World'])).toBe(false);
+      // Horizontal webtoon with one vertical SFX stays LTR
+      expect(isRightToLeftReadingOrder(undefined, ['h', 'h', 'h', 'v'], ['Web', 'Toon', 'Story', 'BOOM'])).toBe(false);
     });
   });
 
@@ -376,9 +397,9 @@ describe('OcrManager', () => {
           recognize: vi.fn().mockResolvedValue({
             texts: [engineResult.leftText, engineResult.rightText],
             polygons: [
-              // Bubble 1 on Left: x=50, y=100, w=100, h=50 -> centerX=100, centerY=125
+              // Bubble 1 on Left (horizontal): x=50, y=100, w=100, h=50 -> centerX=100, centerY=125
               [{ x: 50, y: 100 }, { x: 150, y: 100 }, { x: 150, y: 150 }, { x: 50, y: 150 }],
-              // Bubble 2 on Right: x=400, y=100, w=100, h=50 -> centerX=450, centerY=125
+              // Bubble 2 on Right (horizontal): x=400, y=100, w=100, h=50 -> centerX=450, centerY=125
               [{ x: 400, y: 100 }, { x: 500, y: 100 }, { x: 500, y: 150 }, { x: 400, y: 150 }]
             ],
             scores: [0.95, 0.95],
@@ -393,6 +414,31 @@ describe('OcrManager', () => {
       });
     }
 
+    function mockSideBySideVerticalBubbles(engineResult: { leftText: string; rightText: string }) {
+      (PaddleOcrEngine as any).mockImplementation(function () {
+        return {
+          preset: 'v6-small',
+          init: vi.fn().mockResolvedValue(undefined),
+          recognize: vi.fn().mockResolvedValue({
+            texts: [engineResult.leftText, engineResult.rightText],
+            polygons: [
+              // Vertical Bubble 1 on Left: x=50, y=100, w=40, h=150 -> centerX=70, centerY=175
+              [{ x: 50, y: 100 }, { x: 90, y: 100 }, { x: 90, y: 250 }, { x: 50, y: 250 }],
+              // Vertical Bubble 2 on Right: x=400, y=100, w=40, h=150 -> centerX=420, centerY=175
+              [{ x: 400, y: 100 }, { x: 440, y: 100 }, { x: 440, y: 250 }, { x: 400, y: 250 }]
+            ],
+            scores: [0.95, 0.95],
+            detectionScores: [0.98, 0.98],
+            boxes: [
+              { x: 50, y: 100, w: 40, h: 150 },
+              { x: 400, y: 100, w: 40, h: 150 }
+            ]
+          }),
+          destroy: vi.fn().mockResolvedValue(undefined)
+        };
+      });
+    }
+
     it('orders side-by-side bubbles Right-to-Left (manga) when sourceLang is ja', async () => {
       mockSideBySideBubbles({ leftText: '左のセリフ', rightText: '右のセリフ' });
       const result = await ocrManager.processImage(new ArrayBuffer(16), 'v6-small', { sourceLang: 'ja' });
@@ -400,6 +446,24 @@ describe('OcrManager', () => {
       // In Japanese manga, Right bubble comes first!
       expect(result.texts[0]).toBe('右のセリフ');
       expect(result.texts[1]).toBe('左のセリフ');
+    });
+
+    it('orders side-by-side vertical bubbles Right-to-Left for traditional Chinese manhua', async () => {
+      mockSideBySideVerticalBubbles({ leftText: '左邊對白', rightText: '右邊對白' });
+      const result = await ocrManager.processImage(new ArrayBuffer(16), 'v6-small', { sourceLang: 'zh-TW' });
+      expect(result.texts).toHaveLength(2);
+      // In vertical Chinese manhua, Right bubble comes first (RTL)!
+      expect(result.texts[0]).toBe('右邊對白');
+      expect(result.texts[1]).toBe('左邊對白');
+    });
+
+    it('orders side-by-side horizontal bubbles Left-to-Right for modern Chinese webtoons', async () => {
+      mockSideBySideBubbles({ leftText: '左边对白', rightText: '右边对白' });
+      const result = await ocrManager.processImage(new ArrayBuffer(16), 'v6-small', { sourceLang: 'zh' });
+      expect(result.texts).toHaveLength(2);
+      // In horizontal Chinese webtoons, Left bubble comes first (LTR)!
+      expect(result.texts[0]).toBe('左边对白');
+      expect(result.texts[1]).toBe('右边对白');
     });
 
     it('orders side-by-side bubbles Left-to-Right (western) when sourceLang is en', async () => {
