@@ -17,6 +17,12 @@ const INPAINT_VRAM_MAP: Record<string, string> = {
   'lama-manga': 'LaMa Manga • ~200 MB',
 };
 
+const BUBBLE_VRAM_MAP: Record<string, string> = {
+  off: 'Disabled • 0 MB',
+  heuristic: 'Heuristic • 0 MB',
+  neural: 'Neural YOLO • ~15 MB',
+};
+
 export default function GpuAccelerationPanel({ state, updateState }: GpuAccelerationPanelProps) {
   const [showWebGpuConfig, setShowWebGpuConfig] = useState(false);
   const [engines, setEngines] = useState<Engine[]>([]);
@@ -30,6 +36,7 @@ export default function GpuAccelerationPanel({ state, updateState }: GpuAccelera
     ? `${activeEngine.name} • ${activeEngine.vramEstimate || '0 MB'}` 
     : 'Google Translate • 0 MB';
   const inpaintVramText = INPAINT_VRAM_MAP[state.activeInpaintId] || 'Inpaint Engine • ~50 MB';
+  const bubbleVramText = BUBBLE_VRAM_MAP[state.bubbleMode ?? 'heuristic'] || 'Heuristic • 0 MB';
 
   return (
     <div className="flex flex-col gap-1.5">
@@ -174,6 +181,22 @@ export default function GpuAccelerationPanel({ state, updateState }: GpuAccelera
                 onClick={() => updateState({ webgpuOverrides: { ...state.webgpuOverrides, ocr: !(state.webgpuOverrides?.ocr !== false) }})}
                 className="kites-switch kites-switch-sm"
                 data-state={state.webgpuOverrides?.ocr !== false ? 'checked' : 'unchecked'}
+              >
+                <span className="kites-switch-thumb" />
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between p-2.5 rounded-md hover:bg-[var(--color-paper)] transition-colors">
+              <div className="flex flex-col text-left">
+                <span className="font-medium text-sm text-[var(--color-ink)]">Bubble Detection</span>
+                <span className="text-[10px] text-[var(--color-dust)] font-medium truncate max-w-[180px]">
+                  {bubbleVramText}
+                </span>
+              </div>
+              <button 
+                onClick={() => updateState({ webgpuOverrides: { ...state.webgpuOverrides, bubble: !(state.webgpuOverrides?.bubble !== false) }})}
+                className="kites-switch kites-switch-sm"
+                data-state={state.webgpuOverrides?.bubble !== false ? 'checked' : 'unchecked'}
               >
                 <span className="kites-switch-thumb" />
               </button>

@@ -10,30 +10,30 @@ import { RENDER_FONT_PRESETS, normalizeRenderFontPresetId } from '../../shared/r
 export interface BubbleModeOption {
   id: BubbleDetectionMode;
   name: string;
-  badge: string;
-  recommended?: boolean;
-  description: string;
+  badge?: string;
+  tooltip: string;
+  isModel?: boolean;
+  modelId?: string;
 }
 
 export const BUBBLE_MODE_OPTIONS: BubbleModeOption[] = [
   {
     id: 'heuristic',
     name: 'Heuristic',
-    badge: 'Instant • 0 MB',
-    recommended: true,
-    description: 'Expands into white bubble whitespace with tail severing. Fast (<1ms), zero download.'
+    tooltip: 'Expands into white bubble whitespace with tail severing. Fast (<1ms), zero download.',
   },
   {
     id: 'neural',
     name: 'Neural YOLO',
-    badge: '~3.2 MB • WebGPU',
-    description: 'AI object detector for spiky shock bubbles, dark backgrounds, and complex manga art.'
+    badge: 'WebGPU',
+    tooltip: 'AI object detector for spiky shock bubbles, dark backgrounds, and complex manga art (~11 MB).',
+    isModel: true,
+    modelId: 'bubble-yolo',
   },
   {
     id: 'off',
     name: 'Disabled (Classic)',
-    badge: 'Cotrans MST',
-    description: 'Tightly hugs source text lines without bubble expansion. Preserves v1.1.1 behavior.'
+    tooltip: 'Tightly hugs source text lines without bubble expansion (Cotrans MST).',
   }
 ];
 
@@ -77,6 +77,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
   const [isOpenOcr, setIsOpenOcr] = useState(false);
   const [isOpenRenderFont, setIsOpenRenderFont] = useState(false);
   const [isOpenBubbleMode, setIsOpenBubbleMode] = useState(false);
+  const [isNeuralDownloaded, setIsNeuralDownloaded] = useState(false);
   const [showAddApi, setShowAddApi] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [downloads, setDownloads] = useState<Record<string, { progress: number; status: string }>>({});
@@ -94,7 +95,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
    * @param category - Model subsystem that owns the download.
    * @returns A promise resolved after background/offscreen acknowledgement.
    */
-  const requestDownload = async (modelId: string, category: 'translation' | 'inpaint' | 'ocr'): Promise<void> => {
+  const requestDownload = async (modelId: string, category: 'translation' | 'inpaint' | 'ocr' | 'bubble'): Promise<void> => {
     if (pendingDownloadIds.has(modelId) || downloads[modelId]?.status === 'Queued') return;
     setPendingDownloadIds(prev => new Set(prev).add(modelId));
     setDownloads(prev => ({ ...prev, [modelId]: { progress: 0, status: 'Queued' } }));
@@ -177,6 +178,9 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
             )
             : prev
           );
+          if (message.payload.modelId === 'bubble-yolo') {
+            setIsNeuralDownloaded(true);
+          }
         }
       }
 
@@ -241,6 +245,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
         ...engines.filter(engine => engine.hardware === 'WebGPU').map(engine => engine.id),
         ...inpaintBaseEngines.map(engine => engine.id),
         ...ocrBaseEngines.map(engine => engine.id),
+        'bubble-yolo',
       ];
       chrome.runtime.sendMessage({ type: 'GET_MODEL_STATUSES', target: 'background', source: 'popup', request: true, payload: { modelIds } }, (response) => {
         if (chrome.runtime.lastError || response?.status !== 'success') {
@@ -248,6 +253,9 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
           return;
         }
         setDownloads(prev => ({ ...prev, ...response.downloads }));
+        const isBubbleYoloReady = Boolean(readyModelIds.current.has('bubble-yolo') || response.statuses['bubble-yolo']);
+        setIsNeuralDownloaded(isBubbleYoloReady);
+
         const hydrate = (items: Engine[]) => items.map(engine => ({
           ...engine,
           isDownloaded: Boolean(engine.isDownloaded || readyModelIds.current.has(engine.id) || response.statuses[engine.id]),
@@ -266,10 +274,12 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
         const inpaintUnavailable = Boolean(selectedInpaint && !selectedInpaint.isDownloaded);
         const selectedOcr = hydratedOcr.find((engine) => engine.id === (currentState.activeOcrId || 'v6-small'));
         const ocrUnavailable = Boolean(selectedOcr && !selectedOcr.isDownloaded);
+        const bubbleUnavailable = currentState.bubbleMode === 'neural' && !isBubbleYoloReady;
         const repairs: Partial<PopupState> = {};
         if (translationUnavailable) repairs.activeEngineId = 'gg-translate';
         if (inpaintUnavailable) repairs.activeInpaintId = 'simple';
         if (ocrUnavailable) repairs.activeOcrId = 'v6-small';
+        if (bubbleUnavailable) repairs.bubbleMode = 'heuristic';
         if (Object.keys(repairs).length > 0) {
           console.warn('[EngineSelectionPanel] Resetting unavailable local model selections.', repairs);
           updateState(repairs);
@@ -785,7 +795,6 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
       {/* Layout & Bubble Fit Selector */}
       {(() => {
         const activeBubbleMode = state.bubbleMode ?? 'heuristic';
-        const activeBubbleOption = BUBBLE_MODE_OPTIONS.find((o) => o.id === activeBubbleMode) ?? BUBBLE_MODE_OPTIONS[0];
 
         return (
           <div className="flex flex-col gap-1.5">
@@ -807,51 +816,95 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                 onClick={() => setIsOpenBubbleMode(!isOpenBubbleMode)}
                 className="w-full flex items-center justify-between p-3 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md hover:border-[var(--color-ink)] transition-colors cursor-pointer"
               >
-                <div className="flex items-center gap-2 truncate pr-2">
-                  <span className="font-medium text-sm">{activeBubbleOption.name}</span>
-                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--color-dust)]/15 text-[var(--color-dust)] font-medium">
-                    {activeBubbleOption.badge}
-                  </span>
-                </div>
+                <span className="font-medium truncate pr-2">
+                  {activeBubbleMode === 'neural' && isNeuralDownloaded
+                    ? 'Neural YOLO'
+                    : activeBubbleMode === 'off'
+                      ? 'Disabled (Classic)'
+                      : 'Heuristic'}
+                </span>
                 <ChevronDown size={16} className={`text-[var(--color-dust)] transition-transform ${isOpenBubbleMode ? 'rotate-180' : ''}`} />
               </button>
+
+              {/* Inline progress bar for Neural YOLO bubble detector download */}
+              {(() => {
+                const dl = downloads['bubble-yolo'];
+                if (!dl || dl.progress >= 1) return null;
+                return (
+                  <div className="mt-2 p-2 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md animate-in fade-in duration-200">
+                    <div className="flex justify-between items-end mb-1.5">
+                      <span className="text-[10px] font-medium text-[var(--color-dust)] uppercase tracking-wider truncate max-w-[80%]">
+                        Neural YOLO: {dl.status}
+                      </span>
+                      <span className="text-xs font-bold text-[var(--color-ink)]">
+                        {Math.round(dl.progress * 100)}%
+                      </span>
+                    </div>
+                    <div className="h-1.5 w-full bg-[var(--color-paper)] rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-[var(--color-editorial)] transition-all duration-300 ease-out" 
+                        style={{ width: `${dl.progress * 100}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })()}
 
               {isOpenBubbleMode && (
                 <div className="mt-1 bg-[var(--color-paper)] border border-[var(--color-dust)] rounded-md shadow-sm overflow-hidden flex flex-col max-h-[350px] z-50">
                   <div className="overflow-y-auto flex-1 p-1 custom-scrollbar">
                     {BUBBLE_MODE_OPTIONS.map((opt) => {
-                      const isActive = activeBubbleMode === opt.id;
+                      const isUninstalled = opt.isModel && !isNeuralDownloaded;
+                      const isActive = activeBubbleMode === opt.id && !isUninstalled;
                       return (
                         <button
                           key={opt.id}
                           onClick={() => {
+                            if (isUninstalled) return;
                             updateState({ bubbleMode: opt.id });
                             setIsOpenBubbleMode(false);
                           }}
                           className={`w-full flex items-center justify-between p-2 text-left rounded-sm transition-colors ${
                             isActive
                               ? 'bg-[var(--color-vellum)] text-[var(--color-editorial)] font-semibold cursor-pointer'
-                              : 'hover:bg-[var(--color-vellum)] cursor-pointer'
+                              : isUninstalled
+                                ? 'text-[var(--color-dust)] opacity-50 cursor-not-allowed'
+                                : 'hover:bg-[var(--color-vellum)] cursor-pointer'
                           }`}
                         >
-                          <div className="flex flex-col overflow-hidden pr-2">
-                            <div className="flex items-center gap-2">
-                              <span className="truncate text-sm">{opt.name}</span>
-                              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--color-dust)]/15 text-[var(--color-dust)] font-normal">
-                                {opt.badge}
+                          <div className="flex items-center gap-1.5 overflow-hidden">
+                            <span className="truncate pr-1 text-sm">{opt.name}</span>
+                            {opt.badge && (
+                              <span className="text-[10px] font-bold uppercase tracking-wider">
+                                [{opt.badge}]
                               </span>
-                              {opt.recommended && (
-                                <span className="text-[9px] font-semibold uppercase tracking-wider px-1 py-0.5 rounded bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
-                                  Recommended
-                                </span>
-                              )}
+                            )}
+                            <div className="relative group/tip inline-flex items-center" onClick={(e) => e.stopPropagation()}>
+                              <div className="w-3.5 h-3.5 rounded-full border border-[var(--color-dust)]/60 flex items-center justify-center text-[9px] text-[var(--color-dust)] cursor-help hover:border-[var(--color-ink)] hover:text-[var(--color-ink)] transition-colors">
+                                ?
+                              </div>
+                              <div className="absolute left-0 bottom-full mb-1.5 w-[220px] max-w-[80vw] z-50 opacity-0 pointer-events-none group-hover/tip:opacity-100 transition-opacity">
+                                <div className="p-2 bg-[var(--color-ink)] text-[var(--color-paper)] text-[11px] rounded shadow-xl font-normal leading-tight">
+                                  {opt.tooltip}
+                                </div>
+                              </div>
                             </div>
-                            <span className="text-[11px] text-[var(--color-dust)] leading-tight mt-0.5">
-                              {opt.description}
-                            </span>
                           </div>
                           <div className="flex-shrink-0 ml-2">
-                            {isActive ? <Check size={14} className="text-[var(--color-editorial)]" /> : null}
+                            {isActive ? (
+                              <Check size={14} className="text-[var(--color-editorial)]" />
+                            ) : isUninstalled ? (
+                              <div
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void requestDownload('bubble-yolo', 'bubble');
+                                }}
+                                className="p-1 -mr-1 rounded hover:bg-[var(--color-vellum)] transition-colors cursor-pointer text-[var(--color-ink)] opacity-100"
+                                title="Download model (~11 MB)"
+                              >
+                                <Download size={14} />
+                              </div>
+                            ) : null}
                           </div>
                         </button>
                       );
@@ -864,6 +917,5 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
         );
       })()}
     </div>
-
   );
 }

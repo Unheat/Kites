@@ -1,4 +1,8 @@
 import type { BoxRect } from '../../utils/bubbleExpansion';
+import type { PopupState } from '../../../shared/types';
+import { isBubbleGpuAvailable } from '../../../shared/utils/hardwareUtils';
+import { bubbleRegistry } from './bubbleRegistry';
+import { BubbleCacheManager } from '../../services/BubbleCacheManager';
 
 export interface NeuralBubbleDetectionResult {
   bubbles: BoxRect[];
@@ -10,6 +14,9 @@ export interface NeuralBubbleDetectionResult {
  * Detects speech balloons across the entire page image.
  */
 export class NeuralBubbleDetector {
+  private static session: any = null;
+  private static activeProvider: 'webgpu' | 'wasm' | null = null;
+
   /**
    * Preprocesses canvas/image pixel data into float32 planar RGB tensor [1, 3, inputSize, inputSize].
    *
@@ -118,5 +125,102 @@ export class NeuralBubbleDetector {
     }
 
     return bestBubble;
+  }
+
+  /**
+   * Executes neural bubble detection on an image canvas, initializing ONNX runtime on demand.
+   *
+   * @param canvas - The source image canvas.
+   * @param popupState - Extension settings state to read GPU acceleration overrides.
+   * @returns Detected speech bubble boxes across the image, or null if model unavailable.
+   */
+  static async detect(
+    canvas: OffscreenCanvas | HTMLCanvasElement,
+    popupState?: PopupState
+  ): Promise<BoxRect[] | null> {
+    const entry = bubbleRegistry['bubble-yolo'];
+    if (!entry) return null;
+
+    const isCached = await BubbleCacheManager.isModelCached(entry.onnxUrl);
+    if (!isCached) {
+      console.log('[NeuralBubbleDetector] Model not cached on disk. Skipping neural detection.');
+      return null;
+    }
+
+    const wantGpu = popupState ? isBubbleGpuAvailable(popupState) : false;
+    const requestedProvider = wantGpu ? 'webgpu' : 'wasm';
+
+    try {
+      // Lazily create or re-create session if provider changed
+      if (!this.session || this.activeProvider !== requestedProvider) {
+        console.log(`[NeuralBubbleDetector] Loading model session (provider: ${requestedProvider})...`);
+        const modelBuffer = await BubbleCacheManager.getModelBuffer(entry.onnxUrl);
+
+        const ort = await import('onnxruntime-web');
+        if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.getURL) {
+          ort.env.wasm.wasmPaths = chrome.runtime.getURL('/ort-wasm/');
+        }
+
+        const providers = wantGpu
+          ? [{ name: 'webgpu', deviceType: 'gpu', powerPreference: 'high-performance' as const }, 'wasm']
+          : ['wasm'];
+
+        try {
+          this.session = await ort.InferenceSession.create(modelBuffer, {
+            executionProviders: providers as any,
+          });
+          this.activeProvider = wantGpu ? 'webgpu' : 'wasm';
+        } catch (gpuError) {
+          if (wantGpu) {
+            console.warn('[NeuralBubbleDetector] WebGPU session creation failed; falling back to WASM:', gpuError);
+            this.session = await ort.InferenceSession.create(modelBuffer, {
+              executionProviders: ['wasm'],
+            });
+            this.activeProvider = 'wasm';
+          } else {
+            throw gpuError;
+          }
+        }
+      }
+
+      const inputSize = entry.inputSize;
+      const width = canvas.width;
+      const height = canvas.height;
+
+      // Downscale to model input dimension (640x640)
+      const resizeCanvas = typeof OffscreenCanvas !== 'undefined'
+        ? new OffscreenCanvas(inputSize, inputSize)
+        : document.createElement('canvas');
+      resizeCanvas.width = inputSize;
+      resizeCanvas.height = inputSize;
+      const resizeCtx = resizeCanvas.getContext('2d', { willReadFrequently: true }) as any;
+      if (!resizeCtx) return null;
+
+      resizeCtx.drawImage(canvas, 0, 0, inputSize, inputSize);
+      const resizedImgData = resizeCtx.getImageData(0, 0, inputSize, inputSize).data;
+
+      const floatData = this.preprocessImage(resizedImgData, inputSize);
+      const ort = await import('onnxruntime-web');
+      const tensorImages = new ort.Tensor('float32', floatData, [1, 3, inputSize, inputSize]);
+      const tensorSizes = new ort.Tensor('int64', new BigInt64Array([BigInt(width), BigInt(height)]), [1, 2]);
+
+      const outputs = await this.session.run({
+        images: tensorImages,
+        orig_target_sizes: tensorSizes,
+      });
+
+      const parsed = this.parseDetections(
+        outputs.labels.data as any,
+        outputs.boxes.data as any,
+        outputs.scores.data as any,
+        0.30
+      );
+
+      console.log(`[NeuralBubbleDetector] Detected ${parsed.bubbles.length} bubbles.`);
+      return parsed.bubbles;
+    } catch (error) {
+      console.warn('[NeuralBubbleDetector] Detection failed, falling back to heuristic:', error);
+      return null;
+    }
   }
 }

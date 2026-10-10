@@ -50,7 +50,7 @@ describe('normalizePopupState', () => {
     });
 
     expect(result.changed).toBe(true);
-    expect(result.state.webgpuOverrides).toEqual({ llm: true, inpaint: false, ocr: true });
+    expect(result.state.webgpuOverrides).toEqual({ llm: true, inpaint: false, ocr: true, bubble: true });
     expect(result.state.activeOcrId).toBe(DEFAULT_POPUP_STATE.activeOcrId);
     expect(result.state.customApis).toEqual([]);
   });

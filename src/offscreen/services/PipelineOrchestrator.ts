@@ -10,6 +10,7 @@ import { InpaintCacheManager } from './InpaintCacheManager';
 import { renderTextBlocksBatch, type TextBlockItem, type RenderedBlockInfo } from '../utils/canvasTypesetting';
 import { resolveRenderFontFamily } from '../../shared/renderFontPresets';
 import { HeuristicBubbleExtractor } from '../engines/bubble/HeuristicBubbleExtractor';
+import { NeuralBubbleDetector } from '../engines/bubble/NeuralBubbleDetector';
 import { computeTypesetBox, applySiblingBoundaryConstraints } from '../utils/bubbleExpansion';
 import type { OcrBox } from '../engines/ocr/BaseOcrEngine';
 
@@ -169,18 +170,36 @@ export class PipelineOrchestrator {
           const rawCtx = rawCanvas.getContext('2d', { willReadFrequently: true });
           if (rawCtx) {
             rawCtx.drawImage(rawBitmap, 0, 0);
-            const rawImageData = rawCtx.getImageData(0, 0, rawBitmap.width, rawBitmap.height);
             const typesetBoxes: (OcrBox | undefined)[] = [];
 
-            for (let i = 0; i < ocrResult.boxes.length; i++) {
-              const box = ocrResult.boxes[i];
-              const isVert = (ocrResult.directions && ocrResult.directions[i]) === 'v';
-              const carrier = HeuristicBubbleExtractor.extractCarrierBox(rawImageData, box);
-              if (carrier) {
-                const typesetBox = computeTypesetBox(box, carrier, isVert, rawBitmap.height, true);
-                typesetBoxes[i] = typesetBox;
-              } else {
-                typesetBoxes[i] = undefined;
+            if (bubbleMode === 'neural') {
+              const neuralBubbles = await NeuralBubbleDetector.detect(rawCanvas, popupState);
+              const rawImageData = rawCtx.getImageData(0, 0, rawBitmap.width, rawBitmap.height);
+
+              for (let i = 0; i < ocrResult.boxes.length; i++) {
+                const box = ocrResult.boxes[i];
+                const isVert = (ocrResult.directions && ocrResult.directions[i]) === 'v';
+                const matched = neuralBubbles ? NeuralBubbleDetector.matchBubble(box, neuralBubbles) : null;
+                if (matched) {
+                  typesetBoxes[i] = computeTypesetBox(box, matched, isVert, rawBitmap.height, false);
+                } else {
+                  // Fallback to heuristic for bubbles missed by neural proposals
+                  const carrier = HeuristicBubbleExtractor.extractCarrierBox(rawImageData, box);
+                  typesetBoxes[i] = carrier ? computeTypesetBox(box, carrier, isVert, rawBitmap.height, true) : undefined;
+                }
+              }
+            } else {
+              const rawImageData = rawCtx.getImageData(0, 0, rawBitmap.width, rawBitmap.height);
+              for (let i = 0; i < ocrResult.boxes.length; i++) {
+                const box = ocrResult.boxes[i];
+                const isVert = (ocrResult.directions && ocrResult.directions[i]) === 'v';
+                const carrier = HeuristicBubbleExtractor.extractCarrierBox(rawImageData, box);
+                if (carrier) {
+                  const typesetBox = computeTypesetBox(box, carrier, isVert, rawBitmap.height, true);
+                  typesetBoxes[i] = typesetBox;
+                } else {
+                  typesetBoxes[i] = undefined;
+                }
               }
             }
             // Sibling clearance: partition connected/adjacent bubbles so they never collide

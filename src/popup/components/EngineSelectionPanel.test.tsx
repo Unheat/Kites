@@ -144,4 +144,47 @@ describe('WebLLM download control', () => {
     });
     container.remove();
   });
+
+  it('triggers on-demand download for Neural YOLO when uninstalled', async () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const updateState = vi.fn();
+
+    const state: PopupState = {
+      ...DEFAULT_POPUP_STATE,
+      bubbleMode: 'heuristic',
+    };
+
+    await act(async () => {
+      root.render(<EngineSelectionPanel state={state} updateState={updateState} />);
+    });
+
+    const bubbleButton = container.querySelector<HTMLButtonElement>('button[aria-label="Layout and Bubble Fit"]');
+    await act(async () => {
+      bubbleButton?.click();
+    });
+
+    const downloadIcon = container.querySelector<HTMLElement>('div[title="Download model (~11 MB)"]');
+    expect(downloadIcon).not.toBeNull();
+
+    await act(async () => {
+      downloadIcon?.click();
+      await Promise.resolve();
+    });
+
+    const downloadCalls = (chrome.runtime.sendMessage as any).mock.calls.filter(([message]: [any]) =>
+      message.type === 'START_MODEL_DOWNLOAD' && message.payload?.modelId === 'bubble-yolo'
+    );
+    expect(downloadCalls).toHaveLength(1);
+    expect(downloadCalls[0][0].payload).toEqual({
+      modelId: 'bubble-yolo',
+      category: 'bubble',
+    });
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
 });

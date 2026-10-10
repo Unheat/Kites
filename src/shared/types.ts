@@ -54,7 +54,7 @@ export interface ImageTranslatedMessage {
 }
 export type RuntimeMessageTarget = 'background' | 'offscreen';
 export type RuntimeMessageSource = 'popup' | 'background' | 'offscreen' | 'dashboard' | 'content';
-export type ModelCategory = 'translation' | 'inpaint' | 'ocr';
+export type ModelCategory = 'translation' | 'inpaint' | 'ocr' | 'bubble';
 
 export interface ViewportSelection {
   left: number;
@@ -177,6 +177,7 @@ export interface PopupState {
     llm: boolean;
     inpaint: boolean;
     ocr: boolean;
+    bubble: boolean;
   };
   userAccount?: UserAccountInfo;
 }
@@ -202,5 +203,6 @@ export const DEFAULT_POPUP_STATE: PopupState = {
     llm: true,
     inpaint: true,
     ocr: true,
+    bubble: true,
   }
 };
