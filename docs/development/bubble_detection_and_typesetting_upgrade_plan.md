@@ -216,6 +216,7 @@ Tier 1 requires zero network downloads and runs purely on the Offscreen Canvas `
 6. **Upscale & Bounding Box Extraction:**
    - Extract bounding box $[minX, minY, maxX - minX, maxY - minY]$ and scale back by $1 / s$.
    - Output: `carrier_box` $[x, y, w, h]$.
+   - **Geometry limitation:** this is the enclosing axis-aligned bounding box (AABB) of the reconstructed component, not a guaranteed inscribed rectangle. Curved, concave, or multi-lobe components can leave pixels outside the actual bubble interior inside this box. Tail severing and the later proportional inset do not establish mask containment; rectangular partitioning of this carrier likewise cannot guarantee containment within a curved lobe.
 
 ### 4.2 Tier 2: Neural YOLO Comic Bubble Detector (~3.2 MB ONNX)
 For complex scenes (textured backgrounds, screaming bubbles with irregular spiky strokes, borderless semi-transparent balloons), Tier 2 provides a deep learning object detection model.
@@ -272,7 +273,9 @@ When >= 2 split utterances resolve to the SAME physical container (a single YOLO
    - Overlapping on both axes -> no wall; the floor invariant dominates (see below).
    $$X_{divider} = \frac{B_{right} + A_{left}}{2} \pm \frac{SIBLING\_GAP}{2}$$
 3. **Floor invariant:** every sub-chamber is a superset of its own original text box (a divider midpoint falling inside an original box is clamped back — "no text cut" wins over "no overlap"; `applySiblingBoundaryConstraints` remains the collision safety net).
-4. **Sub-chamber expansion (`computeTypesetBox(..., isSubChamber = true)`):** no second 12% inset (territories were carved from the parent's safe core — a double inset would over-shrink tight lobes) and vertical growth capped at $1.35 \times$ the utterance's own text height (`SHARED_CHAMBER_MAX_V_GROWTH`), preventing font inflation for short utterances ("HUH?") and cross-lobe over-push.
+4. **Sub-chamber expansion (`computeTypesetBox(..., isSubChamber = true)`):** no second 12% inset (territories were carved from the parent's safe core — a double inset would over-shrink tight lobes) and vertical growth capped at $1.35 \times$ the utterance's own text height (`SHARED_CHAMBER_MAX_V_GROWTH`). This cap is intended to limit font inflation for short utterances ("HUH?") and cross-lobe over-push; it is not a curved-mask containment guarantee.
+
+**Phase 24 validation limitation:** the historical `pipelineVisualBubbleTest.ts` harness did not call the new `groupBoxesBySharedContainer` / `partitionSharedContainer` flow. Its images therefore could not validate the production partition path or demonstrate that waist drift, lobe ownership, and shared-container collisions were fixed. The documented geometry/unit-test behavior must not be treated as a verified visual or deployed fix. Repairing the harness and validating the current conservative straight X/Y production partition is required **now** (Section 8, Phase 6), separate from future curved-ownership validation (Section 9).
 
 ### Step 4: Sibling Boundary Constraints (Port from `expansion.rs:230-269`)
 When a bubble contains multiple sibling utterances ($U_1, U_2$):
@@ -410,4 +413,42 @@ No schema migration or extra unused fields needed. `db.textBlocks` directly stor
 ### Phase 6: End-to-End Verification & Devlog
 - Run `npm test` across all unit tests to ensure zero regressions.
 - Execute visual acceptance test via `npx tsx src/test/pipelineVisualTest.ts`.
+- **Current requirement — production harness repair and conservative straight X/Y validation:** repair `pipelineVisualBubbleTest.ts` to exercise production shared-container grouping, partitioning, expansion, and rendering. Validate the existing straight X/Y partition on connected diagonal lobes, overlapping OCR boxes, short utterances, chains, and fallback cases; expose carrier, partition, and rendered-text bounds in the outputs. This work is required **now**, not deferred until segmentation or curved ownership exists. Keep historical Phase 24 test counts separate from the still-unperformed production-path validation; do not claim the repair or a production fix is complete from this docs-only update.
 - Write Devlog document in `docs/dev-history/devlog/`.
+
+---
+
+## 9. Future Work — Additional Segmentation Tier & Curved-Region Ownership (Deferred)
+
+**Status: proposal only; not implemented, integrated, validated, or deployed by this documentation update.** These are future investigations, not claims that the existing rectangular pipeline has been fixed. The existing Tier 1 / Tier 2 plan remains above for context; the segmentation candidate below is an **additional optional tier**, not a silent replacement for the ~3.2 MB box-detector specification and not a new active popup option.
+
+### 9.1 Candidate: YOLO11n Manga109 Bubble Instance Segmentation
+
+- **Original model:** [huyvux3005/manga109-segmentation-bubble](https://huggingface.co/huyvux3005/manga109-segmentation-bubble), described upstream as a YOLO11n instance segmentation model.
+- **Third-party ONNX export:** [mednasserallah/manga109-segmentation-bubble-onnx](https://huggingface.co/mednasserallah/manga109-segmentation-bubble-onnx).
+- **Candidate artifact:** `manga109_segmentation_bubble_1024.onnx` — **11,845,329 bytes**, approximately **11.85 MB in decimal units** (not the earlier ~3.2 MB detector budget).
+- **Reported export metadata:** **1024 × 1024** letterboxed input, **ONNX opset 17**. The export card reports no quantization or retraining. These metadata/card statements are not evidence of successful inference in Kites or browser compatibility.
+
+**Output contract to investigate:** segmentation produces bubble masks, not direct safe inner rectangles. The export card describes box/score/mask-coefficient output plus mask prototypes; decoding would require NMS, per-instance mask reconstruction and box cropping, and inverse letterbox mapping into page coordinates. Even a correctly decoded mask can contain border pixels, tails, holes, or segmentation errors. Deriving a conservative usable interior is a separate geometry problem; neither the prediction box nor the mask's outer AABB is a guaranteed inscribed typesetting area.
+
+**Acceptance gates before any integration decision:**
+1. Evaluate mask quality on representative Kites pages, including connected lobes, concave/spiky contours, translucent interiors, tails, and open borders. Upstream accuracy claims are not local quality verification.
+2. Verify actual ONNX Runtime Web execution in the MV3 offscreen document, including WebGPU operator support, WASM fallback, decoding correctness, memory use, and coordinate mapping. Browser compatibility is **not verified yet**.
+3. Measure cold-load/download cost and end-to-end latency (preprocessing, inference, mask decoding, geometry, and layout) on target hardware. Upstream native/server timings are not Kites browser benchmarks; latency is **not verified yet**.
+4. Verify license and provenance for the original weights, the third-party export, dependencies, and training datasets before redistribution or commercial use. Model-card license labels alone do not establish that chain; license/provenance is **not verified yet**.
+
+No model download, dependency, engine, storage setting, or deployed behavior is authorized by this future-work note.
+
+### 9.2 Deferred Curved-Region Partitioning
+
+For a **reliable bubble-interior mask**, investigate a distance transform plus **marker-controlled watershed** to assign curved interior ownership among utterances. Markers would be anchored to the utterances' OCR geometry; candidate regions must be checked for containment, connectivity, coverage of their own text, and sibling conflicts. This is a hypothesis to evaluate, not a guarantee that every connected balloon can be partitioned safely.
+
+Compare watershed against a simpler **box-distance Voronoi** baseline constrained to the same mask. Measure lobe ownership, border clearance, preservation of original text geometry, stability under noisy masks, and runtime. Only investigate a **global seam / min-cut** formulation if these simpler methods fail on demonstrated cases; avoid adding that complexity without evidence.
+
+Do **not** treat the proposed greedy 8-neighbor max-min pixel walk as guaranteed curved ownership, and do not claim that the perpendicular bisector of the segment joining two selected box corners guarantees an inscribed rectangle or a correct partition. The existing heuristic returns a component-enclosing AABB, so reliable mask availability itself remains a prerequisite rather than an assumption supplied by `carrier_box`.
+
+### 9.3 Required Layout & Verification Work
+
+Curved ownership is useful only if the typesetter consumes it. A future renderer/layout contract must support **per-line mask-aware text layout**, deriving usable horizontal spans over each line's full vertical extent with appropriate border clearance. Replacing an ownership region with its outer AABB would discard the curved boundary and reintroduce unsafe space; there is no outer-AABB trick that makes rectangular wrapping exploit curved ownership.
+
+Future curved-ownership validation must extend the production-path harness required **now** in Section 8, Phase 6; it must not postpone repair or validation of the current conservative straight X/Y partition. For future mask-aware ownership/layout, add concave masks and failed-mask fallback cases alongside connected diagonal lobes, overlapping OCR boxes, short utterances, and chains, with ownership and rendered-text containment visible in the outputs. Keep the Phase 24 historical test counts separate from new validation results. Segmentation, curved partitioning, per-line layout, and their curved-ownership validation remain **future work**; current straight X/Y production harness repair and validation do not.

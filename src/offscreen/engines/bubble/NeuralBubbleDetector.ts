@@ -61,14 +61,17 @@ export class NeuralBubbleDetector {
       const score = scores[i];
 
       // Label 0 is bubble in RT-DETR-v2 / comic-text-and-bubble-detector
-      if ((label === 0 || label === 1) && score >= scoreThreshold) {
+      if (label === 0 && Number.isFinite(score) && score >= scoreThreshold) {
         const x1 = Math.round(boxes[i * 4]);
         const y1 = Math.round(boxes[i * 4 + 1]);
         const x2 = Math.round(boxes[i * 4 + 2]);
         const y2 = Math.round(boxes[i * 4 + 3]);
 
-        const w = Math.max(1, x2 - x1);
-        const h = Math.max(1, y2 - y1);
+        // Class 1 is text INSIDE a bubble, not a container. Invalid model geometry must not
+        // manufacture a one-pixel carrier that could later expand into unrelated artwork.
+        if (![x1, y1, x2, y2].every(Number.isFinite) || x2 <= x1 || y2 <= y1) continue;
+        const w = x2 - x1;
+        const h = y2 - y1;
 
         detectedBubbles.push({ x: x1, y: y1, w, h });
         detectedScores.push(score);
@@ -115,7 +118,7 @@ export class NeuralBubbleDetector {
           textCenter.y >= b.y &&
           textCenter.y <= b.y + b.h;
 
-        if (coverage >= minCoverage || (centerInside && coverage >= 0.35)) {
+        if (centerInside && coverage >= minCoverage) {
           if (coverage > bestScore) {
             bestScore = coverage;
             bestBubble = b;

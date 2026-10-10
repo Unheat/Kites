@@ -38,6 +38,21 @@ describe('HeuristicBubbleExtractor', () => {
     }
   });
 
+  it('optionally retains existing masks without changing the carrier result', () => {
+    const image: ImagePatchData = { width: 160, height: 160, data: new Uint8ClampedArray(160 * 160 * 4).fill(40) };
+    for (let y = 30; y < 130; y++) for (let x = 30; x < 130; x++) {
+      const pixel = (y * 160 + x) * 4;
+      image.data.fill(255, pixel, pixel + 4);
+    }
+    const text = { x: 60, y: 60, w: 30, h: 40 };
+    const plain = HeuristicBubbleExtractor.extractCarrierBox(image, text);
+    let evidence: import('./HeuristicBubbleExtractor').BubbleShapeEvidence | undefined;
+    const retained = HeuristicBubbleExtractor.extractCarrierBox(image, text, { onShapeEvidence: (shape) => { evidence = shape; } });
+    expect(retained).toEqual(plain);
+    expect(evidence?.interior.length).toBe(evidence!.width * evidence!.height);
+    expect(evidence?.eroded.some(Boolean)).toBe(true);
+  });
+
   it('severs narrow pointing tail from main bubble chamber', () => {
     const W = 300;
     const H = 350;

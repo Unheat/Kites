@@ -10,6 +10,7 @@ import { RENDER_FONT_PRESETS, normalizeRenderFontPresetId } from '../../shared/r
 export interface BubbleModeOption {
   id: BubbleDetectionMode;
   name: string;
+  tooltip: string;
   isModel?: boolean;
 }
 
@@ -17,14 +18,17 @@ export const BUBBLE_MODE_OPTIONS: BubbleModeOption[] = [
   {
     id: 'off',
     name: 'Disabled',
+    tooltip: 'Tightly hugs source text lines without bubble expansion (Cotrans MST).',
   },
   {
     id: 'heuristic',
     name: 'Heuristic',
+    tooltip: 'Expands into white bubble whitespace with tail severing. Fast (<1ms), zero download.',
   },
   {
     id: 'neural',
     name: 'YOLO Bubble',
+    tooltip: 'AI object detector for spiky shock bubbles, dark backgrounds, and complex manga art (~11 MB).',
     isModel: true,
   },
 ];
@@ -864,8 +868,20 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                                 : 'hover:bg-[var(--color-vellum)] cursor-pointer'
                           }`}
                         >
-                          <div className="flex flex-col overflow-hidden">
-                            <span className="truncate pr-2 text-sm">{opt.name}</span>
+                          <div className="flex items-center gap-1.5 overflow-hidden">
+                            <span className="truncate pr-1 text-sm">{opt.name}</span>
+                            {opt.tooltip && (
+                              <div className="relative group/tip inline-flex items-center" onClick={(e) => e.stopPropagation()}>
+                                <div className="w-3.5 h-3.5 rounded-full border border-[var(--color-dust)]/60 flex items-center justify-center text-[9px] text-[var(--color-dust)] cursor-help hover:border-[var(--color-ink)] hover:text-[var(--color-ink)] transition-colors">
+                                  ?
+                                </div>
+                                <div className="absolute left-0 bottom-full mb-1.5 w-[220px] max-w-[80vw] z-50 opacity-0 pointer-events-none group-hover/tip:opacity-100 transition-opacity">
+                                  <div className="p-2 bg-[var(--color-ink)] text-[var(--color-paper)] text-[11px] rounded shadow-xl font-normal leading-tight">
+                                    {opt.tooltip}
+                                  </div>
+                                </div>
+                              </div>
+                            )}
                           </div>
                           <div className="flex-shrink-0 ml-2">
                             {isActive ? (

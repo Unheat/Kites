@@ -19,6 +19,19 @@ export interface ImagePatchData {
   data: Uint8ClampedArray | Uint8Array;
 }
 
+/** Existing local morphology buffers retained only for conservative layout validation. */
+export interface BubbleShapeEvidence {
+  x: number;
+  y: number;
+  scale: number;
+  width: number;
+  height: number;
+  interior: Uint8Array;
+  /** Observed light pixels only, excluding force-filled OCR rectangles. */
+  observedInterior: Uint8Array;
+  eroded: Uint8Array;
+}
+
 export interface HeuristicExtractionOptions {
   /** Maximum downscale dimension for the local patch to guarantee sub-millisecond execution. Default 200. */
   maxPatchDimension?: number;
@@ -28,6 +41,8 @@ export interface HeuristicExtractionOptions {
   luminanceThreshold?: number;
   /** Optional array of all detected text boxes to treat as interior whitespace (prevents un-erased sibling text from acting as fake walls). */
   allTextBoxes?: BoxRect[];
+  /** Receives existing masks, including when tail severing leaves only one lobe. No extra segmentation. */
+  onShapeEvidence?: (evidence: BubbleShapeEvidence) => void;
 }
 
 /**
@@ -108,6 +123,9 @@ export class HeuristicBubbleExtractor {
     // 3. Build binary mask of bubble interior
     // Pixel is interior if inside any known text box or has light luminance (white bubble)
     const mask = new Uint8Array(patchW * patchH);
+    // Validation keeps only observed light pixels: force-filled OCR rectangles must never
+    // manufacture connectivity across artwork or a border between unrelated bubbles.
+    const observedInterior = options.onShapeEvidence ? new Uint8Array(patchW * patchH) : undefined;
 
     for (let py = 0; py < patchH; py++) {
       const origY = Math.min(imgH - 1, minY + Math.floor(py / scale));
@@ -129,6 +147,7 @@ export class HeuristicBubbleExtractor {
         const b = data[pIdx + 2];
         const isLight = r >= lumThresh && g >= lumThresh && b >= lumThresh;
 
+        if (isLight && observedInterior) observedInterior[py * patchW + px] = 1;
         if (inText || isLight) {
           mask[py * patchW + px] = 1;
         }
@@ -166,6 +185,12 @@ export class HeuristicBubbleExtractor {
         }
       }
     }
+
+    // Preserve the un-opened interior and erosion result for layout evidence only. The carrier,
+    // OCR polygons, and inpaint masks are unchanged. Rectangular overlap alone cannot prove lobes.
+    options.onShapeEvidence?.({
+      x: minX, y: minY, scale, width: patchW, height: patchH, interior: mask, observedInterior: observedInterior!, eroded
+    });
 
     // 5. Find seed point near text center in eroded mask
     const textCenterX = Math.max(0, Math.min(patchW - 1, Math.round((textBox.x + textBox.w / 2 - minX) * scale)));

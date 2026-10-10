@@ -46,7 +46,7 @@ export interface OcrResult {
   lineCounts?: number[];
 
   /** Optional expanded bubble chamber boxes for comfortable word-wrapping and visual centering. */
-  typesetBoxes?: OcrBox[];
+  typesetBoxes?: (OcrBox | undefined)[];
 }
 
 export interface IOcrEngine {

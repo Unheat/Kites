@@ -30,6 +30,15 @@ import { getFontSizeMinimumBase } from '../engines/ocr/tallStripTiling';
 /** Default font family used for rendered translations (must match canvasTypesetting.ts DEFAULT_RENDER_FONT_FAMILY). */
 export const DEFAULT_RENDER_FONT_FAMILY = 'sans-serif';
 
+/** Default layout may grow a small source font up to this measured-fit ceiling. */
+const DEFAULT_FIT_MAX_FONT_SIZE = 48;
+
+/** Fraction of each destination edge reserved by the measured layout. */
+const DEFAULT_FIT_INSET = 0.05;
+
+/** Matches typesetLayout's line-height budget; validation rejects its unfit minimum fallback. */
+const DEFAULT_FIT_LINE_HEIGHT = 1.2;
+
 /** Cotrans default stroke width relative to font size (put_text_horizontal: max(font_size*0.07, 1)). */
 const STROKE_WIDTH_RATIO = 0.07;
 
@@ -701,6 +710,65 @@ function warpBoxOntoQuad(ctx: any, boxCanvas: AnyCanvas, boxW: number, boxH: num
 }
 
 /**
+ * Measures exactly the sanitized text, font, inset, and ceiling used by the default renderer.
+ * This is a layout measurement, not proof of raster ink containment.
+ *
+ * @param ctx - Canvas context used for text measurement.
+ * @param text - Translated text before renderer normalization.
+ * @param width - Destination width in pixels.
+ * @param height - Destination height in pixels.
+ * @param fontSize - Source font target in pixels (not a geometry scaling instruction).
+ * @param maxFontSizeCap - Optional page dialogue ceiling.
+ * @param fontFamily - CSS font-family stack shared with rendering.
+ * @returns Fitted font size and the exact wrapped lines to draw.
+ */
+export function measureDefaultLayout(
+  ctx: Parameters<typeof fitFontSizeWithLines>[0],
+  text: string,
+  width: number,
+  height: number,
+  fontSize: number,
+  maxFontSizeCap?: number,
+  fontFamily: string = DEFAULT_RENDER_FONT_FAMILY
+): ReturnType<typeof fitFontSizeWithLines> {
+  return fitFontSizeWithLines(
+    ctx,
+    sanitizeTypesetText(compactSpecialSymbols(text)),
+    fontFamily,
+    width,
+    height,
+    fontSize,
+    Math.min(Math.max(fontSize, DEFAULT_FIT_MAX_FONT_SIZE), maxFontSizeCap ?? Number.POSITIVE_INFINITY),
+    DEFAULT_FIT_INSET
+  );
+}
+
+/**
+ * Checks exact line advances and layout height against the real inset rectangle.
+ * Unlike fitFontSizeWithLines's minimum fallback, this does not inflate tiny boxes to 10px.
+ * This is not a glyph/stroke raster containment test.
+ *
+ * @param ctx - Same measurement context and loaded fonts used for rendering.
+ * @param fitted - Layout returned by measureDefaultLayout.
+ * @param width - Actual destination width in pixels.
+ * @param height - Actual destination height in pixels.
+ * @param fontFamily - CSS font-family stack used for rendering.
+ * @returns Whether every returned line fits the renderer's layout budget.
+ */
+export function defaultLayoutFits(
+  ctx: Parameters<typeof fitFontSizeWithLines>[0],
+  fitted: ReturnType<typeof fitFontSizeWithLines>,
+  width: number,
+  height: number,
+  fontFamily: string = DEFAULT_RENDER_FONT_FAMILY
+): boolean {
+  ctx.font = fontSpec(fitted.size, fontFamily, fitted.lines.join(''));
+  return fitted.lines.length > 0
+    && fitted.lines.every(line => ctx.measureText(line).width <= width * (1 - 2 * DEFAULT_FIT_INSET))
+    && fitted.lines.length * fitted.size * DEFAULT_FIT_LINE_HEIGHT <= height * (1 - 2 * DEFAULT_FIT_INSET);
+}
+
+/**
  * 1:1 port of Cotrans `render` (rendering/__init__.py, horizontal branch): renders the translation
  * into a text box sized to the destination quad, pads it to the quad's aspect ratio, and affine-warps
  * it onto the page over the clean background.
@@ -735,17 +803,7 @@ export function renderRegionDefault(
   // XianScan-style fit returns both the verified font size and exact wrapped lines.
   // Rendering those same lines prevents Cotrans's independent syllable pass from
   // turning English dialogue into narrow barcode columns.
-  const displayText = sanitizeTypesetText(compactSpecialSymbols(region.translation));
-  const fitted = fitFontSizeWithLines(
-    ctx,
-    displayText,
-    fontFamily,
-    normH,
-    normV,
-    fontSize,
-    Math.min(Math.max(fontSize, 48), maxFontSizeCap ?? Number.POSITIVE_INFINITY),
-    0.05
-  );
+  const fitted = measureDefaultLayout(ctx, region.translation, normH, normV, fontSize, maxFontSizeCap, fontFamily);
   const temp = putTextLines(ctx, fitted.size, fitted.lines, region.alignment, fg, bg, fontFamily);
   if (!temp) return null;
 

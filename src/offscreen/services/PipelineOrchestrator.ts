@@ -7,12 +7,10 @@ import type { InpaintTier } from './InpaintManager';
 import type { Point2D } from '../engines/inpaint/BaseInpaintEngine';
 import { inpaintRegistry } from '../engines/inpaint/inpaintRegistry';
 import { InpaintCacheManager } from './InpaintCacheManager';
-import { renderTextBlocksBatch, type TextBlockItem, type RenderedBlockInfo } from '../utils/canvasTypesetting';
+import { renderTextBlocksBatch, measureBubbleLayoutFontSize, LANGUAGE_ORIENTATION_PRESETS, type TextBlockItem, type RenderedBlockInfo } from '../utils/canvasTypesetting';
 import { resolveRenderFontFamily } from '../../shared/renderFontPresets';
-import { HeuristicBubbleExtractor } from '../engines/bubble/HeuristicBubbleExtractor';
 import { NeuralBubbleDetector } from '../engines/bubble/NeuralBubbleDetector';
-import { computeTypesetBox, applySiblingBoundaryConstraints, groupBoxesBySharedContainer, partitionSharedContainer, type BoxRect } from '../utils/bubbleExpansion';
-import type { OcrBox } from '../engines/ocr/BaseOcrEngine';
+import { acquireBubbleGeometry, resolveBubbleLayouts, type BubbleGeometry } from './BubbleLayoutService';
 
 export class PipelineOrchestrator {
   private ocrManager: OcrManager;
@@ -161,85 +159,25 @@ export class PipelineOrchestrator {
         });
       }
 
-      // 3.1 Bubble Container Extraction & Chamber Expansion
+      // 3.1 Acquire original bubble geometry only. Final layout waits for translated text/fonts.
+      let bubbleGeometry: BubbleGeometry | undefined;
       const bubbleMode = popupState?.bubbleMode ?? 'heuristic';
-      if (bubbleMode !== 'off' && ocrResult.boxes && ocrResult.boxes.length > 0 && !ocrResult.typesetBoxes) {
+      // Legacy CJK/RTL rendering does not honor fixed bubble rectangles.
+      const supportsBubbleLayout = (LANGUAGE_ORIENTATION_PRESETS[targetLang.toLowerCase().trim()] ?? 'h') === 'h';
+      if (bubbleMode !== 'off' && supportsBubbleLayout && ocrResult.boxes && ocrResult.boxes.length > 0 && !ocrResult.typesetBoxes) {
         try {
           const rawBitmap = await createImageBitmap(imageRecord.rawImageBlob);
           const rawCanvas = new OffscreenCanvas(rawBitmap.width, rawBitmap.height);
           const rawCtx = rawCanvas.getContext('2d', { willReadFrequently: true });
           if (rawCtx) {
             rawCtx.drawImage(rawBitmap, 0, 0);
-            const typesetBoxes: (OcrBox | undefined)[] = [];
-
-            // Pass 1: acquire each utterance's bubble container — neural match with heuristic
-            // fallback, or pure heuristic flood-fill. Matching is intentionally non-exclusive:
-            // several utterances may resolve to the SAME container (single YOLO box covering a
-            // connected multi-lobe balloon, or a merged heuristic carrier), which pass 2 handles.
-            const carriers: (BoxRect | null)[] = new Array(ocrResult.boxes.length).fill(null);
-            const carrierIsNeuralProposal: boolean[] = new Array(ocrResult.boxes.length).fill(false);
-
-            if (bubbleMode === 'neural') {
-              const neuralBubbles = await NeuralBubbleDetector.detect(rawCanvas, popupState);
-              const rawImageData = rawCtx.getImageData(0, 0, rawBitmap.width, rawBitmap.height);
-
-              for (let i = 0; i < ocrResult.boxes.length; i++) {
-                const matched = neuralBubbles ? NeuralBubbleDetector.matchBubble(ocrResult.boxes[i], neuralBubbles) : null;
-                if (matched) {
-                  carriers[i] = matched;
-                  carrierIsNeuralProposal[i] = true;
-                } else {
-                  // Fallback to heuristic for bubbles missed by neural proposals
-                  carriers[i] = HeuristicBubbleExtractor.extractCarrierBox(rawImageData, ocrResult.boxes[i], { allTextBoxes: ocrResult.boxes });
-                }
-              }
-            } else {
-              const rawImageData = rawCtx.getImageData(0, 0, rawBitmap.width, rawBitmap.height);
-              for (let i = 0; i < ocrResult.boxes.length; i++) {
-                carriers[i] = HeuristicBubbleExtractor.extractCarrierBox(rawImageData, ocrResult.boxes[i], { allTextBoxes: ocrResult.boxes });
-              }
-            }
-
-            // Pass 2: utterances sharing ONE container (IoU-grouped carriers) get the container
-            // partitioned into per-utterance sub-chambers BEFORE expansion — each utterance expands
-            // strictly within its own territory with its own anchor, instead of both ballooning into
-            // the full chamber and being re-centered on the shared container center.
-            const groupByIndex = new Map<number, number[]>();
-            for (const members of groupBoxesBySharedContainer(carriers)) {
-              for (const idx of members) groupByIndex.set(idx, members);
-            }
-
-            for (let i = 0; i < ocrResult.boxes.length; i++) {
-              const box = ocrResult.boxes[i];
-              const isVert = (ocrResult.directions && ocrResult.directions[i]) === 'v';
-              const carrier = carriers[i];
-              if (!carrier) {
-                typesetBoxes[i] = undefined;
-                continue;
-              }
-              const group = groupByIndex.get(i);
-              if (group && group.length >= 2) {
-                // Container rect = union of the (near-identical) per-box carriers of this group
-                let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-                for (const idx of group) {
-                  const c = carriers[idx]!;
-                  minX = Math.min(minX, c.x);
-                  minY = Math.min(minY, c.y);
-                  maxX = Math.max(maxX, c.x + c.w);
-                  maxY = Math.max(maxY, c.y + c.h);
-                }
-                const container: BoxRect = { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
-                const subChambers = partitionSharedContainer(container, group.map((idx) => ocrResult.boxes[idx]));
-                typesetBoxes[i] = computeTypesetBox(box, subChambers[group.indexOf(i)], isVert, rawBitmap.height, true, true);
-              } else if (carrierIsNeuralProposal[i]) {
-                typesetBoxes[i] = computeTypesetBox(box, carrier, isVert, rawBitmap.height, false);
-              } else {
-                typesetBoxes[i] = computeTypesetBox(box, carrier, isVert, rawBitmap.height, true);
-              }
-            }
-            // Sibling clearance: partition connected/adjacent bubbles so they never collide
-            applySiblingBoundaryConstraints(ocrResult.boxes, typesetBoxes);
-            ocrResult.typesetBoxes = typesetBoxes as any;
+            // Matching is non-exclusive: exact proposal identity tracks shared neural containers.
+            // Overlapping heuristic carriers are only uncertain candidates, never proof of lobes.
+            const neuralBubbles = bubbleMode === 'neural'
+              ? await NeuralBubbleDetector.detect(rawCanvas, popupState) : undefined;
+            bubbleGeometry = acquireBubbleGeometry(
+              rawCtx.getImageData(0, 0, rawBitmap.width, rawBitmap.height), ocrResult.boxes, neuralBubbles
+            );
           }
           if (typeof rawBitmap.close === 'function') {
             rawBitmap.close();
@@ -351,6 +289,27 @@ export class PipelineOrchestrator {
           });
           itemOcrIndices.push(i);
         }
+      }
+      if (bubbleGeometry) {
+        const blockByOcrIndex = new Map(itemOcrIndices.map((index, position) => [index, textBlockItems[position]]));
+        ocrResult.typesetBoxes = resolveBubbleLayouts({
+          ...bubbleGeometry,
+          boxes: ocrResult.boxes,
+          directions: ocrResult.directions,
+          angles: ocrResult.angles,
+          pageWidth: bitmap.width,
+          pageHeight: bitmap.height,
+          accept: (index, proposed) => {
+            const block = blockByOcrIndex.get(index);
+            if (!block) return false;
+            const fitted = measureBubbleLayoutFontSize(ctx, block, proposed, resolvedFontFamily);
+            return fitted > 0;
+          },
+          onDiagnostics: (counts) => console.log('[PipelineOrchestrator] Bubble layouts:', counts)
+        });
+        itemOcrIndices.forEach((index, position) => {
+          textBlockItems[position].typesetBox = ocrResult.typesetBoxes?.[index];
+        });
       }
       const renderInfos = renderTextBlocksBatch(
         ctx,

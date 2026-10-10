@@ -4,12 +4,12 @@ import { fileURLToPath } from 'url';
 import { OcrManager } from '../offscreen/services/OcrManager';
 import { InpaintManager } from '../offscreen/services/InpaintManager';
 import { GoogleTranslateEngine } from '../offscreen/engines/translation/GoogleTranslateEngine';
-import { renderTextBlocksBatch, type TextBlockItem } from '../offscreen/utils/canvasTypesetting';
+import { renderTextBlocksBatch, measureBubbleLayoutFontSize, type TextBlockItem } from '../offscreen/utils/canvasTypesetting';
 import { createCanvas, loadImage } from 'canvas';
 import type { Point2D } from '../shared/utils/geometry';
-import { HeuristicBubbleExtractor } from '../offscreen/engines/bubble/HeuristicBubbleExtractor';
 import { NeuralBubbleDetector } from '../offscreen/engines/bubble/NeuralBubbleDetector';
-import { computeTypesetBox, applySiblingBoundaryConstraints, type BoxRect } from '../offscreen/utils/bubbleExpansion';
+import { acquireBubbleGeometry, resolveBubbleLayouts, type BubbleGeometry } from '../offscreen/services/BubbleLayoutService';
+import { DEFAULT_RENDER_FONT_FAMILY } from '../offscreen/utils/canvasTypesetting';
 import * as ort from 'onnxruntime-node';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -109,27 +109,34 @@ async function runPipelineVisualBubbleTest() {
     // PASS 1: TIER 1 HEURISTIC BUBBLE EXTRACTOR (0 MB)
     // -------------------------------------------------------------
     console.log("\n--- [Pass 1] Tier 1 Heuristic Bubble Expansion ---");
-    const heuristicTypesetBoxes: (BoxRect | undefined)[] = [];
-    for (let i = 0; i < boxes.length; i++) {
-      const b = boxes[i];
-      const isVert = (ocrResult.directions && ocrResult.directions[i]) === 'v';
-      const carrier = HeuristicBubbleExtractor.extractCarrierBox(rawImageData, b, { allTextBoxes: boxes });
-      if (carrier) {
-        const tb = computeTypesetBox(b, carrier, isVert, pageHeight, true);
-        heuristicTypesetBoxes.push(tb);
-      } else {
-        heuristicTypesetBoxes.push(undefined);
-      }
-    }
-    const heuristicMatches = heuristicTypesetBoxes.filter(Boolean).length;
-    console.log(`[Heuristic] Matched and expanded ${heuristicMatches}/${boxes.length} bubbles.`);
-    applySiblingBoundaryConstraints(boxes, heuristicTypesetBoxes);
+    const heuristicGeometry = acquireBubbleGeometry(rawImageData, boxes);
+
+    /**
+     * Uses the production acquisition/layout contract after translation and font readiness.
+     * @param ctx - Actual output measurement context. @param geometry - Original carrier evidence.
+     * @returns Accepted fixed boxes, with the same source-font and complete-text fit guard as production.
+     */
+    const resolveLayouts = (ctx: any, geometry: BubbleGeometry) => resolveBubbleLayouts({
+      ...geometry, boxes, directions: ocrResult.directions, angles: ocrResult.angles, pageWidth, pageHeight,
+      accept: (index, proposed) => {
+        const block: TextBlockItem = {
+          text: translatedTexts[index], polygon: polygons[index], fontSize: ocrResult.fontSizes?.[index],
+          direction: ocrResult.directions?.[index], angle: ocrResult.angles?.[index],
+          originalText: texts[index], sourceLineCount: ocrResult.lineCounts?.[index]
+        };
+        const fitted = measureBubbleLayoutFontSize(ctx, block, proposed, DEFAULT_RENDER_FONT_FAMILY);
+        return fitted > 0;
+      },
+      onDiagnostics: (counts) => console.log('[Bubble layouts]', counts)
+    });
 
     // Bake Heuristic Output
     {
       const canvas = createCanvas(pageWidth, pageHeight);
       const ctx = canvas.getContext('2d');
       ctx.drawImage(cleanedImage, 0, 0);
+      if (typeof document !== 'undefined' && document.fonts) await document.fonts.ready;
+      const heuristicTypesetBoxes = resolveLayouts(ctx, heuristicGeometry);
 
       const textBlockItems: TextBlockItem[] = [];
       for (let i = 0; i < translatedTexts.length; i++) {
@@ -182,33 +189,14 @@ async function runPipelineVisualBubbleTest() {
       );
       console.log(`[Neural] Detected ${detectedBubbles.length} bubble proposals across image.`);
 
-      const neuralTypesetBoxes: (BoxRect | undefined)[] = [];
-      for (let i = 0; i < boxes.length; i++) {
-        const b = boxes[i];
-        const isVert = (ocrResult.directions && ocrResult.directions[i]) === 'v';
-        const matchedBubble = NeuralBubbleDetector.matchBubble(b, detectedBubbles, 0.40);
-
-        if (matchedBubble) {
-          const tb = computeTypesetBox(b, matchedBubble, isVert, pageHeight);
-          neuralTypesetBoxes.push(tb);
-        } else {
-          // Fallback to heuristic if neural did not propose a container
-          const carrier = HeuristicBubbleExtractor.extractCarrierBox(rawImageData, b, { allTextBoxes: boxes });
-          if (carrier) {
-            neuralTypesetBoxes.push(computeTypesetBox(b, carrier, isVert, pageHeight));
-          } else {
-            neuralTypesetBoxes.push(undefined);
-          }
-        }
-      }
-      const neuralMatches = neuralTypesetBoxes.filter(Boolean).length;
-      console.log(`[Neural] Associated ${neuralMatches}/${boxes.length} bubbles with text regions.`);
-      applySiblingBoundaryConstraints(boxes, neuralTypesetBoxes);
+      const neuralGeometry = acquireBubbleGeometry(rawImageData, boxes, detectedBubbles);
 
       // Bake Neural Output
       const canvas = createCanvas(pageWidth, pageHeight);
       const ctx = canvas.getContext('2d');
       ctx.drawImage(cleanedImage, 0, 0);
+      if (typeof document !== 'undefined' && document.fonts) await document.fonts.ready;
+      const neuralTypesetBoxes = resolveLayouts(ctx, neuralGeometry);
 
       const textBlockItems: TextBlockItem[] = [];
       for (let i = 0; i < translatedTexts.length; i++) {
