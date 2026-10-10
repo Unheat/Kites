@@ -12,9 +12,9 @@ export interface BoxRect {
   h: number;
 }
 
-export const BUBBLE_INSET_FRAC = 0.08;
-export const BUBBLE_INSET_MIN = 4;
-export const BUBBLE_INSET_MAX = 24;
+export const BUBBLE_INSET_FRAC = 0.12;
+export const BUBBLE_INSET_MIN = 8;
+export const BUBBLE_INSET_MAX = 48;
 export const SIBLING_GAP = 6;
 export const MIN_UNUSED_RATIO = 0.15;
 export const MIN_SCALE = 1.05;
@@ -271,8 +271,8 @@ export function computeTypesetBox(
   const coreH = core.bottom - core.top;
 
   // Utilize the roomy chamber dimensions (XianScan builder.rs:673 expands vertical text
-  // to utilize up to 85% of container width rather than constraining to the narrow CJK column).
-  const expandedW = Math.min(coreW, Math.max(Math.round(textBox.w * 1.3), Math.round(coreW * 0.85)));
+  // to utilize up to 80% of safe core width rather than constraining to the narrow CJK column).
+  const expandedW = Math.min(coreW, Math.max(Math.round(textBox.w * 1.25), Math.round(coreW * 0.80)));
   const expandedH = Math.min(coreH, Math.max(Math.round(textBox.h), Math.round(coreH * 0.70)));
 
   // Optical Chamber Centering: center expanded box on carrier chamber center
@@ -286,8 +286,8 @@ export function computeTypesetBox(
     h: expandedH
   };
 
-  // Hard clamp so typeset box never overflows the carrier outer envelope
-  return clampBoxToCore(centered, carrier.x, carrier.x + carrier.w, carrier.y, carrier.y + carrier.h);
+  // Hard clamp so typeset box stays strictly within the SAFE CORE boundaries, avoiding spikes and strokes
+  return clampBoxToCore(centered, core.left, core.right, core.top, core.bottom);
 }
 
 /**
@@ -321,9 +321,13 @@ export function applySiblingBoundaryConstraints(
       const cxJ = origJ.x + origJ.w / 2;
       const cyJ = origJ.y + origJ.h / 2;
 
-      // 1. Horizontal influence: when vertical spans overlap
+      const dx = Math.abs(cxI - cxJ);
+      const dy = Math.abs(cyI - cyJ);
+      const isPrimarilyVertical = dy > dx * 1.25;
+
+      // 1. Horizontal influence: when vertical spans overlap AND they are not primarily vertically staggered
       const yOverlap = (origI.y + origI.h) > origJ.y && (origJ.y + origJ.h) > origI.y;
-      if (yOverlap) {
+      if (yOverlap && !isPrimarilyVertical) {
         // If box J is to the left of box I
         if (cxJ < cxI) {
           const dividerX = Math.round((origJ.x + origJ.w + origI.x) / 2);
@@ -344,9 +348,9 @@ export function applySiblingBoundaryConstraints(
         }
       }
 
-      // 2. Vertical influence: when horizontal spans overlap
+      // 2. Vertical influence: when horizontal spans overlap OR when primarily vertically staggered
       const xOverlap = (origI.x + origI.w) > origJ.x && (origJ.x + origJ.w) > origI.x;
-      if (xOverlap) {
+      if (xOverlap || isPrimarilyVertical) {
         // If box J is above box I
         if (cyJ < cyI) {
           const dividerY = Math.round((origJ.y + origJ.h + origI.y) / 2);

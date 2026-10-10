@@ -10,35 +10,35 @@ import {
 
 describe('bubbleExpansion', () => {
   describe('bubbleCore', () => {
-    it('insets by 8% clamped between 4 and 24', () => {
-      // 100x100 box: 8% = 8px inset
+    it('insets by 12% clamped between 8 and 48', () => {
+      // 100x100 box: 12% = 12px inset
       const box: BoxRect = { x: 50, y: 50, w: 100, h: 100 };
       const core = bubbleCore(box);
       expect(core).toEqual({
-        left: 58,
-        right: 142,
-        top: 58,
-        bottom: 142
+        left: 62,
+        right: 138,
+        top: 62,
+        bottom: 138
       });
 
-      // Large 500x500 box: 8% = 40px, clamped to 24px
+      // Large 500x500 box: 12% = 60px, clamped to 48px
       const largeBox: BoxRect = { x: 0, y: 0, w: 500, h: 500 };
       const largeCore = bubbleCore(largeBox);
       expect(largeCore).toEqual({
-        left: 24,
-        right: 476,
-        top: 24,
-        bottom: 476
+        left: 48,
+        right: 452,
+        top: 48,
+        bottom: 452
       });
 
-      // Small 30x30 box: 8% = 2.4px, clamped to min 4px
+      // Small 30x30 box: 12% = 3.6px, clamped to min 8px
       const smallBox: BoxRect = { x: 10, y: 10, w: 30, h: 30 };
       const smallCore = bubbleCore(smallBox);
       expect(smallCore).toEqual({
-        left: 14,
-        right: 36,
-        top: 14,
-        bottom: 36
+        left: 18,
+        right: 32,
+        top: 18,
+        bottom: 32
       });
 
       // Tiny 8x8 box: returns null
