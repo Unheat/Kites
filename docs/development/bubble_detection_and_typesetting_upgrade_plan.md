@@ -307,34 +307,13 @@ $$W_{\text{new}} = 2 \times \text{round}\left(\frac{t_w}{2} \times \text{final\_
 - Clamp `typeset_box` strictly within `carrier` bounds.
 - Emit `typeset_box` directly to `typesetLayout.ts` and `canvasTypesetting.ts`.
 
-### Step 9: Studio Editor Integration & Dexie Persistence Schema
+### Step 9: Studio Editor Integration & Zero-Migration Persistence
 In Studio Editor (`src/App.tsx`), users interact with rendered speech bubbles via pan, zoom, 8-handle drag/resize, text editing, and PNG export.
 
-#### 1. Dexie Schema Extension (`src/db.ts`):
-Extend `TextBlock` interface to store both active typeset bounds and raw container metadata:
-```typescript
-export interface TextBlock {
-  id?: number;
-  imageId: number;
-  originalText: string;
-  translatedText: string;
-  // Active Layout Box (matches typeset_box when bubble active, or tight OCR box when off)
-  posX: number;
-  posY: number;
-  width: number;
-  height: number;
-  fontSize: number;
-  fontFamily: string;
-  color: string;
-  strokeColor?: string;
-  direction?: 'h' | 'v';
-  lines?: string[];
-
-  // Container Metadata (Optional, backwards-compatible)
-  ocrBox?: { x: number; y: number; w: number; h: number };
-  bubbleBox?: { x: number; y: number; w: number; h: number };
-}
-```
+#### 1. Zero-Migration Dexie Persistence (`src/db.ts`):
+No schema migration or extra unused fields needed. `db.textBlocks` directly stores the active layout coordinates:
+- `posX, posY, width, height` = `typeset_box` (when Bubble Fit is active) or tight OCR box (when off).
+- Retains existing schema 100% intact with zero bloat.
 
 #### 2. WYSIWYG Studio Behavior:
 - **Interactive Bounding Box:**
