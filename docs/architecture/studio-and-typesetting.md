@@ -74,6 +74,8 @@ Kites adopts a **Clean Plate Architecture**:
      ```
 2. **Infinite Re-Typesetting:**
    Because text is rendered dynamically over the clean background, users can change fonts, resize speech bubbles, adjust colors, or retranslate text without degrading the underlying artwork.
+3. **Zero-Migration `typesetBox` Studio Parity:**
+   When speech bubble expansion is enabled, `posX, posY, width, height` in `db.textBlocks` are set directly to the validated expanded `typesetBox` coordinates rather than the narrow raw OCR bounding box. This guarantees 100% WYSIWYG parity between the baked in-page translation and the Studio desktop editor without requiring any Dexie schema migration.
 
 ---
 

@@ -133,6 +133,47 @@ graph TD
 
 ---
 
+## 🗨️ Speech Bubble Detection & Layout Subsystem
+
+Kites incorporates a dual-route bubble extraction subsystem to expand narrow vertical CJK text bounding boxes into comfortable, readable horizontal chambers:
+
+```mermaid
+graph TD
+    InputImage["Source Canvas Image"] --> RouteChoice{"Bubble Mode Selection"}
+    RouteChoice -->|Disabled| ClassicPath["Cotrans MST (Bounding Line Polygons)"]
+    RouteChoice -->|Heuristic| HeuristicExtractor["Tier 1: Heuristic Bubble Extractor<br/>(0 MB, CPU Instant)"]
+    RouteChoice -->|Neural YOLO| NeuralDetector["Tier 2: Neural Bubble Detector<br/>(11 MB ONNX, WebGPU / WASM)"]
+
+    HeuristicExtractor --> AdaptiveLum["Adaptive Background Luminance Sampling<br/>(16-Sample Median Ring)"]
+    AdaptiveLum --> DiskErosion["Morphological Disk Erosion (R = 14) + BFS"]
+    DiskErosion --> CoreInset["12% Safe Core Clamping (8-48px)"]
+
+    NeuralDetector --> ClassFilter["Class Filter (Class 0: bubble only)"]
+    ClassFilter --> CoreInset
+
+    CoreInset --> LayoutService["BubbleLayoutService (Safe Layout & Font Gate)"]
+    LayoutService --> OutputBoxes["Validated typesetBox Coordinates"]
+```
+
+### 1. Tier 1: Heuristic Bubble Extractor (0 MB, Instant CPU)
+- **Zero-Download Footprint:** Operates on offscreen canvas `ImageData` at $< 1.5\text{ ms}$ runtime per bubble.
+- **Adaptive Luminance Sampling:** 16-sample median ring $4\text{ px}$ outside the text bounding box computes $L_{bg}$ and sets threshold $\text{max}(130, L_{bg} - 35)$, allowing translucent balloons to be extracted without premature cutoff.
+- **Morphological Opening:** Disk erosion ($R \approx 14\text{ px}$) severs pointing tails; 4-connected BFS flood-fill recovers the main balloon chamber; constrained dilation restores true borders.
+- **Leak Guard:** Bounding patch fill ratio $\ge 96\%$ in both dimensions flags unbounded page margins, falling back to tight text bounds.
+
+### 2. Tier 2: Neural Bubble Detector (`bubble-yolo`, ~11.12 MB ONNX)
+- **Model:** `ogkalu/comic-text-and-bubble-detector` (`detector-v4-s_int8.onnx`, 11,120,765 bytes).
+- **Execution Provider:** WebGPU (`powerPreference: 'high-performance'`) with automated fallback to multi-threaded WASM.
+- **Input Dimension:** $640 \times 640\text{ px}$.
+- **Class Filtering:** Exclusively admits class `0: bubble` proposals at score threshold $\ge 0.30$. Classes `1: text_bubble` and `2: text_free` are strictly discarded to prevent OCR-like text bounding boxes from being treated as bubble containers.
+
+### 3. Future Work: Neural Bubble Segmentation Candidate
+- **Model:** `mednasserallah/manga109-segmentation-bubble-onnx` (`manga109_segmentation_bubble_1024.onnx`, 11,845,329 bytes / 11.85 MB).
+- **Architecture:** YOLO11n fine-tuned on Manga109 dataset with segmentation head (1024×1024 input, opset 17).
+- **Role:** Deferred research tier for direct curved mask generation and per-line text layout, bypassing axis-aligned rectangular approximations.
+
+---
+
 ## 💾 Model Caching & Lifecycle Management
 
 1. **Persistent Browser Cache API (`caches.open('kites-model-cache')`):**

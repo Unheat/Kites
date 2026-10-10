@@ -199,7 +199,49 @@ $$\text{WebLLM} \longrightarrow \text{Cloudflare Shared Pool} \longrightarrow \t
 
 ---
 
-### Stage 5: Typesetting & Affine Rendering (`canvasTypesetting.ts` & `cotransDefaultRenderer.ts`)
+### Stage 5: Bubble Container Extraction & Layout Resolution (`BubbleLayoutService.ts`)
+
+To prevent narrow vertical CJK text lines ($20-30\text{ px}$) from forcing horizontal English translations to collapse into tiny unreadable $5-7\text{ px}$ fonts, Kites incorporates the **Speech Bubble Detection & Layout Subsystem**:
+
+```mermaid
+flowchart TD
+    ModeCheck{"bubbleMode != 'off'?"} -->|No| DisabledPath["Disabled (Cotrans MST Blocks)"]
+    ModeCheck -->|Yes| Acquire["Pass 1: Geometry Acquisition<br/>(Neural Class 0 / Heuristic BFS)"]
+    Acquire --> TranslateWait["Wait for Translation + Canvas Font Ready"]
+    TranslateWait --> Resolve["Pass 2: Layout Resolution (BubbleLayoutService)"]
+    Resolve --> GroupCheck{"Multi-Utterance<br/>Connected Group?"}
+    GroupCheck -->|Single Bubble| ExpandSingle["computeTypesetBox (12% Safe Core)"]
+    ExpandSingle --> FontCheck{"measureBubbleLayoutFontSize<br/>fitted > 0?"}
+    FontCheck -->|Fits| EmitBox["Emit Fixed typesetBox"]
+    FontCheck -->|Fails| DisabledFallback["Fallback to Disabled (typesetBox = undefined)"]
+    GroupCheck -->|Multi-Utterance| AxisCheck{"Clean Single-Axis X/Y Chain<br/>with Gap ≥ 6px?"}
+    AxisCheck -->|Yes| PartitionXY["Partition Axis Territories + Check Fit"]
+    PartitionXY --> AllFit{"All Members Fit?"}
+    AllFit -->|Yes| EmitGroup["Emit Sub-Chamber typesetBoxes"]
+    AllFit -->|No| DisabledFallback
+    AxisCheck -->|No (Diagonal / Overlapping / Slits)| DisabledFallback
+```
+
+#### 1. Dual-Route Separation
+- **Dialogue in Speech Balloons:** Top-down container extraction pipeline detects the balloon chamber (Tier 1 Heuristic or Tier 2 Neural YOLO), insets a 12% safe core, and expands text horizontally to utilize available chamber space.
+- **Free-Floating Text & Sound Effects:** Bottom-up Cotrans MST merge preserves tight bounding hulls with zero expansion.
+- **Inpainting Isolation Invariant:** Inpainting models strictly receive original character contour polygons (`rawPolygons`), never expanded bubble boxes.
+
+#### 2. Neural Bubble Detector Hardening
+- `NeuralBubbleDetector` exclusively admits class `0: bubble` proposals. Classes `1: text_bubble` and `2: text_free` are strictly filtered out to prevent tight OCR text boxes from being misclassified as bubble containers.
+
+#### 3. Unified Layout Resolution (`BubbleLayoutService`)
+Production and test pipelines invoke the identical `BubbleLayoutService`:
+- **Single-Occupant Balloons:** Expand into the 12% safe core (`computeTypesetBox`), verified by canvas font measurement (`measureBubbleLayoutFontSize`).
+- **Connected Multi-Lobe Balloons:** Sliced into independent territories along clean single-axis X or Y boundaries **only** when unambiguous neck/lobe morphology is proven and positive clearance ($\ge 6\text{ px}$) exists.
+- **Conservative Fallback to Disabled:** When multi-utterance geometry is diagonal, rotated, overlapping across both axes, or lacks clean separation, the entire group rolls back atomically to `typesetBox = undefined` (the exact Disabled tier: Cotrans MST + utterance splitting). This guarantees zero text clipping or slit distortion.
+
+#### 4. Renderer Geometry Lock
+- Accepted `typesetBox` rectangles are rendered axis-aligned (angle 0°) and strictly bypass font-floor quad ballooning and global decollision translation shifts, preserving exact layout geometry and Dexie persistence parity.
+
+---
+
+### Stage 6: Typesetting & Affine Rendering (`canvasTypesetting.ts` & `cotransDefaultRenderer.ts`)
 
 ```mermaid
 flowchart TD
