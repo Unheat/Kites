@@ -44,8 +44,8 @@ export class HeuristicBubbleExtractor {
     }
 
     // 1. Expand patch around text box (slack for bubble borders)
-    const padX = Math.round(Math.max(40, textBox.w * 0.8));
-    const padY = Math.round(Math.max(40, textBox.h * 0.8));
+    const padX = Math.round(Math.max(50, textBox.w * 1.0));
+    const padY = Math.round(Math.max(50, textBox.h * 1.0));
 
     const minX = Math.max(0, textBox.x - padX);
     const minY = Math.max(0, textBox.y - padY);
@@ -69,7 +69,6 @@ export class HeuristicBubbleExtractor {
     // 3. Build binary mask of bubble interior
     // Pixel is interior if inside text box or has light luminance (white bubble)
     const mask = new Uint8Array(patchW * patchH);
-    let borderTouchCount = 0;
 
     for (let py = 0; py < patchH; py++) {
       const origY = Math.min(imgH - 1, minY + Math.floor(py / scale));
@@ -88,22 +87,10 @@ export class HeuristicBubbleExtractor {
         const b = data[pIdx + 2];
         const isLight = r >= lumThresh && g >= lumThresh && b >= lumThresh;
 
-        const isInterior = inText || isLight;
-        if (isInterior) {
+        if (inText || isLight) {
           mask[py * patchW + px] = 1;
-          // Track if light pixels touch the outer perimeter of our expanded patch
-          if (px === 0 || px === patchW - 1 || py === 0 || py === patchH - 1) {
-            borderTouchCount++;
-          }
         }
       }
-    }
-
-    // Leak Guard: if light pixels leak across >= 70% of the patch perimeter,
-    // this is uncontained open artwork / paper margin, not an enclosed bubble.
-    const perimeter = 2 * (patchW + patchH);
-    if (borderTouchCount > perimeter * 0.70) {
-      return null;
     }
 
     // 4. Morphological erosion with disk radius R
@@ -258,6 +245,12 @@ export class HeuristicBubbleExtractor {
     const carrierY = Math.round(minY + minPy / scale);
     const carrierW = Math.round((maxPx - minPx + 1) / scale);
     const carrierH = Math.round((maxPy - minPy + 1) / scale);
+
+    // Leak Guard: if the reconstructed component fills >= 96% of the expanded patch in BOTH dimensions,
+    // this indicates an unbounded white background without enclosing dark borders (e.g. open page margin).
+    if (carrierW >= origPatchW * 0.96 && carrierH >= origPatchH * 0.96) {
+      return null;
+    }
 
     // Sanity clamp: carrier must at least contain the original text box
     const finalX = Math.min(carrierX, textBox.x);
