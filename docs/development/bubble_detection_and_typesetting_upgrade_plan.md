@@ -110,31 +110,31 @@ const state: PopupState = {
 };
 ```
 
-### 2.3 Popup UI Component (`src/popup/components/SettingsView.tsx`)
-Add a dedicated **"Layout & Typography Engine"** section in `SettingsView.tsx`:
+### 2.3 Popup UI Component (`src/popup/components/EngineSelectionPanel.tsx`)
+Place the **"Layout & Bubble Fit"** selector inside `EngineSelectionPanel.tsx` directly beneath the **RENDER FONT** selector, matching the established dropdown pattern of Inpainting and OCR engines.
 
-```tsx
-{/* Layout & Typography Engine Card */}
-<div className="flex flex-col gap-2 p-3 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-lg">
-  <div className="flex items-center justify-between">
-    <div className="flex flex-col">
-      <span className="font-medium text-sm">Smart Bubble Fit</span>
-      <span className="text-xs text-[var(--color-dust)]">
-        Detect bubble containers to prevent tiny fonts & optical decentering
-      </span>
-    </div>
-    <select
-      value={state.bubbleMode}
-      onChange={(e) => updateState({ bubbleMode: e.target.value as BubbleDetectionMode })}
-      className="text-xs bg-[var(--color-bg)] border border-[var(--color-dust)] rounded px-2 py-1 cursor-pointer font-medium"
-    >
-      <option value="off">Off (Classic Line Merge)</option>
-      <option value="heuristic">Heuristic (Fast, 0 MB)</option>
-      <option value="neural">Neural YOLO (Accurate, ~3.2 MB)</option>
-    </select>
-  </div>
-</div>
+#### UX Layout & Visual Hierarchy:
 ```
+LAYOUT & BUBBLE FIT                                   (?)  <-- Tooltip info
+┌───────────────────────────────────────────────────────┐
+│ Heuristic (Instant, 0 MB)                           ▼ │
+└───────────────────────────────────────────────────────┘
+  │
+  ├─ [✓] Tier 1: Heuristic (Instant, 0 MB)  [Recommended]
+  │      Dò bóng & căn giữa bằng hình học. Nhanh <1ms, không tốn bộ nhớ.
+  │
+  ├─ [ ] Tier 2: Neural YOLO (~3.2 MB)      [WebGPU / Advanced]
+  │      Dùng AI quét toàn trang. Chuẩn xác cho bóng gai, nền tranh phức tạp.
+  │
+  └─ [ ] Tier 0: Disabled (Classic MST)     [Legacy]
+         Chỉ gom dòng OCR (Cotrans MST). Không mở rộng bóng, giữ nguyên v1.1.
+```
+
+- **Tooltip `(?)` explanation:**
+  *"Speech bubbles expand horizontal layout space and center translated text inside the balloon chamber, preventing font collapse (tiny 6px text) and tail-skewed alignment."*
+- **Tier 2 Model Download Flow:**
+  - If user selects Tier 2 without local ONNX weights: renders an inline download button `Download (~3.2 MB)` and progress bar identical to LaMa Manga Inpaint.
+  - Automatically falls back to Tier 1 while download is pending.
 
 ---
 
@@ -306,6 +306,45 @@ $$W_{\text{new}} = 2 \times \text{round}\left(\frac{t_w}{2} \times \text{final\_
   $$typeset\_box.y = carrier\_cy - H_{\text{new}} / 2$$
 - Clamp `typeset_box` strictly within `carrier` bounds.
 - Emit `typeset_box` directly to `typesetLayout.ts` and `canvasTypesetting.ts`.
+
+### Step 9: Studio Editor Integration & Dexie Persistence Schema
+In Studio Editor (`src/App.tsx`), users interact with rendered speech bubbles via pan, zoom, 8-handle drag/resize, text editing, and PNG export.
+
+#### 1. Dexie Schema Extension (`src/db.ts`):
+Extend `TextBlock` interface to store both active typeset bounds and raw container metadata:
+```typescript
+export interface TextBlock {
+  id?: number;
+  imageId: number;
+  originalText: string;
+  translatedText: string;
+  // Active Layout Box (matches typeset_box when bubble active, or tight OCR box when off)
+  posX: number;
+  posY: number;
+  width: number;
+  height: number;
+  fontSize: number;
+  fontFamily: string;
+  color: string;
+  strokeColor?: string;
+  direction?: 'h' | 'v';
+  lines?: string[];
+
+  // Container Metadata (Optional, backwards-compatible)
+  ocrBox?: { x: number; y: number; w: number; h: number };
+  bubbleBox?: { x: number; y: number; w: number; h: number };
+}
+```
+
+#### 2. WYSIWYG Studio Behavior:
+- **Interactive Bounding Box:**
+  Studio renders the blue selection/resize rectangle using `block.posX`, `block.posY`, `block.width`, `block.height`.
+  - When Bubble Fit is ON: The blue box **spans the roomy chamber (`typeset_box`)**, perfectly matching the area where text is drawn. Text stays neatly centered inside the blue box rather than spilling outside.
+  - When Bubble Fit is OFF: The blue box is the tight OCR bounding box (100% legacy parity).
+- **Text Re-editing & Re-wrapping:**
+  When users edit translated text in Studio's right inspector, `recalculateBlockTypeset` lays out the edited string using `targetBlock.width` and `targetBlock.height`. Because the box already reflects the bubble chamber, edited text continues to wrap naturally at readable 12–15px font sizes without collapsing.
+- **Export Consistency:**
+  `handleExportPng` uses `block.posX, block.posY, block.width, block.height`. Exported PNGs match the baked canvas output pixel-for-pixel.
 
 ---
 
