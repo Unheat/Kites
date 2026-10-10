@@ -10,7 +10,7 @@ import { InpaintCacheManager } from './InpaintCacheManager';
 import { renderTextBlocksBatch, type TextBlockItem, type RenderedBlockInfo } from '../utils/canvasTypesetting';
 import { resolveRenderFontFamily } from '../../shared/renderFontPresets';
 import { HeuristicBubbleExtractor } from '../engines/bubble/HeuristicBubbleExtractor';
-import { computeTypesetBox } from '../utils/bubbleExpansion';
+import { computeTypesetBox, applySiblingBoundaryConstraints } from '../utils/bubbleExpansion';
 import type { OcrBox } from '../engines/ocr/BaseOcrEngine';
 
 export class PipelineOrchestrator {
@@ -177,12 +177,14 @@ export class PipelineOrchestrator {
               const isVert = (ocrResult.directions && ocrResult.directions[i]) === 'v';
               const carrier = HeuristicBubbleExtractor.extractCarrierBox(rawImageData, box);
               if (carrier) {
-                const typesetBox = computeTypesetBox(box, carrier, isVert, rawBitmap.height);
+                const typesetBox = computeTypesetBox(box, carrier, isVert, rawBitmap.height, true);
                 typesetBoxes[i] = typesetBox;
               } else {
                 typesetBoxes[i] = undefined;
               }
             }
+            // Sibling clearance: partition connected/adjacent bubbles so they never collide
+            applySiblingBoundaryConstraints(ocrResult.boxes, typesetBoxes);
             ocrResult.typesetBoxes = typesetBoxes as any;
           }
           if (typeof rawBitmap.close === 'function') {

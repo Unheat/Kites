@@ -250,39 +250,122 @@ export function dampedSlackExpansion(
  */
 export function computeTypesetBox(
   textBox: BoxRect,
-  bubbleBox: BoxRect,
-  isVertical: boolean,
-  pageH: number
+  bubbleOrCarrierBox: BoxRect,
+  _isVertical: boolean,
+  pageH: number,
+  isAlreadySeveredCarrier: boolean = false
 ): BoxRect {
-  const derivedCarrier = deriveCarrierBoxGeometric(bubbleBox, textBox, pageH);
-  const isValidCut = validTailCutCarrier(derivedCarrier, bubbleBox, pageH);
-  const carrier = isValidCut ? derivedCarrier : bubbleBox;
+  const carrier = isAlreadySeveredCarrier
+    ? bubbleOrCarrierBox
+    : (() => {
+        const derived = deriveCarrierBoxGeometric(bubbleOrCarrierBox, textBox, pageH);
+        return validTailCutCarrier(derived, bubbleOrCarrierBox, pageH) ? derived : bubbleOrCarrierBox;
+      })();
 
-  const core = bubbleCore(carrier) ?? bubbleCore(bubbleBox);
+  const core = bubbleCore(carrier) ?? bubbleCore(bubbleOrCarrierBox);
   if (!core) {
     return textBox;
   }
 
-  const expanded = dampedSlackExpansion(
-    textBox,
-    core.left,
-    core.right,
-    core.top,
-    core.bottom,
-    isVertical
-  );
+  const coreW = core.right - core.left;
+  const coreH = core.bottom - core.top;
+
+  // Utilize the roomy chamber dimensions (XianScan builder.rs:673 expands vertical text
+  // to utilize up to 85% of container width rather than constraining to the narrow CJK column).
+  const expandedW = Math.min(coreW, Math.max(Math.round(textBox.w * 1.3), Math.round(coreW * 0.85)));
+  const expandedH = Math.min(coreH, Math.max(Math.round(textBox.h), Math.round(coreH * 0.70)));
 
   // Optical Chamber Centering: center expanded box on carrier chamber center
   const carrierCx = Math.round(carrier.x + carrier.w / 2);
   const carrierCy = Math.round(carrier.y + carrier.h / 2);
 
   const centered: BoxRect = {
-    x: carrierCx - Math.round(expanded.w / 2),
-    y: carrierCy - Math.round(expanded.h / 2),
-    w: expanded.w,
-    h: expanded.h
+    x: carrierCx - Math.round(expandedW / 2),
+    y: carrierCy - Math.round(expandedH / 2),
+    w: expandedW,
+    h: expandedH
   };
 
   // Hard clamp so typeset box never overflows the carrier outer envelope
   return clampBoxToCore(centered, carrier.x, carrier.x + carrier.w, carrier.y, carrier.y + carrier.h);
+}
+
+/**
+ * Enforces sibling clearance and non-overlap boundaries between all adjacent text regions.
+ *
+ * 1:1 port of XianScan `expansion.rs:230-269` sibling clearance constraint.
+ * Partitions connected or adjacent bubbles (e.g. staggered double-boxes or multi-lobe balloons)
+ * so sibling text boxes never collide or overlap into each other's chambers.
+ *
+ * @param originalBoxes - Array of original unexpanded OCR text boxes.
+ * @param typesetBoxes - Array of candidate typeset boxes (mutated in-place to respect sibling limits).
+ * @param siblingGap - Minimum clearance gap in pixels between sibling boxes. Default SIBLING_GAP = 6.
+ */
+export function applySiblingBoundaryConstraints(
+  originalBoxes: BoxRect[],
+  typesetBoxes: (BoxRect | undefined)[],
+  siblingGap: number = SIBLING_GAP
+): void {
+  const halfGap = Math.round(siblingGap / 2);
+
+  for (let i = 0; i < typesetBoxes.length; i++) {
+    const tbI = typesetBoxes[i];
+    if (!tbI) continue;
+    const origI = originalBoxes[i];
+    const cxI = origI.x + origI.w / 2;
+    const cyI = origI.y + origI.h / 2;
+
+    for (let j = 0; j < typesetBoxes.length; j++) {
+      if (i === j) continue;
+      const origJ = originalBoxes[j];
+      const cxJ = origJ.x + origJ.w / 2;
+      const cyJ = origJ.y + origJ.h / 2;
+
+      // 1. Horizontal influence: when vertical spans overlap
+      const yOverlap = (origI.y + origI.h) > origJ.y && (origJ.y + origJ.h) > origI.y;
+      if (yOverlap) {
+        // If box J is to the left of box I
+        if (cxJ < cxI) {
+          const dividerX = Math.round((origJ.x + origJ.w + origI.x) / 2);
+          const minLeft = dividerX + halfGap;
+          if (tbI.x < minLeft) {
+            const shift = minLeft - tbI.x;
+            tbI.x = minLeft;
+            tbI.w = Math.max(origI.w, tbI.w - shift);
+          }
+        }
+        // If box J is to the right of box I
+        else if (cxJ > cxI) {
+          const dividerX = Math.round((origI.x + origI.w + origJ.x) / 2);
+          const maxRight = dividerX - halfGap;
+          if (tbI.x + tbI.w > maxRight) {
+            tbI.w = Math.max(origI.w, maxRight - tbI.x);
+          }
+        }
+      }
+
+      // 2. Vertical influence: when horizontal spans overlap
+      const xOverlap = (origI.x + origI.w) > origJ.x && (origJ.x + origJ.w) > origI.x;
+      if (xOverlap) {
+        // If box J is above box I
+        if (cyJ < cyI) {
+          const dividerY = Math.round((origJ.y + origJ.h + origI.y) / 2);
+          const minTop = dividerY + halfGap;
+          if (tbI.y < minTop) {
+            const shift = minTop - tbI.y;
+            tbI.y = minTop;
+            tbI.h = Math.max(origI.h, tbI.h - shift);
+          }
+        }
+        // If box J is below box I
+        else if (cyJ > cyI) {
+          const dividerY = Math.round((origI.y + origI.h + origJ.y) / 2);
+          const maxBottom = dividerY - halfGap;
+          if (tbI.y + tbI.h > maxBottom) {
+            tbI.h = Math.max(origI.h, maxBottom - tbI.y);
+          }
+        }
+      }
+    }
+  }
 }

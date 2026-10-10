@@ -157,37 +157,53 @@ export function clusterLinesIntoUtterances(
         continue;
       }
 
-      // Sort lines in reading order: top-to-bottom (Y ascending)
-      const colSorted = [...cluster].sort(
-        (a, b) => polygonBounds(a.polygon).y - polygonBounds(b.polygon).y
-      );
+      // Sort lines in reading order: Right-to-Left (X descending) then Top-to-Bottom (Y ascending)
+      const colSorted = [...cluster].sort((a, b) => {
+        const aBounds = polygonBounds(a.polygon);
+        const bBounds = polygonBounds(b.polygon);
+        const horizDiff = bBounds.x - aBounds.x;
+        if (Math.abs(horizDiff) >= 15) {
+          return horizDiff; // Right to left
+        }
+        return aBounds.y - bBounds.y; // Top to bottom
+      });
 
       let subCluster: InputLine[] = [];
-      let subClusterMaxBot: number | null = null;
+      let prevBounds: { x: number; y: number; w: number; h: number } | null = null;
       let prevText = '';
 
       for (const l of colSorted) {
-        const { y: ly, h: lh } = polygonBounds(l.polygon);
-        const currTopY = ly;
-        const currBotY = ly + lh;
+        const b = polygonBounds(l.polygon);
 
-        if (subClusterMaxBot !== null) {
-          const vertGap = currTopY - subClusterMaxBot;
+        if (prevBounds !== null) {
           const endsWithTerm = endsWithTerminalPunctuation(prevText);
+          const horizStep = Math.abs(b.x - prevBounds.x);
+          const topStagger = b.y - prevBounds.y;
+          const botStagger = (b.y + b.h) - (prevBounds.y + prevBounds.h);
+          const vertGap = b.y - (prevBounds.y + prevBounds.h);
 
-          const isVertLobeSplit =
-            vertGap >= Math.max(22.0, medianTh * 1.35) ||
-            (endsWithTerm && vertGap >= Math.max(6.0, medianTh * 0.45));
+          // 1. Same-column vertical split (one utterance above another in same column)
+          const isSameColumnSplit =
+            horizStep < 18 &&
+            (vertGap >= Math.max(22.0, medianTh * 1.35) ||
+              (endsWithTerm && vertGap >= Math.max(6.0, medianTh * 0.45)));
 
-          if (isVertLobeSplit && subCluster.length > 0) {
+          // 2. Staggered multi-lobe split (adjacent parallel columns shifted vertically,
+          // where column 1 ends with terminal punctuation like ！, ?, …)
+          const isStaggeredLobeSplit =
+            horizStep >= 15 &&
+            endsWithTerm &&
+            (topStagger >= 15 || botStagger >= 25);
+
+          if ((isSameColumnSplit || isStaggeredLobeSplit) && subCluster.length > 0) {
             finalVertUtterances.push(subCluster);
             subCluster = [];
-            subClusterMaxBot = null;
+            prevBounds = null;
           }
         }
 
         subCluster.push(l);
-        subClusterMaxBot = subClusterMaxBot === null ? currBotY : Math.max(subClusterMaxBot, currBotY);
+        prevBounds = b;
         prevText = l.text.trim();
       }
 

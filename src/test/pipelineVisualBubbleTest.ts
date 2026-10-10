@@ -9,7 +9,7 @@ import { createCanvas, loadImage } from 'canvas';
 import type { Point2D } from '../shared/utils/geometry';
 import { HeuristicBubbleExtractor } from '../offscreen/engines/bubble/HeuristicBubbleExtractor';
 import { NeuralBubbleDetector } from '../offscreen/engines/bubble/NeuralBubbleDetector';
-import { computeTypesetBox, type BoxRect } from '../offscreen/utils/bubbleExpansion';
+import { computeTypesetBox, applySiblingBoundaryConstraints, type BoxRect } from '../offscreen/utils/bubbleExpansion';
 import * as ort from 'onnxruntime-node';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -115,7 +115,7 @@ async function runPipelineVisualBubbleTest() {
       const isVert = (ocrResult.directions && ocrResult.directions[i]) === 'v';
       const carrier = HeuristicBubbleExtractor.extractCarrierBox(rawImageData, b);
       if (carrier) {
-        const tb = computeTypesetBox(b, carrier, isVert, pageHeight);
+        const tb = computeTypesetBox(b, carrier, isVert, pageHeight, true);
         heuristicTypesetBoxes.push(tb);
       } else {
         heuristicTypesetBoxes.push(undefined);
@@ -123,6 +123,7 @@ async function runPipelineVisualBubbleTest() {
     }
     const heuristicMatches = heuristicTypesetBoxes.filter(Boolean).length;
     console.log(`[Heuristic] Matched and expanded ${heuristicMatches}/${boxes.length} bubbles.`);
+    applySiblingBoundaryConstraints(boxes, heuristicTypesetBoxes);
 
     // Bake Heuristic Output
     {
@@ -202,6 +203,7 @@ async function runPipelineVisualBubbleTest() {
       }
       const neuralMatches = neuralTypesetBoxes.filter(Boolean).length;
       console.log(`[Neural] Associated ${neuralMatches}/${boxes.length} bubbles with text regions.`);
+      applySiblingBoundaryConstraints(boxes, neuralTypesetBoxes);
 
       // Bake Neural Output
       const canvas = createCanvas(pageWidth, pageHeight);
