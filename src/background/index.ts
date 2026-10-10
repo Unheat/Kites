@@ -1,5 +1,5 @@
 import { db, cleanupOldJobs, deleteJobs, type TranslationJob } from '../db';
-import type { ProcessJobMessage, PopupState, PreloadActiveEngineMessage } from '../shared/types';
+import type { ProcessJobMessage, PopupState, PreloadActiveEngineMessage, BubbleDetectionMode } from '../shared/types';
 import { DEFAULT_POPUP_STATE } from '../shared/types';
 import { CLOUDFLARE_QUOTA_DEFAULT_ENDPOINT, STORAGE_KEYS } from '../shared/constants';
 import modelsRegistryData from '../shared/models-registry.json';
@@ -97,6 +97,10 @@ export function normalizePopupState(popupState: Partial<PopupState> | undefined)
     : DEFAULT_POPUP_STATE.activeInpaintId;
   const activeOcrId = resolveOcrTier(completedState.activeOcrId);
   const renderFontPresetId = normalizeRenderFontPresetId(completedState.renderFontPresetId);
+  const bubbleMode: BubbleDetectionMode =
+    completedState.bubbleMode === 'off' || completedState.bubbleMode === 'neural'
+      ? completedState.bubbleMode
+      : 'heuristic';
   const state: PopupState = {
     ...completedState,
     webgpuSupported: completedState.webgpuSupported === true ? true : null,
@@ -105,6 +109,7 @@ export function normalizePopupState(popupState: Partial<PopupState> | undefined)
     activeInpaintId,
     activeOcrId,
     renderFontPresetId,
+    bubbleMode,
     fallbackChain,
   };
   const changed = JSON.stringify(state) !== JSON.stringify(popupState ?? {});

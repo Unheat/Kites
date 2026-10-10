@@ -154,6 +154,8 @@ export interface UserAccountInfo {
 
 import type { RenderFontPresetId } from './renderFontPresets';
 
+export type BubbleDetectionMode = 'off' | 'heuristic' | 'neural';
+
 export interface PopupState {
   isExtensionEnabled: boolean;
   isAuto: boolean;
@@ -166,6 +168,7 @@ export interface PopupState {
   activeInpaintId: string;
   activeOcrId: string;
   renderFontPresetId: RenderFontPresetId;
+  bubbleMode: BubbleDetectionMode;
   fallbackChain: string[];
   customApis: CustomApiConfig[];
   webgpuSupported: boolean | null;
@@ -190,6 +193,7 @@ export const DEFAULT_POPUP_STATE: PopupState = {
   activeInpaintId: 'simple',
   activeOcrId: 'v6-small',
   renderFontPresetId: 'standard',
+  bubbleMode: 'heuristic',
   fallbackChain: [],
   customApis: [],
   webgpuSupported: null,

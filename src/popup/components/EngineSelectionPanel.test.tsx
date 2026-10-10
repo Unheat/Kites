@@ -106,4 +106,42 @@ describe('WebLLM download control', () => {
     });
     container.remove();
   });
+
+  it('renders Layout & Bubble Fit selector and updates bubbleMode state', async () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const updateState = vi.fn();
+
+    const state: PopupState = {
+      ...DEFAULT_POPUP_STATE,
+      bubbleMode: 'heuristic',
+    };
+
+    await act(async () => {
+      root.render(<EngineSelectionPanel state={state} updateState={updateState} />);
+    });
+
+    const bubbleButton = container.querySelector<HTMLButtonElement>('button[aria-label="Layout and Bubble Fit"]');
+    expect(bubbleButton).not.toBeNull();
+    expect(bubbleButton?.textContent).toContain('Heuristic');
+
+    await act(async () => {
+      bubbleButton?.click();
+    });
+
+    const offButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('Disabled (Classic)'));
+    expect(offButton).toBeDefined();
+
+    await act(async () => {
+      offButton?.click();
+    });
+
+    expect(updateState).toHaveBeenCalledWith({ bubbleMode: 'off' });
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
 });

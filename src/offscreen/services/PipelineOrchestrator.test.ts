@@ -261,4 +261,44 @@ describe('PipelineOrchestrator', () => {
 
     blobSpy.mockRestore();
   });
+
+  it('persists typesetBox coordinates to db.textBlocks when bubble carrier is extracted', async () => {
+    const mockImageRecord = {
+      id: 3,
+      jobId: 300,
+      rawImageBlob: new Blob(['fake image data'], { type: 'image/png' })
+    };
+    ((db.images as any).first as any).mockResolvedValue(mockImageRecord);
+
+    vi.spyOn(chrome.runtime, 'sendMessage').mockImplementation((_message: any, callback: any) => {
+      callback({ activeInpaintId: 'simple', bubbleMode: 'heuristic', targetLang: 'en' });
+    });
+
+    const blobSpy = vi.spyOn(pipelineOrchestrator as any, 'blobToArrayBuffer').mockResolvedValue(new ArrayBuffer(8));
+
+    // Mock OCR result with an explicitly attached typesetBox
+    const ocrSpy = vi.spyOn((pipelineOrchestrator as any).ocrManager, 'processImage').mockResolvedValue({
+      texts: ['テスト'],
+      boxes: [{ x: 50, y: 50, w: 30, h: 80 }],
+      typesetBoxes: [{ x: 30, y: 40, w: 70, h: 100 }],
+      directions: ['v']
+    });
+
+    await pipelineOrchestrator.runPipeline(300);
+
+    expect(db.textBlocks.bulkAdd).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          imageId: 3,
+          posX: 30,
+          posY: 40,
+          width: 70,
+          height: 100
+        })
+      ])
+    );
+
+    blobSpy.mockRestore();
+    ocrSpy.mockRestore();
+  });
 });

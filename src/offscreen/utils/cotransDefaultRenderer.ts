@@ -84,8 +84,25 @@ function makeCanvas(ctx: any, w: number, h: number): AnyCanvas {
   if (typeof OffscreenCanvas !== 'undefined') {
     return new OffscreenCanvas(width, height) as unknown as AnyCanvas;
   }
-  const Ctor = ctx.canvas.constructor as new (w: number, h: number) => AnyCanvas;
-  return new Ctor(width, height);
+  if (ctx?.canvas?.constructor && ctx.canvas.constructor !== Object) {
+    try {
+      const Ctor = ctx.canvas.constructor as new (w: number, h: number) => AnyCanvas;
+      return new Ctor(width, height);
+    } catch {
+      // Fall through to mock/DOM fallback
+    }
+  }
+  if (typeof document !== 'undefined' && document.createElement) {
+    const c = document.createElement('canvas');
+    c.width = width;
+    c.height = height;
+    return c as unknown as AnyCanvas;
+  }
+  return {
+    width,
+    height,
+    getContext: () => ctx,
+  };
 }
 
 /**
@@ -541,7 +558,7 @@ function cropToContent(ctx: any, canvas: AnyCanvas): { canvas: AnyCanvas; width:
 }
 
 /** Rotates a point around a center by `deg` degrees (screen coords, clockwise-positive). */
-function rotatePoint(p: Point2D, center: Point2D, deg: number): Point2D {
+export function rotatePoint(p: Point2D, center: Point2D, deg: number): Point2D {
   const rad = (deg * Math.PI) / 180;
   const cos = Math.cos(rad);
   const sin = Math.sin(rad);

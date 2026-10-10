@@ -9,6 +9,9 @@ import { inpaintRegistry } from '../engines/inpaint/inpaintRegistry';
 import { InpaintCacheManager } from './InpaintCacheManager';
 import { renderTextBlocksBatch, type TextBlockItem, type RenderedBlockInfo } from '../utils/canvasTypesetting';
 import { resolveRenderFontFamily } from '../../shared/renderFontPresets';
+import { HeuristicBubbleExtractor } from '../engines/bubble/HeuristicBubbleExtractor';
+import { computeTypesetBox } from '../utils/bubbleExpansion';
+import type { OcrBox } from '../engines/ocr/BaseOcrEngine';
 
 export class PipelineOrchestrator {
   private ocrManager: OcrManager;
@@ -157,6 +160,39 @@ export class PipelineOrchestrator {
         });
       }
 
+      // 3.1 Bubble Container Extraction & Chamber Expansion
+      const bubbleMode = popupState?.bubbleMode ?? 'heuristic';
+      if (bubbleMode !== 'off' && ocrResult.boxes && ocrResult.boxes.length > 0 && !ocrResult.typesetBoxes) {
+        try {
+          const rawBitmap = await createImageBitmap(imageRecord.rawImageBlob);
+          const rawCanvas = new OffscreenCanvas(rawBitmap.width, rawBitmap.height);
+          const rawCtx = rawCanvas.getContext('2d', { willReadFrequently: true });
+          if (rawCtx) {
+            rawCtx.drawImage(rawBitmap, 0, 0);
+            const rawImageData = rawCtx.getImageData(0, 0, rawBitmap.width, rawBitmap.height);
+            const typesetBoxes: (OcrBox | undefined)[] = [];
+
+            for (let i = 0; i < ocrResult.boxes.length; i++) {
+              const box = ocrResult.boxes[i];
+              const isVert = (ocrResult.directions && ocrResult.directions[i]) === 'v';
+              const carrier = HeuristicBubbleExtractor.extractCarrierBox(rawImageData, box);
+              if (carrier) {
+                const typesetBox = computeTypesetBox(box, carrier, isVert, rawBitmap.height);
+                typesetBoxes[i] = typesetBox;
+              } else {
+                typesetBoxes[i] = undefined;
+              }
+            }
+            ocrResult.typesetBoxes = typesetBoxes as any;
+          }
+          if (typeof rawBitmap.close === 'function') {
+            rawBitmap.close();
+          }
+        } catch (err) {
+          console.warn('[PipelineOrchestrator] Bubble carrier extraction failed, falling back to default text boxes:', err);
+        }
+      }
+
       // 4 + 5. Translation and Inpainting run concurrently.
       const inpaintPolygons = (ocrResult.rawPolygons || ocrResult.polygons || []) as Point2D[][];
       const shouldInpaint = inpaintTier !== 'original' && inpaintTier !== 'none' && inpaintPolygons.length > 0;
@@ -241,11 +277,13 @@ export class PipelineOrchestrator {
         const text = translatedTexts[i];
         const poly = ocrResult.polygons ? ocrResult.polygons[i] : null;
         const dir = (ocrResult.directions && ocrResult.directions[i]) ? ocrResult.directions[i] : 'h';
+        const typesetBox = (ocrResult.typesetBoxes && ocrResult.typesetBoxes[i]) ? ocrResult.typesetBoxes[i] : undefined;
         if (text && poly) {
           textBlockItems.push({
             text,
             polygon: poly as any,
             direction: dir,
+            typesetBox,
             // Colors are decided at render time by background sampling (XianScan
             // color.ts port) — black text on light paper, white on dark panels.
             fontSize: ocrResult.fontSizes ? ocrResult.fontSizes[i] : undefined,
@@ -294,6 +332,9 @@ export class PipelineOrchestrator {
       // Map OCR results back to DB text blocks
       const textBlocksToSave = ocrResult.texts.map((text, i) => {
         const box = ocrResult.boxes[i];
+        const activeBox = (ocrResult.typesetBoxes && ocrResult.typesetBoxes[i])
+          ? ocrResult.typesetBoxes[i]
+          : box;
         const translatedText = translatedTexts[i] || 'Error';
         const dir = (ocrResult.directions && ocrResult.directions[i]) ? ocrResult.directions[i] : 'h';
 
@@ -301,7 +342,7 @@ export class PipelineOrchestrator {
         // downscaling); fall back to the OCR-detected block font size if the block was skipped.
         const fontSize = renderInfoByOcrIndex.get(i)?.fontSize
           ?? (ocrResult.fontSizes ? ocrResult.fontSizes[i] : undefined)
-          ?? Math.max(9, Math.floor(Math.min(box.w, box.h)));
+          ?? Math.max(9, Math.floor(Math.min(activeBox.w, activeBox.h)));
         // Persist the render-time colors (background-sampled) so the Studio overlay
         // matches the baked image instead of assuming black-on-white.
         const renderColors = renderInfoByOcrIndex.get(i);
@@ -310,10 +351,10 @@ export class PipelineOrchestrator {
           imageId: imageRecord.id!,
           originalText: text,
           translatedText,
-          posX: box.x,
-          posY: box.y,
-          width: box.w,
-          height: box.h,
+          posX: activeBox.x,
+          posY: activeBox.y,
+          width: activeBox.w,
+          height: activeBox.h,
           fontSize,
           fontFamily: resolvedFontFamily,
           color: renderColors?.textColor ?? '#000000',

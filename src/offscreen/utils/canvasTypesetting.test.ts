@@ -17,7 +17,7 @@ import {
  * text-box buffer and is covered by cotransDefaultRenderer.test.ts instead.
  */
 function createMockCtx() {
-  return {
+  const ctx: any = {
     measureText: vi.fn().mockImplementation((text: string) => {
       return { width: text.length * 10 };
     }),
@@ -27,6 +27,11 @@ function createMockCtx() {
     rotate: vi.fn(),
     fillText: vi.fn(),
     strokeText: vi.fn(),
+    drawImage: vi.fn(),
+    setTransform: vi.fn(),
+    resetTransform: vi.fn(),
+    beginPath: vi.fn(),
+    clip: vi.fn(),
     font: '',
     textAlign: '',
     textBaseline: '',
@@ -34,7 +39,13 @@ function createMockCtx() {
     lineWidth: 0,
     lineJoin: '',
     fillStyle: ''
-  } as unknown as OffscreenCanvasRenderingContext2D;
+  };
+  ctx.canvas = {
+    width: 500,
+    height: 500,
+    getContext: () => ctx,
+  };
+  return ctx as unknown as OffscreenCanvasRenderingContext2D;
 }
 
 describe('Canvas Typesetting', () => {
@@ -158,5 +169,47 @@ describe('Canvas Typesetting', () => {
 
     expect(result.fontSize).toBeGreaterThanOrEqual(9);
     expect(mockCtx.font).toContain(customFont);
+  });
+
+  it('uses expanded chamber from typesetBox in default renderer, avoiding narrow font collapse', () => {
+    const mockCtx = createMockCtx();
+    const narrowQuad: Point2D[] = [
+      { x: 100, y: 50 },
+      { x: 125, y: 50 },
+      { x: 125, y: 150 },
+      { x: 100, y: 150 }
+    ];
+
+    // Narrow 25px quad without typesetBox
+    const narrowResults = renderTextBlocksBatch(
+      mockCtx,
+      [{
+        text: 'This is a long sentence that would collapse inside a narrow box',
+        polygon: narrowQuad,
+        direction: 'v',
+        fontSize: 20
+      }],
+      'en',
+      { width: 500, height: 500 }
+    );
+
+    // With expanded typesetBox (120px wide bubble chamber)
+    const expandedResults = renderTextBlocksBatch(
+      mockCtx,
+      [{
+        text: 'This is a long sentence that would collapse inside a narrow box',
+        polygon: narrowQuad,
+        direction: 'v',
+        fontSize: 20,
+        typesetBox: { x: 50, y: 40, w: 120, h: 160 }
+      }],
+      'en',
+      { width: 500, height: 500 }
+    );
+
+    expect(narrowResults[0]).toBeDefined();
+    expect(expandedResults[0]).toBeDefined();
+    // Font size in expanded chamber must be larger than or equal to narrow box
+    expect(expandedResults[0]!.fontSize).toBeGreaterThanOrEqual(narrowResults[0]!.fontSize);
   });
 });

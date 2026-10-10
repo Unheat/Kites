@@ -3,6 +3,7 @@ import { calculateAabb, calculateBoundingBox, calculateRotationAngle } from '../
 import {
   resizeRegionToFontSize,
   renderRegionDefault,
+  rotatePoint,
   type DefaultRenderRegion
 } from './cotransDefaultRenderer';
 import { fitFontSizeWithLines, decollideBoxes, fontSpec } from './typesetLayout';
@@ -317,6 +318,8 @@ export interface TextBlockItem {
   text: string;
   polygon: Point2D[];
   direction?: 'h' | 'v';
+  /** Optional expanded bubble chamber bounds for typeset layout and font fitting. */
+  typesetBox?: { x: number; y: number; w: number; h: number };
   textColor?: string;
   strokeColor?: string;
   /** Cotrans block font size in source pixels (floor(min(textline font sizes))). */
@@ -529,10 +532,30 @@ function renderTextBlocksDefault(
     if (!translation || !b.polygon || b.polygon.length < 3) continue;
 
     // Ensure a 4-point quad (Cotrans min_rect is always 4 points).
-    const poly = b.polygon.slice(0, 4);
-    if (poly.length < 4) continue;
+    const rawPoly = b.polygon.slice(0, 4);
+    if (rawPoly.length < 4) continue;
 
     const angle = b.angle ?? (calculateRotationAngle(b.polygon) * 180) / Math.PI;
+
+    // When typesetBox is provided (speech bubble container), derive quad from typesetBox
+    // centered on the optical chamber, rotated by angle if non-zero.
+    let poly = rawPoly;
+    if (b.typesetBox && b.typesetBox.w > 0 && b.typesetBox.h > 0) {
+      const tb = b.typesetBox;
+      const corners: Point2D[] = [
+        { x: tb.x, y: tb.y },
+        { x: tb.x + tb.w, y: tb.y },
+        { x: tb.x + tb.w, y: tb.y + tb.h },
+        { x: tb.x, y: tb.y + tb.h },
+      ];
+      if (Math.abs(angle) >= 2.0) {
+        const cx = tb.x + tb.w / 2;
+        const cy = tb.y + tb.h / 2;
+        poly = corners.map((p) => rotatePoint(p, { x: cx, y: cy }, -angle));
+      } else {
+        poly = corners;
+      }
+    }
     const aabb = calculateAabb(b.polygon);
     const lineCount = b.sourceLineCount && b.sourceLineCount > 0
       ? b.sourceLineCount
