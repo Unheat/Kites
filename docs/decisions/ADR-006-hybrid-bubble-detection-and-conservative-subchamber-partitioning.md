@@ -43,5 +43,6 @@ Production and test pipelines invoke the identical `BubbleLayoutService`:
 
 ## Alternatives Considered
 - **109 MB Segmentation Models (YOLOv8m-seg):** Rejected due to massive download footprint, restrictive copyleft licensing (GPL-3.0 / AGPL-3.0), and wavy contour artifacts. Deferred to Future Work (YOLO11n Manga109 11.85 MB ONNX).
+- **Maximum Area Inscribed Rectangle (Largest Inscribed Rectangle):** Permanently rejected. In ellipses and irregular manga balloons, unconstrained mathematical area maximization produces degenerate, pancake-flat or needle-thin aspect ratios just to grab edge area, destroying readable typography and causing severe font collapse. Typesetting requires proportional aspect ratios ($80\% \times 70\%$) rather than maximal area.
 - **Greedy 8-Neighbor Max-Min Pixel Walk:** Rejected because local distance maximization does not ensure semantic separation, reachability, or rectangular layout capacity.
 - **Unconditional Axis Slicing:** Rejected because splitting diagonal lobes with vertical dividers produced degenerate 33px narrow columns.
