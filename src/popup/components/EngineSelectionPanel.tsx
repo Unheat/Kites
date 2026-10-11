@@ -73,6 +73,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
   const [isOpenOcr, setIsOpenOcr] = useState(false);
   const [isOpenRenderFont, setIsOpenRenderFont] = useState(false);
   const [isOpenBubbleMode, setIsOpenBubbleMode] = useState(false);
+  const [hoveredBubbleTip, setHoveredBubbleTip] = useState<string | null>(null);
   const [isNeuralDownloaded, setIsNeuralDownloaded] = useState(false);
   const [showAddApi, setShowAddApi] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -847,36 +848,53 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
               })()}
 
               {isOpenBubbleMode && (
-                <div className="mt-1 bg-[var(--color-paper)] border border-[var(--color-dust)] rounded-md shadow-sm overflow-hidden flex flex-col max-h-[350px] z-50">
-                  <div className="overflow-y-auto flex-1 p-1 custom-scrollbar">
+                <div className="mt-1 bg-[var(--color-paper)] border border-[var(--color-dust)] rounded-md shadow-sm flex flex-col z-50">
+                  <div className="p-1">
                     {BUBBLE_MODE_OPTIONS.map((opt) => {
                       const isUninstalled = opt.isModel && !isNeuralDownloaded;
                       const isActive = activeBubbleMode === opt.id && !isUninstalled;
                       return (
-                        <button
+                        <div
                           key={opt.id}
-                          onClick={() => {
-                            if (isUninstalled) return;
-                            updateState({ bubbleMode: opt.id });
-                            setIsOpenBubbleMode(false);
-                          }}
-                          className={`w-full flex items-center justify-between p-2 text-left rounded-sm transition-colors ${
+                          className={`w-full flex items-center justify-between p-2 rounded-sm transition-colors ${
                             isActive
-                              ? 'bg-[var(--color-vellum)] text-[var(--color-editorial)] font-semibold cursor-pointer'
+                              ? 'bg-[var(--color-vellum)] text-[var(--color-editorial)] font-semibold'
                               : isUninstalled
-                                ? 'text-[var(--color-dust)] opacity-50 cursor-not-allowed'
-                                : 'hover:bg-[var(--color-vellum)] cursor-pointer'
+                                ? 'text-[var(--color-dust)] opacity-50'
+                                : 'hover:bg-[var(--color-vellum)]'
                           }`}
                         >
-                          <div className="flex items-center gap-1.5 overflow-hidden">
-                            <span className="truncate pr-1 text-sm">{opt.name}</span>
+                          <div className="min-w-0 flex-1 flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              disabled={isUninstalled}
+                              onClick={() => {
+                                if (isUninstalled) return;
+                                updateState({ bubbleMode: opt.id });
+                                setIsOpenBubbleMode(false);
+                              }}
+                              className="min-w-0 flex items-center text-left bg-transparent border-none p-0 cursor-pointer disabled:cursor-not-allowed"
+                            >
+                              <span className="truncate pr-1 text-sm">{opt.name}</span>
+                            </button>
                             {opt.tooltip && (
-                              <div className="relative group/tip inline-flex items-center" onClick={(e) => e.stopPropagation()}>
-                                <div className="w-3.5 h-3.5 rounded-full border border-[var(--color-dust)]/60 flex items-center justify-center text-[9px] text-[var(--color-dust)] cursor-help hover:border-[var(--color-ink)] hover:text-[var(--color-ink)] transition-colors">
+                              <div
+                                className="relative inline-flex items-center"
+                                onClick={(e) => e.stopPropagation()}
+                                onMouseEnter={() => setHoveredBubbleTip(opt.id)}
+                                onMouseLeave={() => setHoveredBubbleTip(null)}
+                              >
+                                <div className="peer w-3.5 h-3.5 rounded-full border border-[var(--color-dust)]/60 flex items-center justify-center text-[9px] text-[var(--color-dust)] cursor-help hover:border-[var(--color-ink)] hover:text-[var(--color-ink)] transition-colors flex-shrink-0">
                                   ?
                                 </div>
-                                <div className="absolute left-0 bottom-full mb-1.5 w-[220px] max-w-[80vw] z-50 opacity-0 pointer-events-none group-hover/tip:opacity-100 transition-opacity">
-                                  <div className="p-2 bg-[var(--color-ink)] text-[var(--color-paper)] text-[11px] rounded shadow-xl font-normal leading-tight">
+                                <div
+                                  className={`absolute ${
+                                    opt.id === 'neural' ? 'bottom-full mb-1.5' : 'top-full mt-1.5'
+                                  } left-0 w-[220px] max-w-[80vw] z-50 pointer-events-none transition-opacity duration-150 ${
+                                    hoveredBubbleTip === opt.id ? 'opacity-100' : 'opacity-0'
+                                  } peer-hover:opacity-100`}
+                                >
+                                  <div className="p-2 bg-[var(--color-ink)] text-[var(--color-paper)] text-[11px] font-normal leading-snug rounded-md shadow-xl border border-[var(--color-dust)]/20">
                                     {opt.tooltip}
                                   </div>
                                 </div>
@@ -899,7 +917,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                               </div>
                             ) : null}
                           </div>
-                        </button>
+                        </div>
                       );
                     })}
                   </div>
