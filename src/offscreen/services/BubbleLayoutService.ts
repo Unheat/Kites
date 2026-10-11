@@ -32,20 +32,31 @@ export interface BubbleLayoutInput extends BubbleGeometry {
  * @param image - Original image pixels.
  * @param boxes - Original utterance boxes.
  * @param neuralProposals - Optional class-0 proposals; missing matches use heuristic carriers.
+ * @param neuralShapes - Optional morphology shape evidence from neural segmentation (neural-mask).
  * @returns Aligned carriers, exact proposal references, and existing morphology evidence.
  */
-export function acquireBubbleGeometry(image: ImagePatchData, boxes: BoxRect[], neuralProposals?: BoxRect[] | null): BubbleGeometry {
+export function acquireBubbleGeometry(
+  image: ImagePatchData,
+  boxes: BoxRect[],
+  neuralProposals?: BoxRect[] | null,
+  neuralShapes?: (BubbleShapeEvidence | undefined)[] | null
+): BubbleGeometry {
   const carriers: (BoxRect | null)[] = [];
   const proposals: (BoxRect | null)[] = [];
   const shapes: (BubbleShapeEvidence | undefined)[] = [];
   boxes.forEach((box, index) => {
     const proposal = NeuralBubbleDetector.matchBubble(box, neuralProposals ?? [], BUBBLE_MATCH_COVERAGE);
     proposals[index] = proposal;
-    const heuristic = HeuristicBubbleExtractor.extractCarrierBox(image, box, {
-      allTextBoxes: boxes,
-      onShapeEvidence: (shape) => { shapes[index] = shape; }
-    });
-    carriers[index] = proposal ?? heuristic;
+    if (neuralShapes && neuralShapes[index]) {
+      shapes[index] = neuralShapes[index];
+      carriers[index] = neuralShapes[index].carrierBox ?? proposal;
+    } else {
+      const heuristic = HeuristicBubbleExtractor.extractCarrierBox(image, box, {
+        allTextBoxes: boxes,
+        onShapeEvidence: (shape) => { shapes[index] = shape; }
+      });
+      carriers[index] = proposal ?? heuristic;
+    }
   });
   return { pageWidth: image.width, carriers, proposals, shapes };
 }
@@ -220,7 +231,8 @@ export function resolveBubbleLayouts(input: BubbleLayoutInput): (BoxRect | undef
         || !Number.isFinite(angles?.[i] ?? 0) || (angles?.[i] ?? 0) !== 0)) continue;
     if (group.length === 1) {
       const i = group[0];
-      const box = computeTypesetBox(boxes[i], carriers[i]!, directions?.[i] === 'v', pageHeight, !proposals[i]);
+      const isAlreadySevered = Boolean(!proposals[i] || shapes[i]?.isSeveredCarrier);
+      const box = computeTypesetBox(boxes[i], carriers[i]!, directions?.[i] === 'v', pageHeight, isAlreadySevered);
       if (validBox(box) && accept(i, box, MIN_SHARED_FONT_RATIO)) {
         result[i] = box;
       }

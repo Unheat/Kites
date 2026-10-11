@@ -39,7 +39,7 @@ export class BubbleManager {
    * @returns IBubbleEngine implementation.
    */
   private createEngine(mode: BubbleDetectionMode): IBubbleEngine | null {
-    if (mode === 'neural') {
+    if (mode === 'neural' || mode === 'neural-mask') {
       return new NeuralBubbleEngine();
     }
     if (mode === 'heuristic') {
@@ -50,7 +50,7 @@ export class BubbleManager {
 
   /**
    * Acquires a lease on the bubble engine for the requested mode.
-   * Disposes the previous engine if the mode changed.
+   * Disposes the previous engine if the mode changed across families (e.g. neural <-> heuristic).
    *
    * @param mode - Requested bubble detection mode.
    * @param popupState - Settings state for WebGPU overrides.
@@ -61,20 +61,26 @@ export class BubbleManager {
     popupState?: PopupState
   ): Promise<{ engine: IBubbleEngine | null; release: () => void }> {
     return this.serializeLifecycle(async () => {
+      const isBothNeural =
+        (this.activeMode === 'neural' && mode === 'neural-mask') ||
+        (this.activeMode === 'neural-mask' && mode === 'neural');
+
       if (this.activeMode !== mode) {
-        if (this.activeEngine) {
+        if (this.activeEngine && !isBothNeural) {
           console.log(`[BubbleManager] Switching bubble mode from '${this.activeMode}' to '${mode}'. Destroying old engine...`);
           await this.activeEngine.destroy();
           this.activeEngine = null;
           this.activeMode = null;
         }
 
-        const newEngine = this.createEngine(mode);
-        if (newEngine) {
-          await newEngine.init(popupState);
-          this.activeEngine = newEngine;
-          this.activeMode = mode;
+        if (!this.activeEngine) {
+          const newEngine = this.createEngine(mode);
+          if (newEngine) {
+            await newEngine.init(popupState);
+            this.activeEngine = newEngine;
+          }
         }
+        this.activeMode = mode;
       }
 
       this.activeUsers += 1;

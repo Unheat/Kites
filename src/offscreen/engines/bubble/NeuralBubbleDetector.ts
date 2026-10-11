@@ -4,9 +4,24 @@ import { isBubbleGpuAvailable } from '../../../shared/utils/hardwareUtils';
 import { bubbleRegistry } from './bubbleRegistry';
 import { BubbleCacheManager } from '../../services/BubbleCacheManager';
 
+export interface DecodedYoloBubble {
+  box: BoxRect;
+  score: number;
+  rawBox: { cx: number; cy: number; w: number; h: number };
+  coeffs?: Float32Array;
+  protoMask?: {
+    mask: Uint8Array;
+    pw: number;
+    ph: number;
+    px1: number;
+    py1: number;
+  };
+}
+
 export interface NeuralBubbleDetectionResult {
   bubbles: BoxRect[];
   scores: number[];
+  items?: DecodedYoloBubble[];
 }
 
 /**
@@ -108,6 +123,61 @@ export class NeuralBubbleDetector {
   }
 
   /**
+   * Decodes a binary prototype mask for a single detected YOLO11-seg bubble.
+   *
+   * @param rawBox - { cx, cy, w, h } in model input coordinate space (e.g. 1024x1024).
+   * @param coeffs - 32 mask coefficients for this detection.
+   * @param protoData - Float32Array from output1 [1, 32, 256, 256].
+   * @param protoDim - Dimension of prototype grid (default 256).
+   * @param inputSize - Model input dimension (default 1024).
+   * @returns Bounding box on the proto grid and local binary mask, or null if invalid.
+   */
+  static decodeProtoMask(
+    rawBox: { cx: number; cy: number; w: number; h: number },
+    coeffs: Float32Array,
+    protoData: Float32Array,
+    protoDim: number = 256,
+    inputSize: number = 1024
+  ): {
+    mask: Uint8Array;
+    pw: number;
+    ph: number;
+    px1: number;
+    py1: number;
+  } | null {
+    const stride = inputSize / protoDim;
+    const px1 = Math.max(0, Math.floor((rawBox.cx - rawBox.w / 2) / stride));
+    const px2 = Math.min(protoDim, Math.ceil((rawBox.cx + rawBox.w / 2) / stride));
+    const py1 = Math.max(0, Math.floor((rawBox.cy - rawBox.h / 2) / stride));
+    const py2 = Math.min(protoDim, Math.ceil((rawBox.cy + rawBox.h / 2) / stride));
+    const pw = px2 - px1;
+    const ph = py2 - py1;
+    if (pw <= 0 || ph <= 0) return null;
+
+    const mask = new Uint8Array(pw * ph);
+    const planeSize = protoDim * protoDim;
+
+    for (let y = 0; y < ph; y++) {
+      const py = py1 + y;
+      const rowOffset = py * protoDim;
+      for (let x = 0; x < pw; x++) {
+        const px = px1 + x;
+        const pixelIdx = rowOffset + px;
+
+        let logit = 0;
+        for (let k = 0; k < 32; k++) {
+          logit += coeffs[k] * protoData[k * planeSize + pixelIdx];
+        }
+        if (logit >= 0) {
+          mask[y * pw + x] = 1;
+        }
+      }
+    }
+
+    return { mask, pw, ph, px1, py1 };
+  }
+
+  /**
    * Parses YOLO11-seg model outputs into non-overlapping bubble boxes in image coordinates.
    *
    * @param output0 - Output tensor [1, 37, numAnchors].
@@ -116,7 +186,8 @@ export class NeuralBubbleDetector {
    * @param inputSize - Model input dimension (1024).
    * @param scoreThreshold - Minimum confidence score (default 0.35).
    * @param iouThreshold - NMS IoU threshold (default 0.45).
-   * @returns Bounding boxes of detected speech bubbles.
+   * @param output1 - Optional prototype mask tensor [1, 32, 256, 256].
+   * @returns Bounding boxes of detected speech bubbles and optional decoded items.
    */
   static parseYolo11Output(
     output0: any,
@@ -124,14 +195,23 @@ export class NeuralBubbleDetector {
     imageHeight: number,
     inputSize: number = 1024,
     scoreThreshold: number = 0.35,
-    iouThreshold: number = 0.45
+    iouThreshold: number = 0.45,
+    output1?: any
   ): NeuralBubbleDetectionResult {
     const numAnchors = output0.dims[2];
     const dataArr = output0.data as Float32Array;
     const scaleX = imageWidth / inputSize;
     const scaleY = imageHeight / inputSize;
 
-    const candidates: Array<{ x: number; y: number; w: number; h: number; score: number }> = [];
+    const candidates: Array<{
+      x: number;
+      y: number;
+      w: number;
+      h: number;
+      score: number;
+      rawBox: { cx: number; cy: number; w: number; h: number };
+      coeffs: Float32Array;
+    }> = [];
 
     for (let a = 0; a < numAnchors; a++) {
       const score = dataArr[4 * numAnchors + a];
@@ -147,7 +227,19 @@ export class NeuralBubbleDetector {
         const boxH = Math.round(h * scaleY);
 
         if (boxW > 10 && boxH > 10 && x1 >= 0 && y1 >= 0) {
-          candidates.push({ x: x1, y: y1, w: boxW, h: boxH, score });
+          const coeffs = new Float32Array(32);
+          for (let k = 0; k < 32; k++) {
+            coeffs[k] = dataArr[(5 + k) * numAnchors + a];
+          }
+          candidates.push({
+            x: x1,
+            y: y1,
+            w: boxW,
+            h: boxH,
+            score,
+            rawBox: { cx, cy, w, h },
+            coeffs,
+          });
         }
       }
     }
@@ -156,6 +248,10 @@ export class NeuralBubbleDetector {
 
     const selected: BoxRect[] = [];
     const selectedScores: number[] = [];
+    const selectedItems: DecodedYoloBubble[] = [];
+
+    const protoData = output1?.data as Float32Array | undefined;
+    const protoDim = output1?.dims?.[2] ?? 256;
 
     for (const b of candidates) {
       let keep = true;
@@ -172,12 +268,73 @@ export class NeuralBubbleDetector {
         }
       }
       if (keep) {
-        selected.push({ x: b.x, y: b.y, w: b.w, h: b.h });
+        const boxRect = { x: b.x, y: b.y, w: b.w, h: b.h };
+        selected.push(boxRect);
         selectedScores.push(b.score);
+
+        let decodedMask: { mask: Uint8Array; pw: number; ph: number; px1: number; py1: number } | null = null;
+        if (protoData) {
+          decodedMask = NeuralBubbleDetector.decodeProtoMask(b.rawBox, b.coeffs, protoData, protoDim, inputSize);
+        }
+
+        selectedItems.push({
+          box: boxRect,
+          score: b.score,
+          rawBox: b.rawBox,
+          coeffs: b.coeffs,
+          protoMask: decodedMask ?? undefined,
+        });
       }
     }
 
-    return { bubbles: selected, scores: selectedScores };
+    return { bubbles: selected, scores: selectedScores, items: selectedItems };
+  }
+
+  /**
+   * Matches an OCR text bounding box to the index of the best enclosing candidate bubble proposal.
+   *
+   * @param textBox - The OCR bounding box.
+   * @param candidateBubbles - Array of detected bubble boxes.
+   * @param minCoverage - Minimum intersection area over text box area (default 0.50).
+   * @returns Index of the best matching candidate bubble, or -1.
+   */
+  static matchBubbleIndex(
+    textBox: BoxRect,
+    candidateBubbles: BoxRect[],
+    minCoverage: number = 0.50
+  ): number {
+    const textCenter = {
+      x: textBox.x + textBox.w / 2,
+      y: textBox.y + textBox.h / 2,
+    };
+
+    let bestIndex = -1;
+    let bestScore = 0;
+
+    for (let i = 0; i < candidateBubbles.length; i++) {
+      const b = candidateBubbles[i];
+      const interX = Math.min(textBox.x + textBox.w, b.x + b.w) - Math.max(textBox.x, b.x);
+      const interY = Math.min(textBox.y + textBox.h, b.y + b.h) - Math.max(textBox.y, b.y);
+
+      if (interX > 0 && interY > 0) {
+        const interArea = interX * interY;
+        const textArea = Math.max(1, textBox.w * textBox.h);
+        const coverage = interArea / textArea;
+
+        const centerInside =
+          textCenter.x >= b.x &&
+          textCenter.x <= b.x + b.w &&
+          textCenter.y >= b.y &&
+          textCenter.y <= b.y + b.h;
+
+        if (centerInside && coverage >= minCoverage && coverage > bestScore) {
+          bestScore = coverage;
+          bestIndex = i;
+        }
+      }
+    }
+
+    return bestIndex;
   }
 
   /**
@@ -193,53 +350,21 @@ export class NeuralBubbleDetector {
     candidateBubbles: BoxRect[],
     minCoverage: number = 0.50
   ): BoxRect | null {
-    const textCenter = {
-      x: textBox.x + textBox.w / 2,
-      y: textBox.y + textBox.h / 2
-    };
-
-    let bestBubble: BoxRect | null = null;
-    let bestScore = 0;
-
-    for (const b of candidateBubbles) {
-      // Intersection
-      const interX = Math.min(textBox.x + textBox.w, b.x + b.w) - Math.max(textBox.x, b.x);
-      const interY = Math.min(textBox.y + textBox.h, b.y + b.h) - Math.max(textBox.y, b.y);
-
-      if (interX > 0 && interY > 0) {
-        const interArea = interX * interY;
-        const textArea = Math.max(1, textBox.w * textBox.h);
-        const coverage = interArea / textArea;
-
-        const centerInside =
-          textCenter.x >= b.x &&
-          textCenter.x <= b.x + b.w &&
-          textCenter.y >= b.y &&
-          textCenter.y <= b.y + b.h;
-
-        if (centerInside && coverage >= minCoverage) {
-          if (coverage > bestScore) {
-            bestScore = coverage;
-            bestBubble = b;
-          }
-        }
-      }
-    }
-
-    return bestBubble;
+    const idx = this.matchBubbleIndex(textBox, candidateBubbles, minCoverage);
+    return idx !== -1 ? candidateBubbles[idx] : null;
   }
 
   /**
-   * Executes neural bubble detection on an image canvas, initializing ONNX runtime on demand.
+   * Executes neural bubble detection on an image canvas, returning boxes, scores, and optional decoded masks.
    *
    * @param canvas - The source image canvas.
    * @param popupState - Extension settings state to read GPU acceleration overrides.
-   * @returns Detected speech bubble boxes across the image, or null if model unavailable.
+   * @returns Detailed detection result with bubble boxes and optional decoded prototype masks, or null if model unavailable.
    */
-  static async detect(
+  static async detectFull(
     canvas: OffscreenCanvas | HTMLCanvasElement,
     popupState?: PopupState
-  ): Promise<BoxRect[] | null> {
+  ): Promise<NeuralBubbleDetectionResult | null> {
     const entry = bubbleRegistry['bubble-yolo'];
     if (!entry) return null;
 
@@ -292,7 +417,7 @@ export class NeuralBubbleDetector {
       const width = canvas.width;
       const height = canvas.height;
 
-      // Downscale to model input dimension (640x640)
+      // Downscale to model input dimension (1024x1024)
       const resizeCanvas = typeof OffscreenCanvas !== 'undefined'
         ? new OffscreenCanvas(inputSize, inputSize)
         : document.createElement('canvas');
@@ -317,7 +442,15 @@ export class NeuralBubbleDetector {
 
       let parsed: NeuralBubbleDetectionResult;
       if (outputs.output0) {
-        parsed = NeuralBubbleDetector.parseYolo11Output(outputs.output0, width, height, inputSize, 0.35, 0.45);
+        parsed = NeuralBubbleDetector.parseYolo11Output(
+          outputs.output0,
+          width,
+          height,
+          inputSize,
+          0.35,
+          0.45,
+          outputs.output1
+        );
       } else {
         parsed = NeuralBubbleDetector.parseDetections(
           outputs.labels.data as any,
@@ -328,10 +461,25 @@ export class NeuralBubbleDetector {
       }
 
       console.log(`[NeuralBubbleDetector] Detected ${parsed.bubbles.length} bubbles.`);
-      return parsed.bubbles;
+      return parsed;
     } catch (error) {
       console.warn('[NeuralBubbleDetector] Detection failed, falling back to heuristic:', error);
       return null;
     }
+  }
+
+  /**
+   * Executes neural bubble detection on an image canvas, returning bubble proposals.
+   *
+   * @param canvas - The source image canvas.
+   * @param popupState - Extension settings state to read GPU acceleration overrides.
+   * @returns Detected speech bubble boxes across the image, or null if model unavailable.
+   */
+  static async detect(
+    canvas: OffscreenCanvas | HTMLCanvasElement,
+    popupState?: PopupState
+  ): Promise<BoxRect[] | null> {
+    const res = await this.detectFull(canvas, popupState);
+    return res ? res.bubbles : null;
   }
 }

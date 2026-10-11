@@ -27,8 +27,14 @@ export const BUBBLE_MODE_OPTIONS: BubbleModeOption[] = [
   },
   {
     id: 'neural',
-    name: 'YOLO Bubble',
-    tooltip: 'AI object detector for spiky shock bubbles, dark backgrounds, and complex manga art (~11 MB).',
+    name: 'YOLO Box',
+    tooltip: 'Fast AI bounding box detector for speech bubble bounds (~11 MB).',
+    isModel: true,
+  },
+  {
+    id: 'neural-mask',
+    name: 'YOLO Smart Mask',
+    tooltip: 'Neural segmentation mask with morphological tail severing on AI contours (~11 MB).',
     isModel: true,
   },
 ];
@@ -271,7 +277,8 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
         const inpaintUnavailable = Boolean(selectedInpaint && !selectedInpaint.isDownloaded);
         const selectedOcr = hydratedOcr.find((engine) => engine.id === (currentState.activeOcrId || 'v6-small'));
         const ocrUnavailable = Boolean(selectedOcr && !selectedOcr.isDownloaded);
-        const bubbleUnavailable = currentState.bubbleMode === 'neural' && !isBubbleYoloReady;
+        const isNeuralActive = currentState.bubbleMode === 'neural' || currentState.bubbleMode === 'neural-mask';
+        const bubbleUnavailable = isNeuralActive && !isBubbleYoloReady;
         const repairs: Partial<PopupState> = {};
         if (translationUnavailable) repairs.activeEngineId = 'gg-translate';
         if (inpaintUnavailable) repairs.activeInpaintId = 'simple';
@@ -814,11 +821,13 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                 className="w-full flex items-center justify-between p-3 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md hover:border-[var(--color-ink)] transition-colors cursor-pointer"
               >
                 <span className="font-medium truncate pr-2">
-                  {activeBubbleMode === 'neural' && isNeuralDownloaded
-                    ? 'YOLO Bubble'
-                    : activeBubbleMode === 'heuristic'
-                      ? 'Heuristic'
-                      : 'Disabled'}
+                  {activeBubbleMode === 'neural-mask' && isNeuralDownloaded
+                    ? 'YOLO Smart Mask'
+                    : activeBubbleMode === 'neural' && isNeuralDownloaded
+                      ? 'YOLO Box'
+                      : activeBubbleMode === 'heuristic'
+                        ? 'Heuristic'
+                        : 'Disabled'}
                 </span>
                 <ChevronDown size={16} className={`text-[var(--color-dust)] transition-transform ${isOpenBubbleMode ? 'rotate-180' : ''}`} />
               </button>

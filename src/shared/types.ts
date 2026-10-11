@@ -154,7 +154,7 @@ export interface UserAccountInfo {
 
 import type { RenderFontPresetId } from './renderFontPresets';
 
-export type BubbleDetectionMode = 'off' | 'heuristic' | 'neural';
+export type BubbleDetectionMode = 'off' | 'heuristic' | 'neural' | 'neural-mask';
 
 export interface PopupState {
   isExtensionEnabled: boolean;

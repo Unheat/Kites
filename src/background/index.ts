@@ -98,7 +98,9 @@ export function normalizePopupState(popupState: Partial<PopupState> | undefined)
   const activeOcrId = resolveOcrTier(completedState.activeOcrId);
   const renderFontPresetId = normalizeRenderFontPresetId(completedState.renderFontPresetId);
   const bubbleMode: BubbleDetectionMode =
-    completedState.bubbleMode === 'heuristic' || completedState.bubbleMode === 'neural'
+    completedState.bubbleMode === 'heuristic' ||
+    completedState.bubbleMode === 'neural' ||
+    completedState.bubbleMode === 'neural-mask'
       ? completedState.bubbleMode
       : 'off';
   const state: PopupState = {

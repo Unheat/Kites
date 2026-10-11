@@ -30,6 +30,14 @@ export interface BubbleShapeEvidence {
   /** Observed light pixels only, excluding force-filled OCR rectangles. */
   observedInterior: Uint8Array;
   eroded: Uint8Array;
+  carrierBox?: BoxRect;
+  isSeveredCarrier?: boolean;
+}
+
+export interface SeveredTailResult {
+  carrier: BoxRect;
+  eroded: Uint8Array;
+  reconstructed: Uint8Array;
 }
 
 export interface HeuristicExtractionOptions {
@@ -154,12 +162,91 @@ export class HeuristicBubbleExtractor {
       }
     }
 
-    // 4. Morphological erosion with disk radius R
+    // 4. Sever narrow pointing tails via morphological opening on binary mask
     const baseR = options.baseErodeRadius ?? 14;
     const rErode = Math.max(4, Math.round(baseR * scale));
+    const textCenterX = Math.max(0, Math.min(patchW - 1, Math.round((textBox.x + textBox.w / 2 - minX) * scale)));
+    const textCenterY = Math.max(0, Math.min(patchH - 1, Math.round((textBox.y + textBox.h / 2 - minY) * scale)));
+
+    const severed = HeuristicBubbleExtractor.severTailOnBinaryMask(
+      mask, patchW, patchH, textCenterX, textCenterY, rErode,
+      origPatchW, origPatchH, minX, minY, scale, scale, true
+    );
+
+    if (!severed) {
+      return null;
+    }
+
+    // Preserve morphology evidence for conservative multi-lobe layout validation.
+    options.onShapeEvidence?.({
+      x: minX,
+      y: minY,
+      scale,
+      width: patchW,
+      height: patchH,
+      interior: mask,
+      observedInterior: observedInterior!,
+      eroded: severed.eroded,
+      carrierBox: severed.carrier,
+      isSeveredCarrier: true,
+    });
+
+    const carrier = severed.carrier;
+
+    // Sanity clamp: carrier must at least contain the original text box
+    const finalX = Math.min(carrier.x, textBox.x);
+    const finalY = Math.min(carrier.y, textBox.y);
+    const finalW = Math.max(carrier.w, textBox.w, (carrier.x + carrier.w) - finalX);
+    const finalH = Math.max(carrier.h, textBox.h, (carrier.y + carrier.h) - finalY);
+
+    return {
+      x: Math.max(0, finalX),
+      y: Math.max(0, finalY),
+      w: Math.min(imgW - Math.max(0, finalX), finalW),
+      h: Math.min(imgH - Math.max(0, finalY), finalH),
+    };
+  }
+
+  /**
+   * Applies morphological opening (disk erosion + BFS flood fill from seed + constrained dilation)
+   * on a binary mask to sever narrow pointing tails and extract the main carrier chamber bounding box.
+   *
+   * @param mask - Binary mask array (width * height), 1 inside, 0 outside.
+   * @param patchW - Mask width in pixels.
+   * @param patchH - Mask height in pixels.
+   * @param textCenterX - Target center X in patch coordinates.
+   * @param textCenterY - Target center Y in patch coordinates.
+   * @param rErode - Disk erosion radius.
+   * @param origPatchW - Original image patch width.
+   * @param origPatchH - Original image patch height.
+   * @param minX - Origin X in image space.
+   * @param minY - Origin Y in image space.
+   * @param scaleX - Horizontal scale factor (patchW / origPatchW).
+   * @param scaleY - Vertical scale factor (patchH / origPatchH).
+   * @param leakGuard - Whether to reject components filling >= 96% of patch (true for heuristic, false for AI mask).
+   * @returns Bounding box in image space and internal morphological buffers, or null if eroded away.
+   */
+  static severTailOnBinaryMask(
+    mask: Uint8Array,
+    patchW: number,
+    patchH: number,
+    textCenterX: number,
+    textCenterY: number,
+    rErode: number,
+    origPatchW: number,
+    origPatchH: number,
+    minX: number,
+    minY: number,
+    scaleX: number,
+    scaleY: number,
+    leakGuard: boolean = true
+  ): SeveredTailResult | null {
+    if (patchW <= 0 || patchH <= 0 || rErode <= 0) return null;
+
     const rSq = rErode * rErode;
     const eroded = new Uint8Array(patchW * patchH);
 
+    // 1. Disk erosion
     for (let py = rErode; py < patchH - rErode; py++) {
       for (let px = rErode; px < patchW - rErode; px++) {
         if (mask[py * patchW + px] === 0) continue;
@@ -186,16 +273,7 @@ export class HeuristicBubbleExtractor {
       }
     }
 
-    // Preserve the un-opened interior and erosion result for layout evidence only. The carrier,
-    // OCR polygons, and inpaint masks are unchanged. Rectangular overlap alone cannot prove lobes.
-    options.onShapeEvidence?.({
-      x: minX, y: minY, scale, width: patchW, height: patchH, interior: mask, observedInterior: observedInterior!, eroded
-    });
-
-    // 5. Find seed point near text center in eroded mask
-    const textCenterX = Math.max(0, Math.min(patchW - 1, Math.round((textBox.x + textBox.w / 2 - minX) * scale)));
-    const textCenterY = Math.max(0, Math.min(patchH - 1, Math.round((textBox.y + textBox.h / 2 - minY) * scale)));
-
+    // 2. Find seed point near text center in eroded mask
     let seedX = -1;
     let seedY = -1;
 
@@ -218,12 +296,11 @@ export class HeuristicBubbleExtractor {
       }
     }
 
-    // If erosion wiped out the entire mask, fall back to geometric bounds or null
     if (seedX === -1 || seedY === -1) {
       return null;
     }
 
-    // 6. BFS flood fill on connected component of eroded mask
+    // 3. BFS flood fill on connected component of eroded mask
     const visited = new Uint8Array(patchW * patchH);
     const queueX: number[] = [seedX];
     const queueY: number[] = [seedY];
@@ -263,7 +340,7 @@ export class HeuristicBubbleExtractor {
       return null;
     }
 
-    // 7. Dilate connected component by R bounded by original mask
+    // 4. Dilate connected component by rErode bounded by original mask
     const reconstructed = new Uint8Array(patchW * patchH);
     for (let i = 0; i < componentX.length; i++) {
       const cx = componentX[i];
@@ -286,7 +363,7 @@ export class HeuristicBubbleExtractor {
       }
     }
 
-    // 8. Extract bounding box of reconstructed carrier
+    // 5. Extract bounding box of reconstructed carrier
     let minPx = patchW;
     let maxPx = 0;
     let minPy = patchH;
@@ -308,28 +385,19 @@ export class HeuristicBubbleExtractor {
     }
 
     // Scale coordinates back to original image space
-    const carrierX = Math.round(minX + minPx / scale);
-    const carrierY = Math.round(minY + minPy / scale);
-    const carrierW = Math.round((maxPx - minPx + 1) / scale);
-    const carrierH = Math.round((maxPy - minPy + 1) / scale);
+    const carrierX = Math.round(minX + minPx / scaleX);
+    const carrierY = Math.round(minY + minPy / scaleY);
+    const carrierW = Math.round((maxPx - minPx + 1) / scaleX);
+    const carrierH = Math.round((maxPy - minPy + 1) / scaleY);
 
-    // Leak Guard: if the reconstructed component fills >= 96% of the expanded patch in BOTH dimensions,
-    // this indicates an unbounded white background without enclosing dark borders (e.g. open page margin).
-    if (carrierW >= origPatchW * 0.96 && carrierH >= origPatchH * 0.96) {
+    if (leakGuard && carrierW >= origPatchW * 0.96 && carrierH >= origPatchH * 0.96) {
       return null;
     }
 
-    // Sanity clamp: carrier must at least contain the original text box
-    const finalX = Math.min(carrierX, textBox.x);
-    const finalY = Math.min(carrierY, textBox.y);
-    const finalW = Math.max(carrierW, textBox.w, (carrierX + carrierW) - finalX);
-    const finalH = Math.max(carrierH, textBox.h, (carrierY + carrierH) - finalY);
-
     return {
-      x: Math.max(0, finalX),
-      y: Math.max(0, finalY),
-      w: Math.min(imgW - finalX, finalW),
-      h: Math.min(imgH - finalY, finalH)
+      carrier: { x: carrierX, y: carrierY, w: carrierW, h: carrierH },
+      eroded,
+      reconstructed,
     };
   }
 

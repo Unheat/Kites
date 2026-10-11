@@ -7,8 +7,8 @@ import { GoogleTranslateEngine } from '../offscreen/engines/translation/GoogleTr
 import { renderTextBlocksBatch, measureBubbleLayoutFontSize, type TextBlockItem } from '../offscreen/utils/canvasTypesetting';
 import { createCanvas, loadImage } from 'canvas';
 import type { Point2D } from '../shared/utils/geometry';
-import type { BoxRect } from '../offscreen/utils/bubbleExpansion';
 import { NeuralBubbleDetector } from '../offscreen/engines/bubble/NeuralBubbleDetector';
+import { HeuristicBubbleExtractor } from '../offscreen/engines/bubble/HeuristicBubbleExtractor';
 import { acquireBubbleGeometry, resolveBubbleLayouts, type BubbleGeometry } from '../offscreen/services/BubbleLayoutService';
 import { DEFAULT_RENDER_FONT_FAMILY } from '../offscreen/utils/canvasTypesetting';
 import * as ort from 'onnxruntime-node';
@@ -23,9 +23,10 @@ async function runPipelineVisualBubbleTest() {
   const baseResultDir = path.join(__dirname, 'result');
   const heuristicDir = path.join(baseResultDir, 'pipeline_bubble_heuristic');
   const neuralDir = path.join(baseResultDir, 'pipeline_bubble_neural');
+  const smartMaskDir = path.join(baseResultDir, 'pipeline_bubble_smart_mask');
 
   // Ensure result directories exist and clean stale outputs
-  [heuristicDir, neuralDir].forEach((dir) => {
+  [heuristicDir, neuralDir, smartMaskDir].forEach((dir) => {
     if (fs.existsSync(dir)) {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -186,22 +187,31 @@ async function runPipelineVisualBubbleTest() {
 
       const neuralOutput = await neuralSession.run(feeds);
 
-      let detectedBubbles: BoxRect[];
+      let parsedNeural: ReturnType<typeof NeuralBubbleDetector.parseYolo11Output>;
       if (neuralOutput.output0) {
-        detectedBubbles = NeuralBubbleDetector.parseYolo11Output(neuralOutput.output0, pageWidth, pageHeight, inputSize, 0.35, 0.45).bubbles;
+        parsedNeural = NeuralBubbleDetector.parseYolo11Output(
+          neuralOutput.output0,
+          pageWidth,
+          pageHeight,
+          inputSize,
+          0.35,
+          0.45,
+          neuralOutput.output1
+        );
       } else {
-        detectedBubbles = NeuralBubbleDetector.parseDetections(
+        parsedNeural = NeuralBubbleDetector.parseDetections(
           neuralOutput.labels.data as any,
           neuralOutput.boxes.data as any,
           neuralOutput.scores.data as any,
           0.30
-        ).bubbles;
+        );
       }
+      const detectedBubbles = parsedNeural.bubbles;
       console.log(`[Neural] Detected ${detectedBubbles.length} bubble proposals across image.`);
 
+      // Pass 2: YOLO Box (raw bounding proposals)
       const neuralGeometry = acquireBubbleGeometry(rawImageData, boxes, detectedBubbles);
 
-      // Bake Neural Output
       const canvas = createCanvas(pageWidth, pageHeight);
       const ctx = canvas.getContext('2d');
       ctx.drawImage(cleanedImage, 0, 0);
@@ -221,7 +231,7 @@ async function runPipelineVisualBubbleTest() {
             fontSize: ocrResult.fontSizes ? ocrResult.fontSizes[i] : undefined,
             angle: ocrResult.angles ? ocrResult.angles[i] : undefined,
             originalText: texts[i],
-            sourceLineCount: ocrResult.lineCounts ? ocrResult.lineCounts[i] : undefined
+            sourceLineCount: ocrResult.lineCounts ? ocrResult.lineCounts[i] : undefined,
           });
         }
       }
@@ -229,6 +239,95 @@ async function runPipelineVisualBubbleTest() {
       const outPath = path.join(neuralDir, testFile);
       fs.writeFileSync(outPath, canvas.toBuffer('image/png'));
       console.log(`[Neural] Saved baked image: result/pipeline_bubble_neural/${testFile}`);
+
+      // Pass 3: YOLO Smart Mask (neural-mask with morphological tail severing on AI mask)
+      if (parsedNeural.items && parsedNeural.items.length > 0) {
+        console.log(`\n--- [Pass 3] Tier 3 YOLO Smart Mask Expansion ---`);
+        const neuralShapes: (any | undefined)[] = new Array(boxes.length).fill(undefined);
+
+        for (let i = 0; i < boxes.length; i++) {
+          const textBox = boxes[i];
+          const matchedIdx = NeuralBubbleDetector.matchBubbleIndex(textBox, detectedBubbles);
+          if (matchedIdx === -1) continue;
+
+          const item = parsedNeural.items[matchedIdx];
+          if (!item || !item.protoMask) continue;
+
+          const { mask, pw, ph, px1, py1 } = item.protoMask;
+          const minX = Math.round(px1 * (pageWidth / 256));
+          const minY = Math.round(py1 * (pageHeight / 256));
+          const origPatchW = Math.max(1, Math.round(pw * (pageWidth / 256)));
+          const origPatchH = Math.max(1, Math.round(ph * (pageHeight / 256)));
+
+          const scaleX = pw / origPatchW;
+          const scaleY = ph / origPatchH;
+
+          const textCenterX = Math.max(0, Math.min(pw - 1, Math.round((textBox.x + textBox.w / 2 - minX) * scaleX)));
+          const textCenterY = Math.max(0, Math.min(ph - 1, Math.round((textBox.y + textBox.h / 2 - minY) * scaleY)));
+
+          const avgScale = (scaleX + scaleY) / 2;
+          const rErode = Math.max(3, Math.round(14 * avgScale));
+
+          const severed = HeuristicBubbleExtractor.severTailOnBinaryMask(
+            mask,
+            pw,
+            ph,
+            textCenterX,
+            textCenterY,
+            rErode,
+            origPatchW,
+            origPatchH,
+            minX,
+            minY,
+            scaleX,
+            scaleY,
+            false
+          );
+
+          if (severed) {
+            neuralShapes[i] = {
+              x: minX,
+              y: minY,
+              scale: avgScale,
+              width: pw,
+              height: ph,
+              interior: mask,
+              observedInterior: mask,
+              eroded: severed.eroded,
+              carrierBox: severed.carrier,
+              isSeveredCarrier: true,
+            };
+          }
+        }
+
+        const maskGeometry = acquireBubbleGeometry(rawImageData, boxes, detectedBubbles, neuralShapes);
+        const maskCanvas = createCanvas(pageWidth, pageHeight);
+        const maskCtx = maskCanvas.getContext('2d');
+        maskCtx.drawImage(cleanedImage, 0, 0);
+        const maskTypesetBoxes = resolveLayouts(maskCtx, maskGeometry);
+
+        const maskTextBlockItems: TextBlockItem[] = [];
+        for (let i = 0; i < translatedTexts.length; i++) {
+          const text = translatedTexts[i];
+          const poly = polygons[i];
+          if (text && poly) {
+            maskTextBlockItems.push({
+              text,
+              polygon: poly,
+              direction: ocrResult.directions ? ocrResult.directions[i] : 'h',
+              typesetBox: maskTypesetBoxes[i],
+              fontSize: ocrResult.fontSizes ? ocrResult.fontSizes[i] : undefined,
+              angle: ocrResult.angles ? ocrResult.angles[i] : undefined,
+              originalText: texts[i],
+              sourceLineCount: ocrResult.lineCounts ? ocrResult.lineCounts[i] : undefined,
+            });
+          }
+        }
+        renderTextBlocksBatch(maskCtx as any, maskTextBlockItems, 'en', { width: pageWidth, height: pageHeight });
+        const maskOutPath = path.join(smartMaskDir, testFile);
+        fs.writeFileSync(maskOutPath, maskCanvas.toBuffer('image/png'));
+        console.log(`[SmartMask] Saved baked image: result/pipeline_bubble_smart_mask/${testFile}`);
+      }
     }
   }
 
@@ -237,8 +336,9 @@ async function runPipelineVisualBubbleTest() {
   console.log('\n======================================================');
   console.log('--- Speech Bubble Visual Test Complete Successfully ---');
   console.log('Outputs:');
-  console.log('  Heuristic -> result/pipeline_bubble_heuristic/');
-  console.log('  Neural    -> result/pipeline_bubble_neural/');
+  console.log('  Heuristic  -> result/pipeline_bubble_heuristic/');
+  console.log('  Neural     -> result/pipeline_bubble_neural/');
+  console.log('  Smart Mask -> result/pipeline_bubble_smart_mask/');
   console.log('======================================================\n');
 }
 

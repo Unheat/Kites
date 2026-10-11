@@ -32,4 +32,42 @@ describe('NeuralBubbleDetector container safety', () => {
     expect(NeuralBubbleDetector.hasActiveSession()).toBe(false);
     expect((NeuralBubbleDetector as any).activeProvider).toBeNull();
   });
+
+  it('decodes prototype mask via linear combination of 32 channels and logit threshold >= 0', () => {
+    const protoDim = 256;
+    const protoData = new Float32Array(32 * protoDim * protoDim).fill(-1.0);
+    // Channel 0 has positive logits (+2.0) in region x: 10..20, y: 10..20
+    for (let y = 10; y <= 20; y++) {
+      for (let x = 10; x <= 20; x++) {
+        protoData[0 * protoDim * protoDim + y * protoDim + x] = 2.0;
+      }
+    }
+
+    const coeffs = new Float32Array(32);
+    coeffs[0] = 1.0; // Positive coefficient on channel 0
+
+    // rawBox in 1024 space: center at (60, 60), size (80, 80) -> proto grid [10, 20]
+    const rawBox = { cx: 60, cy: 60, w: 40, h: 40 };
+    const decoded = NeuralBubbleDetector.decodeProtoMask(rawBox, coeffs, protoData, protoDim, 1024);
+
+    expect(decoded).not.toBeNull();
+    if (decoded) {
+      expect(decoded.pw).toBeGreaterThan(0);
+      expect(decoded.ph).toBeGreaterThan(0);
+      // Some pixels in the mask must be 1 where channel 0 logit was +2.0
+      let hasOne = false;
+      for (let i = 0; i < decoded.mask.length; i++) {
+        if (decoded.mask[i] === 1) hasOne = true;
+      }
+      expect(hasOne).toBe(true);
+    }
+  });
+
+  it('matches bubble index with coverage >= 0.50 and center inside', () => {
+    const text = { x: 50, y: 50, w: 40, h: 40 };
+    const bubbleA = { x: 0, y: 0, w: 20, h: 20 }; // No overlap
+    const bubbleB = { x: 40, y: 40, w: 60, h: 60 }; // Encloses text
+    expect(NeuralBubbleDetector.matchBubbleIndex(text, [bubbleA, bubbleB])).toBe(1);
+    expect(NeuralBubbleDetector.matchBubbleIndex(text, [bubbleA])).toBe(-1);
+  });
 });

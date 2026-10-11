@@ -178,13 +178,15 @@ export class PipelineOrchestrator {
             // Acquire engine through BubbleManager (OOP lifecycle & clean eviction)
             const { engine, release } = await bubbleManager.acquireEngine(bubbleMode, popupState);
             try {
-              const neuralBubbles = bubbleMode === 'neural' && engine
-                ? (await engine.detect(rawCanvas, ocrResult.boxes, popupState))?.bubbles
+              const isNeuralMode = bubbleMode === 'neural' || bubbleMode === 'neural-mask';
+              const neuralResult = isNeuralMode && engine
+                ? await engine.detect(rawCanvas, ocrResult.boxes, popupState)
                 : undefined;
               bubbleGeometry = acquireBubbleGeometry(
                 rawCtx.getImageData(0, 0, rawBitmap.width, rawBitmap.height),
                 ocrResult.boxes,
-                neuralBubbles
+                neuralResult?.bubbles,
+                neuralResult?.shapes
               );
             } finally {
               release();

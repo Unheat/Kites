@@ -187,4 +187,37 @@ describe('WebLLM download control', () => {
     });
     container.remove();
   });
+
+  it('renders both YOLO Box and YOLO Smart Mask options in dropdown', async () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const updateState = vi.fn();
+
+    const state: PopupState = {
+      ...DEFAULT_POPUP_STATE,
+      bubbleMode: 'off',
+    };
+
+    await act(async () => {
+      root.render(<EngineSelectionPanel state={state} updateState={updateState} />);
+    });
+
+    const bubbleButton = container.querySelector<HTMLButtonElement>('button[aria-label="Layout and Bubble Fit"]');
+    await act(async () => {
+      bubbleButton?.click();
+    });
+
+    const buttons = Array.from(container.querySelectorAll('button'));
+    const yoloBoxBtn = buttons.find((b) => b.textContent?.includes('YOLO Box'));
+    const yoloMaskBtn = buttons.find((b) => b.textContent?.includes('YOLO Smart Mask'));
+
+    expect(yoloBoxBtn).toBeDefined();
+    expect(yoloMaskBtn).toBeDefined();
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
 });
