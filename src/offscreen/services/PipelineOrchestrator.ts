@@ -9,7 +9,7 @@ import { inpaintRegistry } from '../engines/inpaint/inpaintRegistry';
 import { InpaintCacheManager } from './InpaintCacheManager';
 import { renderTextBlocksBatch, measureBubbleLayoutFontSize, LANGUAGE_ORIENTATION_PRESETS, type TextBlockItem, type RenderedBlockInfo } from '../utils/canvasTypesetting';
 import { resolveRenderFontFamily } from '../../shared/renderFontPresets';
-import { NeuralBubbleDetector } from '../engines/bubble/NeuralBubbleDetector';
+import { bubbleManager } from './BubbleManager';
 import { acquireBubbleGeometry, resolveBubbleLayouts, type BubbleGeometry } from './BubbleLayoutService';
 
 export class PipelineOrchestrator {
@@ -162,9 +162,9 @@ export class PipelineOrchestrator {
       // 3.1 Acquire original bubble geometry only. Final layout waits for translated text/fonts.
       let bubbleGeometry: BubbleGeometry | undefined;
       const bubbleMode = popupState?.bubbleMode ?? 'heuristic';
-      // Cleanly evict cached neural ONNX session if user switched to heuristic or disabled
-      if (bubbleMode !== 'neural' && NeuralBubbleDetector.hasActiveSession()) {
-        void NeuralBubbleDetector.dispose();
+      // Cleanly evict cached bubble engine if mode is disabled
+      if (bubbleMode === 'off') {
+        void bubbleManager.destroy();
       }
       // Legacy CJK/RTL rendering does not honor fixed bubble rectangles.
       const supportsBubbleLayout = (LANGUAGE_ORIENTATION_PRESETS[targetLang.toLowerCase().trim()] ?? 'h') === 'h';
@@ -175,13 +175,20 @@ export class PipelineOrchestrator {
           const rawCtx = rawCanvas.getContext('2d', { willReadFrequently: true });
           if (rawCtx) {
             rawCtx.drawImage(rawBitmap, 0, 0);
-            // Matching is non-exclusive: exact proposal identity tracks shared neural containers.
-            // Overlapping heuristic carriers are only uncertain candidates, never proof of lobes.
-            const neuralBubbles = bubbleMode === 'neural'
-              ? await NeuralBubbleDetector.detect(rawCanvas, popupState) : undefined;
-            bubbleGeometry = acquireBubbleGeometry(
-              rawCtx.getImageData(0, 0, rawBitmap.width, rawBitmap.height), ocrResult.boxes, neuralBubbles
-            );
+            // Acquire engine through BubbleManager (OOP lifecycle & clean eviction)
+            const { engine, release } = await bubbleManager.acquireEngine(bubbleMode, popupState);
+            try {
+              const neuralBubbles = bubbleMode === 'neural' && engine
+                ? (await engine.detect(rawCanvas, ocrResult.boxes, popupState))?.bubbles
+                : undefined;
+              bubbleGeometry = acquireBubbleGeometry(
+                rawCtx.getImageData(0, 0, rawBitmap.width, rawBitmap.height),
+                ocrResult.boxes,
+                neuralBubbles
+              );
+            } finally {
+              release();
+            }
           }
           if (typeof rawBitmap.close === 'function') {
             rawBitmap.close();

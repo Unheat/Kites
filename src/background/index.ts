@@ -600,7 +600,7 @@ async function isOffscreenResponsive(): Promise<boolean> {
  *
  * @returns A promise that resolves once a fresh offscreen document is ready.
  */
-async function recreateOffscreenDocument(): Promise<void> {
+export async function recreateOffscreenDocument(): Promise<void> {
   try {
     if (await chrome.offscreen.hasDocument()) {
       console.warn('[Background] Offscreen document is unresponsive; closing it for a clean restart.');
@@ -677,7 +677,7 @@ export async function sendMessageToOffscreen(message: any, timeoutMs: number = 3
  * @param {number} tabId - The ID of the tab that requested the translation (for returning result).
  * @returns {Promise<void>}
  */
-async function queueTranslation(srcUrl: string, tabId?: number) {
+export async function queueTranslation(srcUrl: string, tabId?: number) {
   const existingJob = srcUrl ? await db.translationJobs.where('srcUrl').equals(srcUrl).first() : null;
   const isStale = existingJob && (Date.now() - existingJob.timestamp > 5000);
 
@@ -688,6 +688,22 @@ async function queueTranslation(srcUrl: string, tabId?: number) {
 
   if (existingJob) {
     await deleteJobs([existingJob.id!]);
+  }
+
+  // Queue capacity guard: allow up to configured max queue capacity
+  const stateData = await chrome.storage.local.get(STORAGE_KEYS.POPUP_STATE);
+  const popupState = stateData[STORAGE_KEYS.POPUP_STATE] as PopupState | undefined;
+  const maxQueueCapacity = Math.min(10, Math.max(1, popupState?.concurrency || 3));
+  const queuedCount = await db.translationJobs.where('status').equals('queued').count();
+  if (queuedCount >= maxQueueCapacity) {
+    console.warn(`[Background] Translation queue is at maximum capacity (${queuedCount}/${maxQueueCapacity}). Rejecting request:`, srcUrl);
+    if (tabId) {
+      chrome.tabs.sendMessage(tabId, {
+        type: 'TRANSLATION_ERROR',
+        payload: { originalUrl: srcUrl, error: 'Translation queue is full. Please wait for current images to finish.' }
+      }).catch(() => {});
+    }
+    return;
   }
 
   console.log('[Background] Queuing image URL:', srcUrl);
@@ -705,7 +721,7 @@ async function queueTranslation(srcUrl: string, tabId?: number) {
 /**
  * Queues a captured image (crop or screenshot) by saving its Blob to IndexedDB
  * and scheduling it in the background queue.
- *
+ * 
  * @param {string} requestId - Unique identifier for the capture session.
  * @param {string} dataUrl - Base64 data URL of the cropped screen area.
  * @param {number} [tabId] - ID of the tab that requested translation.
@@ -715,6 +731,21 @@ async function queueCapturedTranslation(requestId: string, dataUrl: string, tabI
   const response = await fetch(dataUrl);
   const blob = await response.blob();
   const srcUrl = `kites-capture:${requestId}`;
+
+  const stateData = await chrome.storage.local.get(STORAGE_KEYS.POPUP_STATE);
+  const popupState = stateData[STORAGE_KEYS.POPUP_STATE] as PopupState | undefined;
+  const maxQueueCapacity = Math.min(10, Math.max(1, popupState?.concurrency || 3));
+  const queuedCount = await db.translationJobs.where('status').equals('queued').count();
+  if (queuedCount >= maxQueueCapacity) {
+    console.warn(`[Background] Translation queue is at maximum capacity (${queuedCount}/${maxQueueCapacity}). Rejecting capture request:`, srcUrl);
+    if (tabId) {
+      chrome.tabs.sendMessage(tabId, {
+        type: 'CAPTURE_TRANSLATION_ERROR',
+        payload: { requestId, error: 'Translation queue is full. Please wait for current images to finish.' }
+      }).catch(() => {});
+    }
+    return;
+  }
 
   console.log('[Background] Queuing captured screen area:', srcUrl);
   const jobId = (await db.translationJobs.add({
@@ -801,27 +832,12 @@ export async function reclaimStaleJobs(): Promise<void> {
   }
 }
 
-async function processQueue() {
+export async function processQueue() {
   if (isProcessingQueue) return;
   isProcessingQueue = true;
   
   try {
-    // Dynamically fetch concurrency setting
-    const stateData = await chrome.storage.local.get(STORAGE_KEYS.POPUP_STATE);
-    const popupState = stateData[STORAGE_KEYS.POPUP_STATE] as PopupState | undefined;
-    const configuredConcurrency = popupState?.concurrency || 3;
-    const concurrency = Math.min(5, Math.max(1, configuredConcurrency));
-
     // Reclaim slots held by dead jobs before counting capacity.
-    //
-    // A job is marked 'processing'/'downloading' in IndexedDB while the offscreen document
-    // works on it, and only moves to 'completed'/'error' when that work reports back. If the
-    // offscreen document is torn down mid-job -- a browser/tab crash, a GPU process reset, or
-    // the extension being reloaded -- nothing ever writes that terminal status, so the row
-    // stays 'processing' forever and permanently consumes a concurrency slot. At the default
-    // concurrency of 1 a single crash bricks the queue for good: every later request just logs
-    // "Queue at capacity" and never runs. Anything older than the timeout cannot still be in
-    // flight, so it is failed here to release the slot.
     await reclaimStaleJobs();
 
     // Check how many are currently active
@@ -829,29 +845,27 @@ async function processQueue() {
     const processingCount = await db.translationJobs.where('status').equals('processing').count();
     const activeCount = downloadingCount + processingCount;
     
-    if (activeCount >= concurrency) {
-      console.log(`[Background] Queue at capacity (${activeCount}/${concurrency}). Waiting...`);
+    // Sequential Execution Guard:
+    // WebGPU and ONNX Runtime Web JSEP strictly require serialized execution on the Offscreen thread.
+    // Dispatching multiple tasks in parallel causes recursive WebGPU kernel invocation errors
+    // (e.g. kernel "[Transpose] Transpose" is not allowed to be called recursively).
+    // Therefore, exactly ONE image pipeline runs in Offscreen at a time.
+    if (activeCount >= 1) {
+      console.log(`[Background] Offscreen pipeline is busy with active job (${activeCount} running). Waiting for completion...`);
       return;
     }
     
-    const slotsAvailable = concurrency - activeCount;
-    console.log(`[Background] Queue slots available: ${slotsAvailable}. Pulling next jobs...`);
+    // Pull exactly the single oldest queued job to process next
+    const queuedJob = await db.translationJobs.where('status').equals('queued').first();
+    if (!queuedJob || !queuedJob.id || !queuedJob.srcUrl) return;
     
-    // Dexie implicitly orders by primary key ('id') so this fetches chronologically oldest
-    const queuedJobs = await db.translationJobs.where('status').equals('queued').limit(slotsAvailable).toArray();
+    // Update status to prevent other queue loops from grabbing it. The timestamp is
+    // refreshed here so stale-job reclamation measures "last touched", not enqueue time.
+    await db.translationJobs.update(queuedJob.id, { status: 'downloading', timestamp: Date.now() });
     
-    for (const job of queuedJobs) {
-      if (!job.id || !job.srcUrl) continue;
-      
-      // Update status to prevent other queue loops from grabbing it. The timestamp is
-      // refreshed here so stale-job reclamation measures "last touched", not enqueue time.
-      await db.translationJobs.update(job.id, { status: 'downloading', timestamp: Date.now() });
-      
-      // Fire it off asynchronously so we process all available slots in parallel
-      processImageTranslation(job.id, job.srcUrl, job.tabId).catch(e => {
-        console.error(`[Background] Unhandled error processing job ${job.id}:`, e);
-      });
-    }
+    processImageTranslation(queuedJob.id, queuedJob.srcUrl, queuedJob.tabId).catch(e => {
+      console.error(`[Background] Unhandled error processing job ${queuedJob.id}:`, e);
+    });
     
   } catch (error) {
     console.error('[Background] Error inside processQueue loop:', error);
@@ -903,6 +917,7 @@ async function processImageTranslation(jobId: number, srcUrl: string, tabId?: nu
     console.log(`[Background] Offscreen completed job ${jobId} with status:`, offscreenResponse?.status);
     
     if (offscreenResponse?.status === 'success' && offscreenResponse?.bakedBase64 && tabId) {
+      await db.translationJobs.update(jobId, { status: 'completed' });
       if (srcUrl.startsWith('kites-capture:')) {
         const requestId = srcUrl.replace('kites-capture:', '');
         console.log(`[Background] Sending CAPTURE_TRANSLATED to tab ${tabId} for request ${requestId}...`);
@@ -935,6 +950,9 @@ async function processImageTranslation(jobId: number, srcUrl: string, tabId?: nu
     console.error(`[Background] Failed to process image for job ${jobId}:`, error);
     await db.translationJobs.update(jobId, { status: 'error' });
     
+    const errorStr = error instanceof Error ? error.message : String(error);
+
+    // Notify tab immediately so the user interface spinner unfreezes without delay
     if (tabId) {
       if (srcUrl.startsWith('kites-capture:')) {
         const requestId = srcUrl.replace('kites-capture:', '');
@@ -942,18 +960,32 @@ async function processImageTranslation(jobId: number, srcUrl: string, tabId?: nu
           type: 'CAPTURE_TRANSLATION_ERROR',
           payload: {
             requestId,
-            error: error instanceof Error ? error.message : String(error)
+            error: errorStr
           }
         }).catch(() => {});
       } else {
         chrome.tabs.sendMessage(tabId, {
           type: 'TRANSLATION_ERROR',
-          payload: { originalUrl: srcUrl }
+          payload: { originalUrl: srcUrl, error: errorStr }
         }).catch(() => {});
       }
     }
 
-    // Trigger queue again so slots opened up by this error are immediately reclaimed
+    // Defensive Recovery: Detect if failure was a WebGPU / GPU device or critical pipeline corruption.
+    // When WebGPU crashes or gets wedged mid-kernel, the Offscreen Document's WebGPU device state is
+    // permanently corrupted. Automatically recreate the Offscreen Document so subsequent queued jobs
+    // run against a clean, fresh GPU context rather than freezing or wedging the entire extension!
+    const isGpuOrPipelineCorruption = /recursively|MaxPool|ceil|device lost|Context Lost|OperationError|destroyed|pipeline failed|timed out/i.test(errorStr);
+    if (isGpuOrPipelineCorruption) {
+      console.warn(`[Background] Detected critical WebGPU/Offscreen corruption ("${errorStr}"). Recreating Offscreen document for clean recovery...`);
+      try {
+        await recreateOffscreenDocument();
+      } catch (recErr) {
+        console.error('[Background] Failed to recreate Offscreen document during crash recovery:', recErr);
+      }
+    }
+
+    // Trigger queue again so the next queued image can be processed immediately
     processQueue();
     throw error;
   }

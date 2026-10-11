@@ -7,6 +7,7 @@ import { GoogleTranslateEngine } from '../offscreen/engines/translation/GoogleTr
 import { renderTextBlocksBatch, measureBubbleLayoutFontSize, type TextBlockItem } from '../offscreen/utils/canvasTypesetting';
 import { createCanvas, loadImage } from 'canvas';
 import type { Point2D } from '../shared/utils/geometry';
+import type { BoxRect } from '../offscreen/utils/bubbleExpansion';
 import { NeuralBubbleDetector } from '../offscreen/engines/bubble/NeuralBubbleDetector';
 import { acquireBubbleGeometry, resolveBubbleLayouts, type BubbleGeometry } from '../offscreen/services/BubbleLayoutService';
 import { DEFAULT_RENDER_FONT_FAMILY } from '../offscreen/utils/canvasTypesetting';
@@ -37,7 +38,9 @@ async function runPipelineVisualBubbleTest() {
   await translator.init();
 
   // Load Neural Bubble Detector model if available in models/
-  const neuralModelPath = path.resolve(process.cwd(), 'models/detector-v4-s_int8.onnx');
+  const neuralModelPath = fs.existsSync(path.resolve(process.cwd(), 'models/manga109_yolo11n_seg_1024.onnx'))
+    ? path.resolve(process.cwd(), 'models/manga109_yolo11n_seg_1024.onnx')
+    : path.resolve(process.cwd(), 'models/detector-v4-s_int8.onnx');
   let neuralSession: any = null;
   if (fs.existsSync(neuralModelPath)) {
     console.log(`[Neural] Loading ONNX detector from ${neuralModelPath}...`);
@@ -166,7 +169,8 @@ async function runPipelineVisualBubbleTest() {
     // -------------------------------------------------------------
     if (neuralSession) {
       console.log("\n--- [Pass 2] Tier 2 Neural Bubble Expansion ---");
-      const inputSize = 640;
+      const isYolo11 = neuralSession.outputNames && neuralSession.outputNames.includes('output0');
+      const inputSize = isYolo11 ? 1024 : 640;
       const resizeCanvas = createCanvas(inputSize, inputSize);
       const resizeCtx = resizeCanvas.getContext('2d');
       resizeCtx.drawImage(rawImage, 0, 0, inputSize, inputSize);
@@ -174,19 +178,25 @@ async function runPipelineVisualBubbleTest() {
 
       const floatData = NeuralBubbleDetector.preprocessImage(resizedImgData, inputSize);
       const tensorImages = new ort.Tensor('float32', floatData, [1, 3, inputSize, inputSize]);
-      const tensorSizes = new ort.Tensor('int64', new BigInt64Array([BigInt(pageWidth), BigInt(pageHeight)]), [1, 2]);
 
-      const neuralOutput = await neuralSession.run({
-        images: tensorImages,
-        orig_target_sizes: tensorSizes
-      });
+      const feeds: Record<string, any> = { images: tensorImages };
+      if (neuralSession.inputNames && neuralSession.inputNames.includes('orig_target_sizes')) {
+        feeds.orig_target_sizes = new ort.Tensor('int64', new BigInt64Array([BigInt(pageWidth), BigInt(pageHeight)]), [1, 2]);
+      }
 
-      const { bubbles: detectedBubbles } = NeuralBubbleDetector.parseDetections(
-        neuralOutput.labels.data as any,
-        neuralOutput.boxes.data as any,
-        neuralOutput.scores.data as any,
-        0.30
-      );
+      const neuralOutput = await neuralSession.run(feeds);
+
+      let detectedBubbles: BoxRect[];
+      if (neuralOutput.output0) {
+        detectedBubbles = NeuralBubbleDetector.parseYolo11Output(neuralOutput.output0, pageWidth, pageHeight, inputSize, 0.35, 0.45).bubbles;
+      } else {
+        detectedBubbles = NeuralBubbleDetector.parseDetections(
+          neuralOutput.labels.data as any,
+          neuralOutput.boxes.data as any,
+          neuralOutput.scores.data as any,
+          0.30
+        ).bubbles;
+      }
       console.log(`[Neural] Detected ${detectedBubbles.length} bubble proposals across image.`);
 
       const neuralGeometry = acquireBubbleGeometry(rawImageData, boxes, detectedBubbles);

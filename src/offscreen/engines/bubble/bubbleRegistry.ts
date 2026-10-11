@@ -17,9 +17,9 @@ export interface BubbleModelRegistryEntry {
  */
 export const bubbleRegistry: Record<string, BubbleModelRegistryEntry> = {
   'bubble-yolo': {
-    name: 'Neural YOLO Comic Bubble Detector',
-    onnxUrl: 'https://huggingface.co/ogkalu/comic-text-and-bubble-detector/resolve/main/detector-v4-s_int8.onnx',
-    inputSize: 640,
-    vramEstimate: '~15 MB',
+    name: 'YOLO11n Manga Speech Bubble Detector',
+    onnxUrl: 'https://huggingface.co/mednasserallah/manga109-segmentation-bubble-onnx/resolve/main/manga109_segmentation_bubble_1024.onnx',
+    inputSize: 1024,
+    vramEstimate: '~12 MB',
   },
 };

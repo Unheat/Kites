@@ -108,6 +108,79 @@ export class NeuralBubbleDetector {
   }
 
   /**
+   * Parses YOLO11-seg model outputs into non-overlapping bubble boxes in image coordinates.
+   *
+   * @param output0 - Output tensor [1, 37, numAnchors].
+   * @param imageWidth - Native image width in pixels.
+   * @param imageHeight - Native image height in pixels.
+   * @param inputSize - Model input dimension (1024).
+   * @param scoreThreshold - Minimum confidence score (default 0.35).
+   * @param iouThreshold - NMS IoU threshold (default 0.45).
+   * @returns Bounding boxes of detected speech bubbles.
+   */
+  static parseYolo11Output(
+    output0: any,
+    imageWidth: number,
+    imageHeight: number,
+    inputSize: number = 1024,
+    scoreThreshold: number = 0.35,
+    iouThreshold: number = 0.45
+  ): NeuralBubbleDetectionResult {
+    const numAnchors = output0.dims[2];
+    const dataArr = output0.data as Float32Array;
+    const scaleX = imageWidth / inputSize;
+    const scaleY = imageHeight / inputSize;
+
+    const candidates: Array<{ x: number; y: number; w: number; h: number; score: number }> = [];
+
+    for (let a = 0; a < numAnchors; a++) {
+      const score = dataArr[4 * numAnchors + a];
+      if (score >= scoreThreshold) {
+        const cx = dataArr[0 * numAnchors + a];
+        const cy = dataArr[1 * numAnchors + a];
+        const w = dataArr[2 * numAnchors + a];
+        const h = dataArr[3 * numAnchors + a];
+
+        const x1 = Math.round((cx - w / 2) * scaleX);
+        const y1 = Math.round((cy - h / 2) * scaleY);
+        const boxW = Math.round(w * scaleX);
+        const boxH = Math.round(h * scaleY);
+
+        if (boxW > 10 && boxH > 10 && x1 >= 0 && y1 >= 0) {
+          candidates.push({ x: x1, y: y1, w: boxW, h: boxH, score });
+        }
+      }
+    }
+
+    candidates.sort((a, b) => b.score - a.score);
+
+    const selected: BoxRect[] = [];
+    const selectedScores: number[] = [];
+
+    for (const b of candidates) {
+      let keep = true;
+      for (const s of selected) {
+        const interX = Math.min(b.x + b.w, s.x + s.w) - Math.max(b.x, s.x);
+        const interY = Math.min(b.y + b.h, s.y + s.h) - Math.max(b.y, s.y);
+        if (interX > 0 && interY > 0) {
+          const inter = interX * interY;
+          const union = b.w * b.h + s.w * s.h - inter;
+          if (inter / union >= iouThreshold) {
+            keep = false;
+            break;
+          }
+        }
+      }
+      if (keep) {
+        selected.push({ x: b.x, y: b.y, w: b.w, h: b.h });
+        selectedScores.push(b.score);
+      }
+    }
+
+    return { bubbles: selected, scores: selectedScores };
+  }
+
+  /**
    * Matches an OCR text bounding box to the best enclosing detected bubble proposal.
    *
    * @param textBox - The OCR bounding box.
@@ -234,19 +307,25 @@ export class NeuralBubbleDetector {
       const floatData = this.preprocessImage(resizedImgData, inputSize);
       const ort = await import('onnxruntime-web');
       const tensorImages = new ort.Tensor('float32', floatData, [1, 3, inputSize, inputSize]);
-      const tensorSizes = new ort.Tensor('int64', new BigInt64Array([BigInt(width), BigInt(height)]), [1, 2]);
 
-      const outputs = await this.session.run({
-        images: tensorImages,
-        orig_target_sizes: tensorSizes,
-      });
+      const feeds: Record<string, any> = { images: tensorImages };
+      if (this.session.inputNames && this.session.inputNames.includes('orig_target_sizes')) {
+        feeds.orig_target_sizes = new ort.Tensor('int64', new BigInt64Array([BigInt(width), BigInt(height)]), [1, 2]);
+      }
 
-      const parsed = this.parseDetections(
-        outputs.labels.data as any,
-        outputs.boxes.data as any,
-        outputs.scores.data as any,
-        0.30
-      );
+      const outputs = await this.session.run(feeds);
+
+      let parsed: NeuralBubbleDetectionResult;
+      if (outputs.output0) {
+        parsed = NeuralBubbleDetector.parseYolo11Output(outputs.output0, width, height, inputSize, 0.35, 0.45);
+      } else {
+        parsed = NeuralBubbleDetector.parseDetections(
+          outputs.labels.data as any,
+          outputs.boxes.data as any,
+          outputs.scores.data as any,
+          0.30
+        );
+      }
 
       console.log(`[NeuralBubbleDetector] Detected ${parsed.bubbles.length} bubbles.`);
       return parsed.bubbles;

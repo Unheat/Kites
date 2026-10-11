@@ -66,12 +66,22 @@ Two-pass refactor of the `bubbleMode !== 'off'` block (gate and `!ocrResult.type
 | Tier `off` | Untouched — no grouping, no partitioning, pure Cotrans MST + utterance split |
 
 ## 5. Verification & Results
-- **Unit Tests:** 388 tests passed across 45 files (including 33 unit and integration tests across `BubbleLayoutService.test.ts`, `NeuralBubbleDetector.test.ts`, `HeuristicBubbleExtractor.test.ts`, `PipelineOrchestrator.test.ts`, `canvasTypesetting.test.ts`, and `cotransDefaultRenderer.test.ts`).
-- **Build Check:** `npm run build` (`tsc -b && vite build`) completed cleanly in 1.58s with zero TypeScript compilation errors.
+- **Unit Tests:** 395 tests passed across 46 files (including new suites `BaseBubbleEngine.test.ts`, updated `queueResilience.test.ts`, `BubbleLayoutService.test.ts`, and `NeuralBubbleDetector.test.ts`).
+- **Build Check:** `npm run build` (`tsc -b && vite build`) completed cleanly in 1.50s with zero TypeScript compilation errors.
 - **Production Harness Unification:** Repaired `pipelineVisualBubbleTest.ts` to call the exact same `acquireBubbleGeometry` + `resolveBubbleLayouts` service pipeline as production `PipelineOrchestrator.ts`.
+- **Sequential Queue & Crash Recovery:**
+  - Background queue enforces strictly serialized execution (1 active job through Offscreen at a time), eliminating WebGPU recursive kernel invocation collisions (`kernel "[Transpose] Transpose" is not allowed to be called recursively`).
+  - Settings UI renamed to `Max Queue Capacity`.
+  - Automatic defensive recovery: If a WebGPU or pipeline crash occurs, the requesting tab is notified immediately with `TRANSLATION_ERROR` (unfreezing the UI), and the Offscreen Document is automatically recreated to reset the WebGPU device context for subsequent jobs.
+- **OOP Architecture (`IBubbleEngine` & `BubbleManager`):**
+  - Bubble subsystem refactored to conform to the standard manager pattern (`BaseBubbleEngine.ts`, `HeuristicBubbleEngine.ts`, `NeuralBubbleEngine.ts`, `BubbleManager.ts`).
+- **YOLO11n-Seg Migration (`mednasserallah/manga109-segmentation-bubble-onnx`):**
+  - Replaced legacy RT-DETR with fine-tuned YOLO11n segmentation ONNX (11.2 MB, 1024×1024, opset 17).
+  - All MaxPool layers verified with `ceil_mode = 0`, eliminating the WebGPU `using ceil() in shape computation is not yet supported for MaxPool` crash.
+  - End-to-end WebGPU execution verified in real Chrome via Puppeteer (`scripts/test-webgpu-bubble.mjs`).
 - **Verified Visual Test Output:**
-  - `image4.jpg`: 4/4 bubbles cleanly expanded into the roomy white space (e.g. "No problem then!" expanded to 2 lines from 3; "You can eat it..." expanded from 6 cramped lines to 4).
-  - `image6.jpg`: 5 clear single bubbles expanded into comfortable font sizes, while 14 complex/diagonal/overlapping regions safely fell back to exact Disabled (Cotrans MST + utterance splitting) without horizontal slitting or header clipping.
+  - `image4.jpg`: 4/4 bubbles cleanly expanded into the roomy white space.
+  - `image6.jpg`: Single bubbles expanded into comfortable font sizes; complex/diagonal/overlapping regions safely fell back to exact Disabled without horizontal slitting or header clipping.
   - `image8.png`: Single bubbles expanded into comfortable margins; right-side 3-bubble telephone chain neatly ordered.
 - **Renderer Geometry Lock:** Accepted `typesetBox` quads are rendered axis-aligned (angle 0°) and strictly bypass font-floor geometry ballooning and global decollision shifts, guaranteeing exact visual and Dexie persistence parity.
 
