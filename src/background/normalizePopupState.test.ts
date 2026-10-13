@@ -50,7 +50,7 @@ describe('normalizePopupState', () => {
     });
 
     expect(result.changed).toBe(true);
-    expect(result.state.webgpuOverrides).toEqual({ llm: true, inpaint: false, ocr: true });
+    expect(result.state.webgpuOverrides).toEqual({ llm: true, inpaint: false, ocr: true, bubble: true });
     expect(result.state.activeOcrId).toBe(DEFAULT_POPUP_STATE.activeOcrId);
     expect(result.state.customApis).toEqual([]);
   });
@@ -64,5 +64,41 @@ describe('normalizePopupState', () => {
     const result = normalizePopupState(validState);
     expect(result.changed).toBe(false);
     expect(result.state.renderFontPresetId).toBe('comic');
+  });
+
+  it('normalizes missing or invalid bubbleMode to off', () => {
+    const legacyState = {
+      ...DEFAULT_POPUP_STATE,
+      bubbleMode: undefined as any,
+    } as PopupState;
+
+    const result = normalizePopupState(legacyState);
+    expect(result.changed).toBe(true);
+    expect(result.state.bubbleMode).toBe('off');
+
+    const invalidState = {
+      ...DEFAULT_POPUP_STATE,
+      bubbleMode: 'invalid-mode' as any,
+    } as PopupState;
+
+    const invalidResult = normalizePopupState(invalidState);
+    expect(invalidResult.changed).toBe(true);
+    expect(invalidResult.state.bubbleMode).toBe('off');
+  });
+
+  it('preserves valid bubbleMode options without flagging changed', () => {
+    const heuristicState: PopupState = {
+      ...DEFAULT_POPUP_STATE,
+      bubbleMode: 'heuristic',
+    };
+    expect(normalizePopupState(heuristicState).changed).toBe(false);
+    expect(normalizePopupState(heuristicState).state.bubbleMode).toBe('heuristic');
+
+    const neuralState: PopupState = {
+      ...DEFAULT_POPUP_STATE,
+      bubbleMode: 'neural',
+    };
+    expect(normalizePopupState(neuralState).changed).toBe(false);
+    expect(normalizePopupState(neuralState).state.bubbleMode).toBe('neural');
   });
 });

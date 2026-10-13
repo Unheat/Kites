@@ -52,3 +52,18 @@ export function isOcrGpuAvailable(state: PopupState): boolean {
     state.webgpuOverrides?.ocr !== false
   );
 }
+
+/**
+ * Checks if GPU acceleration is enabled and ready for WebGPU Bubble Detection models.
+ * 
+ * @param state - The current PopupState.
+ * @returns True if WebGPU is available for bubble detection.
+ */
+export function isBubbleGpuAvailable(state: PopupState): boolean {
+  return Boolean(
+    state.webgpuSupported === true &&
+    state.webgpuMaster === true &&
+    state.webgpuOverrides?.bubble !== false
+  );
+}
+

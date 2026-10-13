@@ -6,7 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const offscreenState = vi.hoisted(() => {
   const state = {
     // Behavior of the offscreen document for job messages.
-    sendMessageBehavior: 'hang' as 'hang' | 'pong' | 'no-receiver' | 'respond-after-first',
+    sendMessageBehavior: 'hang' as 'hang' | 'pong' | 'no-receiver' | 'respond-after-first' | 'gpu-crash',
+    // Custom error response when simulating pipeline/GPU crash
+    customError: '',
     // Whether the document answers the OFFSCREEN_PING health probe.
     pingBehavior: 'pong' as 'pong' | 'hang',
     // Number of job (non-ping) messages the stub has received.
@@ -17,6 +19,7 @@ const offscreenState = vi.hoisted(() => {
     closedCount: 0,
     reset(): void {
       state.sendMessageBehavior = 'hang';
+      state.customError = '';
       state.pingBehavior = 'pong';
       state.jobMessageCount = 0;
       state.hasDocument = false;
@@ -69,7 +72,19 @@ const offscreenState = vi.hoisted(() => {
           delete (globalThis as any).chrome.runtime.lastError;
         };
         if (behavior === 'pong') {
-          respond({ status: 'success' });
+          respond({ status: 'success', bakedBase64: 'data:image/png;base64,mock' });
+          return;
+        }
+        if (behavior === 'gpu-crash') {
+          // If first job, trigger crash; on subsequent jobs after recovery, succeed
+          if (state.jobMessageCount === 1) {
+            respond({
+              status: 'error',
+              error: state.customError || 'Error: kernel "[Transpose] Transpose" is not allowed to be called recursively',
+            });
+            return;
+          }
+          respond({ status: 'success', bakedBase64: 'data:image/png;base64,mock' });
           return;
         }
         if (behavior === 'respond-after-first' && state.jobMessageCount > 1) {
@@ -94,7 +109,13 @@ const offscreenState = vi.hoisted(() => {
   return state;
 });
 
-import { reclaimStaleJobs, resetOrphanedInFlightJobs, sendMessageToOffscreen } from './index';
+import {
+  reclaimStaleJobs,
+  resetOrphanedInFlightJobs,
+  sendMessageToOffscreen,
+  processQueue,
+  queueTranslation,
+} from './index';
 import { db } from '../db';
 
 const STALE_WINDOW_MS = 2 * 60 * 1000;
@@ -247,6 +268,156 @@ describe('orphaned in-flight job reset', () => {
     expect(sendMessage).toHaveBeenCalledWith(4, {
       type: 'TRANSLATION_ERROR',
       payload: { originalUrl: 'https://cdn.example.com/page_005.webp', error: expect.any(String) },
+    });
+  });
+});
+
+async function waitForJobTerminalStatus(jobId: number, timeoutMs = 2000): Promise<string> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const job = await db.translationJobs.get(jobId);
+    if (job?.status === 'completed' || job?.status === 'error') {
+      return job.status;
+    }
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  const job = await db.translationJobs.get(jobId);
+  return job?.status || 'unknown';
+}
+
+describe('sequential queue processing', () => {
+  it('processes jobs strictly sequentially, running at most one active job in offscreen', async () => {
+    offscreenState.sendMessageBehavior = 'pong';
+
+    // Pre-seed image blob so fetch is bypassed
+    const mockBlob = new Blob(['mock'], { type: 'image/png' });
+
+    const job1Id = (await db.translationJobs.add({
+      timestamp: Date.now(),
+      status: 'queued',
+      srcUrl: 'https://cdn.example.com/page_010.webp',
+      tabId: 1,
+    })) as number;
+    await db.images.add({ jobId: job1Id, rawImageBlob: mockBlob });
+
+    const job2Id = (await db.translationJobs.add({
+      timestamp: Date.now(),
+      status: 'queued',
+      srcUrl: 'https://cdn.example.com/page_011.webp',
+      tabId: 1,
+    })) as number;
+    await db.images.add({ jobId: job2Id, rawImageBlob: mockBlob });
+
+    // Calling processQueue should pull job 1 and process it
+    await processQueue();
+    const status1 = await waitForJobTerminalStatus(job1Id);
+    expect(status1).toBe('completed');
+
+    // After job 1 completes, processQueue will have pulled job 2
+    const status2 = await waitForJobTerminalStatus(job2Id);
+    expect(status2).toBe('completed');
+  });
+});
+
+describe('WebGPU crash recovery', () => {
+  it('recreates offscreen document on WebGPU kernel error, notifies tab, and processes next job cleanly', async () => {
+    const mockBlob = new Blob(['mock'], { type: 'image/png' });
+
+    // Job 1 will fail with WebGPU recursive kernel error
+    const job1Id = (await db.translationJobs.add({
+      timestamp: Date.now(),
+      status: 'queued',
+      srcUrl: 'https://cdn.example.com/page_fail.webp',
+      tabId: 10,
+    })) as number;
+    await db.images.add({ jobId: job1Id, rawImageBlob: mockBlob });
+
+    // Job 2 is queued waiting
+    const job2Id = (await db.translationJobs.add({
+      timestamp: Date.now(),
+      status: 'queued',
+      srcUrl: 'https://cdn.example.com/page_succeed.webp',
+      tabId: 10,
+    })) as number;
+    await db.images.add({ jobId: job2Id, rawImageBlob: mockBlob });
+
+    // Set offscreen to crash on job 1, but succeed on job 2
+    offscreenState.sendMessageBehavior = 'gpu-crash';
+    offscreenState.customError = 'Error: kernel "[Transpose] Transpose" is not allowed to be called recursively';
+
+    // Start processing
+    await processQueue();
+
+    // Wait for job 1 to hit the error handler
+    const status1 = await waitForJobTerminalStatus(job1Id);
+    expect(status1).toBe('error');
+
+    // Tab 10 must have received TRANSLATION_ERROR
+    const sendMessage = vi.mocked((globalThis as any).chrome.tabs.sendMessage);
+    expect(sendMessage).toHaveBeenCalledWith(10, {
+      type: 'TRANSLATION_ERROR',
+      payload: {
+        originalUrl: 'https://cdn.example.com/page_fail.webp',
+        error: expect.stringContaining('recursively'),
+      },
+    });
+
+    // Wait for offscreen document to finish clean recreation (has 500ms delay)
+    const startRecreate = Date.now();
+    while (offscreenState.createdCount < 2 && Date.now() - startRecreate < 2000) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+
+    // Offscreen document must have been closed and recreated
+    expect(offscreenState.closedCount).toBeGreaterThanOrEqual(1);
+    expect(offscreenState.createdCount).toBeGreaterThanOrEqual(2);
+
+    // Switch offscreen back to healthy for job 2
+    offscreenState.sendMessageBehavior = 'pong';
+    // Trigger queue for job 2 (in case it was waiting during recreation)
+    await processQueue();
+
+    const status2 = await waitForJobTerminalStatus(job2Id);
+    expect(status2).toBe('completed');
+  });
+});
+
+describe('queue capacity limit', () => {
+  it('rejects additional requests when the queue reaches configured maximum capacity', async () => {
+    // Set popupState concurrency to 2
+    (globalThis as any).chrome.storage.local.get.mockResolvedValue({
+      popupState: { concurrency: 2 },
+    });
+
+    // Seed 2 queued jobs
+    await db.translationJobs.add({
+      timestamp: Date.now(),
+      status: 'queued',
+      srcUrl: 'https://cdn.example.com/q1.webp',
+      tabId: 1,
+    });
+    await db.translationJobs.add({
+      timestamp: Date.now(),
+      status: 'queued',
+      srcUrl: 'https://cdn.example.com/q2.webp',
+      tabId: 1,
+    });
+
+    // Try to queue a 3rd job
+    await queueTranslation('https://cdn.example.com/q3.webp', 1);
+
+    // 3rd job must not be added to the queue
+    const count = await db.translationJobs.where('srcUrl').equals('https://cdn.example.com/q3.webp').count();
+    expect(count).toBe(0);
+
+    // Tab should receive TRANSLATION_ERROR explaining queue is full
+    const sendMessage = vi.mocked((globalThis as any).chrome.tabs.sendMessage);
+    expect(sendMessage).toHaveBeenCalledWith(1, {
+      type: 'TRANSLATION_ERROR',
+      payload: {
+        originalUrl: 'https://cdn.example.com/q3.webp',
+        error: expect.stringContaining('full'),
+      },
     });
   });
 });

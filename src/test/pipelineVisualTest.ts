@@ -27,8 +27,8 @@ async function runPipelineVisualTest() {
   const translator = new GoogleTranslateEngine();
   await translator.init();
 
-  // We have image1.jpg to image4.jpg and image5.png
-  const testFiles = ['image1.jpg', 'image2.jpg', 'image3.jpg', 'image4.jpg', 'image5.png', 'image6.jpg', 'image7.jpg'];
+  // We have image1.jpg to image4.jpg, image5.png, image6.jpg, image7.jpg, image8.png
+  const testFiles = ['image1.jpg', 'image2.jpg', 'image3.jpg', 'image4.jpg', 'image5.png', 'image6.jpg', 'image7.jpg', 'image8.png'];
 
   for (const testFile of testFiles) {
     console.log(`\n================================`);
@@ -49,7 +49,8 @@ async function runPipelineVisualTest() {
     const pageHeight = probeImage.height;
 
     console.log('[PipelineTest] Running OCR text detection...');
-    const ocrResult = await ocrManager.processImage(arrayBuffer, 'v6-small', { sourceLang: 'ja', pageWidth, pageHeight });
+    const sourceLang = (testFile === 'image8.png' || testFile === 'image5.png') ? undefined : 'ja';
+    const ocrResult = await ocrManager.processImage(arrayBuffer, 'v6-small', { sourceLang, pageWidth, pageHeight });
     const polygons = ocrResult.polygons as Point2D[][];
     const texts = ocrResult.texts;
     

@@ -44,6 +44,9 @@ export interface OcrResult {
 
   /** Number of source OCR lines merged into each renderable text region. */
   lineCounts?: number[];
+
+  /** Optional expanded bubble chamber boxes for comfortable word-wrapping and visual centering. */
+  typesetBoxes?: (OcrBox | undefined)[];
 }
 
 export interface IOcrEngine {

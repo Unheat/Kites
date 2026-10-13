@@ -272,6 +272,7 @@ export default function App() {
   const dragStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const viewportRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const regionListRef = useRef<HTMLDivElement>(null);
 
   // Active Drag & Resize state for Speech Bubbles
   const [activeDrag, setActiveDrag] = useState<ActiveDragState | null>(null);
@@ -770,6 +771,34 @@ export default function App() {
     }, 'image/png');
   };
 
+  /**
+   * Automatically scrolls the detected regions inspector list to bring the active
+   * text block card into view whenever a bubble is clicked on the canvas.
+   * Uses block: 'nearest' with scroll-margin to preserve breathing room at top/bottom edges
+   * and prevent jarring jumps if the card is already in view.
+   */
+  useEffect(() => {
+    if (selectedBlockId === null || !regionListRef.current) return;
+
+    const frameId = requestAnimationFrame(() => {
+      const container = regionListRef.current;
+      if (!container) return;
+
+      const card = container.querySelector<HTMLElement>(`[data-block-id="${selectedBlockId}"]`);
+      if (!card) return;
+
+      card.scrollIntoView({
+        behavior: 'smooth',
+        block: 'nearest',
+        inline: 'nearest',
+      });
+    });
+
+    return () => {
+      cancelAnimationFrame(frameId);
+    };
+  }, [selectedBlockId]);
+
   const activeJob = jobs.find((j) => j.id === activeJobId);
 
   return (
@@ -1231,7 +1260,7 @@ export default function App() {
           </div>
 
           {/* Region items list */}
-          <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-3">
+          <div ref={regionListRef} className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-3">
             {textBlocks.length === 0 ? (
               <div className="p-8 text-center text-dust text-xs">
                 <p>No text regions detected.</p>
@@ -1244,10 +1273,11 @@ export default function App() {
                 return (
                   <div
                     key={block.id}
+                    data-block-id={block.id}
                     onClick={() => setSelectedBlockId(block.id || null)}
                     onMouseEnter={() => setHoveredBlockId(block.id || null)}
                     onMouseLeave={() => setHoveredBlockId(null)}
-                    className={`p-3 rounded-lg border transition-all ${
+                    className={`scroll-my-3 p-3 rounded-lg border transition-all ${
                       isSelected
                         ? 'border-editorial bg-editorial/5 shadow-xs'
                         : 'border-dust/30 hover:border-dust bg-vellum/50'

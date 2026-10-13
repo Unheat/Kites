@@ -7,8 +7,10 @@ import type { InpaintTier } from './InpaintManager';
 import type { Point2D } from '../engines/inpaint/BaseInpaintEngine';
 import { inpaintRegistry } from '../engines/inpaint/inpaintRegistry';
 import { InpaintCacheManager } from './InpaintCacheManager';
-import { renderTextBlocksBatch, type TextBlockItem, type RenderedBlockInfo } from '../utils/canvasTypesetting';
+import { renderTextBlocksBatch, measureBubbleLayoutFontSize, LANGUAGE_ORIENTATION_PRESETS, type TextBlockItem, type RenderedBlockInfo } from '../utils/canvasTypesetting';
 import { resolveRenderFontFamily } from '../../shared/renderFontPresets';
+import { bubbleManager } from './BubbleManager';
+import { acquireBubbleGeometry, resolveBubbleLayouts, type BubbleGeometry } from './BubbleLayoutService';
 
 export class PipelineOrchestrator {
   private ocrManager: OcrManager;
@@ -157,6 +159,47 @@ export class PipelineOrchestrator {
         });
       }
 
+      // 3.1 Acquire original bubble geometry only. Final layout waits for translated text/fonts.
+      let bubbleGeometry: BubbleGeometry | undefined;
+      const bubbleMode = popupState?.bubbleMode ?? 'heuristic';
+      // Cleanly evict cached bubble engine if mode is disabled
+      if (bubbleMode === 'off') {
+        void bubbleManager.destroy();
+      }
+      // Legacy CJK/RTL rendering does not honor fixed bubble rectangles.
+      const supportsBubbleLayout = (LANGUAGE_ORIENTATION_PRESETS[targetLang.toLowerCase().trim()] ?? 'h') === 'h';
+      if (bubbleMode !== 'off' && supportsBubbleLayout && ocrResult.boxes && ocrResult.boxes.length > 0 && !ocrResult.typesetBoxes) {
+        try {
+          const rawBitmap = await createImageBitmap(imageRecord.rawImageBlob);
+          const rawCanvas = new OffscreenCanvas(rawBitmap.width, rawBitmap.height);
+          const rawCtx = rawCanvas.getContext('2d', { willReadFrequently: true });
+          if (rawCtx) {
+            rawCtx.drawImage(rawBitmap, 0, 0);
+            // Acquire engine through BubbleManager (OOP lifecycle & clean eviction)
+            const { engine, release } = await bubbleManager.acquireEngine(bubbleMode, popupState);
+            try {
+              const isNeuralMode = bubbleMode === 'neural' || bubbleMode === 'neural-mask';
+              const neuralResult = isNeuralMode && engine
+                ? await engine.detect(rawCanvas, ocrResult.boxes, popupState)
+                : undefined;
+              bubbleGeometry = acquireBubbleGeometry(
+                rawCtx.getImageData(0, 0, rawBitmap.width, rawBitmap.height),
+                ocrResult.boxes,
+                neuralResult?.bubbles,
+                neuralResult?.shapes
+              );
+            } finally {
+              release();
+            }
+          }
+          if (typeof rawBitmap.close === 'function') {
+            rawBitmap.close();
+          }
+        } catch (err) {
+          console.warn('[PipelineOrchestrator] Bubble carrier extraction failed, falling back to default text boxes:', err);
+        }
+      }
+
       // 4 + 5. Translation and Inpainting run concurrently.
       const inpaintPolygons = (ocrResult.rawPolygons || ocrResult.polygons || []) as Point2D[][];
       const shouldInpaint = inpaintTier !== 'original' && inpaintTier !== 'none' && inpaintPolygons.length > 0;
@@ -241,11 +284,13 @@ export class PipelineOrchestrator {
         const text = translatedTexts[i];
         const poly = ocrResult.polygons ? ocrResult.polygons[i] : null;
         const dir = (ocrResult.directions && ocrResult.directions[i]) ? ocrResult.directions[i] : 'h';
+        const typesetBox = (ocrResult.typesetBoxes && ocrResult.typesetBoxes[i]) ? ocrResult.typesetBoxes[i] : undefined;
         if (text && poly) {
           textBlockItems.push({
             text,
             polygon: poly as any,
             direction: dir,
+            typesetBox,
             // Colors are decided at render time by background sampling (XianScan
             // color.ts port) — black text on light paper, white on dark panels.
             fontSize: ocrResult.fontSizes ? ocrResult.fontSizes[i] : undefined,
@@ -257,6 +302,27 @@ export class PipelineOrchestrator {
           });
           itemOcrIndices.push(i);
         }
+      }
+      if (bubbleGeometry) {
+        const blockByOcrIndex = new Map(itemOcrIndices.map((index, position) => [index, textBlockItems[position]]));
+        ocrResult.typesetBoxes = resolveBubbleLayouts({
+          ...bubbleGeometry,
+          boxes: ocrResult.boxes,
+          directions: ocrResult.directions,
+          angles: ocrResult.angles,
+          pageWidth: bitmap.width,
+          pageHeight: bitmap.height,
+          accept: (index, proposed) => {
+            const block = blockByOcrIndex.get(index);
+            if (!block) return false;
+            const fitted = measureBubbleLayoutFontSize(ctx, block, proposed, resolvedFontFamily);
+            return fitted > 0;
+          },
+          onDiagnostics: (counts) => console.log('[PipelineOrchestrator] Bubble layouts:', counts)
+        });
+        itemOcrIndices.forEach((index, position) => {
+          textBlockItems[position].typesetBox = ocrResult.typesetBoxes?.[index];
+        });
       }
       const renderInfos = renderTextBlocksBatch(
         ctx,
@@ -294,6 +360,9 @@ export class PipelineOrchestrator {
       // Map OCR results back to DB text blocks
       const textBlocksToSave = ocrResult.texts.map((text, i) => {
         const box = ocrResult.boxes[i];
+        const activeBox = (ocrResult.typesetBoxes && ocrResult.typesetBoxes[i])
+          ? ocrResult.typesetBoxes[i]
+          : box;
         const translatedText = translatedTexts[i] || 'Error';
         const dir = (ocrResult.directions && ocrResult.directions[i]) ? ocrResult.directions[i] : 'h';
 
@@ -301,7 +370,7 @@ export class PipelineOrchestrator {
         // downscaling); fall back to the OCR-detected block font size if the block was skipped.
         const fontSize = renderInfoByOcrIndex.get(i)?.fontSize
           ?? (ocrResult.fontSizes ? ocrResult.fontSizes[i] : undefined)
-          ?? Math.max(9, Math.floor(Math.min(box.w, box.h)));
+          ?? Math.max(9, Math.floor(Math.min(activeBox.w, activeBox.h)));
         // Persist the render-time colors (background-sampled) so the Studio overlay
         // matches the baked image instead of assuming black-on-white.
         const renderColors = renderInfoByOcrIndex.get(i);
@@ -310,10 +379,10 @@ export class PipelineOrchestrator {
           imageId: imageRecord.id!,
           originalText: text,
           translatedText,
-          posX: box.x,
-          posY: box.y,
-          width: box.w,
-          height: box.h,
+          posX: activeBox.x,
+          posY: activeBox.y,
+          width: activeBox.w,
+          height: activeBox.h,
           fontSize,
           fontFamily: resolvedFontFamily,
           color: renderColors?.textColor ?? '#000000',

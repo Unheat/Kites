@@ -3,6 +3,8 @@ import { calculateAabb, calculateBoundingBox, calculateRotationAngle } from '../
 import {
   resizeRegionToFontSize,
   renderRegionDefault,
+  measureDefaultLayout,
+  defaultLayoutFits,
   type DefaultRenderRegion
 } from './cotransDefaultRenderer';
 import { fitFontSizeWithLines, decollideBoxes, fontSpec } from './typesetLayout';
@@ -36,6 +38,9 @@ const PUNSET_RIGHT_ENG = new Set(['.', '?', '!', ':', ';', ')', '}', '"']);
  * round((page_height + page_width) / 200), i.e. ~11px on a 900x1300 manga page.
  */
 const FONT_SIZE_MINIMUM_DIVISOR = 200;
+
+/** Neutral fit target when OCR has no valid source font; never derived from page size. */
+const FIXED_LAYOUT_FALLBACK_FONT_TARGET = 1;
 
 /** Default font family used for rendered translations. */
 export const DEFAULT_RENDER_FONT_FAMILY = 'sans-serif';
@@ -317,6 +322,8 @@ export interface TextBlockItem {
   text: string;
   polygon: Point2D[];
   direction?: 'h' | 'v';
+  /** Final validated axis-aligned layout. Default renderer preserves it exactly, rendering at angle 0. */
+  typesetBox?: { x: number; y: number; w: number; h: number };
   textColor?: string;
   strokeColor?: string;
   /** Cotrans block font size in source pixels (floor(min(textline font sizes))). */
@@ -329,6 +336,41 @@ export interface TextBlockItem {
   sourceLineCount?: number;
   /** Horizontal alignment override; defaults to 'center' for the default renderer. */
   alignment?: 'left' | 'center' | 'right';
+}
+
+/**
+ * Gets the fixed-layout target only from a valid OCR source font, never a page-size floor.
+ *
+ * @param block - OCR/translation metadata; missing or invalid font size uses a neutral target.
+ * @returns Positive integer source target; the shared renderer fit owns the final size.
+ */
+function bubbleLayoutFontTarget(block: TextBlockItem): number {
+  return Number.isFinite(block.fontSize) && block.fontSize! > 0
+    ? Math.max(FIXED_LAYOUT_FALLBACK_FONT_TARGET, Math.trunc(block.fontSize!))
+    : FIXED_LAYOUT_FALLBACK_FONT_TARGET;
+}
+
+/**
+ * Measures a fixed bubble rectangle with the default horizontal renderer's exact fit.
+ * Fixed layouts do not receive page dialogue caps, so this matches their render font size.
+ * Callers must supply the same loaded font family and persist render angle 0 in Studio.
+ * This reports layout size only, not approximate text clipping or raster containment.
+ *
+ * @param ctx - Canvas context used for measurement and rendering.
+ * @param block - Text and source OCR font metadata.
+ * @param box - Final axis-aligned layout rectangle; coordinates are not modified.
+ * @param fontFamily - CSS font-family stack used by the renderer.
+ * @returns Fitted font size, or 0 for empty text, invalid dimensions, or an unfit minimum fallback.
+ */
+export function measureBubbleLayoutFontSize(
+  ctx: Parameters<typeof measureDefaultLayout>[0],
+  block: TextBlockItem,
+  box: NonNullable<TextBlockItem['typesetBox']>,
+  fontFamily: string = DEFAULT_RENDER_FONT_FAMILY
+): number {
+  if (!block.text?.trim() || !Number.isFinite(box.w) || !Number.isFinite(box.h) || box.w < 1 || box.h < 1) return 0;
+  const fitted = measureDefaultLayout(ctx, block.text.trim(), box.w, box.h, bubbleLayoutFontTarget(block), undefined, fontFamily);
+  return defaultLayoutFits(ctx, fitted, box.w, box.h, fontFamily) ? fitted.size : 0;
 }
 
 /** Per-block render outcome, aligned with the input blocks array. */
@@ -520,6 +562,7 @@ function renderTextBlocksDefault(
     dstPoints: Point2D[];
     targetFontSize: number;
     wordCount: number;
+    fixed: boolean;
   }[] = [];
   const dialogueSizes: number[] = [];
 
@@ -529,10 +572,24 @@ function renderTextBlocksDefault(
     if (!translation || !b.polygon || b.polygon.length < 3) continue;
 
     // Ensure a 4-point quad (Cotrans min_rect is always 4 points).
-    const poly = b.polygon.slice(0, 4);
-    if (poly.length < 4) continue;
+    const rawPoly = b.polygon.slice(0, 4);
+    if (rawPoly.length < 4) continue;
 
-    const angle = b.angle ?? (calculateRotationAngle(b.polygon) * 180) / Math.PI;
+    const fixed = b.typesetBox !== undefined;
+    // A typesetBox is already validated in page coordinates. Never rotate, clip, scale,
+    // or decollide it. Integration must persist this actual angle 0 for Studio editing.
+    const angle = fixed ? 0 : b.angle ?? (calculateRotationAngle(b.polygon) * 180) / Math.PI;
+    let poly = rawPoly;
+    if (fixed) {
+      const tb = b.typesetBox!;
+      if (![tb.x, tb.y, tb.w, tb.h].every(Number.isFinite) || tb.w < 1 || tb.h < 1) continue;
+      poly = [
+        { x: tb.x, y: tb.y },
+        { x: tb.x + tb.w, y: tb.y },
+        { x: tb.x + tb.w, y: tb.y + tb.h },
+        { x: tb.x, y: tb.y + tb.h },
+      ];
+    }
     const aabb = calculateAabb(b.polygon);
     const lineCount = b.sourceLineCount && b.sourceLineCount > 0
       ? b.sourceLineCount
@@ -557,17 +614,24 @@ function renderTextBlocksDefault(
     };
 
     try {
-      const { dstPoints, fontSize: targetFontSize } = resizeRegionToFontSize(region, pageWidth, pageHeight);
+      const { dstPoints, fontSize: targetFontSize } = fixed
+        ? { dstPoints: poly, fontSize: bubbleLayoutFontTarget(b) }
+        : resizeRegionToFontSize(region, pageWidth, pageHeight);
+      if (fixed && measureBubbleLayoutFontSize(ctx, b, b.typesetBox!, fontFamily) === 0) continue;
       const wordCount = translation.split(/\s+/).filter(Boolean).length;
       if (wordCount >= 2) {
         // Same quad dims renderRegionDefault will lay out against (edge midpoints).
         const [tl, tr, br, bl] = dstPoints;
         const normH = Math.hypot((tr.x + br.x) / 2 - (tl.x + bl.x) / 2, (tr.y + br.y) / 2 - (tl.y + bl.y) / 2);
         const normV = Math.hypot((bl.x + br.x) / 2 - (tl.x + tr.x) / 2, (bl.y + br.y) / 2 - (tl.y + tr.y) / 2);
-        const fitted = fitFontSizeWithLines(ctx, translation, fontFamily, normH, normV, targetFontSize, Math.max(targetFontSize, 48), 0.05);
+        // Keep the Disabled/free-box baseline unchanged. Fixed layouts use the exact
+        // renderer normalization shared with the layout solver's measurement callback.
+        const fitted = fixed
+          ? measureDefaultLayout(ctx, translation, normH, normV, targetFontSize, undefined, fontFamily)
+          : fitFontSizeWithLines(ctx, translation, fontFamily, normH, normV, targetFontSize, Math.max(targetFontSize, 48), 0.05);
         dialogueSizes.push(fitted.size);
       }
-      planned.push({ index: i, region, dstPoints, targetFontSize, wordCount });
+      planned.push({ index: i, region, dstPoints, targetFontSize, wordCount, fixed });
     } catch (e) {
       console.error('[canvasTypesetting] Default renderer failed for block', i, e);
     }
@@ -577,8 +641,11 @@ function renderTextBlocksDefault(
   // apart before baseline + render. Translation only — quad dimensions are unchanged,
   // so every font fit computed above remains valid. Nested boxes (>50% containment)
   // are skipped by decollideBoxes itself, so bubbles-in-bubbles are not pushed.
-  if (planned.length > 1) {
-    const aabbs = planned.map(p => {
+  // Only free boxes participate. Fixed/free overlaps can remain; the caller must
+  // reject conflicting layouts before rendering, never repair them by moving a box.
+  const freePlans = planned.filter(p => !p.fixed);
+  if (freePlans.length > 1) {
+    const aabbs = freePlans.map(p => {
       const xs = p.dstPoints.map(pt => pt.x);
       const ys = p.dstPoints.map(pt => pt.y);
       const x = Math.min(...xs);
@@ -586,11 +653,20 @@ function renderTextBlocksDefault(
       return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
     });
     const adjusted = decollideBoxes(aabbs);
-    planned.forEach((p, k) => {
+    freePlans.forEach((p, k) => {
       const dx = adjusted[k].x - aabbs[k].x;
       const dy = adjusted[k].y - aabbs[k].y;
       if (dx !== 0 || dy !== 0) {
-        p.dstPoints = p.dstPoints.map(pt => ({ x: pt.x + dx, y: pt.y + dy }));
+        // Free-box decollision translates the original-size quad, not the shrunken
+        // adjusted AABB. Test that actual destination before accepting its movement.
+        const moved = { ...aabbs[k], x: aabbs[k].x + dx, y: aabbs[k].y + dy };
+        const hitsFixed = planned.some(fixedPlan => {
+          if (!fixedPlan.fixed) return false;
+          const [tl, tr, , bl] = fixedPlan.dstPoints;
+          return moved.x < tr.x && moved.x + moved.w > tl.x
+            && moved.y < bl.y && moved.y + moved.h > tl.y;
+        });
+        if (!hitsFixed) p.dstPoints = p.dstPoints.map(pt => ({ x: pt.x + dx, y: pt.y + dy }));
       }
     });
   }
@@ -605,7 +681,7 @@ function renderTextBlocksDefault(
       // XianScan clamp: only short non-shout bubbles follow the page baseline; dense
       // paragraphs and exclamations keep their fitted size.
       const isShortNonShout = plan.wordCount <= 2 && !/[!！]/.test(plan.region.translation);
-      const baselineCap = pageDialogueBaseline > 0 && isShortNonShout
+      const baselineCap = !plan.fixed && pageDialogueBaseline > 0 && isShortNonShout
         ? Math.max(18, Math.round(pageDialogueBaseline * 1.25))
         : undefined;
       const info = renderRegionDefault(ctx, plan.region, plan.dstPoints, plan.targetFontSize, baselineCap, fontFamily);

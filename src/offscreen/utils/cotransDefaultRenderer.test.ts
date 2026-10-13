@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { createCanvas } from 'canvas';
-import { calcHorizontal, compactSpecialSymbols, resizeRegionToFontSize, putTextLines } from './cotransDefaultRenderer';
+import { calcHorizontal, compactSpecialSymbols, resizeRegionToFontSize, putTextLines, measureDefaultLayout, renderRegionDefault } from './cotransDefaultRenderer';
+import { fitFontSizeWithLines } from './typesetLayout';
+import { sanitizeTypesetText } from '../../shared/utils/textCleaning';
 
 /** Minimal ctx: measureText returns 10px per character; font is a no-op setter. */
 function mockCtx() {
@@ -118,6 +120,20 @@ describe('resizeRegionToFontSize (hybrid layout semantics)', () => {
     const r = region(30, 150, 24, '先生', 'teacher');
     const { fontSize } = resizeRegionToFontSize(r, 1000, 1500);
     expect(fontSize).toBe(24);
+  });
+});
+
+describe('shared default layout measurement', () => {
+  it.each([undefined, 18])('matches the pre-existing exact renderer fit with cap %s', (cap) => {
+    const ctx = createCanvas(400, 200).getContext('2d');
+    const text = 'Wait... <br> Teacher, please stop!';
+    const family = 'Georgia, serif';
+    const expected = fitFontSizeWithLines(ctx, sanitizeTypesetText(compactSpecialSymbols(text)), family, 140, 100, 20, Math.min(48, cap ?? Infinity), 0.05);
+    const measured = measureDefaultLayout(ctx, text, 140, 100, 20, cap, family);
+    expect(measured).toEqual(expected);
+    const metadata = region(140, 100, 20, '', text);
+    const rendered = renderRegionDefault(ctx, metadata, metadata.polygon, 20, cap, family);
+    expect(rendered).toEqual({ fontSize: measured.size, lineCount: measured.lines.length, lines: measured.lines });
   });
 });
 

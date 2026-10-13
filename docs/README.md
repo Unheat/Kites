@@ -124,6 +124,7 @@ Key technical decisions and architectural trade-offs are documented under [`docs
 - **[ADR-003: Keyed JSON Protocol for Dialogue Translation](decisions/ADR-003-keyed-json-protocol-for-llm-translation.md)** — Why Keyed JSON replaced delimiter-tagged prompts for LLM dialogue translation.
 - **[ADR-004: 1D In-Memory Canvas Tiling for Tall Webtoons](decisions/ADR-004-1d-in-memory-tiled-ocr-for-webtoons.md)** — Why 1D in-memory canvas tiling was chosen over DOM splitting or viewport scrolling.
 - **[ADR-005: Dexie IndexedDB Clean Plate Storage Architecture](decisions/ADR-005-dexie-indexeddb-clean-plate-storage.md)** — Why clean inpainted backgrounds are persisted separately from text blocks.
+- **[ADR-006: Hybrid Bubble Detection & Conservative Sub-Chamber Partitioning](decisions/ADR-006-hybrid-bubble-detection-and-conservative-subchamber-partitioning.md)** — Why single balloons expand into safe cores while ambiguous multi-lobe balloons safely fall back to the exact Disabled tier.
 
 ---
 
@@ -133,11 +134,12 @@ Key technical decisions and architectural trade-offs are documented under [`docs
 - **[Testing & Quality Gates](development/testing.md)** — Automated unit testing (`npm test`), E2E browser tests, and standalone visual tests.
 - **[Coding Standards & Invariants](development/coding-standards.md)** — WebGPU lifecycle, defensive programming, docstring requirements, and no magic numbers/strings.
 - **[Workarounds & Upstream Mitigations](development/workarounds.md)** — Documented mitigations for Vite 8 / Rolldown, CRXJS 2.7.1, SPA image replacement, and WebGPU state restoration.
+- **[Speech Bubble Detection & Typesetting Plan](development/bubble_detection_and_typesetting_upgrade_plan.md)** — Complete specification for Tier 1 Heuristic, Tier 2 Neural YOLO, sub-chamber partitioning, and future segmentation research.
 
 ---
 
 ### 🗄️ Historical Development Archive
 
 All historical development records, research reports, and phase logs are preserved in:
-- **[`docs/dev-history/devlog/`](dev-history/devlog/)** — 23 detailed development phase logs covering architectural milestones, bug investigations, and performance tuning.
+- **[`docs/dev-history/devlog/`](dev-history/devlog/)** — 24 detailed development phase logs covering architectural milestones, bug investigations, and performance tuning.
 - **[`docs/fullplan.md`](fullplan.md)** — The master project scope specification and roadmap.

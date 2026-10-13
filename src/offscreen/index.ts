@@ -4,8 +4,10 @@ import { translationManager } from './services/TranslationManager';
 import { CustomApiEngine } from './engines/translation/CustomApiEngine';
 import { inpaintRegistry } from './engines/inpaint/inpaintRegistry';
 import { ocrRegistry, resolveOcrTier } from './engines/ocr/ocrRegistry';
+import { bubbleRegistry } from './engines/bubble/bubbleRegistry';
 import { InpaintCacheManager } from './services/InpaintCacheManager';
 import { OcrCacheManager } from './services/OcrCacheManager';
+import { BubbleCacheManager } from './services/BubbleCacheManager';
 import { hasModelInCache } from '@mlc-ai/web-llm';
 import { checkWebGPUAvailability } from './utils/hardware';
 
@@ -352,6 +354,31 @@ async function handleStartDownload(modelId: string, category?: string) {
     return;
   }
 
+  if (category === 'bubble' || modelId === 'bubble-yolo') {
+    const entry = bubbleRegistry['bubble-yolo'];
+    if (!entry) throw new Error(`Unknown bubble engine: ${modelId}`);
+
+    activeDownloads[modelId] = {
+      files: {},
+      maxProgress: 0,
+      status: 'Downloading bubble weights...'
+    };
+
+    await BubbleCacheManager.downloadModelWithProgress(entry.onnxUrl, progressCallback);
+
+    if (activeDownloads[modelId]) {
+      activeDownloads[modelId].maxProgress = 1;
+      activeDownloads[modelId].status = 'ready';
+    }
+
+    chrome.runtime.sendMessage({
+      type: 'MODEL_DOWNLOAD_PROGRESS',
+      payload: { modelId, progress: 1, status: 'ready' }
+    }).catch(() => {});
+
+    return;
+  }
+
   activeDownloads[modelId] = {
     files: {},
     maxProgress: 0,
@@ -381,13 +408,18 @@ async function handleStartDownload(modelId: string, category?: string) {
 
 async function handleCheckStatus(modelId: string): Promise<boolean> {
   modelId = modelId === 'aot' ? 'aotgan' : modelId;
-  // Built-in inpaint algorithms require no downloaded model files
-  if (modelId === 'none' || modelId === 'simple' || modelId === 'telea') {
+  // Built-in inpaint and bubble algorithms require no downloaded model files
+  if (modelId === 'none' || modelId === 'simple' || modelId === 'telea' || modelId === 'heuristic' || modelId === 'off') {
     return true;
   }
 
   // Check the Cache API to see if the model files are resident on disk.
   try {
+    if (modelId === 'bubble-yolo' || modelId === 'neural') {
+      const entry = bubbleRegistry['bubble-yolo'];
+      return await BubbleCacheManager.isModelCached(entry.onnxUrl);
+    }
+
     if (modelId in ocrRegistry || modelId === 'paddle-dbnet') {
       const canonicalOcr = resolveOcrTier(modelId);
       return await OcrCacheManager.isModelCached(canonicalOcr);

@@ -41,6 +41,8 @@ Traditional manga translators require installing complex Python scripts, gigabyt
 - 🔒 **100% Local & Private:** Optical character recognition (OCR) and background cleaning happen on your device. Your images never leave your browser.
 - 🎨 **Intelligent Background Repair:** AI inpainting erases foreign text cleanly while preserving linework, screentones, and textures.
 - ✍️ **Natural Typesetting:** Automatically measures speech balloons, balances line breaks, fits font sizes, and adapts font colors.
+- 🗨️ **Smart Speech Bubble Fit:** Advanced bubble detection (Heuristic & Neural YOLO) expands narrow CJK columns into roomy balloon chambers, eliminating tiny squeezed fonts.
+- 📜 **Full Webtoon Strip Support:** Seamlessly translates extreme long-strip webtoons ($>14,000\text{ px}$) with 1D in-memory canvas tiling at full native resolution.
 - 🛠️ **Built-in Studio:** Fix mistranslations, resize text balloons, or tweak typography on the fly.
 
 ---
@@ -146,7 +148,8 @@ Customize target languages, neural OCR models, and inpainting algorithms from th
 | :--- | :--- | :--- |
 | **Translation** | **WebLLM** *(Local WebGPU)*<br/>**Cloud Shared Pool** *(Free)*<br/>**Google Translate**<br/>**Custom API** *(OpenAI, Claude, Gemini)* | Run local LLMs right in your browser (Llama 3.2, Qwen 2.5), use our free community pool, or connect your own API key. |
 | **Inpainting** | **LaMa Manga** *(Neural)*<br/>**AOT-GAN** *(Fast Neural)*<br/>**Telea Diffusion** *(Instant)*<br/>**Simple Fill** | Erases text strictly inside character boundaries to preserve comic art. |
-| **OCR** | **PaddleOCR v3 – v6** | Industry-standard multilingual text detection and recognition. |
+| **OCR** | **PaddleOCR v3 – v6** | Industry-standard multilingual text detection and recognition with seamless 1D webtoon strip tiling. |
+| **Bubble Fit** | **Neural YOLO** *(WebGPU)*<br/>**Heuristic** *(Instant)*<br/>**Classic MST** | Expands dialogue into natural balloon whitespace with tail severing, eliminating tiny fonts. |
 
 ---
 
