@@ -289,8 +289,9 @@ function PopupApp() {
               chrome.tabs.create({ url: chrome.runtime.getURL('index.html') });
             }}
             className="w-full py-2.5 bg-[var(--color-ink)] text-[var(--color-paper)] font-bold rounded hover:bg-[var(--color-editorial)] transition-colors flex items-center justify-center gap-2 cursor-pointer"
+            title="Open manga editing studio in a new tab"
           >
-            Open Dashboard <span className="opacity-70">↗</span>
+            Open Edit Studio <span className="opacity-70">↗</span>
           </button>
         </div>
       </div>
