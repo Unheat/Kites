@@ -2,32 +2,33 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import ChapterReaderModal from './ChapterReaderModal';
-import type { ChapterTranslationRecord } from './chapterZip';
+import ChapterReaderModal, { type ChapterReaderPage } from './ChapterReaderModal';
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
 describe('ChapterReaderModal UI & Controls', () => {
   let roots: Array<ReturnType<typeof createRoot>> = [];
 
-  const mockRecords: ChapterTranslationRecord[] = [
+  const mockPages: ChapterReaderPage[] = [
     {
-      originalUrl: 'https://example.com/p1.jpg',
+      id: '1',
+      url: 'https://example.com/p1.jpg',
       translatedUrl: 'blob:https://example.com/translated-p1',
-      sourcePage: 'https://example.com/ch1',
-      sequence: 1,
-      documentPath: [0],
-      documentY: 100,
-      showOriginal: false,
+      width: 800,
+      height: 1200,
+      top: 100,
+      isTranslated: true,
+      status: 'completed',
     },
     {
-      originalUrl: 'https://example.com/p2.jpg',
+      id: '2',
+      url: 'https://example.com/p2.jpg',
       translatedUrl: 'blob:https://example.com/translated-p2',
-      sourcePage: 'https://example.com/ch1',
-      sequence: 2,
-      documentPath: [1],
-      documentY: 600,
-      showOriginal: false,
+      width: 800,
+      height: 1200,
+      top: 600,
+      isTranslated: true,
+      status: 'completed',
     },
   ];
 
@@ -53,7 +54,7 @@ describe('ChapterReaderModal UI & Controls', () => {
         <ChapterReaderModal
           isOpen={false}
           onClose={vi.fn()}
-          records={mockRecords}
+          pages={mockPages}
         />
       );
     });
@@ -74,7 +75,7 @@ describe('ChapterReaderModal UI & Controls', () => {
         <ChapterReaderModal
           isOpen={true}
           onClose={onClose}
-          records={mockRecords}
+          pages={mockPages}
           title="Chapter 1"
         />
       );
@@ -97,6 +98,49 @@ describe('ChapterReaderModal UI & Controls', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
+  it('renders raw pages immediately when untranslated and calls onTranslateAll on click', async () => {
+    const rawPages: ChapterReaderPage[] = [
+      { id: '1', url: 'https://example.com/raw1.jpg', width: 800, height: 1200, top: 0, isTranslated: false, status: 'idle' },
+      { id: '2', url: 'https://example.com/raw2.jpg', width: 800, height: 1200, top: 1200, isTranslated: false, status: 'idle' },
+    ];
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    roots.push(root);
+    const onTranslateAll = vi.fn();
+
+    await act(async () => {
+      root.render(
+        <ChapterReaderModal
+          isOpen={true}
+          onClose={vi.fn()}
+          pages={rawPages}
+          onTranslateAll={onTranslateAll}
+        />
+      );
+    });
+
+    // Images display raw url immediately without waiting
+    const images = container.querySelectorAll('img');
+    expect(images[0].src).toBe('https://example.com/raw1.jpg');
+    expect(images[1].src).toBe('https://example.com/raw2.jpg');
+
+    // Prominent Translate Chapter button exists
+    const translateBtn = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('Translate Chapter')
+    );
+    expect(translateBtn).toBeDefined();
+
+    await act(async () => {
+      translateBtn?.click();
+    });
+
+    expect(onTranslateAll).toHaveBeenCalledWith([
+      'https://example.com/raw1.jpg',
+      'https://example.com/raw2.jpg',
+    ]);
+  });
+
   it('toggles between translated and original artwork on F key press', async () => {
     const container = document.createElement('div');
     document.body.appendChild(container);
@@ -108,7 +152,7 @@ describe('ChapterReaderModal UI & Controls', () => {
         <ChapterReaderModal
           isOpen={true}
           onClose={vi.fn()}
-          records={mockRecords}
+          pages={mockPages}
         />
       );
     });
@@ -144,7 +188,7 @@ describe('ChapterReaderModal UI & Controls', () => {
         <ChapterReaderModal
           isOpen={true}
           onClose={vi.fn()}
-          records={mockRecords}
+          pages={mockPages}
         />
       );
     });
@@ -162,7 +206,7 @@ describe('ChapterReaderModal UI & Controls', () => {
     expect(images.length).toBe(1);
     expect(images[0].src).toContain('translated-p1');
 
-    // ArrowRight navigates page
+    // ArrowLeft navigates to next page in RTL mode
     await act(async () => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
     });
@@ -184,14 +228,14 @@ describe('ChapterReaderModal UI & Controls', () => {
         <ChapterReaderModal
           isOpen={true}
           onClose={vi.fn()}
-          records={mockRecords}
+          pages={mockPages}
           onExportZip={onExportZip}
         />
       );
     });
 
-    const exportBtn = container.querySelector('button[title="Download Chapter ZIP"]') as HTMLButtonElement;
-    expect(exportBtn).toBeDefined();
+    const exportBtn = container.querySelector('button[title*="Download Chapter ZIP"]') as HTMLButtonElement;
+    expect(exportBtn).not.toBeNull();
 
     await act(async () => {
       exportBtn.click();

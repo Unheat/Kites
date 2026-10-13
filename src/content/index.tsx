@@ -5,8 +5,8 @@ import { Languages, Eye, EyeOff, ExternalLink, X, Crop, RotateCcw, Download } fr
 import type { PopupState, CropOverlayItem, ViewportSelection, SiteSelectorRule } from '../shared/types';
 import { STORAGE_KEYS } from '../shared/constants';
 import { isDomainDisabled, findMatchingSiteRule } from '../shared/siteRules';
-import { createChapterTranslationRegistry, createChapterExporter, orderChapterImages, type ChapterTranslationRecord } from './chapterZip';
-import ChapterReaderModal from './ChapterReaderModal';
+import { createChapterTranslationRegistry, createChapterExporter, type ChapterTranslationRecord } from './chapterZip';
+import ChapterReaderModal, { type ChapterReaderPage } from './ChapterReaderModal';
 import ChapterReaderFloatingPill from './ChapterReaderFloatingPill';
 import { scanChapterPages, fastScrollPreload } from './scanner';
 import { handleReadingKeydown, handleReadingCommand, type ReadingShortcutActions } from './readingShortcuts';
@@ -1381,6 +1381,8 @@ function GlobalOverlay() {
   const [crops, setCrops] = useState<CropOverlayItem[]>([]);
   const [isReaderOpen, setIsReaderOpen] = useState<boolean>(false);
   const [isPillDismissed, setIsPillDismissed] = useState<boolean>(false);
+  const [chapterPages, setChapterPages] = useState<ChapterReaderPage[]>([]);
+  const [isTranslatingChapter, setIsTranslatingChapter] = useState<boolean>(false);
 
   const activeImgRef = useRef(activeImg);
   const translatingUrlsRef = useRef(translatingUrls);
@@ -1396,11 +1398,64 @@ function GlobalOverlay() {
     return findMatchingSiteRule(window.location.hostname, siteRulesRef.current)?.selector;
   };
 
+  /** Scans the document for all comic chapter pages and keeps translation states updated. */
+  const refreshChapterPages = useCallback(() => {
+    const isTranslatedCheck = (url: string) => {
+      const reg = translatedRegistry.get(url);
+      return {
+        isTranslated: Boolean(reg?.translatedUrl),
+        translatedUrl: reg?.translatedUrl,
+      };
+    };
+    const scanned = scanChapterPages(document, getActiveCustomSelector(), isTranslatedCheck);
+    setChapterPages(scanned);
+    return scanned;
+  }, []);
+
   useEffect(() => {
-    const handleOpenReader = () => setIsReaderOpen(true);
+    if (!isEnabled) return;
+    refreshChapterPages();
+    const interval = setInterval(() => {
+      if (!isReaderOpen) refreshChapterPages();
+    }, 4000);
+    return () => clearInterval(interval);
+  }, [isEnabled, isReaderOpen, refreshChapterPages]);
+
+  const handleTranslateChapter = useCallback(async (urls: string[]) => {
+    if (urls.length === 0) return;
+    setIsTranslatingChapter(true);
+
+    for (const url of urls) {
+      rememberChapterRequest(url, resolveTargetMedia(url));
+    }
+
+    setChapterPages((prev) =>
+      prev.map((page) =>
+        urls.includes(page.url) && !page.isTranslated
+          ? { ...page, status: 'queued' as const }
+          : page
+      )
+    );
+
+    try {
+      await chrome.runtime.sendMessage({
+        type: 'BATCH_QUEUE_TRANSLATIONS',
+        payload: { urls },
+      });
+    } catch (err) {
+      console.warn('[Content Script] Failed to dispatch batch chapter translation:', err);
+      setIsTranslatingChapter(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const handleOpenReader = () => {
+      refreshChapterPages();
+      setIsReaderOpen(true);
+    };
     document.addEventListener('kites-open-chapter-reader', handleOpenReader);
     return () => document.removeEventListener('kites-open-chapter-reader', handleOpenReader);
-  }, []);
+  }, [refreshChapterPages]);
 
   /**
    * Marks an image URL as no longer translating so its button leaves the spinner state.
@@ -1639,7 +1694,10 @@ function GlobalOverlay() {
         anchorName: getAnchorName(target.surfaceElement),
       }),
       startAreaSelection: () => setIsSnipping(true),
-      openChapterReader: () => setIsReaderOpen(true),
+      openChapterReader: () => {
+        refreshChapterPages();
+        setIsReaderOpen(true);
+      },
     };
     /**
      * Saves live pointer coordinates for shortcut targeting in both manual modes.
@@ -1762,12 +1820,36 @@ function GlobalOverlay() {
 
       if (message.type !== 'IMAGE_TRANSLATED' || !bakedBase64) {
         translatedRegistry.forget(originalUrl);
+        setChapterPages((prev) =>
+          prev.map((page) =>
+            page.url === originalUrl ? { ...page, status: 'error' as const } : page
+          )
+        );
         return;
       }
       console.log(`[Content Script] Received translated image for: ${originalUrl}`);
       const target = resolveTargetMedia(originalUrl);
       // Archive completed translation before requiring a DOM target; detached pages still enter the registry.
       const record = translatedRegistry.complete(originalUrl, bakedBase64, jobId, target ?? undefined);
+
+      // Reactively update chapter reader modal pages with the new translated image!
+      setChapterPages((prev) => {
+        const next = prev.map((page) =>
+          page.url === originalUrl
+            ? {
+                ...page,
+                isTranslated: true,
+                translatedUrl: record?.translatedUrl || createSafeBlobUrlFromData(bakedBase64),
+                status: 'completed' as const,
+              }
+            : page
+        );
+        if (next.every((p) => p.isTranslated)) {
+          setIsTranslatingChapter(false);
+        }
+        return next;
+      });
+
       // Late results belong to the queued chapter, never a same-URL image in the new SPA chapter.
       if (!record || record.sourcePage !== window.location.href || !target) {
         console.warn(`[Content Script] Target media element detached or chapter changed; translation archived when context is known: ${originalUrl}`);
@@ -2093,16 +2175,21 @@ function GlobalOverlay() {
       <ChapterReaderModal
         isOpen={isReaderOpen}
         onClose={() => setIsReaderOpen(false)}
-        records={orderChapterImages(translatedRegistry.getRecords(), window.location.href) as ChapterTranslationRecord[]}
+        pages={chapterPages}
         title={document.title}
         onExportZip={() => void chapterExporter.exportChapter()}
+        onTranslateAll={handleTranslateChapter}
+        isTranslatingChapter={isTranslatingChapter}
       />
 
       {/* Floating Reader Launch Pill */}
       {!isReaderOpen && !isPillDismissed && (
         <ChapterReaderFloatingPill
-          pageCount={orderChapterImages(translatedRegistry.getRecords(), window.location.href).length}
-          onOpen={() => setIsReaderOpen(true)}
+          pageCount={chapterPages.length}
+          onOpen={() => {
+            refreshChapterPages();
+            setIsReaderOpen(true);
+          }}
           onDismiss={() => setIsPillDismissed(true)}
         />
       )}

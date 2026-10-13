@@ -10,18 +10,33 @@ import {
   Download,
   BookOpen,
   ArrowLeftRight,
+  Sparkles,
+  Check,
+  Loader,
 } from 'lucide-react';
-import type { ChapterTranslationRecord } from './chapterZip';
 
 export type ReaderViewMode = 'webtoon' | 'single' | 'double';
 export type WebtoonWidthPreset = 'md' | 'lg' | 'full';
 
+export interface ChapterReaderPage {
+  id: string;
+  url: string;
+  width: number;
+  height: number;
+  top: number;
+  isTranslated: boolean;
+  translatedUrl?: string;
+  status?: 'idle' | 'queued' | 'processing' | 'completed' | 'error';
+}
+
 export interface ChapterReaderModalProps {
   isOpen: boolean;
   onClose: () => void;
-  records: ChapterTranslationRecord[];
+  pages: ChapterReaderPage[];
   title?: string;
   onExportZip?: () => void;
+  onTranslateAll?: (urls: string[]) => void;
+  isTranslatingChapter?: boolean;
 }
 
 const WIDTH_CLASSES: Record<WebtoonWidthPreset, string> = {
@@ -31,18 +46,21 @@ const WIDTH_CLASSES: Record<WebtoonWidthPreset, string> = {
 };
 
 /**
- * Distraction-free full-screen chapter reader modal displaying translated manga/webtoon pages.
- * Collects pages directly from in-memory translated registry and isolates from host site clutter.
+ * Distraction-free full-screen chapter reader modal displaying all manga/webtoon pages.
+ * Opens immediately with raw pages for zero-wait reading, and supports streaming top-to-bottom
+ * translation where pages smoothly hot-swap live as background jobs settle.
  *
- * @param props - Component props containing open state, close callback, and chapter records.
+ * @param props - Component props containing open state, pages, title, and translation callbacks.
  * @returns The rendered full-screen reader modal or null.
  */
 export default function ChapterReaderModal({
   isOpen,
   onClose,
-  records,
+  pages,
   title,
   onExportZip,
+  onTranslateAll,
+  isTranslatingChapter = false,
 }: ChapterReaderModalProps) {
   const [viewMode, setViewMode] = useState<ReaderViewMode>('webtoon');
   const [webtoonWidth, setWebtoonWidth] = useState<WebtoonWidthPreset>('md');
@@ -52,7 +70,10 @@ export default function ChapterReaderModal({
   const [activeScrollPage, setActiveScrollPage] = useState(1);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const totalPages = records.length;
+  const totalPages = pages.length;
+  const untranslatedUrls = pages.filter((p) => !p.isTranslated).map((p) => p.url);
+  const translatedCount = pages.filter((p) => p.isTranslated).length;
+  const isAllTranslated = totalPages > 0 && translatedCount === totalPages;
 
   // Lock body scroll while modal is mounted
   useEffect(() => {
@@ -308,8 +329,72 @@ export default function ChapterReaderModal({
           </button>
         </div>
 
-        {/* Right: Width / Flip / Direction / ZIP */}
+        {/* Right: Translate All / Width / Flip / Direction / ZIP */}
         <div className="kites-reader-header-right" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          {/* Top-to-Bottom Translate All Action Button */}
+          {isAllTranslated ? (
+            <div
+              style={{
+                padding: '4px 10px',
+                borderRadius: '6px',
+                fontSize: '11px',
+                fontWeight: 600,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '5px',
+                backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                color: '#34d399',
+                border: '1px solid rgba(16, 185, 129, 0.3)',
+              }}
+              title="All chapter pages are translated"
+            >
+              <Check size={13} />
+              <span>All Translated</span>
+            </div>
+          ) : isTranslatingChapter ? (
+            <div
+              style={{
+                padding: '4px 10px',
+                borderRadius: '6px',
+                fontSize: '11px',
+                fontWeight: 600,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                backgroundColor: 'rgba(244, 68, 109, 0.15)',
+                color: '#f4446d',
+                border: '1px solid rgba(244, 68, 109, 0.3)',
+              }}
+              title="Translating pages in background sequentially"
+            >
+              <Loader size={12} className="animate-spin" />
+              <span>Translating {translatedCount}/{totalPages}…</span>
+            </div>
+          ) : onTranslateAll && untranslatedUrls.length > 0 ? (
+            <button
+              onClick={() => onTranslateAll(untranslatedUrls)}
+              className="kites-reader-btn kites-reader-btn-primary"
+              style={{
+                padding: '5px 12px',
+                borderRadius: '6px',
+                fontSize: '11px',
+                fontWeight: 600,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                cursor: 'pointer',
+                backgroundColor: '#f4446d',
+                color: '#ffffff',
+                border: '1px solid #f4446d',
+                boxShadow: '0 2px 8px rgba(244, 68, 109, 0.35)',
+              }}
+              title="Translate all pages in top-to-bottom sequence"
+            >
+              <Sparkles size={13} />
+              <span>Translate Chapter ({untranslatedUrls.length})</span>
+            </button>
+          ) : null}
+
           {/* Width Preset (Webtoon only) */}
           {viewMode === 'webtoon' && (
             <div
@@ -441,7 +526,7 @@ export default function ChapterReaderModal({
           scrollBehavior: 'smooth',
         }}
       >
-        {records.length === 0 ? (
+        {pages.length === 0 ? (
           <div
             style={{
               flex: '1 1 0%',
@@ -455,8 +540,8 @@ export default function ChapterReaderModal({
             }}
           >
             <BookOpen size={36} style={{ marginBottom: '12px', opacity: 0.4 }} />
-            <p style={{ fontSize: '14px', fontWeight: 500, margin: '0 0 6px 0' }}>No translated pages available in this chapter.</p>
-            <p style={{ fontSize: '12px', color: 'rgba(255, 255, 255, 0.4)', margin: 0 }}>Translate pages on the host site to view them here.</p>
+            <p style={{ fontSize: '14px', fontWeight: 500, margin: '0 0 6px 0' }}>No chapter pages found on this tab.</p>
+            <p style={{ fontSize: '12px', color: 'rgba(255, 255, 255, 0.4)', margin: 0 }}>Open a manga or webtoon reader page to view chapter panels.</p>
           </div>
         ) : viewMode === 'webtoon' ? (
           /* Continuous Vertical Stream (Webtoon) */
@@ -472,11 +557,14 @@ export default function ChapterReaderModal({
               padding: 0,
             }}
           >
-            {records.map((page, idx) => {
-              const src = showOriginal ? page.originalUrl : page.translatedUrl;
+            {pages.map((page, idx) => {
+              const isShowingOriginal = showOriginal || !page.isTranslated || !page.translatedUrl;
+              const src = isShowingOriginal ? page.url : page.translatedUrl;
+              const isPageTranslating = isTranslatingChapter && !page.isTranslated;
+
               return (
                 <div
-                  key={`${page.originalUrl}-${idx}`}
+                  key={page.id || `${page.url}-${idx}`}
                   data-reader-page={idx + 1}
                   className="kites-reader-page-item"
                   style={{
@@ -486,12 +574,13 @@ export default function ChapterReaderModal({
                     lineHeight: 0,
                     margin: 0,
                     padding: 0,
+                    aspectRatio: page.width > 0 && page.height > 0 ? `${page.width} / ${page.height}` : undefined,
                   }}
                 >
                   <img
                     src={src}
                     alt={`Page ${idx + 1}`}
-                    loading="lazy"
+                    loading={idx < 3 ? 'eager' : 'lazy'}
                     className="kites-reader-page-img"
                     style={{
                       width: '100%',
@@ -501,9 +590,40 @@ export default function ChapterReaderModal({
                       margin: 0,
                       padding: 0,
                       border: 'none',
+                      transition: 'opacity 0.25s ease',
                     }}
                     draggable={false}
                   />
+
+                  {/* Live Streaming Translation Pill */}
+                  {isPageTranslating && (
+                    <div
+                      style={{
+                        position: 'absolute',
+                        left: '12px',
+                        bottom: '12px',
+                        backgroundColor: 'rgba(0, 0, 0, 0.82)',
+                        backdropFilter: 'blur(6px)',
+                        WebkitBackdropFilter: 'blur(6px)',
+                        color: '#f4446d',
+                        fontSize: '11px',
+                        fontFamily: 'system-ui, sans-serif',
+                        fontWeight: 600,
+                        padding: '4px 10px',
+                        borderRadius: '9999px',
+                        border: '1px solid rgba(244, 68, 109, 0.4)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        pointerEvents: 'none',
+                        zIndex: 10,
+                      }}
+                    >
+                      <Loader size={11} className="animate-spin" />
+                      <span>Translating page {idx + 1}…</span>
+                    </div>
+                  )}
+
                   {/* Subtle page indicator badge */}
                   <div
                     className="kites-reader-page-badge"
@@ -518,9 +638,10 @@ export default function ChapterReaderModal({
                       padding: '2px 8px',
                       borderRadius: '4px',
                       pointerEvents: 'none',
+                      zIndex: 10,
                     }}
                   >
-                    p. {idx + 1}
+                    {page.isTranslated && !showOriginal ? `✓ p. ${idx + 1}` : `p. ${idx + 1}`}
                   </div>
                 </div>
               );
@@ -542,20 +663,49 @@ export default function ChapterReaderModal({
               boxSizing: 'border-box',
             }}
           >
-            {records[currentIndex] && (
-              <img
-                src={showOriginal ? records[currentIndex].originalUrl : records[currentIndex].translatedUrl}
-                alt={`Page ${currentIndex + 1}`}
-                className="kites-reader-single-img"
-                style={{
-                  maxHeight: 'calc(100vh - 80px)',
-                  maxWidth: '100%',
-                  objectFit: 'contain',
-                  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.6)',
-                  display: 'block',
-                }}
-                draggable={false}
-              />
+            {pages[currentIndex] && (
+              <div style={{ position: 'relative', display: 'inline-block' }}>
+                <img
+                  src={
+                    showOriginal || !pages[currentIndex].isTranslated || !pages[currentIndex].translatedUrl
+                      ? pages[currentIndex].url
+                      : pages[currentIndex].translatedUrl
+                  }
+                  alt={`Page ${currentIndex + 1}`}
+                  className="kites-reader-single-img"
+                  style={{
+                    maxHeight: 'calc(100vh - 80px)',
+                    maxWidth: '100%',
+                    objectFit: 'contain',
+                    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.6)',
+                    display: 'block',
+                    transition: 'opacity 0.25s ease',
+                  }}
+                  draggable={false}
+                />
+                {isTranslatingChapter && !pages[currentIndex].isTranslated && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      left: '12px',
+                      bottom: '12px',
+                      backgroundColor: 'rgba(0, 0, 0, 0.82)',
+                      color: '#f4446d',
+                      fontSize: '11px',
+                      fontWeight: 600,
+                      padding: '4px 10px',
+                      borderRadius: '9999px',
+                      border: '1px solid rgba(244, 68, 109, 0.4)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                    }}
+                  >
+                    <Loader size={11} className="animate-spin" />
+                    <span>Translating page {currentIndex + 1}…</span>
+                  </div>
+                )}
+              </div>
             )}
 
             {/* Click zones for navigation */}
@@ -638,35 +788,93 @@ export default function ChapterReaderModal({
                 flexDirection: isRtl ? 'row-reverse' : 'row',
               }}
             >
-              {records[currentIndex] && (
-                <img
-                  src={showOriginal ? records[currentIndex].originalUrl : records[currentIndex].translatedUrl}
-                  alt={`Page ${currentIndex + 1}`}
-                  className="kites-reader-double-img"
-                  style={{
-                    maxHeight: 'calc(100vh - 80px)',
-                    maxWidth: 'calc(50vw - 24px)',
-                    objectFit: 'contain',
-                    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.6)',
-                    display: 'block',
-                  }}
-                  draggable={false}
-                />
+              {pages[currentIndex] && (
+                <div style={{ position: 'relative', display: 'inline-block' }}>
+                  <img
+                    src={
+                      showOriginal || !pages[currentIndex].isTranslated || !pages[currentIndex].translatedUrl
+                        ? pages[currentIndex].url
+                        : pages[currentIndex].translatedUrl
+                    }
+                    alt={`Page ${currentIndex + 1}`}
+                    className="kites-reader-double-img"
+                    style={{
+                      maxHeight: 'calc(100vh - 80px)',
+                      maxWidth: 'calc(50vw - 24px)',
+                      objectFit: 'contain',
+                      boxShadow: '0 8px 32px rgba(0, 0, 0, 0.6)',
+                      display: 'block',
+                      transition: 'opacity 0.25s ease',
+                    }}
+                    draggable={false}
+                  />
+                  {isTranslatingChapter && !pages[currentIndex].isTranslated && (
+                    <div
+                      style={{
+                        position: 'absolute',
+                        left: '8px',
+                        bottom: '8px',
+                        backgroundColor: 'rgba(0, 0, 0, 0.82)',
+                        color: '#f4446d',
+                        fontSize: '10px',
+                        fontWeight: 600,
+                        padding: '3px 8px',
+                        borderRadius: '9999px',
+                        border: '1px solid rgba(244, 68, 109, 0.4)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                      }}
+                    >
+                      <Loader size={10} className="animate-spin" />
+                      <span>Translating p. {currentIndex + 1}…</span>
+                    </div>
+                  )}
+                </div>
               )}
-              {currentIndex + 1 < totalPages && records[currentIndex + 1] && (
-                <img
-                  src={showOriginal ? records[currentIndex + 1].originalUrl : records[currentIndex + 1].translatedUrl}
-                  alt={`Page ${currentIndex + 2}`}
-                  className="kites-reader-double-img"
-                  style={{
-                    maxHeight: 'calc(100vh - 80px)',
-                    maxWidth: 'calc(50vw - 24px)',
-                    objectFit: 'contain',
-                    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.6)',
-                    display: 'block',
-                  }}
-                  draggable={false}
-                />
+              {currentIndex + 1 < totalPages && pages[currentIndex + 1] && (
+                <div style={{ position: 'relative', display: 'inline-block' }}>
+                  <img
+                    src={
+                      showOriginal || !pages[currentIndex + 1].isTranslated || !pages[currentIndex + 1].translatedUrl
+                        ? pages[currentIndex + 1].url
+                        : pages[currentIndex + 1].translatedUrl
+                    }
+                    alt={`Page ${currentIndex + 2}`}
+                    className="kites-reader-double-img"
+                    style={{
+                      maxHeight: 'calc(100vh - 80px)',
+                      maxWidth: 'calc(50vw - 24px)',
+                      objectFit: 'contain',
+                      boxShadow: '0 8px 32px rgba(0, 0, 0, 0.6)',
+                      display: 'block',
+                      transition: 'opacity 0.25s ease',
+                    }}
+                    draggable={false}
+                  />
+                  {isTranslatingChapter && !pages[currentIndex + 1].isTranslated && (
+                    <div
+                      style={{
+                        position: 'absolute',
+                        left: '8px',
+                        bottom: '8px',
+                        backgroundColor: 'rgba(0, 0, 0, 0.82)',
+                        color: '#f4446d',
+                        fontSize: '10px',
+                        fontWeight: 600,
+                        padding: '3px 8px',
+                        borderRadius: '9999px',
+                        border: '1px solid rgba(244, 68, 109, 0.4)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                      }}
+                    >
+                      <Loader size={10} className="animate-spin" />
+                      <span>Translating p. {currentIndex + 2}…</span>
+                    </div>
+                  )}
+                </div>
               )}
             </div>
 
