@@ -50,7 +50,7 @@ export const FontManagerModal: React.FC<FontManagerModalProps> = ({ onClose }) =
       <div className="w-full max-w-md rounded-xl border border-[#282d3f] bg-[#12141c] p-5 shadow-2xl text-slate-100 flex flex-col">
         <div className="flex items-center justify-between pb-3 border-b border-[#282d3f]">
           <div className="flex items-center gap-2 font-medium text-sm text-slate-200">
-            <Type className="w-4 h-4 text-indigo-400" />
+            <Type className="w-4 h-4 text-[#f4446d]" />
             Font Manager & Custom Fonts
           </div>
           <button
@@ -62,8 +62,8 @@ export const FontManagerModal: React.FC<FontManagerModalProps> = ({ onClose }) =
         </div>
 
         <div className="mt-4">
-          <label className="flex flex-col items-center justify-center p-4 rounded-xl border-2 border-dashed border-[#282d3f] bg-[#090a0f] hover:border-indigo-500/60 hover:bg-[#12141c] cursor-pointer transition">
-            <Upload className="w-6 h-6 text-indigo-400 mb-1" />
+          <label className="flex flex-col items-center justify-center p-4 rounded-xl border-2 border-dashed border-[#282d3f] bg-[#090a0f] hover:border-[#f4446d]/60 hover:bg-[#12141c] cursor-pointer transition">
+            <Upload className="w-6 h-6 text-[#f4446d] mb-1" />
             <span className="text-xs font-medium text-slate-200">Upload Font (.ttf, .otf, .woff2)</span>
             <span className="text-[11px] text-slate-500 mt-0.5">Loads directly into canvas typography engine</span>
             <input
@@ -76,7 +76,7 @@ export const FontManagerModal: React.FC<FontManagerModalProps> = ({ onClose }) =
         </div>
 
         {uploadStatus && (
-          <div className="mt-3 p-2 rounded-lg bg-indigo-950/40 border border-indigo-800/40 text-xs text-indigo-300 flex items-center gap-2">
+          <div className="mt-3 p-2 rounded-lg bg-[#f4446d]/15 border border-[#f4446d]/30 text-xs text-[#f4446d] flex items-center gap-2">
             <Check className="w-3.5 h-3.5 shrink-0" />
             {uploadStatus}
           </div>

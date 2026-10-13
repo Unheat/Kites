@@ -57,6 +57,7 @@ export interface StudioState {
   pan: { x: number; y: number };
   isSpacePanning: boolean;
   isCanvasFlipped: boolean;
+  hideBoxes: boolean;
   activeJobId: number | null;
   imageDimensions: { width: number; height: number };
 
@@ -88,10 +89,10 @@ export interface StudioState {
 }
 
 const initialAppearance: EditorAppearanceSettings = {
-  selectedBoxBorderColor: '#6366f1',
+  selectedBoxBorderColor: '#f4446d',
   unselectedBoxBorderColor: 'rgba(255, 255, 255, 0.35)',
-  caretColor: '#6366f1',
-  brushCursorColor: 'rgba(99, 102, 241, 0.85)',
+  caretColor: '#f4446d',
+  brushCursorColor: 'rgba(244, 68, 109, 0.85)',
 };
 
 const initialState: StudioState = {
@@ -100,6 +101,7 @@ const initialState: StudioState = {
   pan: { x: 0, y: 0 },
   isSpacePanning: false,
   isCanvasFlipped: false,
+  hideBoxes: false,
   activeJobId: null,
   imageDimensions: { width: 0, height: 0 },
 

@@ -48,7 +48,7 @@ export const TypographySettings: React.FC = () => {
         </p>
         <button
           onClick={() => studioStore.setState({ globalEditMode: true })}
-          className="mt-3 px-3 py-1.5 rounded-lg border border-[#282d3f] bg-[#1c1f2e] text-indigo-300 hover:bg-[#282d3f] transition"
+          className="mt-3 px-3 py-1.5 rounded-lg border border-[#282d3f] bg-[#1c1f2e] text-red-400 hover:bg-[#282d3f] transition"
         >
           Enable Global Edit Mode
         </button>
@@ -59,17 +59,17 @@ export const TypographySettings: React.FC = () => {
   const obj = selectedObj || textObjects[0] || ({} as Partial<TextObject>);
 
   return (
-    <div className="space-y-4 p-4 text-xs text-slate-200">
+    <div className="space-y-4 text-xs text-slate-200">
       <div className="flex items-center justify-between pb-2 border-b border-[#282d3f]">
-        <h3 className="font-semibold text-sm text-slate-100">Typography Inspector</h3>
-        <label className="flex items-center gap-1.5 text-[11px] text-indigo-300 font-medium cursor-pointer">
+        <h3 className="font-semibold text-sm text-slate-100">Typography</h3>
+        <label className="flex items-center gap-1.5 text-[11px] text-red-400 font-medium cursor-pointer">
           <input
             type="checkbox"
             checked={globalEditMode}
             onChange={(e) => studioStore.setState({ globalEditMode: e.target.checked })}
-            className="rounded border-[#282d3f] bg-[#090a0f] text-indigo-600 focus:ring-0"
+            className="rounded border-[#282d3f] bg-[#090a0f] text-red-600 focus:ring-0"
           />
-          Global Edit All
+          All Bubbles
         </label>
       </div>
 
@@ -103,7 +103,7 @@ export const TypographySettings: React.FC = () => {
             max="120"
             value={obj.fontSize || 16}
             onChange={(e) => updateSelected({ fontSize: Number(e.target.value) })}
-            className="w-full accent-indigo-500"
+            className="w-full accent-red-500"
           />
         </div>
         <div>
@@ -118,7 +118,7 @@ export const TypographySettings: React.FC = () => {
             step="0.1"
             value={obj.lineSpacing || 1.2}
             onChange={(e) => updateSelected({ lineSpacing: Number(e.target.value) })}
-            className="w-full accent-indigo-500"
+            className="w-full accent-red-500"
           />
         </div>
       </div>
@@ -129,7 +129,7 @@ export const TypographySettings: React.FC = () => {
           onClick={() => updateSelected({ bold: !obj.bold })}
           className={`p-2 rounded-lg border transition ${
             obj.bold
-              ? 'border-indigo-500 bg-indigo-950/40 text-indigo-300'
+              ? 'border-red-500 bg-red-950/40 text-red-400'
               : 'border-[#282d3f] bg-[#090a0f] text-slate-400'
           }`}
           title="Bold"
@@ -140,7 +140,7 @@ export const TypographySettings: React.FC = () => {
           onClick={() => updateSelected({ italic: !obj.italic })}
           className={`p-2 rounded-lg border transition ${
             obj.italic
-              ? 'border-indigo-500 bg-indigo-950/40 text-indigo-300'
+              ? 'border-red-500 bg-red-950/40 text-red-400'
               : 'border-[#282d3f] bg-[#090a0f] text-slate-400'
           }`}
           title="Italic"
@@ -151,7 +151,7 @@ export const TypographySettings: React.FC = () => {
           onClick={() => updateSelected({ uppercase: !obj.uppercase, lowercase: false })}
           className={`p-2 rounded-lg border transition ${
             obj.uppercase
-              ? 'border-indigo-500 bg-indigo-950/40 text-indigo-300'
+              ? 'border-red-500 bg-red-950/40 text-red-400'
               : 'border-[#282d3f] bg-[#090a0f] text-slate-400'
           }`}
           title="Uppercase"
@@ -162,7 +162,7 @@ export const TypographySettings: React.FC = () => {
           onClick={() => updateSelected({ align: 'left' })}
           className={`p-2 rounded-lg border transition ${
             obj.align === 'left'
-              ? 'border-indigo-500 bg-indigo-950/40 text-indigo-300'
+              ? 'border-red-500 bg-red-950/40 text-red-400'
               : 'border-[#282d3f] bg-[#090a0f] text-slate-400'
           }`}
           title="Align Left"
@@ -173,7 +173,7 @@ export const TypographySettings: React.FC = () => {
           onClick={() => updateSelected({ align: 'center' })}
           className={`p-2 rounded-lg border transition ${
             obj.align === 'center' || !obj.align
-              ? 'border-indigo-500 bg-indigo-950/40 text-indigo-300'
+              ? 'border-red-500 bg-red-950/40 text-red-400'
               : 'border-[#282d3f] bg-[#090a0f] text-slate-400'
           }`}
           title="Align Center"
@@ -184,7 +184,7 @@ export const TypographySettings: React.FC = () => {
           onClick={() => updateSelected({ align: 'right' })}
           className={`p-2 rounded-lg border transition ${
             obj.align === 'right'
-              ? 'border-indigo-500 bg-indigo-950/40 text-indigo-300'
+              ? 'border-red-500 bg-red-950/40 text-red-400'
               : 'border-[#282d3f] bg-[#090a0f] text-slate-400'
           }`}
           title="Align Right"
@@ -203,7 +203,7 @@ export const TypographySettings: React.FC = () => {
           type="checkbox"
           checked={obj.isVertical || false}
           onChange={(e) => updateSelected({ isVertical: e.target.checked })}
-          className="rounded border-[#282d3f] bg-[#12141c] text-indigo-600 focus:ring-0"
+          className="rounded border-[#282d3f] bg-[#12141c] text-red-600 focus:ring-0"
         />
       </div>
 
@@ -216,7 +216,7 @@ export const TypographySettings: React.FC = () => {
               type="checkbox"
               checked={obj.isGradient || false}
               onChange={(e) => updateSelected({ isGradient: e.target.checked })}
-              className="rounded border-[#282d3f] bg-[#090a0f] text-indigo-600 focus:ring-0"
+              className="rounded border-[#282d3f] bg-[#090a0f] text-red-600 focus:ring-0"
             />
             Linear Gradient
           </label>
@@ -231,7 +231,7 @@ export const TypographySettings: React.FC = () => {
           {obj.isGradient && (
             <input
               type="color"
-              value={obj.color2 || '#6366f1'}
+              value={obj.color2 || '#ef4444'}
               onChange={(e) => updateSelected({ color2: e.target.value })}
               className="w-7 h-7 rounded border border-[#282d3f] bg-transparent cursor-pointer"
             />
@@ -264,7 +264,7 @@ export const TypographySettings: React.FC = () => {
             max="20"
             value={obj.strokeWidth || 0}
             onChange={(e) => updateSelected({ strokeWidth: Number(e.target.value) })}
-            className="flex-1 accent-indigo-500"
+            className="flex-1 accent-red-500"
           />
         </div>
 
@@ -281,7 +281,7 @@ export const TypographySettings: React.FC = () => {
               max="25"
               value={obj.shadowDistance || 0}
               onChange={(e) => updateSelected({ shadowDistance: Number(e.target.value) })}
-              className="w-full accent-indigo-500"
+              className="w-full accent-red-500"
             />
           </div>
           <div>
@@ -295,7 +295,7 @@ export const TypographySettings: React.FC = () => {
               max="360"
               value={obj.shadowAngle || 45}
               onChange={(e) => updateSelected({ shadowAngle: Number(e.target.value) })}
-              className="w-full accent-indigo-500"
+              className="w-full accent-red-500"
             />
           </div>
         </div>
@@ -331,7 +331,7 @@ export const TypographySettings: React.FC = () => {
                 max="30"
                 value={obj.backgroundPadding || 4}
                 onChange={(e) => updateSelected({ backgroundPadding: Number(e.target.value) })}
-                className="w-full accent-indigo-500"
+                className="w-full accent-red-500"
               />
             </div>
             <div>
@@ -345,7 +345,7 @@ export const TypographySettings: React.FC = () => {
                 max="50"
                 value={obj.backgroundBorderRadius || 0}
                 onChange={(e) => updateSelected({ backgroundBorderRadius: Number(e.target.value) })}
-                className="w-full accent-indigo-500"
+                className="w-full accent-red-500"
               />
             </div>
           </div>

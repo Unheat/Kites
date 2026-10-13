@@ -12,7 +12,7 @@ export const EraseSettings: React.FC = () => {
   };
 
   return (
-    <div className="space-y-4 p-4 text-xs text-slate-200">
+    <div className="space-y-4 text-xs text-slate-200">
       <div className="pb-2 border-b border-[#282d3f]">
         <h3 className="font-semibold text-sm text-slate-100">Restore / Erase Brush</h3>
         <p className="text-[11px] text-slate-400 mt-0.5">
@@ -28,7 +28,7 @@ export const EraseSettings: React.FC = () => {
             onClick={() => update({ source: 'inpainted' })}
             className={`py-1.5 px-2 rounded-md font-medium transition ${
               erase.source === 'inpainted'
-                ? 'bg-indigo-600 text-white shadow-xs'
+                ? 'bg-[#f4446d] text-white shadow-xs'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
@@ -38,7 +38,7 @@ export const EraseSettings: React.FC = () => {
             onClick={() => update({ source: 'original' })}
             className={`py-1.5 px-2 rounded-md font-medium transition ${
               erase.source === 'original'
-                ? 'bg-indigo-600 text-white shadow-xs'
+                ? 'bg-[#f4446d] text-white shadow-xs'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
@@ -55,7 +55,7 @@ export const EraseSettings: React.FC = () => {
             onClick={() => update({ shape: 'circle' })}
             className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg border transition ${
               erase.shape === 'circle'
-                ? 'border-indigo-500 bg-indigo-950/30 text-indigo-300 font-medium'
+                ? 'border-[#f4446d] bg-[#f4446d]/15 text-[#f4446d] font-medium'
                 : 'border-[#282d3f] bg-[#090a0f] text-slate-400 hover:text-slate-200'
             }`}
           >
@@ -66,7 +66,7 @@ export const EraseSettings: React.FC = () => {
             onClick={() => update({ shape: 'square' })}
             className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg border transition ${
               erase.shape === 'square'
-                ? 'border-indigo-500 bg-indigo-950/30 text-indigo-300 font-medium'
+                ? 'border-[#f4446d] bg-[#f4446d]/15 text-[#f4446d] font-medium'
                 : 'border-[#282d3f] bg-[#090a0f] text-slate-400 hover:text-slate-200'
             }`}
           >
@@ -88,7 +88,7 @@ export const EraseSettings: React.FC = () => {
           max="300"
           value={erase.size}
           onChange={(e) => update({ size: Number(e.target.value) })}
-          className="w-full accent-indigo-500"
+          className="w-full accent-[#f4446d]"
         />
       </div>
 
@@ -104,7 +104,7 @@ export const EraseSettings: React.FC = () => {
           max="80"
           value={erase.feather}
           onChange={(e) => update({ feather: Number(e.target.value) })}
-          className="w-full accent-indigo-500"
+          className="w-full accent-[#f4446d]"
         />
       </div>
     </div>

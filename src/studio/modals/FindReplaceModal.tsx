@@ -76,7 +76,7 @@ export const FindReplaceModal: React.FC<FindReplaceModalProps> = ({ onClose }) =
       <div className="w-full max-w-md rounded-xl border border-[#282d3f] bg-[#12141c] p-5 shadow-2xl text-slate-100">
         <div className="flex items-center justify-between pb-3 border-b border-[#282d3f]">
           <div className="flex items-center gap-2 font-medium text-sm text-slate-200">
-            <Search className="w-4 h-4 text-indigo-400" />
+            <Search className="w-4 h-4 text-[#f4446d]" />
             Find and Replace
           </div>
           <button
@@ -99,7 +99,7 @@ export const FindReplaceModal: React.FC<FindReplaceModalProps> = ({ onClose }) =
                   setReplacedCount(null);
                 }}
                 placeholder="Search dialogue..."
-                className="w-full rounded-lg border border-[#282d3f] bg-[#090a0f] px-3 py-2 text-sm text-slate-100 placeholder-slate-600 focus:border-indigo-500 focus:outline-hidden"
+                className="w-full rounded-lg border border-[#282d3f] bg-[#090a0f] px-3 py-2 text-sm text-slate-100 placeholder-slate-600 focus:border-[#f4446d] focus:outline-hidden"
               />
               {searchTerm && (
                 <span className="absolute right-3 top-2.5 text-xs text-slate-400">
@@ -119,7 +119,7 @@ export const FindReplaceModal: React.FC<FindReplaceModalProps> = ({ onClose }) =
                 setReplacedCount(null);
               }}
               placeholder="Replacement text..."
-              className="w-full rounded-lg border border-[#282d3f] bg-[#090a0f] px-3 py-2 text-sm text-slate-100 placeholder-slate-600 focus:border-indigo-500 focus:outline-hidden"
+              className="w-full rounded-lg border border-[#282d3f] bg-[#090a0f] px-3 py-2 text-sm text-slate-100 placeholder-slate-600 focus:border-[#f4446d] focus:outline-hidden"
             />
           </div>
 
@@ -129,7 +129,7 @@ export const FindReplaceModal: React.FC<FindReplaceModalProps> = ({ onClose }) =
                 type="checkbox"
                 checked={matchCase}
                 onChange={(e) => setMatchCase(e.target.checked)}
-                className="rounded border-[#282d3f] bg-[#090a0f] text-indigo-600 focus:ring-0"
+                className="rounded border-[#282d3f] bg-[#090a0f] text-[#f4446d] focus:ring-0"
               />
               Match case
             </label>
@@ -138,7 +138,7 @@ export const FindReplaceModal: React.FC<FindReplaceModalProps> = ({ onClose }) =
                 type="checkbox"
                 checked={wholeWord}
                 onChange={(e) => setWholeWord(e.target.checked)}
-                className="rounded border-[#282d3f] bg-[#090a0f] text-indigo-600 focus:ring-0"
+                className="rounded border-[#282d3f] bg-[#090a0f] text-[#f4446d] focus:ring-0"
               />
               Whole word
             </label>
@@ -162,7 +162,7 @@ export const FindReplaceModal: React.FC<FindReplaceModalProps> = ({ onClose }) =
           <button
             onClick={handleReplaceAll}
             disabled={!searchTerm.trim() || matchingIndices.length === 0}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-40 disabled:pointer-events-none transition shadow-sm"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#f4446d] text-white hover:bg-[#e0355e] disabled:opacity-40 disabled:pointer-events-none transition shadow-sm"
           >
             <Replace className="w-3.5 h-3.5" />
             Replace All ({matchingIndices.length})

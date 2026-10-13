@@ -194,22 +194,26 @@ export default function App() {
   }, [activeJobId, loadJobs, loadJobDetails]);
 
   // Map Dexie TextBlocks to Studio TextObjects
-  const studioTextObjects: TextObject[] = textBlocks.map((b) => ({
-    id: String(b.id || `tb-${b.posX}-${b.posY}`),
-    x: b.posX,
-    y: b.posY,
-    width: b.width,
-    height: b.height,
-    text: b.translatedText,
-    originalText: b.originalText,
-    fontSize: b.fontSize || 16,
-    fontFamily: b.fontFamily || 'WildWords, CCWildWords, sans-serif',
-    color: b.color || '#000000',
-    strokeColor: b.strokeColor || '#ffffff',
-    strokeWidth: 2,
-    align: 'center',
-    isVertical: b.direction === 'v',
-  }));
+  const studioTextObjects: TextObject[] = textBlocks.map((b) => {
+    const isCjk = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/.test(b.translatedText);
+    return {
+      id: String(b.id || `tb-${b.posX}-${b.posY}`),
+      x: b.posX,
+      y: b.posY,
+      width: b.width,
+      height: b.height,
+      text: b.translatedText,
+      lines: b.lines,
+      originalText: b.originalText,
+      fontSize: b.fontSize || 16,
+      fontFamily: b.fontFamily || 'WildWords, CCWildWords, sans-serif',
+      color: b.color || '#000000',
+      strokeColor: b.strokeColor || '#ffffff',
+      strokeWidth: 2,
+      align: 'center',
+      isVertical: b.direction === 'v' && isCjk,
+    };
+  });
 
   const handleManualUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];

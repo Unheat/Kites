@@ -35,7 +35,7 @@ export const PaintSettings: React.FC = () => {
   };
 
   return (
-    <div className="space-y-4 p-4 text-xs text-slate-200">
+    <div className="space-y-4 text-xs text-slate-200">
       <div className="pb-2 border-b border-[#282d3f]">
         <h3 className="font-semibold text-sm text-slate-100">Freehand Paint Brush</h3>
         <p className="text-[11px] text-slate-400 mt-0.5">
@@ -53,7 +53,7 @@ export const PaintSettings: React.FC = () => {
               onClick={() => update({ mode })}
               className={`py-1.5 px-2 rounded-md font-medium capitalize transition ${
                 paint.mode === mode
-                  ? 'bg-indigo-600 text-white shadow-xs'
+                  ? 'bg-[#f4446d] text-white shadow-xs'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
@@ -97,8 +97,8 @@ export const PaintSettings: React.FC = () => {
       {paint.mode === 'pattern' && (
         <div className="space-y-3">
           <label className="block text-slate-400 font-medium mb-1.5">Pattern Image</label>
-          <label className="flex items-center justify-center gap-2 p-3 rounded-lg border border-dashed border-[#282d3f] bg-[#090a0f] cursor-pointer hover:border-indigo-500 transition">
-            <ImageIcon className="w-4 h-4 text-indigo-400" />
+          <label className="flex items-center justify-center gap-2 p-3 rounded-lg border border-dashed border-[#282d3f] bg-[#090a0f] cursor-pointer hover:border-[#f4446d] transition">
+            <ImageIcon className="w-4 h-4 text-[#f4446d]" />
             <span className="text-slate-300">{paint.patternUrl ? 'Change Pattern' : 'Upload Pattern Image'}</span>
             <input type="file" accept="image/*" onChange={handlePatternUpload} className="hidden" />
           </label>
@@ -115,7 +115,7 @@ export const PaintSettings: React.FC = () => {
                 step="0.1"
                 value={paint.patternScale}
                 onChange={(e) => update({ patternScale: Number(e.target.value) })}
-                className="w-full accent-indigo-500"
+                className="w-full accent-[#f4446d]"
               />
             </div>
           )}
@@ -135,7 +135,7 @@ export const PaintSettings: React.FC = () => {
             max="30"
             value={paint.blurRadius}
             onChange={(e) => update({ blurRadius: Number(e.target.value) })}
-            className="w-full accent-indigo-500"
+            className="w-full accent-[#f4446d]"
           />
         </div>
       )}
@@ -152,7 +152,7 @@ export const PaintSettings: React.FC = () => {
           max="300"
           value={paint.size}
           onChange={(e) => update({ size: Number(e.target.value) })}
-          className="w-full accent-indigo-500"
+          className="w-full accent-[#f4446d]"
         />
       </div>
 
@@ -168,7 +168,7 @@ export const PaintSettings: React.FC = () => {
           max="80"
           value={paint.feather}
           onChange={(e) => update({ feather: Number(e.target.value) })}
-          className="w-full accent-indigo-500"
+          className="w-full accent-[#f4446d]"
         />
       </div>
     </div>

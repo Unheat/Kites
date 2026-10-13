@@ -8,10 +8,10 @@ export interface AppearanceSettingsModalProps {
 }
 
 const DEFAULT_APPEARANCE: EditorAppearanceSettings = {
-  selectedBoxBorderColor: '#6366f1',
+  selectedBoxBorderColor: '#f4446d',
   unselectedBoxBorderColor: 'rgba(255, 255, 255, 0.35)',
-  caretColor: '#6366f1',
-  brushCursorColor: 'rgba(99, 102, 241, 0.85)',
+  caretColor: '#f4446d',
+  brushCursorColor: 'rgba(244, 68, 109, 0.85)',
 };
 
 export const AppearanceSettingsModal: React.FC<AppearanceSettingsModalProps> = ({ onClose }) => {
@@ -35,7 +35,7 @@ export const AppearanceSettingsModal: React.FC<AppearanceSettingsModalProps> = (
       <div className="w-full max-w-sm rounded-xl border border-[#282d3f] bg-[#12141c] p-5 shadow-2xl text-slate-100 flex flex-col">
         <div className="flex items-center justify-between pb-3 border-b border-[#282d3f]">
           <div className="flex items-center gap-2 font-medium text-sm text-slate-200">
-            <Palette className="w-4 h-4 text-indigo-400" />
+            <Palette className="w-4 h-4 text-[#f4446d]" />
             Editor Appearance
           </div>
           <button
@@ -81,7 +81,7 @@ export const AppearanceSettingsModal: React.FC<AppearanceSettingsModalProps> = (
             <span className="text-slate-300">Brush Cursor Footprint</span>
             <input
               type="color"
-              value={appearance.brushCursorColor.startsWith('#') ? appearance.brushCursorColor : '#6366f1'}
+              value={appearance.brushCursorColor.startsWith('#') ? appearance.brushCursorColor : '#f4446d'}
               onChange={(e) => updateSetting('brushCursorColor', e.target.value)}
               className="w-7 h-7 rounded border border-[#282d3f] bg-transparent cursor-pointer"
             />
@@ -98,7 +98,7 @@ export const AppearanceSettingsModal: React.FC<AppearanceSettingsModalProps> = (
           </button>
           <button
             onClick={onClose}
-            className="px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-600 text-white hover:bg-indigo-500 transition shadow-sm"
+            className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[#f4446d] text-white hover:bg-[#e0355e] transition shadow-sm"
           >
             Save
           </button>

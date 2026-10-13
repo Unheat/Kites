@@ -1,38 +1,40 @@
 import type { Point } from '../types';
-import { MIN_ZOOM_LEVEL, MAX_ZOOM_LEVEL } from '../state/studioStore';
 
-/** Normal scroll velocity multiplier for wheel delta. */
-export const WHEEL_SCROLL_SPEED = 0.6;
+/** Minimum permitted zoom factor (10%). */
+export const MIN_ZOOM_LEVEL = 0.1;
 
-/** Exponential zoom dampening factor for cursor-centered wheel zooming. */
-export const WHEEL_ZOOM_SENSITIVITY = 0.0015;
+/** Maximum permitted zoom factor (500%). */
+export const MAX_ZOOM_LEVEL = 5.0;
 
 /**
- * Transforms screen client coordinates into canvas image coordinate space.
+ * Transforms screen client coordinates into image pixel space using the canvas element's bounding rect.
+ * Perfectly immune to scroll offsets and margin: auto centering.
  *
- * @param clientX - Screen horizontal coordinate.
- * @param clientY - Screen vertical coordinate.
- * @param containerRect - Bounding client rectangle of the viewport container.
- * @param zoom - Current zoom magnification factor.
- * @param pan - Viewport translation offsets in screen pixels.
- * @param imageWidth - Width of the base manga image.
- * @param isFlipped - Whether the image is mirrored horizontally.
- * @returns Translated point in image pixel coordinates.
+ * @param clientX - Pointer screen horizontal coordinate.
+ * @param clientY - Pointer screen vertical coordinate.
+ * @param canvasRect - Bounding client rectangle of the rendered canvas.
+ * @param imageWidth - Natural width of manga image in pixels.
+ * @param imageHeight - Natural height of manga image in pixels.
+ * @param isFlipped - Whether image is horizontally mirrored.
+ * @returns Point in natural image coordinate space.
  */
 export function clientToImage(
   clientX: number,
   clientY: number,
-  containerRect: DOMRect,
-  zoom: number,
-  pan: Point,
+  canvasRect: DOMRect,
   imageWidth: number,
+  imageHeight: number,
   isFlipped: boolean = false
 ): Point {
-  const localX = clientX - containerRect.left - pan.x;
-  const localY = clientY - containerRect.top - pan.y;
+  if (canvasRect.width <= 0 || canvasRect.height <= 0) {
+    return { x: 0, y: 0 };
+  }
 
-  let imgX = localX / zoom;
-  const imgY = localY / zoom;
+  const normalizedX = (clientX - canvasRect.left) / canvasRect.width;
+  const normalizedY = (clientY - canvasRect.top) / canvasRect.height;
+
+  let imgX = normalizedX * imageWidth;
+  const imgY = normalizedY * imageHeight;
 
   if (isFlipped && imageWidth > 0) {
     imgX = imageWidth - imgX;
@@ -42,39 +44,41 @@ export function clientToImage(
 }
 
 /**
- * Transforms canvas image coordinates into screen client coordinate space.
+ * Transforms image coordinates into screen client pixels using the canvas element's bounding rect.
  *
- * @param imageX - Horizontal image coordinate.
- * @param imageY - Vertical image coordinate.
- * @param containerRect - Bounding client rectangle of the viewport container.
- * @param zoom - Current zoom magnification factor.
- * @param pan - Viewport translation offsets in screen pixels.
- * @param imageWidth - Width of the base manga image.
- * @param isFlipped - Whether the image is mirrored horizontally.
- * @returns Screen position point in client pixels.
+ * @param imageX - Horizontal coordinate in image space.
+ * @param imageY - Vertical coordinate in image space.
+ * @param canvasRect - Bounding client rectangle of the rendered canvas.
+ * @param imageWidth - Natural width of manga image in pixels.
+ * @param imageHeight - Natural height of manga image in pixels.
+ * @param isFlipped - Whether image is horizontally mirrored.
+ * @returns Screen coordinate point in client pixels.
  */
 export function imageToClient(
   imageX: number,
   imageY: number,
-  containerRect: DOMRect,
-  zoom: number,
-  pan: Point,
+  canvasRect: DOMRect,
   imageWidth: number,
+  imageHeight: number,
   isFlipped: boolean = false
 ): Point {
+  if (imageWidth <= 0 || imageHeight <= 0) {
+    return { x: canvasRect.left, y: canvasRect.top };
+  }
+
   const effectiveX = isFlipped && imageWidth > 0 ? imageWidth - imageX : imageX;
-  const clientX = containerRect.left + pan.x + effectiveX * zoom;
-  const clientY = containerRect.top + pan.y + imageY * zoom;
+  const clientX = canvasRect.left + (effectiveX / imageWidth) * canvasRect.width;
+  const clientY = canvasRect.top + (imageY / imageHeight) * canvasRect.height;
 
   return { x: clientX, y: clientY };
 }
 
 /**
- * Computes zoom factor to fit the image width into the viewport container with padding.
+ * Computes scale to fit the image width into the container with padding.
  *
- * @param containerWidth - Width of viewport container.
- * @param imageWidth - Natural width of manga image.
- * @param paddingPx - Margin padding inside container (default 32).
+ * @param containerWidth - Width of available scroll viewport.
+ * @param imageWidth - Natural image width.
+ * @param paddingPx - Margin padding (default 32).
  * @returns Clamped scale factor.
  */
 export function calculateFitWidth(
@@ -88,11 +92,11 @@ export function calculateFitWidth(
 }
 
 /**
- * Computes zoom factor to fit the image height into the viewport container with padding.
+ * Computes scale to fit the image height into the container with padding.
  *
- * @param containerHeight - Height of viewport container.
- * @param imageHeight - Natural height of manga image.
- * @param paddingPx - Margin padding inside container (default 32).
+ * @param containerHeight - Height of available scroll viewport.
+ * @param imageHeight - Natural image height.
+ * @param paddingPx - Margin padding (default 32).
  * @returns Clamped scale factor.
  */
 export function calculateFitHeight(
@@ -106,13 +110,13 @@ export function calculateFitHeight(
 }
 
 /**
- * Computes zoom factor to fit the entire image within the container boundaries.
+ * Computes scale to fit both width and height inside the scroll container.
  *
- * @param containerWidth - Width of viewport container.
- * @param containerHeight - Height of viewport container.
- * @param imageWidth - Natural width of manga image.
- * @param imageHeight - Natural height of manga image.
- * @param paddingPx - Margin padding inside container (default 32).
+ * @param containerWidth - Width of available scroll viewport.
+ * @param containerHeight - Height of available scroll viewport.
+ * @param imageWidth - Natural image width.
+ * @param imageHeight - Natural image height.
+ * @param paddingPx - Margin padding (default 32).
  * @returns Clamped scale factor.
  */
 export function calculateFitWindow(
@@ -125,63 +129,4 @@ export function calculateFitWindow(
   const scaleW = calculateFitWidth(containerWidth, imageWidth, paddingPx);
   const scaleH = calculateFitHeight(containerHeight, imageHeight, paddingPx);
   return Math.min(scaleW, scaleH);
-}
-
-/**
- * Processes mouse wheel events for natural scrolling vs cursor-centered zoom.
- *
- * @param event - MouseWheel event from the viewport container.
- * @param containerRect - Bounding rectangle of the viewport container.
- * @param currentZoom - Current zoom factor.
- * @param currentPan - Current pan coordinates.
- * @returns Updated zoom and pan state.
- */
-export function processWheelNavigation(
-  event: WheelEvent,
-  containerRect: DOMRect,
-  currentZoom: number,
-  currentPan: Point
-): { zoom: number; pan: Point } {
-  // Cursor-centered zoom on Ctrl+wheel or Cmd+wheel
-  if (event.ctrlKey || event.metaKey) {
-    const zoomMultiplier = Math.exp(-event.deltaY * WHEEL_ZOOM_SENSITIVITY);
-    const targetZoom = Math.max(
-      MIN_ZOOM_LEVEL,
-      Math.min(MAX_ZOOM_LEVEL, currentZoom * zoomMultiplier)
-    );
-
-    // Compute cursor position relative to container
-    const cursorX = event.clientX - containerRect.left;
-    const cursorY = event.clientY - containerRect.top;
-
-    // Preserve the image coordinate under the cursor
-    const scaleRatio = targetZoom / currentZoom;
-    const nextPanX = cursorX - (cursorX - currentPan.x) * scaleRatio;
-    const nextPanY = cursorY - (cursorY - currentPan.y) * scaleRatio;
-
-    return {
-      zoom: targetZoom,
-      pan: { x: nextPanX, y: nextPanY },
-    };
-  }
-
-  // Shift+wheel: Horizontal scroll
-  if (event.shiftKey) {
-    return {
-      zoom: currentZoom,
-      pan: {
-        x: currentPan.x - event.deltaY * WHEEL_SCROLL_SPEED,
-        y: currentPan.y,
-      },
-    };
-  }
-
-  // Default: Vertical document scroll
-  return {
-    zoom: currentZoom,
-    pan: {
-      x: currentPan.x - (event.deltaX ? event.deltaX * WHEEL_SCROLL_SPEED : 0),
-      y: currentPan.y - event.deltaY * WHEEL_SCROLL_SPEED,
-    },
-  };
 }

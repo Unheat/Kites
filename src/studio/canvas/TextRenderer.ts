@@ -55,7 +55,11 @@ export class TextRenderer {
 
     const processedText = this.applyCasing(obj.text, obj.uppercase, obj.lowercase);
 
-    if (obj.isVertical) {
+    // Only render single-column vertical CJK if text contains CJK glyphs or explicitly requested
+    const hasCjk = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/.test(processedText);
+    const isVerticalMode = Boolean(obj.isVertical && hasCjk);
+
+    if (isVerticalMode) {
       this.renderVertical(ctx, processedText, obj);
     } else {
       this.renderHorizontal(ctx, processedText, obj);
@@ -82,18 +86,68 @@ export class TextRenderer {
     ctx.fill();
   }
 
+  /**
+   * Word-wraps text within the specified bounding box width.
+   */
+  public static wrapTextLines(
+    ctx: CanvasRenderingContext2D,
+    text: string,
+    maxWidth: number,
+    existingLines?: string[]
+  ): string[] {
+    if (existingLines && existingLines.length > 0) {
+      const normalizedExisting = existingLines.join(' ').replace(/\s+/g, ' ').trim();
+      const normalizedCurrent = text.replace(/\s+/g, ' ').trim();
+      if (normalizedExisting === normalizedCurrent) {
+        return existingLines;
+      }
+    }
+
+    const paragraphs = text.split('\n');
+    const resultLines: string[] = [];
+    const safeWidth = Math.max(20, maxWidth - 8);
+
+    for (const para of paragraphs) {
+      if (!para.trim()) {
+        resultLines.push('');
+        continue;
+      }
+
+      const words = para.split(/\s+/);
+      let currentLine = '';
+
+      for (const word of words) {
+        const testLine = currentLine ? `${currentLine} ${word}` : word;
+        const testWidth = ctx.measureText(testLine).width;
+
+        if (testWidth <= safeWidth || !currentLine) {
+          currentLine = testLine;
+        } else {
+          resultLines.push(currentLine);
+          currentLine = word;
+        }
+      }
+
+      if (currentLine) {
+        resultLines.push(currentLine);
+      }
+    }
+
+    return resultLines.length > 0 ? resultLines : [text];
+  }
+
   private static renderHorizontal(
     ctx: CanvasRenderingContext2D,
     text: string,
     obj: TextObject
   ): void {
-    const lines = text.split('\n');
+    const lines = this.wrapTextLines(ctx, text, obj.width, obj.lines);
     const lineHeight = obj.fontSize * (obj.lineSpacing ?? 1.2);
     const align = obj.align ?? 'center';
 
     let startX = obj.width / 2;
-    if (align === 'left') startX = 0;
-    if (align === 'right') startX = obj.width;
+    if (align === 'left') startX = 4;
+    if (align === 'right') startX = obj.width - 4;
     ctx.textAlign = align;
 
     const totalHeight = lines.length * lineHeight;

@@ -46,7 +46,7 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ onClose }) => {
       <div className="w-full max-w-lg rounded-xl border border-[#282d3f] bg-[#12141c] p-5 shadow-2xl text-slate-100 max-h-[85vh] flex flex-col">
         <div className="flex items-center justify-between pb-3 border-b border-[#282d3f]">
           <div className="flex items-center gap-2 font-medium text-sm text-slate-200">
-            <Keyboard className="w-4 h-4 text-indigo-400" />
+            <Keyboard className="w-4 h-4 text-[#f4446d]" />
             Keyboard Shortcuts
           </div>
           <button
@@ -70,7 +70,7 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ onClose }) => {
                     className="flex items-center justify-between p-2 rounded-lg bg-[#090a0f] border border-[#282d3f]/60 text-xs"
                   >
                     <span className="text-slate-300">{item.desc}</span>
-                    <kbd className="px-2 py-0.5 rounded-md bg-[#1c1f2e] border border-[#363c54] font-mono text-[11px] text-indigo-300 font-medium">
+                    <kbd className="px-2 py-0.5 rounded-md bg-[#1c1f2e] border border-[#363c54] font-mono text-[11px] text-[#f4446d] font-medium">
                       {item.key}
                     </kbd>
                   </div>

@@ -12,7 +12,8 @@ import { studioUndoStack } from '../state/undoStack';
 import {
   clientToImage,
   imageToClient,
-  processWheelNavigation,
+  MIN_ZOOM_LEVEL,
+  MAX_ZOOM_LEVEL,
 } from './CanvasViewport';
 import { BrushEngine } from './BrushEngine';
 import { TextRenderer } from './TextRenderer';
@@ -36,13 +37,14 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
   cleanedImage,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
+  const spacerRef = useRef<HTMLDivElement>(null);
   const bgCanvasRef = useRef<HTMLCanvasElement>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
 
   const activeTool = useStudioStore((s) => s.activeTool);
   const zoom = useStudioStore((s) => s.zoom);
-  const pan = useStudioStore((s) => s.pan);
   const isCanvasFlipped = useStudioStore((s) => s.isCanvasFlipped);
+  const hideBoxes = useStudioStore((s) => s.hideBoxes);
   const textObjects = useStudioStore((s) => s.textObjects);
   const selectedTextId = useStudioStore((s) => s.selectedTextId);
   const clipboardStyle = useStudioStore((s) => s.clipboardStyle);
@@ -66,7 +68,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
   const imageWidth = originalImage?.naturalWidth || cleanedImage?.naturalWidth || 800;
   const imageHeight = originalImage?.naturalHeight || cleanedImage?.naturalHeight || 1200;
 
-  // Initialize and redraw background canvas when base cleaned artwork changes
+  // Initialize and redraw background canvas
   useEffect(() => {
     const bgCanvas = bgCanvasRef.current;
     if (!bgCanvas || imageWidth <= 0 || imageHeight <= 0) return;
@@ -86,7 +88,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
     brushEngineRef.current.init(imageWidth, imageHeight);
   }, [cleanedImage, originalImage, imageWidth, imageHeight]);
 
-  // Main redraw loop for overlay canvas (text objects, stickers, selection furniture, cursor)
+  // Main redraw loop for overlay canvas (text objects, stickers, selection furniture)
   const redrawOverlay = useCallback(() => {
     const overlay = overlayCanvasRef.current;
     if (!overlay) return;
@@ -112,8 +114,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       }
       ctx.restore();
 
-      // Selection outline for sticker
-      if (layer.id === selectedImageLayerId) {
+      if (!hideBoxes && layer.id === selectedImageLayerId) {
         ctx.save();
         ctx.strokeStyle = appearance.selectedBoxBorderColor;
         ctx.setLineDash([4, 4]);
@@ -127,7 +128,6 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       if (obj.isVisible === false) continue;
 
       if (obj.warpPreset && obj.warpPreset !== 'none' && obj.quadPoints) {
-        // Render into temporary canvas then warp
         const tempCanvas = document.createElement('canvas');
         tempCanvas.width = obj.width;
         tempCanvas.height = obj.height;
@@ -144,18 +144,20 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       }
     }
 
-    // 3. Render transform furniture for active text object
-    const selectedObj = textObjects.find((t) => t.id === selectedTextId);
-    if (selectedObj) {
-      CanvasFurniture.drawSelectionFurniture(ctx, selectedObj, appearance.selectedBoxBorderColor);
+    // 3. Render transform furniture if not in hideBoxes mode
+    if (!hideBoxes) {
+      const selectedObj = textObjects.find((t) => t.id === selectedTextId);
+      if (selectedObj) {
+        CanvasFurniture.drawSelectionFurniture(ctx, selectedObj, appearance.selectedBoxBorderColor);
+      }
     }
-  }, [imageWidth, imageHeight, textObjects, imageLayers, selectedTextId, selectedImageLayerId, appearance]);
+  }, [imageWidth, imageHeight, textObjects, imageLayers, selectedTextId, selectedImageLayerId, appearance, hideBoxes]);
 
   useEffect(() => {
     redrawOverlay();
   }, [redrawOverlay]);
 
-  // Spacebar pan gesture handler
+  // Spacebar pan gesture listener
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.code === 'Space' && !e.repeat) {
@@ -164,14 +166,12 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
         e.preventDefault();
         setIsSpacePanning(true);
       }
-      // Delete shortcut
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedTextId) {
         const target = e.target as HTMLElement;
         if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return;
         e.preventDefault();
         handleDeleteSelectedText();
       }
-      // Duplicate shortcut
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd' && selectedTextId) {
         e.preventDefault();
         handleDuplicateSelectedText();
@@ -192,38 +192,55 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
     };
   }, [selectedTextId]);
 
-  // Mouse wheel listener: vertical scrolling vs cursor-centered zoom
+  // Mouse wheel listener: natural scrolling vs cursor-centered zoom
   const handleWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
     const container = containerRef.current;
     if (!container) return;
 
-    const next = processWheelNavigation(e.nativeEvent, container.getBoundingClientRect(), zoom, pan);
-    studioStore.setState({ zoom: next.zoom, pan: next.pan });
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      const containerRect = container.getBoundingClientRect();
+      const mouseX = e.clientX - containerRect.left + container.scrollLeft;
+      const mouseY = e.clientY - containerRect.top + container.scrollTop;
+
+      const factor = e.deltaY < 0 ? 1.15 : 0.85;
+      const newZoom = Math.max(MIN_ZOOM_LEVEL, Math.min(MAX_ZOOM_LEVEL, zoom * factor));
+      const ratio = newZoom / zoom;
+
+      studioStore.setState({ zoom: newZoom });
+
+      requestAnimationFrame(() => {
+        if (containerRef.current) {
+          containerRef.current.scrollLeft = mouseX * ratio - (e.clientX - containerRect.left);
+          containerRef.current.scrollTop = mouseY * ratio - (e.clientY - containerRect.top);
+        }
+      });
+    } else if (e.shiftKey) {
+      e.preventDefault();
+      container.scrollLeft += e.deltaY * 0.6;
+    }
   };
 
   const getPointerImageCoords = (e: React.PointerEvent): Point => {
-    const container = containerRef.current;
-    if (!container) return { x: 0, y: 0 };
+    const overlay = overlayCanvasRef.current;
+    if (!overlay) return { x: 0, y: 0 };
     return clientToImage(
       e.clientX,
       e.clientY,
-      container.getBoundingClientRect(),
-      zoom,
-      pan,
+      overlay.getBoundingClientRect(),
       imageWidth,
+      imageHeight,
       isCanvasFlipped
     );
   };
 
   // Pointer Down
   const handlePointerDown = (e: React.PointerEvent) => {
-    if (e.button !== 0) return; // Left click only
+    if (e.button !== 0) return;
     const pt = getPointerImageCoords(e);
     setIsPointerDown(true);
     setDragStartPoint(pt);
 
-    // 1. Spacebar Pan
     if (isSpacePanning) {
       return;
     }
@@ -231,7 +248,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
     const bgCanvas = bgCanvasRef.current;
     const bgCtx = bgCanvas?.getContext('2d', { willReadFrequently: true });
 
-    // 2. Erase / Restore Brush
+    // Erase / Restore Brush
     if (activeTool === 'erase' && bgCtx) {
       const radius = eraseSettings.size / 2;
       const initialBbox: BoundingBox = {
@@ -250,7 +267,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       return;
     }
 
-    // 3. Paint Brush
+    // Paint Brush
     if (activeTool === 'paint' && bgCtx) {
       const radius = paintSettings.size / 2;
       const initialBbox: BoundingBox = {
@@ -273,7 +290,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       return;
     }
 
-    // 4. Inpaint / OCR Mask Brush
+    // Inpaint / OCR Mask Brush
     if (activeTool === 'inpaint' || activeTool === 'ocr') {
       const brushSize = activeTool === 'inpaint' ? inpaintSettings.size : ocrSettings.size;
       brushEngineRef.current.beginStroke(pt, {
@@ -284,12 +301,11 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       return;
     }
 
-    // 5. Select & Transform Tool
+    // Select & Transform Tool
     if (activeTool === 'select' || activeTool === 'text') {
       const selectedObj = textObjects.find((t) => t.id === selectedTextId);
 
-      // Check handle click
-      if (selectedObj) {
+      if (selectedObj && !hideBoxes) {
         const handle = CanvasFurniture.hitTestHandles(pt, selectedObj);
         if (handle) {
           setActiveHandle(handle);
@@ -298,7 +314,6 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
         }
       }
 
-      // Check object body click
       let clickedObj: TextObject | null = null;
       for (let i = textObjects.length - 1; i >= 0; i--) {
         if (CanvasFurniture.hitTestBody(pt, textObjects[i])) {
@@ -309,12 +324,11 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
 
       if (clickedObj) {
         studioStore.setState({ selectedTextId: clickedObj.id });
-        setActiveHandle('nw'); // standard move state
+        setActiveHandle('nw');
         setInitialTransformState({ ...clickedObj });
         return;
       }
 
-      // If active tool is Text and clicked empty canvas -> create new text bubble!
       if (activeTool === 'text') {
         const newObj: TextObject = {
           id: `bubble-${Date.now()}`,
@@ -343,7 +357,6 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
         return;
       }
 
-      // Clicked empty canvas -> deselect
       studioStore.setState({ selectedTextId: null });
       setActiveHandle(null);
     }
@@ -353,14 +366,11 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
   const handlePointerMove = (e: React.PointerEvent) => {
     const pt = getPointerImageCoords(e);
 
-    // 1. Space Panning
     if (isPointerDown && isSpacePanning) {
-      studioStore.setState({
-        pan: {
-          x: pan.x + e.movementX,
-          y: pan.y + e.movementY,
-        },
-      });
+      if (containerRef.current) {
+        containerRef.current.scrollLeft -= e.movementX;
+        containerRef.current.scrollTop -= e.movementY;
+      }
       return;
     }
 
@@ -369,7 +379,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
     const bgCanvas = bgCanvasRef.current;
     const bgCtx = bgCanvas?.getContext('2d', { willReadFrequently: true });
 
-    // 2. Erase / Restore Brush Drag
+    // Erase / Restore Brush Drag
     if (activeTool === 'erase' && bgCtx) {
       brushEngineRef.current.extendStroke(pt, {
         shape: eraseSettings.shape,
@@ -387,7 +397,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       return;
     }
 
-    // 3. Paint Brush Drag
+    // Paint Brush Drag
     if (activeTool === 'paint' && bgCtx) {
       brushEngineRef.current.extendStroke(pt, {
         shape: paintSettings.shape,
@@ -409,7 +419,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       return;
     }
 
-    // 4. Inpaint / OCR Brush Drag (draws preview mask on overlay)
+    // Inpaint / OCR Brush Drag (draws preview mask on overlay)
     if (activeTool === 'inpaint' || activeTool === 'ocr') {
       const brushSize = activeTool === 'inpaint' ? inpaintSettings.size : ocrSettings.size;
       brushEngineRef.current.extendStroke(pt, {
@@ -421,7 +431,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       const overlay = overlayCanvasRef.current;
       const ctx = overlay?.getContext('2d');
       if (ctx) {
-        ctx.fillStyle = activeTool === 'inpaint' ? 'rgba(99, 102, 241, 0.4)' : 'rgba(244, 63, 94, 0.4)';
+        ctx.fillStyle = activeTool === 'inpaint' ? 'rgba(239, 68, 68, 0.4)' : 'rgba(244, 63, 94, 0.4)';
         ctx.beginPath();
         ctx.arc(pt.x, pt.y, brushSize / 2, 0, Math.PI * 2);
         ctx.fill();
@@ -429,7 +439,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       return;
     }
 
-    // 5. Transform / Drag Selected Text Object
+    // Transform Selected Text Object
     if ((activeTool === 'select' || activeTool === 'text') && activeHandle && dragStartPoint && initialTransformState) {
       const deltaX = pt.x - dragStartPoint.x;
       const deltaY = pt.y - dragStartPoint.y;
@@ -437,11 +447,9 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       let updated = { ...initialTransformState };
 
       if (activeHandle === 'nw' && !initialTransformState.rotation) {
-        // Translation movement
         updated.x = Math.round(initialTransformState.x + deltaX);
         updated.y = Math.round(initialTransformState.y + deltaY);
       } else if (activeHandle === 'rot') {
-        // Rotation handle
         const centerX = initialTransformState.x + initialTransformState.width / 2;
         const centerY = initialTransformState.y + initialTransformState.height / 2;
         const angleRad = Math.atan2(pt.y - centerY, pt.x - centerX);
@@ -470,7 +478,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
     const bgCanvas = bgCanvasRef.current;
     const bgCtx = bgCanvas?.getContext('2d', { willReadFrequently: true });
 
-    // 1. Finalize Erase or Paint stroke and record undo patch
+    // Erase or Paint stroke undo patch
     if ((activeTool === 'erase' || activeTool === 'paint') && bgCtx && preStrokePatch) {
       const bbox = brushEngineRef.current.endStroke(eraseSettings.feather);
       const postStrokePatch = BrushEngine.captureBoundingPatch(bgCtx, bbox);
@@ -488,7 +496,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       return;
     }
 
-    // 2. Finalize Live AI Inpaint
+    // Finalize Live AI Inpaint
     if (activeTool === 'inpaint' && bgCanvas && bgCtx) {
       const bbox = brushEngineRef.current.endStroke(0);
       if (bbox.width <= 5 || bbox.height <= 5) return;
@@ -500,7 +508,6 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       const cropH = Math.min(imageHeight - cropY, bbox.height + pad * 2);
       const paddedBbox: BoundingBox = { x: cropX, y: cropY, width: cropW, height: cropH };
 
-      // Create cropped canvases
       const patchCanvas = document.createElement('canvas');
       patchCanvas.width = cropW;
       patchCanvas.height = cropH;
@@ -511,11 +518,10 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       maskCanvas.width = cropW;
       maskCanvas.height = cropH;
       const maskCtx = maskCanvas.getContext('2d');
-      // Fill mask with white rectangle across stroke area
       maskCtx?.fillRect(0, 0, cropW, cropH);
 
       const preInpaintPatch = BrushEngine.captureBoundingPatch(bgCtx, paddedBbox);
-      redrawOverlay(); // clear mask overlay immediately
+      redrawOverlay();
 
       setIsAiProcessing(true);
       try {
@@ -540,7 +546,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       return;
     }
 
-    // 3. Finalize Live AI Re-OCR Area
+    // Finalize Live AI Re-OCR Area
     if (activeTool === 'ocr' && bgCanvas && bgCtx) {
       const bbox = brushEngineRef.current.endStroke(0);
       if (bbox.width <= 8 || bbox.height <= 8) return;
@@ -559,7 +565,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       patchCtx?.drawImage(bgCanvas, paddedBbox.x, paddedBbox.y, paddedBbox.width, paddedBbox.height, 0, 0, paddedBbox.width, paddedBbox.height);
 
       const preOcrPatch = BrushEngine.captureBoundingPatch(bgCtx, paddedBbox);
-      redrawOverlay(); // clear overlay immediately
+      redrawOverlay();
 
       setIsAiProcessing(true);
       try {
@@ -589,7 +595,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       return;
     }
 
-    // 4. Transform Text Box Undo state
+    // Transform Text Box Undo state
     if (initialTransformState && selectedTextId) {
       const current = textObjects.find((t) => t.id === selectedTextId);
       if (current && JSON.stringify(current) !== JSON.stringify(initialTransformState)) {
@@ -702,14 +708,13 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
 
   // Compute screen coordinates for floating action pill
   const selectedObj = textObjects.find((t) => t.id === selectedTextId);
-  const pillPos = selectedObj && containerRef.current
+  const pillPos = selectedObj && overlayCanvasRef.current
     ? imageToClient(
         selectedObj.x + selectedObj.width / 2,
         selectedObj.y,
-        containerRef.current.getBoundingClientRect(),
-        zoom,
-        pan,
+        overlayCanvasRef.current.getBoundingClientRect(),
         imageWidth,
+        imageHeight,
         isCanvasFlipped
       )
     : null;
@@ -718,41 +723,54 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
     <div
       ref={containerRef}
       onWheel={handleWheel}
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerUp}
-      className={`relative w-full h-full overflow-hidden bg-[#090a0f] select-none ${
+      className={`relative flex flex-1 min-h-0 overflow-auto p-4 w-full h-full bg-[#0a0c12] select-none ${
         isSpacePanning ? 'cursor-grab active:cursor-grabbing' : ''
       }`}
     >
-      {/* Canvas Transform Stage */}
+      {/* Centered Canvas Spacer: Torii m-auto architecture */}
       <div
+        ref={spacerRef}
         style={{
-          transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom}) ${
-            isCanvasFlipped ? 'scaleX(-1)' : ''
-          }`,
-          transformOrigin: 'top left',
-          width: imageWidth,
-          height: imageHeight,
+          width: `${imageWidth * zoom}px`,
+          height: `${imageHeight * zoom}px`,
         }}
-        className="absolute left-0 top-0 pointer-events-none"
+        className="relative block shrink-0 m-auto select-none"
       >
         {/* Working background raster canvas */}
-        <canvas ref={bgCanvasRef} className="absolute left-0 top-0 shadow-2xl" />
+        <canvas
+          ref={bgCanvasRef}
+          style={{
+            width: `${imageWidth * zoom}px`,
+            height: `${imageHeight * zoom}px`,
+            transform: isCanvasFlipped ? 'scaleX(-1)' : 'none',
+          }}
+          className="block absolute top-0 left-0 shadow-2xl rounded-sm"
+        />
 
         {/* Live overlay canvas for text, stickers, furniture */}
-        <canvas ref={overlayCanvasRef} className="absolute left-0 top-0" />
+        <canvas
+          ref={overlayCanvasRef}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          style={{
+            width: `${imageWidth * zoom}px`,
+            height: `${imageHeight * zoom}px`,
+            transform: isCanvasFlipped ? 'scaleX(-1)' : 'none',
+          }}
+          className="block absolute top-0 left-0 cursor-crosshair"
+        />
       </div>
 
       {/* Floating Action Pill Toolbar (Figma/Torii style) */}
-      {pillPos && selectedObj && !isSpacePanning && (
+      {pillPos && selectedObj && !isSpacePanning && !hideBoxes && (
         <div
           style={{
             left: `${pillPos.x}px`,
             top: `${pillPos.y - 44}px`,
             transform: 'translateX(-50%)',
           }}
-          className="absolute z-40 flex items-center gap-0.5 p-1 rounded-xl border border-[#282d3f] bg-[#12141c]/95 backdrop-blur-md shadow-2xl text-slate-200"
+          className="fixed z-40 flex items-center gap-0.5 p-1 rounded-xl border border-[#282d3f] bg-[#12141c]/95 backdrop-blur-md shadow-2xl text-slate-200"
         >
           <button
             onClick={handleCopyStyle}
@@ -765,7 +783,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
             <button
               onClick={handlePasteStyle}
               title="Paste Typography Style"
-              className="p-1.5 rounded-lg hover:bg-[#1c1f2e] text-indigo-400 hover:text-indigo-300 transition"
+              className="p-1.5 rounded-lg hover:bg-[#1c1f2e] text-[#f4446d] hover:text-[#e0355e] transition"
             >
               <ClipboardPaste className="w-3.5 h-3.5" />
             </button>
@@ -787,7 +805,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
           <button
             onClick={handleDeleteSelectedText}
             title="Delete Bubble (Delete)"
-            className="p-1.5 rounded-lg hover:bg-red-950/40 text-red-400 hover:text-red-300 transition"
+            className="p-1.5 rounded-lg hover:bg-[#f4446d]/15 text-[#f4446d] hover:text-[#e0355e] transition"
           >
             <Trash2 className="w-3.5 h-3.5" />
           </button>
@@ -796,8 +814,8 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
 
       {/* Local AI WebGPU Processing Spinner */}
       {isAiProcessing && (
-        <div className="absolute top-4 right-4 z-50 flex items-center gap-2 px-3 py-1.5 rounded-xl border border-indigo-500/40 bg-indigo-950/80 backdrop-blur-md text-xs text-indigo-200 shadow-xl">
-          <Sparkles className="w-4 h-4 animate-spin text-indigo-400" />
+        <div className="fixed top-16 right-6 z-50 flex items-center gap-2 px-3 py-1.5 rounded-xl border border-[#f4446d]/40 bg-[#12141c]/90 backdrop-blur-md text-xs text-[#f4446d] shadow-xl">
+          <Sparkles className="w-4 h-4 animate-spin text-[#f4446d]" />
           <span>Local WebGPU Inference...</span>
         </div>
       )}

@@ -54,6 +54,7 @@ export interface TextObject {
   width: number;
   height: number;
   text: string;
+  lines?: string[];
   originalText?: string;
   fontSize: number;
   fontFamily: string;

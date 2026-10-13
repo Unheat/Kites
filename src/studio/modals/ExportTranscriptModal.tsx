@@ -83,7 +83,7 @@ export const ExportTranscriptModal: React.FC<ExportTranscriptModalProps> = ({ on
       <div className="w-full max-w-lg rounded-xl border border-[#282d3f] bg-[#12141c] p-5 shadow-2xl text-slate-100 flex flex-col max-h-[85vh]">
         <div className="flex items-center justify-between pb-3 border-b border-[#282d3f]">
           <div className="flex items-center gap-2 font-medium text-sm text-slate-200">
-            <FileText className="w-4 h-4 text-indigo-400" />
+            <FileText className="w-4 h-4 text-[#f4446d]" />
             Export Dialogue Transcript
           </div>
           <button
@@ -99,7 +99,7 @@ export const ExportTranscriptModal: React.FC<ExportTranscriptModalProps> = ({ on
             onClick={() => setFormat('combined')}
             className={`p-2 rounded-lg border text-left transition ${
               format === 'combined'
-                ? 'border-indigo-500 bg-indigo-950/30 text-indigo-300 font-medium'
+                ? 'border-[#f4446d] bg-[#f4446d]/15 text-[#f4446d] font-medium'
                 : 'border-[#282d3f] bg-[#090a0f] text-slate-400 hover:border-slate-700'
             }`}
           >
@@ -109,7 +109,7 @@ export const ExportTranscriptModal: React.FC<ExportTranscriptModalProps> = ({ on
             onClick={() => setFormat('translated_only')}
             className={`p-2 rounded-lg border text-left transition ${
               format === 'translated_only'
-                ? 'border-indigo-500 bg-indigo-950/30 text-indigo-300 font-medium'
+                ? 'border-[#f4446d] bg-[#f4446d]/15 text-[#f4446d] font-medium'
                 : 'border-[#282d3f] bg-[#090a0f] text-slate-400 hover:border-slate-700'
             }`}
           >
@@ -119,7 +119,7 @@ export const ExportTranscriptModal: React.FC<ExportTranscriptModalProps> = ({ on
             onClick={() => setFormat('original_only')}
             className={`p-2 rounded-lg border text-left transition ${
               format === 'original_only'
-                ? 'border-indigo-500 bg-indigo-950/30 text-indigo-300 font-medium'
+                ? 'border-[#f4446d] bg-[#f4446d]/15 text-[#f4446d] font-medium'
                 : 'border-[#282d3f] bg-[#090a0f] text-slate-400 hover:border-slate-700'
             }`}
           >
@@ -129,7 +129,7 @@ export const ExportTranscriptModal: React.FC<ExportTranscriptModalProps> = ({ on
             onClick={() => setFormat('separate')}
             className={`p-2 rounded-lg border text-left transition ${
               format === 'separate'
-                ? 'border-indigo-500 bg-indigo-950/30 text-indigo-300 font-medium'
+                ? 'border-[#f4446d] bg-[#f4446d]/15 text-[#f4446d] font-medium'
                 : 'border-[#282d3f] bg-[#090a0f] text-slate-400 hover:border-slate-700'
             }`}
           >
@@ -143,7 +143,7 @@ export const ExportTranscriptModal: React.FC<ExportTranscriptModalProps> = ({ on
               type="checkbox"
               checked={includeIndices}
               onChange={(e) => setIncludeIndices(e.target.checked)}
-              className="rounded border-[#282d3f] bg-[#090a0f] text-indigo-600 focus:ring-0"
+              className="rounded border-[#282d3f] bg-[#090a0f] text-[#f4446d] focus:ring-0"
             />
             Include bubble numbers
           </label>
@@ -152,7 +152,7 @@ export const ExportTranscriptModal: React.FC<ExportTranscriptModalProps> = ({ on
               type="checkbox"
               checked={extraSpacing}
               onChange={(e) => setExtraSpacing(e.target.checked)}
-              className="rounded border-[#282d3f] bg-[#090a0f] text-indigo-600 focus:ring-0"
+              className="rounded border-[#282d3f] bg-[#090a0f] text-[#f4446d] focus:ring-0"
             />
             Extra paragraph spacing
           </label>
@@ -180,7 +180,7 @@ export const ExportTranscriptModal: React.FC<ExportTranscriptModalProps> = ({ on
             </button>
             <button
               onClick={handleDownload}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-600 text-white hover:bg-indigo-500 transition shadow-sm"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#f4446d] text-white hover:bg-[#e0355e] transition shadow-sm"
             >
               <Download className="w-3.5 h-3.5" />
               Download .txt

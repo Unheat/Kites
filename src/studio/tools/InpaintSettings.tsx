@@ -12,10 +12,10 @@ export const InpaintSettings: React.FC = () => {
   };
 
   return (
-    <div className="space-y-4 p-4 text-xs text-slate-200">
+    <div className="space-y-4 text-xs text-slate-200">
       <div className="pb-2 border-b border-[#282d3f]">
         <div className="flex items-center gap-2">
-          <Sparkles className="w-4 h-4 text-indigo-400" />
+          <Sparkles className="w-4 h-4 text-[#f4446d]" />
           <h3 className="font-semibold text-sm text-slate-100">Live AI Inpaint Brush</h3>
         </div>
         <p className="text-[11px] text-slate-400 mt-1">
@@ -30,7 +30,7 @@ export const InpaintSettings: React.FC = () => {
             onClick={() => update({ shape: 'circle' })}
             className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg border transition ${
               inpaint.shape === 'circle'
-                ? 'border-indigo-500 bg-indigo-950/30 text-indigo-300 font-medium'
+                ? 'border-[#f4446d] bg-[#f4446d]/15 text-[#f4446d] font-medium'
                 : 'border-[#282d3f] bg-[#090a0f] text-slate-400 hover:text-slate-200'
             }`}
           >
@@ -41,7 +41,7 @@ export const InpaintSettings: React.FC = () => {
             onClick={() => update({ shape: 'square' })}
             className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg border transition ${
               inpaint.shape === 'square'
-                ? 'border-indigo-500 bg-indigo-950/30 text-indigo-300 font-medium'
+                ? 'border-[#f4446d] bg-[#f4446d]/15 text-[#f4446d] font-medium'
                 : 'border-[#282d3f] bg-[#090a0f] text-slate-400 hover:text-slate-200'
             }`}
           >
@@ -62,11 +62,11 @@ export const InpaintSettings: React.FC = () => {
           max="300"
           value={inpaint.size}
           onChange={(e) => update({ size: Number(e.target.value) })}
-          className="w-full accent-indigo-500"
+          className="w-full accent-[#f4446d]"
         />
       </div>
 
-      <div className="p-3 rounded-lg bg-indigo-950/30 border border-indigo-900/40 text-[11px] text-indigo-300 leading-relaxed">
+      <div className="p-3 rounded-lg bg-[#f4446d]/10 border border-[#f4446d]/30 text-[11px] text-[#f4446d] leading-relaxed">
         ⚡ <strong>Privacy Guaranteed:</strong> Inpainting executes 100% inside your browser using WebGPU/WASM. No image crops leave your machine.
       </div>
     </div>

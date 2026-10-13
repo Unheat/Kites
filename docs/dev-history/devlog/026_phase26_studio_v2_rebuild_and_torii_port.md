@@ -78,12 +78,34 @@ src/studio/
 
 ---
 
-## 4. Verification & Test Coverage
+## 4. Layout & UI/UX Alignment (Torii 1:1 Parity)
 
-- **Viewport Geometry & Math:** Verified in `src/studio/canvas/CanvasViewport.test.ts` (10 tests).
+1. **Left Panel Dual-Card Structure:**
+   - Consolidated tools and tool settings into a single cohesive left panel (`w-88` ~352px).
+   - Card 1 (Top): 8-tool grid across top + active tool settings directly beneath + Global Editing toggle pill at bottom.
+   - Card 2 (Bottom): 6-button Actions grid (`Undo`, `Redo`, `Export Texts`, `Find & Replace`, `Save Image`, `Library`).
+   - Removed disconnected right-hand inspector panel.
+
+2. **Canvas Viewport Centering & Zero-Void Architecture:**
+   - Swapped out brittle absolute translation offsets for Torii's `margin: auto` centered `#canvas-spacer` inside a native scrollable container (`overflow-auto flex flex-1 p-4`).
+   - Eliminates empty black space above the manga page while retaining smooth native document scrolling and cursor-anchored Ctrl-zoom.
+
+3. **Typesetting & Latin Word Rendering Fix:**
+   - Prevented Latin translations (Vietnamese, English, etc.) from erroneously inheriting Japanese CJK vertical single-character noodle stacking (`t \n h \n ư ...`).
+   - Retained Cotrans-typeset wrapped lines (`b.lines`) from Dexie database with automatic multi-line word-wrapping fallback.
+
+4. **Brand Tone & Palette Alignment:**
+   - Replaced generic colors with Kites official signature Hot Rose / Strawberry Pink `#f4446d` (RGB: 244, 68, 109) across active tool highlights, action pills, sliders, and badges over dark matte obsidian (`#090a0f`, `#121212`, `#18181b`).
+
+---
+
+## 5. Verification & Test Coverage
+
+- **Viewport Geometry & Math:** Verified in `src/studio/canvas/CanvasViewport.test.ts` (6 tests).
 - **Brush Engine & Dirty-Rect Undo:** Verified in `src/studio/canvas/BrushEngine.test.ts` (3 tests).
 - **Text Rendering & Handle Hit-Testing:** Verified in `src/studio/canvas/TextRenderer.test.ts` (4 tests).
 - **Bilinear Quad Warp Interpolation:** Verified in `src/studio/canvas/WarpMesh.test.ts` (3 tests).
 - **State Store & Hotkeys:** Verified in `src/studio/Studio.test.ts` (3 tests).
-- **Full Test Suite:** 50 test files passed (418 total tests passing, 0 failures).
-- **Production Build:** Clean `tsc -b` and `vite build` completed successfully with extension package artifacts.
+- **Visual E2E Puppeteer Suite:** Executed in `scripts/test-studio-v2-visual.js`, capturing 6 pixel-perfect verification screenshots with real manga speech bubbles.
+- **Full Test Suite:** 51 test files passed (417 total tests passing, 0 failures).
+- **Production Build:** Clean `tsc -b` and `vite build` completed successfully.
