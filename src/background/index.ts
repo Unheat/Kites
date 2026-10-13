@@ -1,5 +1,5 @@
 import { db, cleanupOldJobs, deleteJobs, type TranslationJob } from '../db';
-import type { ProcessJobMessage, PopupState, PreloadActiveEngineMessage, BubbleDetectionMode } from '../shared/types';
+import type { ProcessJobMessage, PopupState, PreloadActiveEngineMessage, BubbleDetectionMode, HistoryRetentionPeriod } from '../shared/types';
 import { DEFAULT_POPUP_STATE } from '../shared/types';
 import { CLOUDFLARE_QUOTA_DEFAULT_ENDPOINT, STORAGE_KEYS } from '../shared/constants';
 import modelsRegistryData from '../shared/models-registry.json';
@@ -49,7 +49,7 @@ const OFFSCREEN_RECREATE_DELAY_MS = 500;
 
 /**
  * Removes translation engines that are no longer supported from stored popup settings
- * and normalizes render font presets to an allowlisted preset ID.
+ * and normalizes render font presets and history retention to allowlisted values.
  *
  * @param popupState - The persisted popup state to validate.
  * @returns The normalized popup state and whether it needs to be saved.
@@ -103,6 +103,12 @@ export function normalizePopupState(popupState: Partial<PopupState> | undefined)
     completedState.bubbleMode === 'neural-mask'
       ? completedState.bubbleMode
       : 'off';
+  const historyRetention: HistoryRetentionPeriod =
+    completedState.historyRetention === '1day' ||
+    completedState.historyRetention === '1month' ||
+    completedState.historyRetention === 'never'
+      ? completedState.historyRetention
+      : DEFAULT_POPUP_STATE.historyRetention;
   const state: PopupState = {
     ...completedState,
     webgpuSupported: completedState.webgpuSupported === true ? true : null,
@@ -112,6 +118,7 @@ export function normalizePopupState(popupState: Partial<PopupState> | undefined)
     activeOcrId,
     renderFontPresetId,
     bubbleMode,
+    historyRetention,
     fallbackChain,
   };
   const changed = JSON.stringify(state) !== JSON.stringify(popupState ?? {});

@@ -184,6 +184,7 @@ export interface UserAccountInfo {
 import type { RenderFontPresetId } from './renderFontPresets';
 
 export type BubbleDetectionMode = 'off' | 'heuristic' | 'neural' | 'neural-mask';
+export type HistoryRetentionPeriod = '1day' | '1week' | '1month' | 'never';
 
 export interface PopupState {
   isExtensionEnabled: boolean;
@@ -198,6 +199,7 @@ export interface PopupState {
   activeOcrId: string;
   renderFontPresetId: RenderFontPresetId;
   bubbleMode: BubbleDetectionMode;
+  historyRetention: HistoryRetentionPeriod;
   fallbackChain: string[];
   customApis: CustomApiConfig[];
   webgpuSupported: boolean | null;
@@ -224,6 +226,7 @@ export const DEFAULT_POPUP_STATE: PopupState = {
   activeOcrId: 'v6-small',
   renderFontPresetId: 'standard',
   bubbleMode: 'off',
+  historyRetention: '1week',
   fallbackChain: [],
   customApis: [],
   webgpuSupported: null,

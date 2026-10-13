@@ -101,4 +101,27 @@ describe('normalizePopupState', () => {
     expect(normalizePopupState(neuralState).changed).toBe(false);
     expect(normalizePopupState(neuralState).state.bubbleMode).toBe('neural');
   });
+
+  it.each([undefined, null, 'invalid', '', 0, 7, 'toString'])('defaults invalid or missing historyRetention %s to 1week', (historyRetention) => {
+    const savedState = { ...DEFAULT_POPUP_STATE, historyRetention } as unknown as PopupState;
+    const result = normalizePopupState(savedState);
+
+    expect(result.state.historyRetention).toBe('1week');
+    expect(result.changed).toBe(true);
+  });
+
+  it.each(['1day', '1week', '1month', 'never'] as const)('preserves valid historyRetention %s without flagging changed', (historyRetention) => {
+    const result = normalizePopupState({ ...DEFAULT_POPUP_STATE, historyRetention });
+
+    expect(result.state.historyRetention).toBe(historyRetention);
+    expect(result.changed).toBe(false);
+  });
+
+  it('migrates legacy settings without historyRetention to the seven-day default', () => {
+    const { historyRetention: _historyRetention, ...legacyState } = DEFAULT_POPUP_STATE;
+    const result = normalizePopupState(legacyState);
+
+    expect(result.state.historyRetention).toBe('1week');
+    expect(result.changed).toBe(true);
+  });
 });

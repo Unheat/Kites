@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { PopupState } from '../../shared/types';
+import type { PopupState, HistoryRetentionPeriod } from '../../shared/types';
 import { DEFAULT_POPUP_STATE } from '../../shared/types';
 import { Moon, Sun, KeyRound, Network } from 'lucide-react';
 import ApiManagerPanel from './ApiManagerPanel';
@@ -123,6 +123,30 @@ export default function SettingsView({ state, updateState }: SettingsViewProps) 
               <span>1</span>
               <span>5</span>
             </div>
+          </div>
+
+          {/* History Retention / Auto-Delete (Torii parity) */}
+          <div className="pt-2 border-t border-[var(--color-dust)] border-opacity-30">
+            <div className="flex justify-between items-center mb-1">
+              <label htmlFor="history-retention" className="font-medium text-sm">Auto-delete History</label>
+              <select
+                id="history-retention"
+                aria-describedby="history-retention-description"
+                value={state.historyRetention ?? DEFAULT_POPUP_STATE.historyRetention}
+                onChange={(e) => updateState({ historyRetention: e.target.value as HistoryRetentionPeriod })}
+                className="px-2.5 py-1 text-xs bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded font-medium text-[var(--color-ink)] cursor-pointer focus:outline-none focus:border-[var(--color-editorial)]"
+              >
+                <option value="1day">1 day</option>
+                <option value="1week">1 week (Default)</option>
+                <option value="1month">1 month</option>
+                <option value="never">Never</option>
+              </select>
+            </div>
+            <p id="history-retention-description" className="text-[11px] text-[var(--color-dust)]">
+              {state.historyRetention === 'never'
+                ? 'Auto-delete is disabled. History is kept until you delete it manually.'
+                : 'Deletes inactive job records and their cached images and text older than the selected window. Queued, downloading, and processing jobs are kept.'}
+            </p>
           </div>
         </div>
       </div>
