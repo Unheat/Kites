@@ -3,6 +3,7 @@ import { createOpenAI } from '@ai-sdk/openai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import type { CustomApiConfig } from '../../../shared/types';
+import type { TranslationOptions } from './BaseEngine';
 import { BaseLlmTranslationEngine, type LlmChatMessage } from './BaseLlmTranslationEngine';
 
 /** Network request timeout in milliseconds */
@@ -52,17 +53,18 @@ export class CustomApiEngine extends BaseLlmTranslationEngine {
   }
 
   /**
-   * Translates nonblank texts in bounded batches using numbered delimiter format.
+   * Translates nonblank texts in bounded batches using the keyed JSON protocol.
    * Ensures the engine has been initialized before proceeding.
    *
    * @param texts - Array of source text strings.
    * @param sourceLangId - BCP-47 language code or natural name (default 'auto').
    * @param targetLangId - BCP-47 language code or natural name (default 'en').
+   * @param options - Request-local glossary forwarded to the shared LLM prompt builder.
    * @returns Array of translated strings aligned with the input array.
    */
-  override async translate(texts: string[], sourceLangId = 'auto', targetLangId = 'en'): Promise<string[]> {
+  override async translate(texts: string[], sourceLangId = 'auto', targetLangId = 'en', options?: TranslationOptions): Promise<string[]> {
     if (!this.initialized) throw new Error('CustomApiEngine is not initialized. Call init() first.');
-    return super.translate(texts, sourceLangId, targetLangId);
+    return super.translate(texts, sourceLangId, targetLangId, options);
   }
 
   /**

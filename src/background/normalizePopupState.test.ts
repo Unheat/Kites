@@ -117,6 +117,37 @@ describe('normalizePopupState', () => {
     expect(result.changed).toBe(false);
   });
 
+  it('defaults missing glossary settings to disabled and empty', () => {
+    const result = normalizePopupState({ activeEngineId: 'gg-translate' });
+    expect(result.state.glossaryEnabled).toBe(false);
+    expect(result.state.glossaryEntries).toEqual([]);
+  });
+
+  it('normalizes glossary data at the background storage boundary', () => {
+    const saved = {
+      ...DEFAULT_POPUP_STATE,
+      glossaryEnabled: 'true',
+      glossaryEntries: [
+        { source: '  先輩 ', target: ' Senpai ' },
+        { source: '', target: 'ignored' },
+        null,
+      ],
+    } as unknown as PopupState;
+    const result = normalizePopupState(saved);
+    expect(result.state.glossaryEnabled).toBe(false);
+    expect(result.state.glossaryEntries).toEqual([{ source: '先輩', target: 'Senpai' }]);
+    expect(result.changed).toBe(true);
+  });
+
+  it('preserves valid glossary preferences', () => {
+    const saved: PopupState = {
+      ...DEFAULT_POPUP_STATE,
+      glossaryEnabled: true,
+      glossaryEntries: [{ source: '先輩', target: 'Senpai' }],
+    };
+    expect(normalizePopupState(saved)).toEqual({ state: saved, changed: false });
+  });
+
   it('migrates legacy settings without historyRetention to the seven-day default', () => {
     const { historyRetention: _historyRetention, ...legacyState } = DEFAULT_POPUP_STATE;
     const result = normalizePopupState(legacyState);

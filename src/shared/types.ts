@@ -182,6 +182,7 @@ export interface UserAccountInfo {
 }
 
 import type { RenderFontPresetId } from './renderFontPresets';
+import type { GlossaryEntry } from './glossary';
 
 export type BubbleDetectionMode = 'off' | 'heuristic' | 'neural' | 'neural-mask';
 export type HistoryRetentionPeriod = '1day' | '1week' | '1month' | 'never';
@@ -200,6 +201,8 @@ export interface PopupState {
   renderFontPresetId: RenderFontPresetId;
   bubbleMode: BubbleDetectionMode;
   historyRetention: HistoryRetentionPeriod;
+  glossaryEnabled: boolean;
+  glossaryEntries: GlossaryEntry[];
   fallbackChain: string[];
   customApis: CustomApiConfig[];
   webgpuSupported: boolean | null;
@@ -227,6 +230,8 @@ export const DEFAULT_POPUP_STATE: PopupState = {
   renderFontPresetId: 'standard',
   bubbleMode: 'off',
   historyRetention: '1week',
+  glossaryEnabled: false,
+  glossaryEntries: [],
   fallbackChain: [],
   customApis: [],
   webgpuSupported: null,

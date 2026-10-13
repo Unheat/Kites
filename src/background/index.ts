@@ -7,6 +7,7 @@ import { normalizeCustomApiConfig } from '../shared/customApi';
 import { inpaintRegistry } from '../offscreen/engines/inpaint/inpaintRegistry';
 import { resolveOcrTier } from '../offscreen/engines/ocr/ocrRegistry';
 import { normalizeRenderFontPresetId } from '../shared/renderFontPresets';
+import { normalizeGlossaryEntries } from '../shared/glossary';
 import { oAuthManager } from './auth/OAuthManager';
 
 // Magic Number: Limit concurrency to avoid network/CPU throttling
@@ -119,6 +120,8 @@ export function normalizePopupState(popupState: Partial<PopupState> | undefined)
     renderFontPresetId,
     bubbleMode,
     historyRetention,
+    glossaryEnabled: completedState.glossaryEnabled === true,
+    glossaryEntries: normalizeGlossaryEntries(completedState.glossaryEntries),
     fallbackChain,
   };
   const changed = JSON.stringify(state) !== JSON.stringify(popupState ?? {});

@@ -1,4 +1,5 @@
-import type { ITranslationEngine } from './BaseEngine';
+import type { ITranslationEngine, TranslationOptions } from './BaseEngine';
+import { buildGlossaryPrompt, GLOSSARY_PROMPT_RULES, getEnabledGlossary, type GlossaryEntry } from '../../../shared/glossary';
 import { getLanguageName } from '../../../shared/utils/LanguageRegistry';
 import { hasNativeScriptForLang } from '../../../shared/utils/textCleaning';
 
@@ -200,9 +201,10 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
    * @param texts - Array of source text strings.
    * @param sourceLangId - BCP-47 language code or natural name (default 'auto').
    * @param targetLangId - BCP-47 language code or natural name (default 'en').
+   * @param options - Request-local terminology snapshot, copied before the first inference await.
    * @returns Array of translated strings aligned with the input array.
    */
-  async translate(texts: string[], sourceLangId = 'auto', targetLangId = 'en'): Promise<string[]> {
+  async translate(texts: string[], sourceLangId = 'auto', targetLangId = 'en', options?: TranslationOptions): Promise<string[]> {
     if (!texts || texts.length === 0) return [];
 
     const results: string[] = new Array(texts.length).fill('');
@@ -224,12 +226,14 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
 
     const sourceLang = this.resolveLanguage(sourceLangId, 'source');
     const targetLang = this.resolveLanguage(targetLangId, 'target');
+    // Snapshot before awaiting inference so edits cannot alter later batches of this request.
+    const glossary = getEnabledGlossary(options);
 
     // 2. Process remaining meaningful segments in bounded batches
     for (let offset = 0; offset < toTranslate.length; offset += this.batchSize) {
       const chunk = toTranslate.slice(offset, offset + this.batchSize);
-      const prompt = this.buildPrompt(chunk, sourceLang, targetLang);
-      const messages = this.buildJsonMessages(chunk, sourceLang, targetLang);
+      const prompt = this.buildPrompt(chunk, sourceLang, targetLang, glossary);
+      const messages = this.buildJsonMessages(chunk, sourceLang, targetLang, glossary);
       const schema = buildSchema(chunk.length);
       const maxTokens = maxTokensForBatch(chunk.map((s) => s.text));
       const rawOutput = await this.requestLlm(prompt, messages, schema, undefined, maxTokens);
@@ -298,9 +302,10 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
    * @param chunk - The current chunk of segments to translate.
    * @param sourceLang - Resolved source language name.
    * @param targetLang - Resolved target language name.
+   * @param glossary - Immutable literal terminology mappings for this request.
    * @returns Formatted prompt string.
    */
-  protected buildPrompt(chunk: LlmTranslationSegment[], sourceLang: string, targetLang: string): string {
+  protected buildPrompt(chunk: LlmTranslationSegment[], sourceLang: string, targetLang: string, glossary: readonly GlossaryEntry[] = []): string {
     const sourceObj: Record<string, string> = {};
     chunk.forEach((item, index) => {
       sourceObj[`b${index}`] = item.text;
@@ -308,8 +313,9 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
 
     return (
       `Translate SOURCE from ${sourceLang} to ${targetLang}.\n\n` +
-      `Return only one JSON object matching the required schema.\n\n` +
-      `SOURCE:\n${JSON.stringify(sourceObj)}`
+      `Return only one JSON object matching the required schema.` +
+      (glossary.length > 0 ? GLOSSARY_PROMPT_RULES : '') + '\n\n' +
+      `SOURCE:\n${JSON.stringify(sourceObj)}` + buildGlossaryPrompt(glossary)
     );
   }
 
@@ -321,12 +327,14 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
    * @param chunk - The current chunk of segments to translate.
    * @param sourceLang - Resolved source language name.
    * @param targetLang - Resolved target language name.
+   * @param glossary - Immutable literal terminology mappings for this request.
    * @returns Structured ChatMessage array with system and user turns.
    */
   protected buildJsonMessages(
     chunk: LlmTranslationSegment[],
     sourceLang: string,
-    targetLang: string
+    targetLang: string,
+    glossary: readonly GlossaryEntry[] = []
   ): LlmChatMessage[] {
     const sourceObj: Record<string, string> = {};
     chunk.forEach((item, index) => {
@@ -347,26 +355,32 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
           `- If a value is empty, punctuation-only, an ellipsis, or cannot be usefully translated, copy it unchanged.\n` +
           `- Do not add explanations, labels, markdown, apologies, or introductory text.\n` +
           `- Do not add quotation marks around a translation. JSON string quotes are syntax only.\n` +
-          `- Output raw JSON only.`,
+          `- Output raw JSON only.` + (glossary.length > 0 ? GLOSSARY_PROMPT_RULES : ''),
       },
       {
         role: 'user',
         content:
           `Translate SOURCE from ${sourceLang} to ${targetLang}.\n\n` +
-          `SOURCE:\n${JSON.stringify(sourceObj)}`,
+          `SOURCE:\n${JSON.stringify(sourceObj)}` + buildGlossaryPrompt(glossary),
       },
     ];
   }
 
   /**
    * Legacy message builder kept for backward compatibility with existing tests.
+   * @param chunk - Current segments to translate.
+   * @param sourceLang - Resolved source language name.
+   * @param targetLang - Resolved target language name.
+   * @param glossary - Immutable literal terminology mappings for this request.
+   * @returns Structured system rules and user data messages.
    */
   protected buildMessages(
     chunk: LlmTranslationSegment[],
     sourceLang: string,
-    targetLang: string
+    targetLang: string,
+    glossary: readonly GlossaryEntry[] = []
   ): LlmChatMessage[] {
-    return this.buildJsonMessages(chunk, sourceLang, targetLang);
+    return this.buildJsonMessages(chunk, sourceLang, targetLang, glossary);
   }
 
   /**
