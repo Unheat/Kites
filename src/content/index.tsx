@@ -8,6 +8,7 @@ import { isDomainDisabled, findMatchingSiteRule } from '../shared/siteRules';
 import { createChapterTranslationRegistry, createChapterExporter, orderChapterImages, type ChapterTranslationRecord } from './chapterZip';
 import ChapterReaderModal from './ChapterReaderModal';
 import ChapterReaderFloatingPill from './ChapterReaderFloatingPill';
+import { scanChapterPages, fastScrollPreload } from './scanner';
 import { handleReadingKeydown, handleReadingCommand, type ReadingShortcutActions } from './readingShortcuts';
 import {
   normalizeSelection,
@@ -298,6 +299,11 @@ document.addEventListener('contextmenu', (event) => {
   if (target) translatedRegistry.rememberContextMenu(target.srcUrl, target);
 }, true);
 
+let cachedSiteRules: SiteSelectorRule[] = [];
+export function getActiveCustomSelector(): string | undefined {
+  return findMatchingSiteRule(window.location.hostname, cachedSiteRules)?.selector;
+}
+
 // Top-frame v1: popup explicitly targets frameId 0, so embedded readers cannot create multiple archives.
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.target !== 'content' || message?.source !== 'popup' || message?.request !== true) return;
@@ -316,6 +322,36 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     document.dispatchEvent(new CustomEvent('kites-open-chapter-reader'));
     sendResponse({ status: 'success' });
     return;
+  }
+  if (message.type === 'SCAN_CHAPTER_PAGES') {
+    const isTranslatedCheck = (url: string) => {
+      const reg = translatedRegistry.get(url);
+      return {
+        isTranslated: Boolean(reg?.translatedUrl),
+        translatedUrl: reg?.translatedUrl,
+      };
+    };
+    const pages = scanChapterPages(document, getActiveCustomSelector(), isTranslatedCheck);
+    sendResponse({ status: 'success', pages });
+    return;
+  }
+  if (message.type === 'FAST_SCROLL_PRELOAD') {
+    const isTranslatedCheck = (url: string) => {
+      const reg = translatedRegistry.get(url);
+      return {
+        isTranslated: Boolean(reg?.translatedUrl),
+        translatedUrl: reg?.translatedUrl,
+      };
+    };
+    void fastScrollPreload(document, getActiveCustomSelector(), isTranslatedCheck)
+      .then((pages) => {
+        sendResponse({ status: 'success', pages });
+      })
+      .catch((err) => {
+        console.warn('[Scanner] Fast scroll preload failed:', err);
+        sendResponse({ status: 'error', error: String(err), pages: [] });
+      });
+    return true;
   }
 });
 
@@ -1652,6 +1688,7 @@ function GlobalOverlay() {
   // Load user settings and react to popup updates.
   useEffect(() => {
     const applyState = (state: PopupState) => {
+      cachedSiteRules = state.siteRules || [];
       siteRulesRef.current = state.siteRules || [];
       const currentHost = window.location.hostname;
       const disabled = isDomainDisabled(currentHost, state.disabledDomains);

@@ -4,8 +4,9 @@ import '../index.css';
 
 import EngineDropdown from './components/EngineDropdown';
 import SettingsView from './components/SettingsView';
+import BatchScanPanel from './components/BatchScanPanel';
 
-import { Settings, Home, Power, Crop, Globe } from 'lucide-react';
+import { Settings, Home, Power, Crop, Globe, Layers } from 'lucide-react';
 import PageExportControl from './components/PageExportControl';
 import ReaderLaunchControl from './components/ReaderLaunchControl';
 
@@ -32,7 +33,7 @@ export function completePopupState(state?: Partial<PopupState>): PopupState {
 }
 
 function PopupApp() {
-  const [activeTab, setActiveTab] = useState<'home' | 'settings'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'batch' | 'settings'>('home');
   const [isLoaded, setIsLoaded] = useState(false);
   const [state, setState] = useState<PopupState>(DEFAULT_POPUP_STATE);
   const [currentDomain, setCurrentDomain] = useState<string | null>(null);
@@ -219,6 +220,13 @@ function PopupApp() {
             <Home size={18} className="text-[var(--color-ink)]" />
           </button>
           <button 
+            onClick={() => setActiveTab('batch')}
+            className={`p-1.5 rounded transition-colors cursor-pointer ${activeTab === 'batch' ? 'bg-[var(--color-vellum)]' : 'hover:bg-[var(--color-vellum)]'}`}
+            title="Chapter Page Scanner & Batch Translate"
+          >
+            <Layers size={18} className="text-[var(--color-ink)]" />
+          </button>
+          <button 
             onClick={() => setActiveTab('settings')}
             className={`p-1.5 rounded transition-colors cursor-pointer ${activeTab === 'settings' ? 'bg-[var(--color-vellum)]' : 'hover:bg-[var(--color-vellum)]'}`}
             title="Settings"
@@ -256,6 +264,25 @@ function PopupApp() {
         <div className="flex-1 flex flex-col px-3.5 pb-3.5">
           {activeTab === 'home' ? (
             <EngineDropdown state={state} updateState={updateState} />
+          ) : activeTab === 'batch' ? (
+            <BatchScanPanel
+              onOpenReader={async () => {
+                try {
+                  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+                  if (tab?.id) {
+                    await chrome.tabs.sendMessage(tab.id, {
+                      type: 'OPEN_CHAPTER_READER',
+                      target: 'content',
+                      source: 'popup',
+                      request: true,
+                    }, { frameId: 0 });
+                    window.close();
+                  }
+                } catch (err) {
+                  console.warn('[Popup] Failed to open chapter reader from batch panel:', err);
+                }
+              }}
+            />
           ) : (
             <SettingsView state={state} updateState={updateState} />
           )}

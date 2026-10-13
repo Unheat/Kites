@@ -271,6 +271,57 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
   }
 
+  if (message.type === 'BATCH_QUEUE_TRANSLATIONS') {
+    const urls: string[] = message.payload?.urls || message.urls || [];
+    const targetTabId: number | undefined = message.tabId || _sender.tab?.id;
+    if (urls.length > 0) {
+      chrome.storage.local.get(STORAGE_KEYS.POPUP_STATE).then(async (data) => {
+        const popupState = data[STORAGE_KEYS.POPUP_STATE] as PopupState | undefined;
+        let tabUrl = _sender.tab?.url;
+        if (!tabUrl && targetTabId) {
+          try {
+            const tab = await chrome.tabs.get(targetTabId);
+            tabUrl = tab?.url;
+          } catch {}
+        }
+        if (popupState && (popupState.isExtensionEnabled === false || isDomainDisabled(tabUrl || '', popupState.disabledDomains))) {
+          sendResponse({ status: 'error', error: 'Extension is disabled on this domain' });
+          return;
+        }
+
+        console.log(`[Background] Received BATCH_QUEUE_TRANSLATIONS for ${urls.length} images.`);
+        let queuedCount = 0;
+        for (const url of urls) {
+          try {
+            await queueTranslation(url, targetTabId, true);
+            queuedCount++;
+          } catch (err) {
+            console.warn(`[Background] Failed to queue batch image ${url}:`, err);
+          }
+        }
+        sendResponse({ status: 'success', queuedCount, total: urls.length });
+      }).catch((err) => {
+        sendResponse({ status: 'error', error: err instanceof Error ? err.message : String(err) });
+      });
+      return true; // Keep message channel open for async response
+    } else {
+      sendResponse({ status: 'error', error: 'No URLs provided' });
+      return false;
+    }
+  }
+
+  if (message.type === 'GET_QUEUE_STATUS') {
+    (async () => {
+      try {
+        const jobs = await db.translationJobs.toArray();
+        sendResponse({ status: 'success', jobs });
+      } catch (err) {
+        sendResponse({ status: 'error', error: String(err) });
+      }
+    })();
+    return true;
+  }
+
   if (message.type === 'CAPTURE_VISIBLE_TAB') {
     const windowId = _sender.tab?.windowId ?? chrome.windows.WINDOW_ID_CURRENT;
     chrome.tabs.captureVisibleTab(windowId, { format: 'png' }, (dataUrl) => {
@@ -692,14 +743,17 @@ export async function sendMessageToOffscreen(message: any, timeoutMs: number = 3
   throw new Error(`Message ${message.type} to offscreen timed out after ${timeoutMs}ms`);
 }
 
+const MAX_BATCH_QUEUE_CAPACITY = 100;
+
 /**
  * Inserts the image URL into the Dexie queue as "queued" and triggers the queue loop.
  * 
  * @param {string} srcUrl - The URL of the image to queue.
- * @param {number} tabId - The ID of the tab that requested the translation (for returning result).
+ * @param {number} [tabId] - The ID of the tab that requested the translation (for returning result).
+ * @param {boolean} [isBatch=false] - Whether this is a batch queue from the chapter scanner.
  * @returns {Promise<void>}
  */
-export async function queueTranslation(srcUrl: string, tabId?: number) {
+export async function queueTranslation(srcUrl: string, tabId?: number, isBatch = false) {
   const existingJob = srcUrl ? await db.translationJobs.where('srcUrl').equals(srcUrl).first() : null;
   const isStale = existingJob && (Date.now() - existingJob.timestamp > 5000);
 
@@ -712,10 +766,12 @@ export async function queueTranslation(srcUrl: string, tabId?: number) {
     await deleteJobs([existingJob.id!]);
   }
 
-  // Queue capacity guard: allow up to configured max queue capacity
+  // Queue capacity guard: allow up to configured max queue capacity, or MAX_BATCH_QUEUE_CAPACITY for batch panel
   const stateData = await chrome.storage.local.get(STORAGE_KEYS.POPUP_STATE);
   const popupState = stateData[STORAGE_KEYS.POPUP_STATE] as PopupState | undefined;
-  const maxQueueCapacity = Math.min(10, Math.max(1, popupState?.concurrency || 3));
+  const maxQueueCapacity = isBatch
+    ? MAX_BATCH_QUEUE_CAPACITY
+    : Math.min(10, Math.max(1, popupState?.concurrency || 3));
   const queuedCount = await db.translationJobs.where('status').equals('queued').count();
   if (queuedCount >= maxQueueCapacity) {
     console.warn(`[Background] Translation queue is at maximum capacity (${queuedCount}/${maxQueueCapacity}). Rejecting request:`, srcUrl);
