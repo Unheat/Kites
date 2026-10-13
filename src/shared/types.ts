@@ -63,6 +63,7 @@ export interface StudioInpaintPayload {
   maskPatchBase64: string;
   width: number;
   height: number;
+  engineId?: string;
 }
 
 export interface StudioOcrPayload {
@@ -71,6 +72,9 @@ export interface StudioOcrPayload {
   height: number;
   offsetX: number;
   offsetY: number;
+  ocrEngineId?: string;
+  inpaintEngineId?: string;
+  translationEngineId?: string;
 }
 export type ModelCategory = 'translation' | 'inpaint' | 'ocr' | 'bubble';
 

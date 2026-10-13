@@ -1,6 +1,7 @@
 import React from 'react';
 import { Sparkles, Circle, Square } from 'lucide-react';
 import { studioStore, useStudioStore } from '../state/studioStore';
+import { StudioEngineSelector } from './StudioEngineSelector';
 
 export const InpaintSettings: React.FC = () => {
   const inpaint = useStudioStore((s) => s.inpaintSettings);
@@ -19,9 +20,12 @@ export const InpaintSettings: React.FC = () => {
           <h3 className="font-semibold text-sm text-slate-100">Live AI Inpaint Brush</h3>
         </div>
         <p className="text-[11px] text-slate-400 mt-1">
-          Brush over bubbles or artifacts. On pointer release, crops tight 1:1 patch and runs local WebGPU LaMa inpainting with zero cloud cost.
+          Brush over bubbles or artifacts. On pointer release, crops tight 1:1 patch and runs local inpainting with zero cloud cost.
         </p>
       </div>
+
+      {/* Selectable Inpaint Model Tier */}
+      <StudioEngineSelector category="inpaint" />
 
       <div>
         <label className="block text-slate-400 font-medium mb-1.5">Brush Shape</label>

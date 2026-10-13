@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import { STORAGE_KEYS } from '../../shared/constants';
 import type {
   BrushShape,
   EditorAppearanceSettings,
@@ -62,6 +63,14 @@ export interface StudioState {
   activeJobId: number | null;
   imageDimensions: { width: number; height: number };
 
+  // Engine Tiers & Global Sync
+  syncWithGlobal: boolean;
+  selectedInpaintEngineId: string;
+  selectedOcrEngineId: string;
+  selectedTranslationEngineId: string;
+  modelDownloads: Record<string, { progress: number; status: string }>;
+  downloadedModelIds: string[];
+
   // Brush Configurations
   eraseSettings: EraseSettingsState;
   paintSettings: PaintSettingsState;
@@ -106,6 +115,13 @@ const initialState: StudioState = {
   hideBoxes: false,
   activeJobId: null,
   imageDimensions: { width: 0, height: 0 },
+
+  syncWithGlobal: true,
+  selectedInpaintEngineId: 'lama-manga',
+  selectedOcrEngineId: 'v6-small',
+  selectedTranslationEngineId: 'gg-translate',
+  modelDownloads: {},
+  downloadedModelIds: ['none', 'simple', 'telea', 'gg-translate', 'cloudflare-translate'],
 
   eraseSettings: {
     source: 'inpainted',
@@ -193,6 +209,64 @@ class StudioStore {
   public setClampedZoom = (targetZoom: number): void => {
     const clamped = Math.max(MIN_ZOOM_LEVEL, Math.min(MAX_ZOOM_LEVEL, targetZoom));
     this.setState({ zoom: clamped });
+  };
+
+  /**
+   * Updates an engine selection, optionally persisting to chrome.storage.local (popupState) if syncWithGlobal is enabled.
+   */
+  public setEngineSelection = (
+    category: 'inpaint' | 'ocr' | 'translation',
+    engineId: string
+  ): void => {
+    const { syncWithGlobal } = this.state;
+    if (category === 'inpaint') {
+      this.setState({ selectedInpaintEngineId: engineId });
+      if (syncWithGlobal && typeof chrome !== 'undefined' && chrome.storage?.local) {
+        chrome.storage.local.get(STORAGE_KEYS.POPUP_STATE, (data) => {
+          const current = data[STORAGE_KEYS.POPUP_STATE] || {};
+          chrome.storage.local.set({
+            [STORAGE_KEYS.POPUP_STATE]: { ...current, activeInpaintId: engineId },
+          });
+        });
+      }
+    } else if (category === 'ocr') {
+      this.setState({ selectedOcrEngineId: engineId });
+      if (syncWithGlobal && typeof chrome !== 'undefined' && chrome.storage?.local) {
+        chrome.storage.local.get(STORAGE_KEYS.POPUP_STATE, (data) => {
+          const current = data[STORAGE_KEYS.POPUP_STATE] || {};
+          chrome.storage.local.set({
+            [STORAGE_KEYS.POPUP_STATE]: { ...current, activeOcrId: engineId },
+          });
+        });
+      }
+    } else if (category === 'translation') {
+      this.setState({ selectedTranslationEngineId: engineId });
+      if (syncWithGlobal && typeof chrome !== 'undefined' && chrome.storage?.local) {
+        chrome.storage.local.get(STORAGE_KEYS.POPUP_STATE, (data) => {
+          const current = data[STORAGE_KEYS.POPUP_STATE] || {};
+          chrome.storage.local.set({
+            [STORAGE_KEYS.POPUP_STATE]: { ...current, activeEngineId: engineId },
+          });
+        });
+      }
+    }
+  };
+
+  /**
+   * Hydrates engine selections from popupState in chrome.storage.local.
+   */
+  public hydrateFromStorage = (): void => {
+    if (typeof chrome === 'undefined' || !chrome.storage?.local) return;
+    chrome.storage.local.get(STORAGE_KEYS.POPUP_STATE, (data) => {
+      const state = data[STORAGE_KEYS.POPUP_STATE] as any;
+      if (state) {
+        this.setState({
+          selectedInpaintEngineId: state.activeInpaintId || this.state.selectedInpaintEngineId,
+          selectedOcrEngineId: state.activeOcrId || this.state.selectedOcrEngineId,
+          selectedTranslationEngineId: state.activeEngineId || this.state.selectedTranslationEngineId,
+        });
+      }
+    });
   };
 }
 

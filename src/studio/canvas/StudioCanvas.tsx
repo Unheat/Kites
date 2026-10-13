@@ -53,6 +53,8 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
   const paintSettings = useStudioStore((s) => s.paintSettings);
   const inpaintSettings = useStudioStore((s) => s.inpaintSettings);
   const ocrSettings = useStudioStore((s) => s.ocrSettings);
+  const selectedInpaintEngineId = useStudioStore((s) => s.selectedInpaintEngineId);
+  const selectedOcrEngineId = useStudioStore((s) => s.selectedOcrEngineId);
   const imageLayers = useStudioStore((s) => s.imageLayers);
   const selectedImageLayerId = useStudioStore((s) => s.selectedImageLayerId);
   const appearance = useStudioStore((s) => s.appearance);
@@ -536,7 +538,12 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
 
       setIsAiProcessing(true);
       try {
-        const inpaintedImg = await requestStudioInpaint(patchCanvas, maskCanvas, paddedBbox);
+        const inpaintedImg = await requestStudioInpaint(
+          patchCanvas,
+          maskCanvas,
+          paddedBbox,
+          selectedInpaintEngineId
+        );
         bgCtx.drawImage(inpaintedImg, cropX, cropY, cropW, cropH);
         const postInpaintPatch = BrushEngine.captureBoundingPatch(bgCtx, paddedBbox);
 
@@ -580,7 +587,10 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
 
       setIsAiProcessing(true);
       try {
-        const result = await requestStudioOcr(patchCanvas, paddedBbox);
+        const result = await requestStudioOcr(patchCanvas, paddedBbox, {
+          ocrEngineId: selectedOcrEngineId,
+          inpaintEngineId: selectedInpaintEngineId,
+        });
         bgCtx.drawImage(result.inpaintedImage, paddedBbox.x, paddedBbox.y, paddedBbox.width, paddedBbox.height);
         const postOcrPatch = BrushEngine.captureBoundingPatch(bgCtx, paddedBbox);
 

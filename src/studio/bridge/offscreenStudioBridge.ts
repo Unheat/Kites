@@ -11,7 +11,8 @@ import type { BoundingBox, TextObject } from '../types';
 export async function requestStudioInpaint(
   patchCanvas: HTMLCanvasElement,
   maskCanvas: HTMLCanvasElement,
-  bbox: BoundingBox
+  bbox: BoundingBox,
+  engineId?: string
 ): Promise<HTMLImageElement> {
   const imagePatchBase64 = patchCanvas.toDataURL('image/png');
   const maskPatchBase64 = maskCanvas.toDataURL('image/png');
@@ -29,6 +30,7 @@ export async function requestStudioInpaint(
             maskPatchBase64,
             width: bbox.width,
             height: bbox.height,
+            engineId,
           },
         },
         (res) => {
@@ -58,7 +60,12 @@ export async function requestStudioInpaint(
  */
 export async function requestStudioOcr(
   patchCanvas: HTMLCanvasElement,
-  bbox: BoundingBox
+  bbox: BoundingBox,
+  overrides?: {
+    ocrEngineId?: string;
+    inpaintEngineId?: string;
+    translationEngineId?: string;
+  }
 ): Promise<{
   inpaintedImage: HTMLImageElement;
   textObjects: TextObject[];
@@ -91,6 +98,9 @@ export async function requestStudioOcr(
           height: bbox.height,
           offsetX: bbox.x,
           offsetY: bbox.y,
+          ocrEngineId: overrides?.ocrEngineId,
+          inpaintEngineId: overrides?.inpaintEngineId,
+          translationEngineId: overrides?.translationEngineId,
         },
       },
       (res) => {

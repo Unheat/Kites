@@ -172,6 +172,25 @@ fs.mkdirSync(screenshotDir, { recursive: true });
       path: path.join(screenshotDir, '04_inpaint_tool_settings.png'),
     });
 
+    // Open Inpaint Tier Dropdown
+    console.log('[Visual Test] Opening Inpaint Tier dropdown...');
+    await page.evaluate(() => {
+      const btns = Array.from(document.querySelectorAll('button'));
+      const dropdown = btns.find((b) => b.querySelector('svg.lucide-chevron-down') && (b.textContent.includes('Fill') || b.textContent.includes('LaMa')));
+      if (dropdown) dropdown.click();
+    });
+    await new Promise((r) => setTimeout(r, 400));
+    await page.screenshot({
+      path: path.join(screenshotDir, '04b_inpaint_tier_dropdown_open.png'),
+    });
+    // Close dropdown
+    await page.evaluate(() => {
+      const btns = Array.from(document.querySelectorAll('button'));
+      const dropdown = btns.find((b) => b.querySelector('svg.lucide-chevron-down') && (b.textContent.includes('Fill') || b.textContent.includes('LaMa')));
+      if (dropdown) dropdown.click();
+    });
+    await new Promise((r) => setTimeout(r, 200));
+
     // Click on Text Tool (Ctrl+5) and select first bubble
     console.log('[Visual Test] Selecting Text tool...');
     await page.click('button[title*="Text & Typography"]');

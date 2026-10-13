@@ -129,8 +129,31 @@ To prevent modern SPA frameworks (Twitter/X, Reddit, Threads) or Kites' own Muta
 
 ---
 
-## 5. Verification Results
+## 5. In-Studio Multi-Tier Engine Selection & Global/Local Sync
+
+### 5.1 Architecture & Parity with Extension Popup
+Unlike Torii which only provides a single paid cloud endpoint and basic fill, Kites incorporates multi-tier local and WebGPU engines directly selectable inside Studio:
+- **Inpaint Tiers:** `Simple Fill` (fast color), `Telea Diffusion` (fast diffusion), `LaMa Manga` (neural dynamic patch, ~50MB), `AOT-GAN` (neural high-detail, ~60MB), and `None (Bypass)`.
+- **OCR Tiers:** `PaddleOCR v6 Small` (~4MB), `v6 Medium` (~8MB), `v6 Tiny` (~2MB), `v5 Mobile` (~4MB), and `v5 Server` (~20MB).
+
+### 5.2 Global Sync vs. Local Override Model
+- Embedded a pill toggle in each tool's header (`StudioEngineSelector`):
+  - **Global Sync (ON):** Selecting an engine updates `STORAGE_KEYS.POPUP_STATE` in `chrome.storage.local`, synchronizing across the popup and future in-page web translations.
+  - **Local Only (OFF):** Retains the selection strictly in `studioStore`. The live inpaint or re-OCR brush dispatches `{ engineId: selectedTier }` via `STUDIO_INPAINT` or `STUDIO_OCR`, and the offscreen document prioritizes the payload override over the global popup state.
+
+### 5.3 On-Demand Model Downloads & Real-time Progress
+- Models not yet cached on disk display an inline **Download Button** with size estimation.
+- Clicking dispatches `START_MODEL_DOWNLOAD` to the background queue and binds to the `MODEL_DOWNLOAD_PROGRESS` event bus, rendering an inline progress bar and percentage directly in Studio.
+
+---
+
+## 6. Verification Results
 
 - **Automated Puppeteer Integration Test:** `scripts/test-content-finished-buttons.js` passed with verified screenshot artifact (`scratches/test-artifacts/content-finished-buttons/01_finished_buttons_cluster.png`), confirming button appearance, toggle behavior, and Studio redirection with `?jobId=42`.
-- **Vitest Unit Tests:** All 51 test files and 417 tests passing.
-- **Production Build:** `npm run build` completed cleanly in 1.45s.
+- **Studio Visual Regression Runner:** `scripts/test-studio-v2-visual.js` captured all artifacts including:
+  - `04_inpaint_tool_settings.png`: StudioEngineSelector integrated into Inpaint tool card.
+  - `04b_inpaint_tier_dropdown_open.png`: Multi-tier dropdown open with download buttons and tags.
+  - `07_show_original_untranslated_preview.png`: Raw untranslated artwork display without horizontal mirror inversion.
+  - `08_show_translated_restored.png`: Translated typography restored.
+- **Vitest Unit Tests:** All 51 test files and 419 unit tests passing (`npm test`).
+- **Production Build:** `npm run build` completed cleanly in 1.39s.

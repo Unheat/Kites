@@ -550,7 +550,7 @@ async function handleStudioInpaint(payload: StudioInpaintPayload): Promise<{ inp
   const popupState = await new Promise<any>((resolve) => {
     chrome.runtime.sendMessage({ type: 'GET_POPUP_STATE' }, (res) => resolve(res || {}));
   });
-  const inpaintTier = popupState.activeInpaintId || 'lama-manga';
+  const inpaintTier = payload.engineId || popupState.activeInpaintId || 'lama-manga';
 
   const patchPoly: Point2D[] = [
     { x: 0, y: 0 },
@@ -588,7 +588,7 @@ async function handleStudioOcr(payload: StudioOcrPayload): Promise<{
     chrome.runtime.sendMessage({ type: 'GET_POPUP_STATE' }, (res) => resolve(res || {}));
   });
 
-  const ocrTier = popupState.activeOcrId || 'v6-small';
+  const ocrTier = payload.ocrEngineId || popupState.activeOcrId || 'v6-small';
   const ocrResult = await pipelineOrchestrator.getOcrManager().processImage(imageBuf, ocrTier, {
     sourceLang: popupState.sourceLang !== 'auto' ? popupState.sourceLang : undefined,
     pageWidth: payload.width,
@@ -599,20 +599,23 @@ async function handleStudioOcr(payload: StudioOcrPayload): Promise<{
   if (ocrResult.texts && ocrResult.texts.length > 0) {
     const sourceLang = popupState.sourceLang || 'auto';
     const targetLang = popupState.targetLang || 'en';
+    const effectivePopupState = payload.translationEngineId
+      ? { ...popupState, activeEngineId: payload.translationEngineId }
+      : popupState;
     try {
       translatedTexts = await translationManager.processTranslation(
         ocrResult.texts,
         sourceLang,
         targetLang,
         () => {},
-        popupState
+        effectivePopupState
       );
     } catch {
       translatedTexts = ocrResult.texts;
     }
   }
 
-  const inpaintTier = popupState.activeInpaintId || 'lama-manga';
+  const inpaintTier = payload.inpaintEngineId || popupState.activeInpaintId || 'lama-manga';
   let cleanedBuffer = imageBuf;
   if (ocrResult.polygons && ocrResult.polygons.length > 0) {
     cleanedBuffer = await pipelineOrchestrator.getInpaintManager().eraseText(imageBuf, ocrResult.polygons, inpaintTier);

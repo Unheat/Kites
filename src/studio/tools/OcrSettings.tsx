@@ -1,6 +1,7 @@
 import React from 'react';
 import { ScanText, Circle, Square } from 'lucide-react';
 import { studioStore, useStudioStore } from '../state/studioStore';
+import { StudioEngineSelector } from './StudioEngineSelector';
 
 export const OcrSettings: React.FC = () => {
   const ocr = useStudioStore((s) => s.ocrSettings);
@@ -19,9 +20,12 @@ export const OcrSettings: React.FC = () => {
           <h3 className="font-semibold text-sm text-slate-100">Live AI Re-OCR Area</h3>
         </div>
         <p className="text-[11px] text-slate-400 mt-1">
-          Brush or box over missed dialogue or SFX. Recognizes text via PaddleOCR v6, translates it, cleans background with LaMa, and spawns an editable text box.
+          Brush or box over missed dialogue or SFX. Recognizes text via PaddleOCR, translates it, and spawns an editable text box.
         </p>
       </div>
+
+      {/* Selectable OCR Recognition Tier */}
+      <StudioEngineSelector category="ocr" />
 
       <div>
         <label className="block text-slate-400 font-medium mb-1.5">Brush Shape</label>

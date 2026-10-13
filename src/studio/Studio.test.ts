@@ -86,4 +86,19 @@ describe('Studio State Management', () => {
     studioStore.setState({ isShowingOriginal: false });
     expect(studioStore.getState().isShowingOriginal).toBe(false);
   });
+
+  it('manages engine tier selection and global sync toggle', () => {
+    expect(studioStore.getState().syncWithGlobal).toBe(true);
+    studioStore.setEngineSelection('inpaint', 'aotgan');
+    expect(studioStore.getState().selectedInpaintEngineId).toBe('aotgan');
+
+    studioStore.setEngineSelection('ocr', 'v6-medium');
+    expect(studioStore.getState().selectedOcrEngineId).toBe('v6-medium');
+
+    studioStore.setState({ syncWithGlobal: false });
+    expect(studioStore.getState().syncWithGlobal).toBe(false);
+
+    studioStore.setEngineSelection('inpaint', 'telea');
+    expect(studioStore.getState().selectedInpaintEngineId).toBe('telea');
+  });
 });
