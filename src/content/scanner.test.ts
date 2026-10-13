@@ -30,16 +30,30 @@ describe('scanner unit tests', () => {
     ]);
   });
 
-  it('filters outlier recommendation thumbnails when full-sized manga panels exist', () => {
+  it('filters outlier recommendation thumbnails when full-sized manga panels dominate chapter reader', () => {
     const images: ScannedPageImage[] = [
       { id: '1', url: 'https://example.com/p1.jpg', width: 800, height: 1200, top: 0, left: 0, isTranslated: false },
       { id: '2', url: 'https://example.com/p2.jpg', width: 800, height: 1200, top: 1200, left: 0, isTranslated: false },
-      { id: 'thumb', url: 'https://example.com/rec-thumb.jpg', width: 180, height: 240, top: 2500, left: 0, isTranslated: false },
+      { id: '3', url: 'https://example.com/p3.jpg', width: 800, height: 1200, top: 2400, left: 0, isTranslated: false },
+      { id: 'thumb', url: 'https://example.com/rec-thumb.jpg', width: 180, height: 240, top: 3600, left: 0, isTranslated: false },
     ];
 
     const filtered = filterOutlierThumbnails(images);
-    expect(filtered).toHaveLength(2);
-    expect(filtered.map((f) => f.id)).toEqual(['1', '2']);
+    expect(filtered).toHaveLength(3);
+    expect(filtered.map((f) => f.id)).toEqual(['1', '2', '3']);
+  });
+
+  it('preserves all manga covers on gallery and artist catalog pages', () => {
+    const galleryCovers: ScannedPageImage[] = [
+      { id: '1', url: 'https://t.nhentai.net/1.jpg', width: 250, height: 350, top: 0, left: 0, isTranslated: false },
+      { id: '2', url: 'https://t.nhentai.net/2.jpg', width: 250, height: 350, top: 0, left: 260, isTranslated: false },
+      { id: '3', url: 'https://t.nhentai.net/3.jpg', width: 250, height: 350, top: 360, left: 0, isTranslated: false },
+      { id: '4', url: 'https://t.nhentai.net/4.jpg', width: 250, height: 350, top: 360, left: 260, isTranslated: false },
+    ];
+
+    const filtered = filterOutlierThumbnails(galleryCovers);
+    expect(filtered).toHaveLength(4);
+    expect(filtered.map((f) => f.id)).toEqual(['1', '2', '3', '4']);
   });
 
   it('filters resolution outliers (short wide banner ads)', () => {

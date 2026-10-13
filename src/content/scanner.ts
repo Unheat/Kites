@@ -35,12 +35,17 @@ const LAZY_IMAGE_ATTRIBUTES = [
  * @returns Filtered array without thumbnail noise.
  */
 export function filterOutlierThumbnails(images: ScannedPageImage[]): ScannedPageImage[] {
-  if (images.length < 2) return images;
+  if (images.length < 3) return images;
 
-  const hasLargePanels = images.some((i) => i.height >= 600 || i.width >= 500);
-  if (hasLargePanels) {
+  const largePanelsCount = images.filter((i) => i.height >= 600 || i.width >= 500).length;
+  const smallThumbnailsCount = images.filter(
+    (img) => img.width > 0 && img.height > 0 && img.width <= 320 && img.height <= 450
+  ).length;
+
+  // Only filter out small thumbnails if large manga panels predominate (e.g. reader mode with footer recommendations)
+  if (largePanelsCount >= 3 && largePanelsCount > smallThumbnailsCount) {
     return images.filter((img) => {
-      if (img.height >= 600) return true;
+      if (img.height >= 600 || img.width >= 500) return true;
       if (img.width > 0 && img.height > 0 && img.width <= 320 && img.height <= 450) {
         return false;
       }
@@ -161,8 +166,8 @@ export async function fastScrollPreload(
 ): Promise<ScannedPageImage[]> {
   forcePromoteLazyAttributes(root);
 
-  const step = 600;
-  const delay = 35;
+  const step = 1200;
+  const delay = 20;
   const initScrollY = typeof window !== 'undefined' ? window.scrollY : 0;
 
   type ScrollTarget = {
@@ -197,23 +202,25 @@ export async function fastScrollPreload(
 
   for (const target of targets) {
     let currentY = 0;
-    let maxCycles = 150; // Cap to 90,000px maximum
-    while (currentY < target.getMax() && maxCycles > 0) {
-      currentY += step;
-      target.set(currentY);
-      maxCycles--;
+    let maxCycles = 30; // Max 36,000px scroll depth
+    try {
+      while (currentY < target.getMax() && maxCycles > 0) {
+        currentY += step;
+        target.set(currentY);
+        maxCycles--;
 
-      forcePromoteLazyAttributes(root);
-      await new Promise((r) => setTimeout(r, delay));
+        forcePromoteLazyAttributes(root);
+        await new Promise((r) => setTimeout(r, delay));
+      }
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('resize'));
+        window.dispatchEvent(new Event('scroll'));
+      }
+      await new Promise((r) => setTimeout(r, 40));
+    } finally {
+      target.set(target.init);
     }
-
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new Event('resize'));
-      window.dispatchEvent(new Event('scroll'));
-    }
-    await new Promise((r) => setTimeout(r, 60));
-
-    target.set(target.init);
   }
 
   return scanChapterPages(root, customSelector, isTranslatedCheck);

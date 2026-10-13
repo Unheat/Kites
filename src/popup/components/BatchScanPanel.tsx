@@ -35,6 +35,7 @@ export default function BatchScanPanel({ onOpenReader }: BatchScanPanelProps) {
   const [isScanning, setIsScanning] = useState(false);
   const [isFastScanning, setIsFastScanning] = useState(false);
   const [isQueueing, setIsQueueing] = useState(false);
+  const [needsTabReload, setNeedsTabReload] = useState(false);
   const [activeJobs, setActiveJobs] = useState<Map<string, string>>(new Map());
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [activeTabId, setActiveTabId] = useState<number | null>(null);
@@ -104,8 +105,12 @@ export default function BatchScanPanel({ onOpenReader }: BatchScanPanelProps) {
         }
         setSelectedUrls(initialSelected);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.warn('[BatchScan] Snapshot scan failed:', err);
+      const msg = err?.message || String(err);
+      if (msg.includes('Could not establish connection') || msg.includes('Receiving end does not exist')) {
+        setNeedsTabReload(true);
+      }
     } finally {
       if (mountedRef.current) setIsScanning(false);
     }
@@ -144,9 +149,14 @@ export default function BatchScanPanel({ onOpenReader }: BatchScanPanelProps) {
           if (mountedRef.current) setStatusMessage(null);
         }, 3000);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.warn('[BatchScan] Fast scan failed:', err);
-      setStatusMessage('Fast scan timed out or reader is restricted');
+      const msg = err?.message || String(err);
+      if (msg.includes('Could not establish connection') || msg.includes('Receiving end does not exist')) {
+        setNeedsTabReload(true);
+      } else {
+        setStatusMessage('Fast scan timed out or reader is restricted');
+      }
     } finally {
       if (mountedRef.current) setIsFastScanning(false);
     }
@@ -271,6 +281,31 @@ export default function BatchScanPanel({ onOpenReader }: BatchScanPanelProps) {
           </button>
         </div>
       </div>
+
+      {/* Tab Reload Needed Prompt */}
+      {needsTabReload && (
+        <div className="p-2.5 rounded bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 flex flex-col gap-2">
+          <div className="flex items-start gap-2">
+            <AlertCircle size={15} className="shrink-0 mt-0.5 text-amber-500" />
+            <div className="text-[11px] leading-snug">
+              <p className="font-semibold text-[var(--color-ink)]">Extension Updated</p>
+              <p className="opacity-80 mt-0.5">Please reload this tab to connect the updated extension.</p>
+            </div>
+          </div>
+          <button
+            onClick={async () => {
+              const tab = await getActiveTab();
+              if (tab?.id) {
+                chrome.tabs.reload(tab.id);
+                window.close();
+              }
+            }}
+            className="w-full py-1 bg-amber-500 text-black font-bold rounded text-[11px] cursor-pointer hover:bg-amber-400 transition-colors shadow-sm"
+          >
+            Reload Tab Now
+          </button>
+        </div>
+      )}
 
       {/* Status banner */}
       {statusMessage && (

@@ -162,7 +162,19 @@ export function resolveElementSource(element: Element): string {
   // directCandidates fallback.
   const realDirect = directCandidates.find((candidate) =>
     candidate && !isPlaceholderSource(candidate) && !candidate.startsWith('data:image/svg+xml'));
-  if (realDirect) return realDirect;
+  const normalizeCandidateUrl = (url: string): string => {
+    if (!url) return '';
+    const trimmed = url.trim();
+    if (trimmed.startsWith('//')) {
+      const proto = typeof window !== 'undefined' && window.location?.protocol.startsWith('http')
+        ? window.location.protocol
+        : 'https:';
+      return `${proto}${trimmed}`;
+    }
+    return trimmed;
+  };
+
+  if (realDirect) return normalizeCandidateUrl(realDirect);
 
   const srcsets = [element.getAttribute('srcset') || ''];
   if (element.parentElement instanceof HTMLPictureElement) {
@@ -172,18 +184,19 @@ export function resolveElementSource(element: Element): string {
   }
   for (const srcset of srcsets) {
     const candidate = resolveBestSrcsetUrl(srcset);
-    if (candidate && !isPlaceholderSource(candidate)) return candidate;
+    if (candidate && !isPlaceholderSource(candidate)) return normalizeCandidateUrl(candidate);
   }
 
   for (const attribute of Array.from(element.attributes)) {
     if (attribute.name === 'src' || attribute.name === 'srcset') continue;
     if (!LAZY_SOURCE_ATTRIBUTE.test(attribute.name)) continue;
-    const candidate = attribute.name.toLowerCase().includes('srcset')
+    const rawVal = attribute.name.toLowerCase().includes('srcset')
       ? resolveBestSrcsetUrl(attribute.value)
       : attribute.value.trim();
-    if (candidate && !isPlaceholderSource(candidate)) return candidate;
+    if (rawVal && !isPlaceholderSource(rawVal)) return normalizeCandidateUrl(rawVal);
   }
-  return directCandidates.find(Boolean) || '';
+  const fallback = directCandidates.find(Boolean) || '';
+  return normalizeCandidateUrl(fallback);
 }
 
 /**
@@ -423,8 +436,9 @@ export function discoverMediaTargets(root: ParentNode = document, customSelector
     if (targets.length > 0) return targets;
   }
 
+  const MEDIA_QUERY_SELECTOR = 'img, picture img, svg image, [style*="background-image"]';
   for (const queryRoot of collectQueryRoots(root)) {
-    for (const element of Array.from(queryRoot.querySelectorAll('*'))) {
+    for (const element of Array.from(queryRoot.querySelectorAll(MEDIA_QUERY_SELECTOR))) {
       if (isElementInNoiseContainer(element)) continue;
       const target = element instanceof HTMLImageElement ? createMediaTarget(element) : createNonHtmlImageTarget(element);
       if (!target || seenSurfaces.has(target.surfaceElement)) continue;
