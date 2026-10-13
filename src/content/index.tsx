@@ -2,8 +2,9 @@ import { createRoot } from 'react-dom/client';
 import { useEffect, useRef, useState, useCallback, useId } from 'react';
 import './content.css';
 import { Languages, Eye, EyeOff, ExternalLink, X, Crop, RotateCcw, Download } from 'lucide-react';
-import type { PopupState, CropOverlayItem, ViewportSelection } from '../shared/types';
+import type { PopupState, CropOverlayItem, ViewportSelection, SiteSelectorRule } from '../shared/types';
 import { STORAGE_KEYS } from '../shared/constants';
+import { isDomainDisabled, findMatchingSiteRule } from '../shared/siteRules';
 import { createChapterTranslationRegistry, createChapterExporter, type ChapterTranslationRecord } from './chapterZip';
 import { handleReadingKeydown, handleReadingCommand, type ReadingShortcutActions } from './readingShortcuts';
 import {
@@ -1279,11 +1280,17 @@ function GlobalOverlay() {
 
   const activeImgRef = useRef(activeImg);
   const translatingUrlsRef = useRef(translatingUrls);
+  const siteRulesRef = useRef<SiteSelectorRule[]>([]);
   // Last known pointer position for scroll-driven hover re-resolution (scroll fires no
   // mouse events, so the hover target must be re-derived from the last cursor position).
   const lastCursorPositionRef = useRef<{ x: number; y: number } | null>(null);
   activeImgRef.current = activeImg;
   translatingUrlsRef.current = translatingUrls;
+
+  /** Resolves the custom image selector for this domain if configured in site rules. */
+  const getActiveCustomSelector = (): string | undefined => {
+    return findMatchingSiteRule(window.location.hostname, siteRulesRef.current)?.selector;
+  };
 
   /**
    * Marks an image URL as no longer translating so its button leaves the spinner state.
@@ -1548,23 +1555,26 @@ function GlobalOverlay() {
 
   // Load user settings and react to popup updates.
   useEffect(() => {
+    const applyState = (state: PopupState) => {
+      siteRulesRef.current = state.siteRules || [];
+      const currentHost = window.location.hostname;
+      const disabled = isDomainDisabled(currentHost, state.disabledDomains);
+      setIsEnabled((state.isExtensionEnabled ?? true) && !disabled);
+      setMode(state.manualMode || 'hover');
+      setAutoTranslate(state.isAuto || false);
+    };
+
     const loadSettings = () => {
       chrome.storage.local.get(STORAGE_KEYS.POPUP_STATE, (data) => {
         const state = data[STORAGE_KEYS.POPUP_STATE] as PopupState | undefined;
-        if (state) {
-          setIsEnabled(state.isExtensionEnabled ?? true);
-          setMode(state.manualMode || 'hover');
-          setAutoTranslate(state.isAuto || false);
-        }
+        if (state) applyState(state);
       });
     };
     loadSettings();
     const handleStorageChange = (changes: { [key: string]: chrome.storage.StorageChange }, area: string) => {
       if (area !== 'local' || !changes[STORAGE_KEYS.POPUP_STATE]?.newValue) return;
       const state = changes[STORAGE_KEYS.POPUP_STATE].newValue as PopupState;
-      setIsEnabled(state.isExtensionEnabled ?? true);
-      setMode(state.manualMode || 'hover');
-      setAutoTranslate(state.isAuto || false);
+      applyState(state);
     };
     chrome.storage.onChanged.addListener(handleStorageChange);
     return () => chrome.storage.onChanged.removeListener(handleStorageChange);
@@ -1674,7 +1684,7 @@ function GlobalOverlay() {
     });
 
     const observeImages = () => {
-      for (const target of discoverMediaTargets()) {
+      for (const target of discoverMediaTargets(document, getActiveCustomSelector())) {
         if (!observedSurfaces.has(target.surfaceElement)) {
           observedSurfaces.add(target.surfaceElement);
           targetsBySurface.set(target.surfaceElement, target);
@@ -1728,7 +1738,7 @@ function GlobalOverlay() {
     const observedMutationRoots = new WeakSet<Node>();
     let timeoutId: number | null = null;
     const updateImages = () => {
-      setConsistentImages(discoverMediaTargets()
+      setConsistentImages(discoverMediaTargets(document, getActiveCustomSelector())
         .map((target) => ({ ...target, anchorName: getAnchorName(target.anchorElement) })));
       for (const root of collectQueryRoots(document)) {
         if (root === document || observedMutationRoots.has(root)) continue;

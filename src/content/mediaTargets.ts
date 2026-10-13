@@ -1,3 +1,5 @@
+import { AD_NOISE_CONTAINER_SELECTORS, MANGA_READER_CONTAINER_SELECTORS } from '../shared/siteRules';
+
 export const MIN_MEDIA_WIDTH_PX = 150;
 export const MIN_MEDIA_HEIGHT_PX = 150;
 const MAX_SURFACE_ANCESTOR_DEPTH = 3;
@@ -351,16 +353,57 @@ export function collectQueryRoots(root: ParentNode): ParentNode[] {
 }
 
 /**
+ * Checks whether an element is located inside an advertisement or noise container,
+ * unless it is contained within an established manga reader container.
+ *
+ * @param element - DOM element to test.
+ * @returns Whether the element is likely non-chapter ad/sidebar noise.
+ */
+export function isElementInNoiseContainer(element: Element): boolean {
+  for (const readerSelector of MANGA_READER_CONTAINER_SELECTORS) {
+    try {
+      if (element.closest(readerSelector)) return false;
+    } catch {}
+  }
+  for (const noiseSelector of AD_NOISE_CONTAINER_SELECTORS) {
+    try {
+      if (element.closest(noiseSelector)) return true;
+    } catch {}
+  }
+  return false;
+}
+
+/**
  * Discovers document media targets and removes duplicates sharing one source or surface.
+ * Prioritizes user-configured custom selectors when available, and excludes noise/ad containers.
  *
  * @param root - Document or subtree to scan.
+ * @param customSelector - Optional custom CSS selector override matching image elements.
  * @returns Unique validated media targets.
  */
-export function discoverMediaTargets(root: ParentNode = document): MediaTarget[] {
+export function discoverMediaTargets(root: ParentNode = document, customSelector?: string): MediaTarget[] {
   const seenSurfaces = new Set<HTMLElement>();
   const targets: MediaTarget[] = [];
+
+  if (customSelector) {
+    for (const queryRoot of collectQueryRoots(root)) {
+      try {
+        for (const element of Array.from(queryRoot.querySelectorAll(customSelector))) {
+          const target = element instanceof HTMLImageElement ? createMediaTarget(element) : createNonHtmlImageTarget(element);
+          if (!target || seenSurfaces.has(target.surfaceElement)) continue;
+          seenSurfaces.add(target.surfaceElement);
+          targets.push(target);
+        }
+      } catch (err) {
+        console.warn('[MediaTargets] Custom selector query failed:', err);
+      }
+    }
+    if (targets.length > 0) return targets;
+  }
+
   for (const queryRoot of collectQueryRoots(root)) {
     for (const element of Array.from(queryRoot.querySelectorAll('*'))) {
+      if (isElementInNoiseContainer(element)) continue;
       const target = element instanceof HTMLImageElement ? createMediaTarget(element) : createNonHtmlImageTarget(element);
       if (!target || seenSurfaces.has(target.surfaceElement)) continue;
       seenSurfaces.add(target.surfaceElement);

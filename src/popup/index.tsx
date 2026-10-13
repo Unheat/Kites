@@ -5,12 +5,13 @@ import '../index.css';
 import EngineDropdown from './components/EngineDropdown';
 import SettingsView from './components/SettingsView';
 
-import { Settings, Home, Power, Crop } from 'lucide-react';
+import { Settings, Home, Power, Crop, Globe } from 'lucide-react';
 import PageExportControl from './components/PageExportControl';
 
 import type { PopupState } from '../shared/types';
 import { DEFAULT_POPUP_STATE } from '../shared/types';
 import { STORAGE_KEYS } from '../shared/constants';
+import { isDomainDisabled, normalizeDomain } from '../shared/siteRules';
 
 /**
  * Completes persisted popup settings and preserves nested WebGPU defaults.
@@ -33,7 +34,39 @@ function PopupApp() {
   const [activeTab, setActiveTab] = useState<'home' | 'settings'>('home');
   const [isLoaded, setIsLoaded] = useState(false);
   const [state, setState] = useState<PopupState>(DEFAULT_POPUP_STATE);
+  const [currentDomain, setCurrentDomain] = useState<string | null>(null);
   const storageWriteQueue = useRef<Promise<void>>(Promise.resolve());
+
+  useEffect(() => {
+    if (typeof chrome !== 'undefined' && chrome.tabs?.query) {
+      chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
+        if (tab?.url) {
+          try {
+            const url = new URL(tab.url);
+            if (url.protocol === 'http:' || url.protocol === 'https:') {
+              setCurrentDomain(url.hostname.toLowerCase());
+            }
+          } catch {}
+        }
+      });
+    }
+  }, []);
+
+  const isCurrentDomainDisabled = currentDomain
+    ? isDomainDisabled(currentDomain, state.disabledDomains)
+    : false;
+
+  const handleToggleCurrentDomain = () => {
+    if (!currentDomain) return;
+    const currentDisabled = state.disabledDomains || [];
+    let next: string[];
+    if (isCurrentDomainDisabled) {
+      next = currentDisabled.filter((d) => normalizeDomain(d) !== currentDomain);
+    } else {
+      next = [...currentDisabled, currentDomain];
+    }
+    updateState({ disabledDomains: next });
+  };
 
   useEffect(() => {
     let isMounted = true;
@@ -160,7 +193,11 @@ function PopupApp() {
       <div className="flex justify-between items-center mb-2.5 p-3.5 pb-0">
         <h1 className="text-xl font-bold font-display tracking-tight text-[var(--color-editorial)] flex items-center gap-2">
           Kites
-          {!state.isExtensionEnabled && <span className="text-xs font-normal text-[var(--color-dust)] px-2 py-0.5 border border-[var(--color-dust)] rounded-full">OFF</span>}
+          {!state.isExtensionEnabled ? (
+            <span className="text-xs font-normal text-[var(--color-dust)] px-2 py-0.5 border border-[var(--color-dust)] rounded-full">OFF</span>
+          ) : isCurrentDomainDisabled ? (
+            <span className="text-xs font-normal text-amber-500 px-2 py-0.5 border border-amber-500/40 rounded-full">PAUSED</span>
+          ) : null}
         </h1>
         <div className="flex gap-2 items-center">
           <button 
@@ -188,8 +225,31 @@ function PopupApp() {
         </div>
       </div>
 
+      {/* 1-Click Domain Status Pill */}
+      {currentDomain && state.isExtensionEnabled && (
+        <div className="mx-3.5 mb-2.5 px-2.5 py-1.5 rounded bg-[var(--color-vellum)] border border-[var(--color-dust)] border-opacity-30 flex items-center justify-between text-xs">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <Globe size={13} className={isCurrentDomainDisabled ? 'text-amber-500 shrink-0' : 'text-[var(--color-dust)] shrink-0'} />
+            <span className="font-mono text-[11px] truncate text-[var(--color-ink)]" title={currentDomain}>
+              {currentDomain}
+            </span>
+          </div>
+          <button
+            onClick={handleToggleCurrentDomain}
+            className={`px-2 py-0.5 rounded text-[10px] font-semibold border transition-colors cursor-pointer shrink-0 ${
+              isCurrentDomainDisabled
+                ? 'bg-amber-500/10 border-amber-500/30 text-amber-500 hover:bg-amber-500/20'
+                : 'bg-[var(--color-paper)] border-[var(--color-dust)] border-opacity-40 text-[var(--color-dust)] hover:text-red-500 hover:border-red-400'
+            }`}
+            title={isCurrentDomainDisabled ? `Re-enable Kites on ${currentDomain}` : `Disable Kites on ${currentDomain}`}
+          >
+            {isCurrentDomainDisabled ? 'Disabled · Enable' : 'Disable on site'}
+          </button>
+        </div>
+      )}
+
       {/* Main Content Area (Dims when disabled) */}
-      <div className={`flex-1 flex flex-col transition-opacity duration-300 ${!state.isExtensionEnabled ? 'opacity-40 pointer-events-none grayscale' : ''}`}>
+      <div className={`flex-1 flex flex-col transition-opacity duration-300 ${(!state.isExtensionEnabled || isCurrentDomainDisabled) ? 'opacity-40 pointer-events-none grayscale' : ''}`}>
         <div className="flex-1 flex flex-col px-3.5 pb-3.5">
           {activeTab === 'home' ? (
             <EngineDropdown state={state} updateState={updateState} />

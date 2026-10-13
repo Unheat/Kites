@@ -8,6 +8,7 @@ import { inpaintRegistry } from '../offscreen/engines/inpaint/inpaintRegistry';
 import { resolveOcrTier } from '../offscreen/engines/ocr/ocrRegistry';
 import { normalizeRenderFontPresetId } from '../shared/renderFontPresets';
 import { normalizeGlossaryEntries } from '../shared/glossary';
+import { normalizeDisabledDomains, normalizeSiteRules, isDomainDisabled } from '../shared/siteRules';
 import { oAuthManager } from './auth/OAuthManager';
 import { registerReadingCommands } from './readingCommands';
 
@@ -125,6 +126,8 @@ export function normalizePopupState(popupState: Partial<PopupState> | undefined)
     historyRetention,
     glossaryEnabled: completedState.glossaryEnabled === true,
     glossaryEntries: normalizeGlossaryEntries(completedState.glossaryEntries),
+    disabledDomains: normalizeDisabledDomains(completedState.disabledDomains),
+    siteRules: normalizeSiteRules(completedState.siteRules),
     fallbackChain,
   };
   const changed = JSON.stringify(state) !== JSON.stringify(popupState ?? {});
@@ -168,8 +171,8 @@ chrome.contextMenus.onClicked.addListener(async (info: chrome.contextMenus.OnCli
   if (info.menuItemId === 'translate-image' && info.srcUrl) {
     const data = await chrome.storage.local.get(STORAGE_KEYS.POPUP_STATE);
     const popupState = data[STORAGE_KEYS.POPUP_STATE] as PopupState | undefined;
-    if (popupState && popupState.isExtensionEnabled === false) {
-      console.log('[Background] Context menu ignored: Kites extension is disabled.');
+    if (popupState && (popupState.isExtensionEnabled === false || isDomainDisabled(_tab?.url || '', popupState.disabledDomains))) {
+      console.log('[Background] Context menu ignored: Kites extension is disabled on this domain.');
       return;
     }
     console.log('[Background] Context menu clicked. Target URL:', info.srcUrl);
@@ -181,8 +184,8 @@ chrome.contextMenus.onClicked.addListener(async (info: chrome.contextMenus.OnCli
   } else if (info.menuItemId === 'translate-area' && _tab?.id) {
     const data = await chrome.storage.local.get(STORAGE_KEYS.POPUP_STATE);
     const popupState = data[STORAGE_KEYS.POPUP_STATE] as PopupState | undefined;
-    if (popupState && popupState.isExtensionEnabled === false) {
-      console.log('[Background] Context menu ignored: Kites extension is disabled.');
+    if (popupState && (popupState.isExtensionEnabled === false || isDomainDisabled(_tab?.url || '', popupState.disabledDomains))) {
+      console.log('[Background] Context menu ignored: Kites extension is disabled on this domain.');
       return;
     }
     console.log('[Background] Context menu Crop & Translate Area clicked for tab:', _tab.id);
@@ -251,9 +254,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (srcUrl) {
       chrome.storage.local.get(STORAGE_KEYS.POPUP_STATE).then((data) => {
         const popupState = data[STORAGE_KEYS.POPUP_STATE] as PopupState | undefined;
-        if (popupState && popupState.isExtensionEnabled === false) {
-          console.warn('[Background] Rejected TRANSLATE_IMAGE: Kites extension is disabled.');
-          sendResponse({ status: 'error', error: 'Extension is disabled' });
+        const tabUrl = _sender.tab?.url;
+        if (popupState && (popupState.isExtensionEnabled === false || isDomainDisabled(tabUrl || '', popupState.disabledDomains))) {
+          console.warn('[Background] Rejected TRANSLATE_IMAGE: Kites extension or domain is disabled.');
+          sendResponse({ status: 'error', error: 'Extension is disabled on this domain' });
           return;
         }
         console.log('[Background] Received TRANSLATE_IMAGE from content script. URL:', srcUrl);
@@ -293,9 +297,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
     chrome.storage.local.get(STORAGE_KEYS.POPUP_STATE).then(async (data) => {
       const popupState = data[STORAGE_KEYS.POPUP_STATE] as PopupState | undefined;
-      if (popupState && popupState.isExtensionEnabled === false) {
-        console.warn('[Background] Rejected TRANSLATE_CAPTURED_IMAGE: Kites extension is disabled.');
-        sendResponse({ status: 'error', error: 'Extension is disabled' });
+      const tabUrl = _sender.tab?.url;
+      if (popupState && (popupState.isExtensionEnabled === false || isDomainDisabled(tabUrl || '', popupState.disabledDomains))) {
+        console.warn('[Background] Rejected TRANSLATE_CAPTURED_IMAGE: Kites extension or domain is disabled.');
+        sendResponse({ status: 'error', error: 'Extension is disabled on this domain' });
         return;
       }
       console.log('[Background] Received TRANSLATE_CAPTURED_IMAGE from content script. Request ID:', requestId);

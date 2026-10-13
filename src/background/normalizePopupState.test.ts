@@ -148,6 +148,26 @@ describe('normalizePopupState', () => {
     expect(normalizePopupState(saved)).toEqual({ state: saved, changed: false });
   });
 
+  it('normalizes disabledDomains and siteRules at storage boundary', () => {
+    const raw = {
+      ...DEFAULT_POPUP_STATE,
+      disabledDomains: [' MangaDex.Org ', 'mangadex.org', 'https://bato.to/read', 123],
+      siteRules: [
+        { domain: 'MangaDex.Org', selector: ' #readerarea img ', enabled: true },
+        { domain: '', selector: 'img', enabled: true },
+        { domain: 'bato.to', selector: '{bad}', enabled: true },
+        null,
+      ],
+    } as unknown as PopupState;
+
+    const result = normalizePopupState(raw);
+    expect(result.state.disabledDomains).toEqual(['mangadex.org', 'bato.to']);
+    expect(result.state.siteRules).toEqual([
+      { domain: 'mangadex.org', selector: '#readerarea img', enabled: true },
+    ]);
+    expect(result.changed).toBe(true);
+  });
+
   it('migrates legacy settings without historyRetention to the seven-day default', () => {
     const { historyRetention: _historyRetention, ...legacyState } = DEFAULT_POPUP_STATE;
     const result = normalizePopupState(legacyState);

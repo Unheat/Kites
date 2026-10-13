@@ -187,6 +187,13 @@ import type { GlossaryEntry } from './glossary';
 export type BubbleDetectionMode = 'off' | 'heuristic' | 'neural' | 'neural-mask';
 export type HistoryRetentionPeriod = '1day' | '1week' | '1month' | 'never';
 
+/** Custom CSS image selector rule for tricky or non-standard manga reader sites. */
+export interface SiteSelectorRule {
+  domain: string;
+  selector: string;
+  enabled: boolean;
+}
+
 export interface PopupState {
   isExtensionEnabled: boolean;
   isAuto: boolean;
@@ -203,6 +210,8 @@ export interface PopupState {
   historyRetention: HistoryRetentionPeriod;
   glossaryEnabled: boolean;
   glossaryEntries: GlossaryEntry[];
+  disabledDomains: string[];
+  siteRules: SiteSelectorRule[];
   fallbackChain: string[];
   customApis: CustomApiConfig[];
   webgpuSupported: boolean | null;
@@ -232,6 +241,8 @@ export const DEFAULT_POPUP_STATE: PopupState = {
   historyRetention: '1week',
   glossaryEnabled: false,
   glossaryEntries: [],
+  disabledDomains: [],
+  siteRules: [],
   fallbackChain: [],
   customApis: [],
   webgpuSupported: null,

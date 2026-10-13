@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import type { PopupState, HistoryRetentionPeriod } from '../../shared/types';
 import { DEFAULT_POPUP_STATE } from '../../shared/types';
-import { Moon, Sun, KeyRound, Network, BookOpen } from 'lucide-react';
+import { Moon, Sun, KeyRound, Network, BookOpen, Globe } from 'lucide-react';
 import GlossaryPanel from './GlossaryPanel';
+import SiteRulesPanel from './SiteRulesPanel';
 import ReadingShortcutsHelp from './ReadingShortcutsHelp';
 import ApiManagerPanel from './ApiManagerPanel';
 import FallbackConfigPanel from './FallbackConfigPanel';
@@ -41,6 +42,7 @@ export default function SettingsView({ state, updateState }: SettingsViewProps) 
   const [showApiManager, setShowApiManager] = useState(false);
   const [showFallbackConfig, setShowFallbackConfig] = useState(false);
   const [showGlossary, setShowGlossary] = useState(false);
+  const [showSiteRules, setShowSiteRules] = useState(false);
 
   const concurrency = Math.min(5, Math.max(1, state.concurrency));
 
@@ -137,6 +139,25 @@ export default function SettingsView({ state, updateState }: SettingsViewProps) 
                 glossaryEntries={state.glossaryEntries ?? []}
                 updateState={updateState}
                 onClose={() => setShowGlossary(false)}
+              />
+            )}
+
+            {!showSiteRules ? (
+              <button
+                onClick={() => setShowSiteRules(true)}
+                className="w-full flex items-center justify-between p-2.5 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md hover:border-[var(--color-ink)] transition-colors cursor-pointer"
+              >
+                <div className="flex items-center gap-2">
+                  <Globe size={16} className="text-[var(--color-dust)]" />
+                  <span className="font-medium text-sm">Site Rules & Domains</span>
+                </div>
+                <span className="text-xs text-[var(--color-editorial)] font-medium">Edit</span>
+              </button>
+            ) : (
+              <SiteRulesPanel
+                state={state}
+                updateState={updateState}
+                onClose={() => setShowSiteRules(false)}
               />
             )}
           </div>
