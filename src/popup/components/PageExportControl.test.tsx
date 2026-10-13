@@ -20,7 +20,7 @@ describe('PageExportControl', () => {
 
   afterEach(() => { vi.useRealTimers(); });
 
-  it('renders nothing when active tab has 0 translated pages', async () => {
+  it('renders disabled button when active tab has 0 translated pages', async () => {
     (globalThis as any).chrome = {
       tabs: {
         query: vi.fn().mockResolvedValue([{ id: 123 }]),
@@ -46,7 +46,7 @@ describe('PageExportControl', () => {
       await Promise.resolve();
     });
 
-    expect(container.textContent).toBe('');
+    expect(container.textContent).toContain('Download Chapter ZIP (0 pages)');
     await act(async () => { root.unmount(); });
     container.remove();
   });

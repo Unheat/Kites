@@ -82,7 +82,7 @@ export function normalizeMediaUrl(url: string): string {
  * @param url - Candidate image URL.
  * @returns Whether the URL should be ignored in favor of another source.
  */
-function isPlaceholderSource(url: string): boolean {
+export function isPlaceholderSource(url: string): boolean {
   if (!url) return true;
   if (url.startsWith('data:image/svg+xml')) return true;
   if (url.startsWith('data:image/gif;base64,R0lGODlhAQAB')) return true;
@@ -117,7 +117,29 @@ function resolveBestSrcsetUrl(srcset: string): string {
 export function resolveElementSource(element: Element): string {
   const origSrc = element.getAttribute('data-kites-orig-src');
   if (origSrc && !isPlaceholderSource(origSrc)) {
-    return origSrc;
+    if (element instanceof HTMLImageElement) {
+      const appliedSrc = element.getAttribute('data-kites-applied-src');
+      const currentSrc = element.currentSrc || element.src || '';
+      // If currentSrc is neither applied blob nor origSrc (e.g. host single-page reader navigated to next page),
+      // the DOM element has been recycled for a new image. Clear stale Kites attributes so the new image is recognized.
+      if (
+        currentSrc &&
+        !isPlaceholderSource(currentSrc) &&
+        currentSrc !== appliedSrc &&
+        currentSrc !== origSrc
+      ) {
+        element.removeAttribute('data-kites-orig-src');
+        element.removeAttribute('data-kites-orig-srcset');
+        element.removeAttribute('data-kites-applied-src');
+        element.removeAttribute('data-kites-translated');
+        element.removeAttribute('data-kites-show-original');
+        element.removeAttribute('data-kites-job-id');
+      } else {
+        return origSrc;
+      }
+    } else {
+      return origSrc;
+    }
   }
 
   const directCandidates: string[] = [];

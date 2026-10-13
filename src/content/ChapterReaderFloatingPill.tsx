@@ -43,18 +43,60 @@ export default function ChapterReaderFloatingPill({
 
   return (
     <div
-      className={`fixed bottom-5 right-5 z-[999998] flex items-center bg-black/80 hover:bg-black/95 text-white text-xs rounded-full shadow-2xl border border-white/20 backdrop-blur-md transition-all duration-200 select-none ${
-        isScrolling ? 'opacity-30 hover:opacity-100' : 'opacity-100'
-      }`}
+      className={`kites-reader-pill ${isScrolling ? 'kites-scrolling' : ''}`}
+      style={{
+        position: 'fixed',
+        bottom: '20px',
+        right: '20px',
+        zIndex: 999998,
+        display: 'flex',
+        alignItems: 'center',
+        backgroundColor: 'rgba(18, 18, 18, 0.92)',
+        color: '#ffffff',
+        fontSize: '12px',
+        borderRadius: '9999px',
+        boxShadow: '0 4px 20px rgba(0, 0, 0, 0.5)',
+        border: '1px solid rgba(255, 255, 255, 0.2)',
+        backdropFilter: 'blur(8px)',
+        WebkitBackdropFilter: 'blur(8px)',
+        userSelect: 'none',
+        WebkitUserSelect: 'none',
+        opacity: isScrolling ? 0.35 : 1,
+        transition: 'opacity 0.2s ease, transform 0.2s ease',
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+      }}
     >
       <button
         onClick={onOpen}
-        className="flex items-center gap-2 pl-3.5 pr-2.5 py-1.5 hover:text-[var(--color-editorial)] transition-colors cursor-pointer font-medium"
+        className="kites-reader-pill-btn"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          padding: '6px 12px 6px 14px',
+          background: 'transparent',
+          border: 'none',
+          color: '#ffffff',
+          cursor: 'pointer',
+          fontWeight: 500,
+          fontSize: '12px',
+          lineHeight: 1,
+        }}
         title="Open Distraction-Free Chapter Reader"
       >
-        <BookOpen size={14} className="text-[var(--color-editorial)]" />
+        <BookOpen size={14} color="#f4446d" />
         <span>Read Chapter</span>
-        <span className="font-mono text-[10px] bg-white/20 px-1.5 py-0.2 rounded-full font-bold">
+        <span
+          className="kites-reader-pill-count"
+          style={{
+            fontFamily: 'monospace',
+            fontSize: '10px',
+            fontWeight: 700,
+            backgroundColor: 'rgba(255, 255, 255, 0.2)',
+            padding: '2px 6px',
+            borderRadius: '9999px',
+          }}
+        >
           {pageCount}
         </span>
       </button>
@@ -64,7 +106,17 @@ export default function ChapterReaderFloatingPill({
           e.stopPropagation();
           onDismiss();
         }}
-        className="pr-2.5 pl-1 py-1.5 text-white/50 hover:text-white transition-colors cursor-pointer"
+        className="kites-reader-pill-close"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '6px 10px 6px 4px',
+          background: 'transparent',
+          border: 'none',
+          color: 'rgba(255, 255, 255, 0.45)',
+          cursor: 'pointer',
+        }}
         title="Dismiss for this page"
       >
         <X size={12} />

@@ -25,9 +25,9 @@ export interface ChapterReaderModalProps {
 }
 
 const WIDTH_CLASSES: Record<WebtoonWidthPreset, string> = {
-  md: 'max-w-2xl',  // ~672px
-  lg: 'max-w-4xl',  // ~896px
-  full: 'w-full',   // 100%
+  md: 'width-md',
+  lg: 'width-lg',
+  full: 'width-full',
 };
 
 /**
@@ -150,30 +150,79 @@ export default function ChapterReaderModal({
       role="dialog"
       aria-modal="true"
       aria-label="Distraction-Free Chapter Reader"
-      className="fixed inset-0 z-[1000000] bg-black/95 text-white flex flex-col select-none font-sans"
+      className="kites-reader-modal"
+      style={{
+        position: 'fixed',
+        inset: 0,
+        width: '100vw',
+        height: '100vh',
+        zIndex: 1000000,
+        backgroundColor: 'rgba(10, 10, 10, 0.98)',
+        color: '#ffffff',
+        display: 'flex',
+        flexDirection: 'column',
+        userSelect: 'none',
+        overflow: 'hidden',
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+      }}
     >
       {/* Top Controls Header Bar */}
-      <header className="h-12 bg-black/80 backdrop-blur border-b border-white/10 px-4 flex items-center justify-between text-xs shrink-0 z-30">
+      <header
+        className="kites-reader-header"
+        style={{
+          height: '48px',
+          minHeight: '48px',
+          backgroundColor: 'rgba(18, 18, 18, 0.95)',
+          borderBottom: '1px solid rgba(255, 255, 255, 0.12)',
+          padding: '0 16px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          fontSize: '12px',
+          flexShrink: 0,
+          zIndex: 1000001,
+          width: '100%',
+          boxSizing: 'border-box',
+        }}
+      >
         {/* Left: Close & Title & Page counter */}
-        <div className="flex items-center gap-3 min-w-0">
+        <div className="kites-reader-header-left" style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
           <button
             onClick={onClose}
-            className="p-1.5 rounded hover:bg-white/10 text-white/70 hover:text-white transition-colors cursor-pointer flex items-center gap-1.5"
+            className="kites-reader-btn"
+            style={{
+              padding: '6px 8px',
+              borderRadius: '6px',
+              color: 'rgba(255, 255, 255, 0.8)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              cursor: 'pointer',
+              background: 'rgba(255, 255, 255, 0.08)',
+              border: '1px solid rgba(255, 255, 255, 0.12)',
+            }}
             title="Exit Reader (Esc)"
           >
-            <X size={16} />
-            <kbd className="hidden sm:inline px-1 py-0.5 rounded text-[10px] font-mono bg-white/15 text-white/80">
+            <X size={15} />
+            <kbd className="kites-reader-kbd" style={{ fontSize: '10px', padding: '1px 4px', borderRadius: '3px', background: 'rgba(255, 255, 255, 0.15)' }}>
               Esc
             </kbd>
           </button>
 
-          <div className="h-4 w-px bg-white/20 hidden sm:block" />
+          <div style={{ height: '16px', width: '1px', backgroundColor: 'rgba(255, 255, 255, 0.2)' }} />
 
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="font-semibold truncate max-w-[200px] sm:max-w-xs text-white" title={title || document.title}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+            <span
+              className="kites-reader-title"
+              style={{ fontWeight: 600, color: '#ffffff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '240px' }}
+              title={title || document.title}
+            >
               {title || document.title}
             </span>
-            <span className="text-[11px] font-mono text-white/50 shrink-0">
+            <span
+              className="kites-reader-page-counter"
+              style={{ fontSize: '11px', fontFamily: 'monospace', color: 'rgba(255, 255, 255, 0.5)', whiteSpace: 'nowrap' }}
+            >
               {viewMode === 'webtoon'
                 ? `Page ${activeScrollPage} / ${totalPages}`
                 : `Page ${currentIndex + 1}${viewMode === 'double' && currentIndex + 1 < totalPages ? `-${currentIndex + 2}` : ''} / ${totalPages}`}
@@ -182,51 +231,115 @@ export default function ChapterReaderModal({
         </div>
 
         {/* Center: View Mode Selector */}
-        <div className="flex items-center gap-1 bg-white/5 p-0.5 rounded-lg border border-white/10">
+        <div
+          className="kites-reader-mode-group"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '2px',
+            backgroundColor: 'rgba(255, 255, 255, 0.06)',
+            padding: '2px',
+            borderRadius: '8px',
+            border: '1px solid rgba(255, 255, 255, 0.1)',
+          }}
+        >
           <button
             onClick={() => setViewMode('webtoon')}
-            className={`px-2 py-1 rounded text-[11px] font-medium flex items-center gap-1 transition-colors cursor-pointer ${
-              viewMode === 'webtoon' ? 'bg-white/20 text-white' : 'text-white/60 hover:text-white'
-            }`}
+            className={`kites-reader-btn ${viewMode === 'webtoon' ? 'active' : ''}`}
+            style={{
+              padding: '4px 8px',
+              borderRadius: '6px',
+              fontSize: '11px',
+              fontWeight: 500,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              cursor: 'pointer',
+              border: 'none',
+              backgroundColor: viewMode === 'webtoon' ? 'rgba(255, 255, 255, 0.2)' : 'transparent',
+              color: viewMode === 'webtoon' ? '#ffffff' : 'rgba(255, 255, 255, 0.6)',
+            }}
             title="Continuous Vertical Stream (Webtoon)"
           >
             <BookOpen size={13} />
-            <span className="hidden md:inline">Webtoon</span>
+            <span>Webtoon</span>
           </button>
           <button
             onClick={() => setViewMode('single')}
-            className={`px-2 py-1 rounded text-[11px] font-medium flex items-center gap-1 transition-colors cursor-pointer ${
-              viewMode === 'single' ? 'bg-white/20 text-white' : 'text-white/60 hover:text-white'
-            }`}
+            className={`kites-reader-btn ${viewMode === 'single' ? 'active' : ''}`}
+            style={{
+              padding: '4px 8px',
+              borderRadius: '6px',
+              fontSize: '11px',
+              fontWeight: 500,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              cursor: 'pointer',
+              border: 'none',
+              backgroundColor: viewMode === 'single' ? 'rgba(255, 255, 255, 0.2)' : 'transparent',
+              color: viewMode === 'single' ? '#ffffff' : 'rgba(255, 255, 255, 0.6)',
+            }}
             title="Single Page Mode"
           >
             <FileText size={13} />
-            <span className="hidden md:inline">Single</span>
+            <span>Single</span>
           </button>
           <button
             onClick={() => setViewMode('double')}
-            className={`px-2 py-1 rounded text-[11px] font-medium flex items-center gap-1 transition-colors cursor-pointer ${
-              viewMode === 'double' ? 'bg-white/20 text-white' : 'text-white/60 hover:text-white'
-            }`}
+            className={`kites-reader-btn ${viewMode === 'double' ? 'active' : ''}`}
+            style={{
+              padding: '4px 8px',
+              borderRadius: '6px',
+              fontSize: '11px',
+              fontWeight: 500,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              cursor: 'pointer',
+              border: 'none',
+              backgroundColor: viewMode === 'double' ? 'rgba(255, 255, 255, 0.2)' : 'transparent',
+              color: viewMode === 'double' ? '#ffffff' : 'rgba(255, 255, 255, 0.6)',
+            }}
             title="Double Page Spread Mode"
           >
             <Columns size={13} />
-            <span className="hidden md:inline">Double</span>
+            <span>Double</span>
           </button>
         </div>
 
         {/* Right: Width / Flip / Direction / ZIP */}
-        <div className="flex items-center gap-2">
+        <div className="kites-reader-header-right" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           {/* Width Preset (Webtoon only) */}
           {viewMode === 'webtoon' && (
-            <div className="flex items-center gap-1 bg-white/5 p-0.5 rounded border border-white/10 text-[11px]">
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '2px',
+                backgroundColor: 'rgba(255, 255, 255, 0.06)',
+                padding: '2px',
+                borderRadius: '6px',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+              }}
+            >
               {(['md', 'lg', 'full'] as WebtoonWidthPreset[]).map((preset) => (
                 <button
                   key={preset}
                   onClick={() => setWebtoonWidth(preset)}
-                  className={`px-1.5 py-0.5 rounded uppercase font-mono text-[10px] cursor-pointer ${
-                    webtoonWidth === preset ? 'bg-white/20 text-white font-bold' : 'text-white/50 hover:text-white'
-                  }`}
+                  className={`kites-reader-btn ${webtoonWidth === preset ? 'active' : ''}`}
+                  style={{
+                    padding: '3px 6px',
+                    borderRadius: '4px',
+                    textTransform: 'uppercase',
+                    fontFamily: 'monospace',
+                    fontSize: '10px',
+                    cursor: 'pointer',
+                    border: 'none',
+                    backgroundColor: webtoonWidth === preset ? 'rgba(255, 255, 255, 0.2)' : 'transparent',
+                    color: webtoonWidth === preset ? '#ffffff' : 'rgba(255, 255, 255, 0.5)',
+                    fontWeight: webtoonWidth === preset ? 700 : 400,
+                  }}
                   title={`Width: ${preset}`}
                 >
                   {preset}
@@ -239,34 +352,68 @@ export default function ChapterReaderModal({
           {(viewMode === 'single' || viewMode === 'double') && (
             <button
               onClick={() => setIsRtl((prev) => !prev)}
-              className="p-1.5 rounded hover:bg-white/10 text-white/70 hover:text-white transition-colors cursor-pointer flex items-center gap-1 text-[11px]"
+              className="kites-reader-btn"
+              style={{
+                padding: '4px 8px',
+                borderRadius: '6px',
+                color: 'rgba(255, 255, 255, 0.7)',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                fontSize: '11px',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+                background: 'rgba(255, 255, 255, 0.06)',
+              }}
               title={`Reading Direction: ${isRtl ? 'Right-to-Left (Manga)' : 'Left-to-Right (Webtoon)'}`}
             >
               <ArrowLeftRight size={13} />
-              <span className="font-mono text-[10px]">{isRtl ? 'RTL' : 'LTR'}</span>
+              <span style={{ fontFamily: 'monospace', fontSize: '10px' }}>{isRtl ? 'RTL' : 'LTR'}</span>
             </button>
           )}
 
           {/* Original vs Translated Flip Toggle */}
           <button
             onClick={() => setShowOriginal((prev) => !prev)}
-            className={`px-2 py-1 rounded text-[11px] font-medium flex items-center gap-1.5 transition-colors cursor-pointer border ${
-              showOriginal
-                ? 'bg-amber-500/20 border-amber-500/40 text-amber-300 hover:bg-amber-500/30'
-                : 'bg-white/10 border-white/15 text-white hover:bg-white/20'
-            }`}
+            className="kites-reader-btn"
+            style={{
+              padding: '4px 8px',
+              borderRadius: '6px',
+              fontSize: '11px',
+              fontWeight: 500,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              cursor: 'pointer',
+              border: showOriginal ? '1px solid rgba(245, 158, 11, 0.5)' : '1px solid rgba(255, 255, 255, 0.15)',
+              backgroundColor: showOriginal ? 'rgba(245, 158, 11, 0.15)' : 'rgba(255, 255, 255, 0.08)',
+              color: showOriginal ? '#fbbf24' : '#ffffff',
+            }}
             title="Toggle Original Artwork / Translation (F)"
           >
             {showOriginal ? <EyeOff size={13} /> : <Eye size={13} />}
-            <span className="hidden sm:inline">{showOriginal ? 'Original' : 'Translated'}</span>
-            <kbd className="px-1 py-0.2 rounded text-[9px] font-mono bg-white/20">F</kbd>
+            <span>{showOriginal ? 'Original' : 'Translated'}</span>
+            <kbd className="kites-reader-kbd" style={{ fontSize: '9px', padding: '1px 4px', background: 'rgba(255, 255, 255, 0.2)' }}>
+              F
+            </kbd>
           </button>
 
           {/* ZIP Export Button */}
           {onExportZip && (
             <button
               onClick={onExportZip}
-              className="p-1.5 rounded hover:bg-white/10 text-white/70 hover:text-white transition-colors cursor-pointer"
+              className="kites-reader-btn"
+              style={{
+                padding: '6px 8px',
+                borderRadius: '6px',
+                color: 'rgba(255, 255, 255, 0.8)',
+                cursor: 'pointer',
+                border: '1px solid rgba(255, 255, 255, 0.12)',
+                background: 'rgba(255, 255, 255, 0.08)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
               title="Download Chapter ZIP"
             >
               <Download size={14} />
@@ -279,34 +426,100 @@ export default function ChapterReaderModal({
       <div
         ref={containerRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto overflow-x-hidden relative flex flex-col items-center bg-black/95 scroll-smooth"
+        className="kites-reader-viewport"
+        style={{
+          flex: '1 1 0%',
+          overflowY: 'auto',
+          overflowX: 'hidden',
+          position: 'relative',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          backgroundColor: '#050505',
+          width: '100%',
+          height: 'calc(100vh - 48px)',
+          scrollBehavior: 'smooth',
+        }}
       >
         {records.length === 0 ? (
-          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-white/50">
-            <BookOpen size={36} className="mb-3 opacity-40" />
-            <p className="text-sm font-medium">No translated pages available in this chapter.</p>
-            <p className="text-xs text-white/40 mt-1">Translate pages on the host site to view them here.</p>
+          <div
+            style={{
+              flex: '1 1 0%',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '32px',
+              textAlign: 'center',
+              color: 'rgba(255, 255, 255, 0.5)',
+            }}
+          >
+            <BookOpen size={36} style={{ marginBottom: '12px', opacity: 0.4 }} />
+            <p style={{ fontSize: '14px', fontWeight: 500, margin: '0 0 6px 0' }}>No translated pages available in this chapter.</p>
+            <p style={{ fontSize: '12px', color: 'rgba(255, 255, 255, 0.4)', margin: 0 }}>Translate pages on the host site to view them here.</p>
           </div>
         ) : viewMode === 'webtoon' ? (
           /* Continuous Vertical Stream (Webtoon) */
-          <div className={`flex flex-col items-center w-full ${WIDTH_CLASSES[webtoonWidth]}`}>
+          <div
+            className={`kites-reader-webtoon-container ${WIDTH_CLASSES[webtoonWidth]}`}
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              width: '100%',
+              maxWidth: webtoonWidth === 'md' ? '768px' : webtoonWidth === 'lg' ? '1024px' : '100%',
+              margin: '0 auto',
+              padding: 0,
+            }}
+          >
             {records.map((page, idx) => {
               const src = showOriginal ? page.originalUrl : page.translatedUrl;
               return (
                 <div
                   key={`${page.originalUrl}-${idx}`}
                   data-reader-page={idx + 1}
-                  className="relative w-full bg-black leading-none m-0 p-0 group"
+                  className="kites-reader-page-item"
+                  style={{
+                    position: 'relative',
+                    width: '100%',
+                    backgroundColor: '#000000',
+                    lineHeight: 0,
+                    margin: 0,
+                    padding: 0,
+                  }}
                 >
                   <img
                     src={src}
                     alt={`Page ${idx + 1}`}
                     loading="lazy"
-                    className="w-full h-auto block select-none"
+                    className="kites-reader-page-img"
+                    style={{
+                      width: '100%',
+                      height: 'auto',
+                      display: 'block',
+                      userSelect: 'none',
+                      margin: 0,
+                      padding: 0,
+                      border: 'none',
+                    }}
                     draggable={false}
                   />
-                  {/* Subtle page indicator badge on hover */}
-                  <div className="absolute right-3 bottom-3 opacity-0 group-hover:opacity-100 transition-opacity bg-black/70 backdrop-blur text-white/70 text-[10px] font-mono px-2 py-0.5 rounded pointer-events-none">
+                  {/* Subtle page indicator badge */}
+                  <div
+                    className="kites-reader-page-badge"
+                    style={{
+                      position: 'absolute',
+                      right: '12px',
+                      bottom: '12px',
+                      backgroundColor: 'rgba(0, 0, 0, 0.75)',
+                      color: 'rgba(255, 255, 255, 0.75)',
+                      fontSize: '10px',
+                      fontFamily: 'monospace',
+                      padding: '2px 8px',
+                      borderRadius: '4px',
+                      pointerEvents: 'none',
+                    }}
+                  >
                     p. {idx + 1}
                   </div>
                 </div>
@@ -315,12 +528,32 @@ export default function ChapterReaderModal({
           </div>
         ) : viewMode === 'single' ? (
           /* Single Page View */
-          <div className="flex-1 w-full flex items-center justify-center relative p-2">
+          <div
+            className="kites-reader-panel-container"
+            style={{
+              flex: '1 1 0%',
+              width: '100%',
+              height: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              position: 'relative',
+              padding: '16px',
+              boxSizing: 'border-box',
+            }}
+          >
             {records[currentIndex] && (
               <img
                 src={showOriginal ? records[currentIndex].originalUrl : records[currentIndex].translatedUrl}
                 alt={`Page ${currentIndex + 1}`}
-                className="max-h-[calc(100vh-64px)] max-w-full object-contain shadow-2xl"
+                className="kites-reader-single-img"
+                style={{
+                  maxHeight: 'calc(100vh - 80px)',
+                  maxWidth: '100%',
+                  objectFit: 'contain',
+                  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.6)',
+                  display: 'block',
+                }}
                 draggable={false}
               />
             )}
@@ -329,7 +562,24 @@ export default function ChapterReaderModal({
             <button
               onClick={() => setCurrentIndex((prev) => (isRtl ? Math.min(totalPages - 1, prev + 1) : Math.max(0, prev - 1)))}
               disabled={isRtl ? currentIndex >= totalPages - 1 : currentIndex <= 0}
-              className="absolute left-2 top-1/2 -translate-y-1/2 p-3 rounded-full bg-black/60 hover:bg-black/90 text-white/70 hover:text-white transition-all disabled:opacity-0 cursor-pointer shadow-xl border border-white/10"
+              className="kites-reader-nav-prev"
+              style={{
+                position: 'absolute',
+                left: '16px',
+                top: '50%',
+                transform: 'translateY(-50%)',
+                width: '48px',
+                height: '80px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: 'rgba(255, 255, 255, 0.08)',
+                color: '#ffffff',
+                border: '1px solid rgba(255, 255, 255, 0.15)',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                zIndex: 1000002,
+              }}
               title={isRtl ? 'Next Page' : 'Previous Page'}
             >
               <ChevronLeft size={24} />
@@ -337,7 +587,24 @@ export default function ChapterReaderModal({
             <button
               onClick={() => setCurrentIndex((prev) => (isRtl ? Math.max(0, prev - 1) : Math.min(totalPages - 1, prev + 1)))}
               disabled={isRtl ? currentIndex <= 0 : currentIndex >= totalPages - 1}
-              className="absolute right-2 top-1/2 -translate-y-1/2 p-3 rounded-full bg-black/60 hover:bg-black/90 text-white/70 hover:text-white transition-all disabled:opacity-0 cursor-pointer shadow-xl border border-white/10"
+              className="kites-reader-nav-next"
+              style={{
+                position: 'absolute',
+                right: '16px',
+                top: '50%',
+                transform: 'translateY(-50%)',
+                width: '48px',
+                height: '80px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: 'rgba(255, 255, 255, 0.08)',
+                color: '#ffffff',
+                border: '1px solid rgba(255, 255, 255, 0.15)',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                zIndex: 1000002,
+              }}
               title={isRtl ? 'Previous Page' : 'Next Page'}
             >
               <ChevronRight size={24} />
@@ -345,13 +612,44 @@ export default function ChapterReaderModal({
           </div>
         ) : (
           /* Double Page Spread View */
-          <div className="flex-1 w-full flex items-center justify-center relative p-2">
-            <div className={`flex items-center justify-center gap-1 max-h-[calc(100vh-64px)] max-w-full ${isRtl ? 'flex-row-reverse' : 'flex-row'}`}>
+          <div
+            className="kites-reader-panel-container"
+            style={{
+              flex: '1 1 0%',
+              width: '100%',
+              height: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              position: 'relative',
+              padding: '16px',
+              boxSizing: 'border-box',
+            }}
+          >
+            <div
+              className="kites-reader-double-container"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '4px',
+                maxHeight: 'calc(100vh - 80px)',
+                maxWidth: '100%',
+                flexDirection: isRtl ? 'row-reverse' : 'row',
+              }}
+            >
               {records[currentIndex] && (
                 <img
                   src={showOriginal ? records[currentIndex].originalUrl : records[currentIndex].translatedUrl}
                   alt={`Page ${currentIndex + 1}`}
-                  className="max-h-[calc(100vh-64px)] max-w-[50vw] object-contain shadow-2xl"
+                  className="kites-reader-double-img"
+                  style={{
+                    maxHeight: 'calc(100vh - 80px)',
+                    maxWidth: 'calc(50vw - 24px)',
+                    objectFit: 'contain',
+                    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.6)',
+                    display: 'block',
+                  }}
                   draggable={false}
                 />
               )}
@@ -359,7 +657,14 @@ export default function ChapterReaderModal({
                 <img
                   src={showOriginal ? records[currentIndex + 1].originalUrl : records[currentIndex + 1].translatedUrl}
                   alt={`Page ${currentIndex + 2}`}
-                  className="max-h-[calc(100vh-64px)] max-w-[50vw] object-contain shadow-2xl"
+                  className="kites-reader-double-img"
+                  style={{
+                    maxHeight: 'calc(100vh - 80px)',
+                    maxWidth: 'calc(50vw - 24px)',
+                    objectFit: 'contain',
+                    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.6)',
+                    display: 'block',
+                  }}
                   draggable={false}
                 />
               )}
@@ -369,7 +674,24 @@ export default function ChapterReaderModal({
             <button
               onClick={() => setCurrentIndex((prev) => (isRtl ? Math.min(totalPages - 1, prev + 2) : Math.max(0, prev - 2)))}
               disabled={isRtl ? currentIndex + 1 >= totalPages - 1 : currentIndex <= 0}
-              className="absolute left-2 top-1/2 -translate-y-1/2 p-3 rounded-full bg-black/60 hover:bg-black/90 text-white/70 hover:text-white transition-all disabled:opacity-0 cursor-pointer shadow-xl border border-white/10"
+              className="kites-reader-nav-prev"
+              style={{
+                position: 'absolute',
+                left: '16px',
+                top: '50%',
+                transform: 'translateY(-50%)',
+                width: '48px',
+                height: '80px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: 'rgba(255, 255, 255, 0.08)',
+                color: '#ffffff',
+                border: '1px solid rgba(255, 255, 255, 0.15)',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                zIndex: 1000002,
+              }}
               title={isRtl ? 'Next Spread' : 'Previous Spread'}
             >
               <ChevronLeft size={24} />
@@ -377,7 +699,24 @@ export default function ChapterReaderModal({
             <button
               onClick={() => setCurrentIndex((prev) => (isRtl ? Math.max(0, prev - 2) : Math.min(totalPages - 1, prev + 2)))}
               disabled={isRtl ? currentIndex <= 0 : currentIndex + 1 >= totalPages - 1}
-              className="absolute right-2 top-1/2 -translate-y-1/2 p-3 rounded-full bg-black/60 hover:bg-black/90 text-white/70 hover:text-white transition-all disabled:opacity-0 cursor-pointer shadow-xl border border-white/10"
+              className="kites-reader-nav-next"
+              style={{
+                position: 'absolute',
+                right: '16px',
+                top: '50%',
+                transform: 'translateY(-50%)',
+                width: '48px',
+                height: '80px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: 'rgba(255, 255, 255, 0.08)',
+                color: '#ffffff',
+                border: '1px solid rgba(255, 255, 255, 0.15)',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                zIndex: 1000002,
+              }}
               title={isRtl ? 'Previous Spread' : 'Next Spread'}
             >
               <ChevronRight size={24} />

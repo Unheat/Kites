@@ -76,35 +76,44 @@ export default function PageExportControl() {
     }
   }, [poll]);
 
-  // Nothing to show when content script not reachable or no pages available.
-  if (!status || (status.total === 0 && !status.busy)) return null;
+  // Nothing to show when content script is not reachable.
+  if (!status) return null;
 
+  const total = status.total ?? 0;
   const busy = status.busy || exporting;
-  const phase: ChapterZipPhase = status.phase;
+  const phase: ChapterZipPhase = status.phase ?? 'idle';
   const done = phase === 'success' || phase === 'partial';
 
   return (
     <div className="flex flex-col gap-1.5">
       <button
         onClick={handleExport}
-        disabled={busy || status.total === 0}
-        className={`w-full py-2 border font-semibold rounded flex items-center justify-center gap-2 cursor-pointer text-sm transition-colors ${
-          done
-            ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300'
+        disabled={busy || total === 0}
+        className={`w-full py-2 border font-semibold rounded flex items-center justify-center gap-2 text-sm transition-colors ${
+          total === 0
+            ? 'bg-[var(--color-vellum)] text-[var(--color-dust)] border-[var(--color-dust)] border-opacity-20 opacity-60 cursor-not-allowed'
+            : done
+            ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300 cursor-pointer'
             : busy
-              ? 'bg-[var(--color-vellum)] border-[var(--color-dust)] border-opacity-30 text-[var(--color-dust)] cursor-wait'
-              : 'bg-[var(--color-vellum)] text-[var(--color-ink)] border-[var(--color-dust)] border-opacity-30 hover:border-[var(--color-editorial)] hover:text-[var(--color-editorial)]'
+            ? 'bg-[var(--color-vellum)] border-[var(--color-dust)] border-opacity-30 text-[var(--color-dust)] cursor-wait'
+            : 'bg-[var(--color-vellum)] text-[var(--color-ink)] border-[var(--color-dust)] border-opacity-30 hover:border-[var(--color-editorial)] hover:text-[var(--color-editorial)] cursor-pointer'
         }`}
-        title="Download all translated pages as a ZIP archive"
+        title={
+          total === 0
+            ? 'No translated pages on this tab yet. Translate images to export chapter as ZIP.'
+            : 'Download all translated pages as a ZIP archive'
+        }
       >
         {busy ? <Loader size={16} className="animate-spin" /> : <Archive size={16} />}
         {busy
-          ? `Exporting${status.percent > 0 ? ` ${status.percent}%` : '…'}`
+          ? `Exporting${status && status.percent > 0 ? ` ${status.percent}%` : '…'}`
           : done
-            ? 'Re-download Chapter ZIP'
-            : `Download ${status.total} Translated Pages`}
+          ? 'Re-download Chapter ZIP'
+          : total > 0
+          ? `Download ${total} Translated Pages`
+          : 'Download Chapter ZIP (0 pages)'}
       </button>
-      {status.message && (phase !== 'idle') && (
+      {status?.message && (phase !== 'idle') && (
         <p className={`text-xs px-1 leading-relaxed ${
           phase === 'error' ? 'text-red-500 dark:text-red-400' : 'text-[var(--color-dust)]'
         }`}>

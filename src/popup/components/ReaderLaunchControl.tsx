@@ -47,7 +47,19 @@ export default function ReaderLaunchControl() {
     };
   }, [checkStatus]);
 
-  if (pageCount === 0) return null;
+  if (pageCount === 0) {
+    return (
+      <button
+        disabled={true}
+        className="w-full py-2 bg-[var(--color-vellum)] text-[var(--color-dust)] border border-[var(--color-dust)] border-opacity-20 font-bold rounded flex items-center justify-center gap-2 text-sm opacity-60 cursor-not-allowed"
+        title="No translated pages on this tab yet. Translate images to view in distraction-free reader."
+      >
+        <BookOpen size={16} className="opacity-50" />
+        <span>Open Chapter Reader</span>
+        <span className="font-mono text-xs opacity-60 font-normal">(0)</span>
+      </button>
+    );
+  }
 
   const handleOpenReader = async () => {
     try {

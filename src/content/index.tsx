@@ -20,6 +20,7 @@ import {
 import {
   collectQueryRoots,
   discoverMediaTargets,
+  isPlaceholderSource,
   normalizeMediaUrl,
   resolveHoverMediaTarget,
   resolveImageSource,
@@ -342,15 +343,38 @@ function attachReversionShield(img: HTMLImageElement, safeUrl: string, surfaceEl
   const observer = new MutationObserver((mutations) => {
     if (isSelfMutating) return;
 
-    // If user is previewing original image, do not revert back to translated
-    if (img.getAttribute('data-kites-show-original') === 'true') {
-      return;
-    }
-
     for (const mutation of mutations) {
       if (mutation.type === 'attributes') {
         const appliedSrc = img.getAttribute('data-kites-applied-src') || safeUrl;
-        if (mutation.attributeName === 'src' && appliedSrc && img.src !== appliedSrc) {
+        const origSrc = img.getAttribute('data-kites-orig-src');
+        if (mutation.attributeName === 'src') {
+          const currentSrc = img.getAttribute('src') || img.src;
+          if (!currentSrc || currentSrc === appliedSrc) continue;
+
+          // If user is previewing original image, do not revert back to translated
+          if (img.getAttribute('data-kites-show-original') === 'true') {
+            continue;
+          }
+
+          // Check if host updated the element with a COMPLETELY NEW image (e.g. reader navigated to next page)
+          // An SPA reset sets src back to origSrc. If new src is neither appliedSrc nor origSrc, it's a new image!
+          const isSameImageReset = Boolean(origSrc && (currentSrc === origSrc || currentSrc.includes(origSrc)));
+          if (!isSameImageReset && !isPlaceholderSource(currentSrc)) {
+            console.log('[Content Script] New image detected on recycled element; disconnecting shield and resetting translation state.');
+            observer.disconnect();
+            activeShieldObservers.delete(img);
+            img.removeAttribute('data-kites-translated');
+            img.removeAttribute('data-kites-applied-src');
+            img.removeAttribute('data-kites-show-original');
+            img.removeAttribute('data-kites-orig-src');
+            img.removeAttribute('data-kites-orig-srcset');
+            img.removeAttribute('data-kites-job-id');
+            surfaceElement.removeAttribute('data-kites-translated');
+            surfaceElement.removeAttribute('data-kites-show-original');
+            surfaceElement.removeAttribute('data-kites-job-id');
+            continue;
+          }
+
           console.log('[Content Script] Host SPA reset detected on src, restoring translated image.');
           runSelfMutation(() => {
             img.src = appliedSrc;
@@ -563,12 +587,30 @@ function TranslateButton({
   // looked like nothing happened. The button shows the failure briefly, then returns to
   // its idle look so the next click reads as a retry.
   const [hasFailed, setHasFailed] = useState(false);
-  const [isTranslated, setIsTranslated] = useState(() => {
-    return Boolean(
-      translatedRegistry.get(srcUrl) ||
-      anchorElement.getAttribute('data-kites-translated') === 'true'
-    );
-  });
+
+  const isElementTranslated = useCallback(() => {
+    const hasAttr = anchorElement.getAttribute('data-kites-translated') === 'true';
+    if (!hasAttr) return false;
+
+    const img = anchorElement instanceof HTMLImageElement ? anchorElement : anchorElement.querySelector('img');
+    if (img) {
+      const appliedSrc = img.getAttribute('data-kites-applied-src') || anchorElement.getAttribute('data-kites-applied-src');
+      const origSrc = img.getAttribute('data-kites-orig-src') || anchorElement.getAttribute('data-kites-orig-src');
+      const currentSrc = img.currentSrc || img.src || '';
+      const showingOriginal =
+        img.getAttribute('data-kites-show-original') === 'true' ||
+        anchorElement.getAttribute('data-kites-show-original') === 'true';
+
+      if (showingOriginal) {
+        return Boolean(origSrc && (currentSrc === origSrc || currentSrc.includes(origSrc)));
+      }
+      return Boolean(appliedSrc && currentSrc === appliedSrc);
+    }
+
+    return true;
+  }, [anchorElement]);
+
+  const [isTranslated, setIsTranslated] = useState(isElementTranslated);
   const [showOriginal, setShowOriginal] = useState(() => {
     return Boolean(
       translatedRegistry.get(srcUrl)?.showOriginal ||
@@ -583,6 +625,37 @@ function TranslateButton({
   });
 
   const activeTranslating = isTranslating || localTranslating;
+
+  useEffect(() => {
+    const update = () => {
+      setIsTranslated(isElementTranslated());
+      setShowOriginal(
+        translatedRegistry.get(srcUrl)?.showOriginal ??
+        (anchorElement.getAttribute('data-kites-show-original') === 'true')
+      );
+      const reg = translatedRegistry.get(srcUrl)?.jobId;
+      const attr = anchorElement.getAttribute('data-kites-job-id');
+      setJobId(reg ?? (attr ? Number(attr) : null));
+    };
+
+    update();
+
+    const observer = new MutationObserver(update);
+    observer.observe(anchorElement, {
+      attributes: true,
+      attributeFilter: ['src', 'data-kites-translated', 'data-kites-applied-src', 'data-kites-show-original'],
+    });
+
+    const img = anchorElement instanceof HTMLImageElement ? null : anchorElement.querySelector('img');
+    if (img) {
+      observer.observe(img, {
+        attributes: true,
+        attributeFilter: ['src', 'data-kites-translated', 'data-kites-applied-src', 'data-kites-show-original'],
+      });
+    }
+
+    return () => observer.disconnect();
+  }, [srcUrl, anchorElement, isElementTranslated]);
 
   useEffect(() => {
     /**
@@ -831,10 +904,6 @@ function TranslateButton({
             }
             setHasFailed(false);
           }
-          if (isTranslated && !activeTranslating) {
-            handleToggleOriginal(event);
-            return;
-          }
           setLocalTranslating(true);
           onTranslate(srcUrl);
         }}
@@ -862,9 +931,7 @@ function TranslateButton({
           hasFailed
             ? TRANSLATION_FAILURE_LABEL
             : isTranslated && !activeTranslating
-            ? showOriginal
-              ? 'Show Translated Image'
-              : 'Show Original Image'
+            ? 'Re-translate Image'
             : 'Translate Image'
         }
         aria-label={
@@ -873,21 +940,13 @@ function TranslateButton({
             : showInitializationLabel
             ? MODEL_INITIALIZATION_LABEL
             : isTranslated && !activeTranslating
-            ? showOriginal
-              ? 'Show Translated Image'
-              : 'Show Original Image'
+            ? 'Re-translate Image'
             : 'Translate Image'
         }
         aria-describedby={showInitializationLabel && !hasFailed ? initializationLabelId : undefined}
       >
         {hasFailed ? (
           <X size={18} aria-hidden="true" />
-        ) : isTranslated && !activeTranslating ? (
-          showOriginal ? (
-            <EyeOff size={18} aria-hidden="true" />
-          ) : (
-            <Eye size={18} aria-hidden="true" />
-          )
         ) : (
           <Languages
             size={18}
@@ -1332,12 +1391,33 @@ function GlobalOverlay() {
   const requestTranslation = (srcUrl: string, image?: OverlayImage): void => {
     if (!srcUrl || translatingUrlsRef.current.has(srcUrl)) return;
 
+    const target = image ?? resolveTargetMedia(srcUrl);
+    const cachedRecord = translatedRegistry.get(srcUrl);
+    // If translation was already completed in this session and cached in registry, but the host site
+    // just loaded or refreshed the raw image (e.g. single-page reader navigated back), re-apply instantly!
+    const targetEl = target?.sourceElement || target?.imgElement;
+    if (
+      cachedRecord &&
+      cachedRecord.translatedUrl &&
+      target &&
+      targetEl &&
+      targetEl.getAttribute('data-kites-translated') !== 'true'
+    ) {
+      console.log('[Content Script] Re-applying existing translation from memory for:', srcUrl);
+      if (image) {
+        setActiveImg(image);
+        registerMediaTarget(image);
+      }
+      replaceImageWithTranslation(target, cachedRecord);
+      return;
+    }
+
     if (image) {
       setActiveImg(image);
       registerMediaTarget(image);
     }
     // Lock queue-time document context: after SPA navigation the target may detach before completion.
-    rememberChapterRequest(srcUrl, image ?? resolveTargetMedia(srcUrl));
+    rememberChapterRequest(srcUrl, target);
     setTranslatingUrls((current) => new Set(current).add(srcUrl));
     console.log('[Content Script] Sending TRANSLATE_IMAGE to background:', srcUrl);
 
