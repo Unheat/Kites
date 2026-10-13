@@ -1,0 +1,806 @@
+import React, { useRef, useEffect, useState, useCallback } from 'react';
+import {
+  Copy,
+  ClipboardPaste,
+  CopyPlus,
+  Trash2,
+  Layers,
+  Sparkles,
+} from 'lucide-react';
+import { studioStore, useStudioStore } from '../state/studioStore';
+import { studioUndoStack } from '../state/undoStack';
+import {
+  clientToImage,
+  imageToClient,
+  processWheelNavigation,
+} from './CanvasViewport';
+import { BrushEngine } from './BrushEngine';
+import { TextRenderer } from './TextRenderer';
+import { CanvasFurniture } from './CanvasFurniture';
+import { WarpMesh } from './WarpMesh';
+import { requestStudioInpaint, requestStudioOcr } from '../bridge/offscreenStudioBridge';
+import type {
+  BoundingBox,
+  Point,
+  TextObject,
+  TransformHandle,
+} from '../types';
+
+export interface StudioCanvasProps {
+  originalImage: HTMLImageElement | null;
+  cleanedImage: HTMLImageElement | null;
+}
+
+export const StudioCanvas: React.FC<StudioCanvasProps> = ({
+  originalImage,
+  cleanedImage,
+}) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const bgCanvasRef = useRef<HTMLCanvasElement>(null);
+  const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
+
+  const activeTool = useStudioStore((s) => s.activeTool);
+  const zoom = useStudioStore((s) => s.zoom);
+  const pan = useStudioStore((s) => s.pan);
+  const isCanvasFlipped = useStudioStore((s) => s.isCanvasFlipped);
+  const textObjects = useStudioStore((s) => s.textObjects);
+  const selectedTextId = useStudioStore((s) => s.selectedTextId);
+  const clipboardStyle = useStudioStore((s) => s.clipboardStyle);
+  const eraseSettings = useStudioStore((s) => s.eraseSettings);
+  const paintSettings = useStudioStore((s) => s.paintSettings);
+  const inpaintSettings = useStudioStore((s) => s.inpaintSettings);
+  const ocrSettings = useStudioStore((s) => s.ocrSettings);
+  const imageLayers = useStudioStore((s) => s.imageLayers);
+  const selectedImageLayerId = useStudioStore((s) => s.selectedImageLayerId);
+  const appearance = useStudioStore((s) => s.appearance);
+
+  const brushEngineRef = useRef<BrushEngine>(new BrushEngine());
+  const [isPointerDown, setIsPointerDown] = useState(false);
+  const [isSpacePanning, setIsSpacePanning] = useState(false);
+  const [isAiProcessing, setIsAiProcessing] = useState(false);
+  const [activeHandle, setActiveHandle] = useState<TransformHandle | null>(null);
+  const [dragStartPoint, setDragStartPoint] = useState<Point | null>(null);
+  const [initialTransformState, setInitialTransformState] = useState<TextObject | null>(null);
+  const [preStrokePatch, setPreStrokePatch] = useState<any>(null);
+
+  const imageWidth = originalImage?.naturalWidth || cleanedImage?.naturalWidth || 800;
+  const imageHeight = originalImage?.naturalHeight || cleanedImage?.naturalHeight || 1200;
+
+  // Initialize and redraw background canvas when base cleaned artwork changes
+  useEffect(() => {
+    const bgCanvas = bgCanvasRef.current;
+    if (!bgCanvas || imageWidth <= 0 || imageHeight <= 0) return;
+
+    bgCanvas.width = imageWidth;
+    bgCanvas.height = imageHeight;
+    const ctx = bgCanvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return;
+
+    ctx.clearRect(0, 0, imageWidth, imageHeight);
+    if (cleanedImage && cleanedImage.complete) {
+      ctx.drawImage(cleanedImage, 0, 0);
+    } else if (originalImage && originalImage.complete) {
+      ctx.drawImage(originalImage, 0, 0);
+    }
+
+    brushEngineRef.current.init(imageWidth, imageHeight);
+  }, [cleanedImage, originalImage, imageWidth, imageHeight]);
+
+  // Main redraw loop for overlay canvas (text objects, stickers, selection furniture, cursor)
+  const redrawOverlay = useCallback(() => {
+    const overlay = overlayCanvasRef.current;
+    if (!overlay) return;
+
+    overlay.width = imageWidth;
+    overlay.height = imageHeight;
+    const ctx = overlay.getContext('2d');
+    if (!ctx) return;
+
+    ctx.clearRect(0, 0, imageWidth, imageHeight);
+
+    // 1. Render stickers / image layers
+    for (const layer of imageLayers) {
+      if (layer.isVisible === false) continue;
+      ctx.save();
+      ctx.translate(layer.x + layer.width / 2, layer.y + layer.height / 2);
+      if (layer.rotation) ctx.rotate((layer.rotation * Math.PI) / 180);
+      if (layer.flipH || layer.flipV) ctx.scale(layer.flipH ? -1 : 1, layer.flipV ? -1 : 1);
+      ctx.globalAlpha = layer.opacity;
+
+      if (layer.imageBitmap) {
+        ctx.drawImage(layer.imageBitmap, -layer.width / 2, -layer.height / 2, layer.width, layer.height);
+      }
+      ctx.restore();
+
+      // Selection outline for sticker
+      if (layer.id === selectedImageLayerId) {
+        ctx.save();
+        ctx.strokeStyle = appearance.selectedBoxBorderColor;
+        ctx.setLineDash([4, 4]);
+        ctx.strokeRect(layer.x, layer.y, layer.width, layer.height);
+        ctx.restore();
+      }
+    }
+
+    // 2. Render Text Objects
+    for (const obj of textObjects) {
+      if (obj.isVisible === false) continue;
+
+      if (obj.warpPreset && obj.warpPreset !== 'none' && obj.quadPoints) {
+        // Render into temporary canvas then warp
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = obj.width;
+        tempCanvas.height = obj.height;
+        const tempCtx = tempCanvas.getContext('2d');
+        if (tempCtx) {
+          TextRenderer.renderText(tempCtx, { ...obj, x: 0, y: 0, rotation: 0 });
+          ctx.save();
+          ctx.translate(obj.x, obj.y);
+          WarpMesh.renderWarpedMesh(ctx, tempCanvas, obj.quadPoints);
+          ctx.restore();
+        }
+      } else {
+        TextRenderer.renderText(ctx, obj);
+      }
+    }
+
+    // 3. Render transform furniture for active text object
+    const selectedObj = textObjects.find((t) => t.id === selectedTextId);
+    if (selectedObj) {
+      CanvasFurniture.drawSelectionFurniture(ctx, selectedObj, appearance.selectedBoxBorderColor);
+    }
+  }, [imageWidth, imageHeight, textObjects, imageLayers, selectedTextId, selectedImageLayerId, appearance]);
+
+  useEffect(() => {
+    redrawOverlay();
+  }, [redrawOverlay]);
+
+  // Spacebar pan gesture handler
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && !e.repeat) {
+        const target = e.target as HTMLElement;
+        if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return;
+        e.preventDefault();
+        setIsSpacePanning(true);
+      }
+      // Delete shortcut
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedTextId) {
+        const target = e.target as HTMLElement;
+        if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return;
+        e.preventDefault();
+        handleDeleteSelectedText();
+      }
+      // Duplicate shortcut
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd' && selectedTextId) {
+        e.preventDefault();
+        handleDuplicateSelectedText();
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space') {
+        setIsSpacePanning(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, [selectedTextId]);
+
+  // Mouse wheel listener: vertical scrolling vs cursor-centered zoom
+  const handleWheel = (e: React.WheelEvent) => {
+    e.preventDefault();
+    const container = containerRef.current;
+    if (!container) return;
+
+    const next = processWheelNavigation(e.nativeEvent, container.getBoundingClientRect(), zoom, pan);
+    studioStore.setState({ zoom: next.zoom, pan: next.pan });
+  };
+
+  const getPointerImageCoords = (e: React.PointerEvent): Point => {
+    const container = containerRef.current;
+    if (!container) return { x: 0, y: 0 };
+    return clientToImage(
+      e.clientX,
+      e.clientY,
+      container.getBoundingClientRect(),
+      zoom,
+      pan,
+      imageWidth,
+      isCanvasFlipped
+    );
+  };
+
+  // Pointer Down
+  const handlePointerDown = (e: React.PointerEvent) => {
+    if (e.button !== 0) return; // Left click only
+    const pt = getPointerImageCoords(e);
+    setIsPointerDown(true);
+    setDragStartPoint(pt);
+
+    // 1. Spacebar Pan
+    if (isSpacePanning) {
+      return;
+    }
+
+    const bgCanvas = bgCanvasRef.current;
+    const bgCtx = bgCanvas?.getContext('2d', { willReadFrequently: true });
+
+    // 2. Erase / Restore Brush
+    if (activeTool === 'erase' && bgCtx) {
+      const radius = eraseSettings.size / 2;
+      const initialBbox: BoundingBox = {
+        x: pt.x - radius,
+        y: pt.y - radius,
+        width: eraseSettings.size,
+        height: eraseSettings.size,
+      };
+      setPreStrokePatch(BrushEngine.captureBoundingPatch(bgCtx, initialBbox));
+
+      brushEngineRef.current.beginStroke(pt, {
+        shape: eraseSettings.shape,
+        size: eraseSettings.size,
+        feather: eraseSettings.feather,
+      });
+      return;
+    }
+
+    // 3. Paint Brush
+    if (activeTool === 'paint' && bgCtx) {
+      const radius = paintSettings.size / 2;
+      const initialBbox: BoundingBox = {
+        x: pt.x - radius,
+        y: pt.y - radius,
+        width: paintSettings.size,
+        height: paintSettings.size,
+      };
+      setPreStrokePatch(BrushEngine.captureBoundingPatch(bgCtx, initialBbox));
+
+      brushEngineRef.current.beginStroke(pt, {
+        shape: paintSettings.shape,
+        size: paintSettings.size,
+        feather: paintSettings.feather,
+        color: paintSettings.color,
+        paintMode: paintSettings.mode,
+        blurRadius: paintSettings.blurRadius,
+        patternScale: paintSettings.patternScale,
+      });
+      return;
+    }
+
+    // 4. Inpaint / OCR Mask Brush
+    if (activeTool === 'inpaint' || activeTool === 'ocr') {
+      const brushSize = activeTool === 'inpaint' ? inpaintSettings.size : ocrSettings.size;
+      brushEngineRef.current.beginStroke(pt, {
+        shape: 'circle',
+        size: brushSize,
+        feather: 0,
+      });
+      return;
+    }
+
+    // 5. Select & Transform Tool
+    if (activeTool === 'select' || activeTool === 'text') {
+      const selectedObj = textObjects.find((t) => t.id === selectedTextId);
+
+      // Check handle click
+      if (selectedObj) {
+        const handle = CanvasFurniture.hitTestHandles(pt, selectedObj);
+        if (handle) {
+          setActiveHandle(handle);
+          setInitialTransformState({ ...selectedObj });
+          return;
+        }
+      }
+
+      // Check object body click
+      let clickedObj: TextObject | null = null;
+      for (let i = textObjects.length - 1; i >= 0; i--) {
+        if (CanvasFurniture.hitTestBody(pt, textObjects[i])) {
+          clickedObj = textObjects[i];
+          break;
+        }
+      }
+
+      if (clickedObj) {
+        studioStore.setState({ selectedTextId: clickedObj.id });
+        setActiveHandle('nw'); // standard move state
+        setInitialTransformState({ ...clickedObj });
+        return;
+      }
+
+      // If active tool is Text and clicked empty canvas -> create new text bubble!
+      if (activeTool === 'text') {
+        const newObj: TextObject = {
+          id: `bubble-${Date.now()}`,
+          x: Math.round(pt.x - 60),
+          y: Math.round(pt.y - 20),
+          width: 120,
+          height: 40,
+          text: 'New Dialogue',
+          fontSize: 18,
+          fontFamily: 'WildWords, CCWildWords, sans-serif',
+          color: '#000000',
+          strokeColor: '#ffffff',
+          strokeWidth: 2,
+          align: 'center',
+          isVertical: false,
+        };
+        const prev = [...textObjects];
+        const next = [...textObjects, newObj];
+        studioStore.setState({ textObjects: next, selectedTextId: newObj.id });
+        studioUndoStack.push({
+          id: `create-bubble-${Date.now()}`,
+          timestamp: Date.now(),
+          description: 'Create Text Bubble',
+          textObjects: { before: prev, after: next },
+        });
+        return;
+      }
+
+      // Clicked empty canvas -> deselect
+      studioStore.setState({ selectedTextId: null });
+      setActiveHandle(null);
+    }
+  };
+
+  // Pointer Move
+  const handlePointerMove = (e: React.PointerEvent) => {
+    const pt = getPointerImageCoords(e);
+
+    // 1. Space Panning
+    if (isPointerDown && isSpacePanning) {
+      studioStore.setState({
+        pan: {
+          x: pan.x + e.movementX,
+          y: pan.y + e.movementY,
+        },
+      });
+      return;
+    }
+
+    if (!isPointerDown) return;
+
+    const bgCanvas = bgCanvasRef.current;
+    const bgCtx = bgCanvas?.getContext('2d', { willReadFrequently: true });
+
+    // 2. Erase / Restore Brush Drag
+    if (activeTool === 'erase' && bgCtx) {
+      brushEngineRef.current.extendStroke(pt, {
+        shape: eraseSettings.shape,
+        size: eraseSettings.size,
+        feather: eraseSettings.feather,
+      });
+
+      const sourceImage: CanvasImageSource =
+        eraseSettings.source === 'original' && originalImage
+          ? originalImage
+          : ((cleanedImage || bgCanvas) as CanvasImageSource);
+      if (sourceImage) {
+        brushEngineRef.current.applyEraseRestore(bgCtx, sourceImage, eraseSettings.feather);
+      }
+      return;
+    }
+
+    // 3. Paint Brush Drag
+    if (activeTool === 'paint' && bgCtx) {
+      brushEngineRef.current.extendStroke(pt, {
+        shape: paintSettings.shape,
+        size: paintSettings.size,
+        feather: paintSettings.feather,
+        color: paintSettings.color,
+        paintMode: paintSettings.mode,
+        blurRadius: paintSettings.blurRadius,
+        patternScale: paintSettings.patternScale,
+      });
+      brushEngineRef.current.applyPaint(bgCtx, {
+        shape: paintSettings.shape,
+        size: paintSettings.size,
+        feather: paintSettings.feather,
+        color: paintSettings.color,
+        paintMode: paintSettings.mode,
+        blurRadius: paintSettings.blurRadius,
+      });
+      return;
+    }
+
+    // 4. Inpaint / OCR Brush Drag (draws preview mask on overlay)
+    if (activeTool === 'inpaint' || activeTool === 'ocr') {
+      const brushSize = activeTool === 'inpaint' ? inpaintSettings.size : ocrSettings.size;
+      brushEngineRef.current.extendStroke(pt, {
+        shape: 'circle',
+        size: brushSize,
+        feather: 0,
+      });
+
+      const overlay = overlayCanvasRef.current;
+      const ctx = overlay?.getContext('2d');
+      if (ctx) {
+        ctx.fillStyle = activeTool === 'inpaint' ? 'rgba(99, 102, 241, 0.4)' : 'rgba(244, 63, 94, 0.4)';
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, brushSize / 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      return;
+    }
+
+    // 5. Transform / Drag Selected Text Object
+    if ((activeTool === 'select' || activeTool === 'text') && activeHandle && dragStartPoint && initialTransformState) {
+      const deltaX = pt.x - dragStartPoint.x;
+      const deltaY = pt.y - dragStartPoint.y;
+
+      let updated = { ...initialTransformState };
+
+      if (activeHandle === 'nw' && !initialTransformState.rotation) {
+        // Translation movement
+        updated.x = Math.round(initialTransformState.x + deltaX);
+        updated.y = Math.round(initialTransformState.y + deltaY);
+      } else if (activeHandle === 'rot') {
+        // Rotation handle
+        const centerX = initialTransformState.x + initialTransformState.width / 2;
+        const centerY = initialTransformState.y + initialTransformState.height / 2;
+        const angleRad = Math.atan2(pt.y - centerY, pt.x - centerX);
+        updated.rotation = Math.round((angleRad * 180) / Math.PI + 90);
+      } else if (activeHandle === 'se') {
+        updated.width = Math.max(30, Math.round(initialTransformState.width + deltaX));
+        updated.height = Math.max(20, Math.round(initialTransformState.height + deltaY));
+      } else if (activeHandle === 'e') {
+        updated.width = Math.max(30, Math.round(initialTransformState.width + deltaX));
+      } else if (activeHandle === 's') {
+        updated.height = Math.max(20, Math.round(initialTransformState.height + deltaY));
+      }
+
+      studioStore.setState({
+        textObjects: textObjects.map((t) => (t.id === updated.id ? updated : t)),
+      });
+    }
+  };
+
+  // Pointer Up
+  const handlePointerUp = async () => {
+    setIsPointerDown(false);
+    setActiveHandle(null);
+    setDragStartPoint(null);
+
+    const bgCanvas = bgCanvasRef.current;
+    const bgCtx = bgCanvas?.getContext('2d', { willReadFrequently: true });
+
+    // 1. Finalize Erase or Paint stroke and record undo patch
+    if ((activeTool === 'erase' || activeTool === 'paint') && bgCtx && preStrokePatch) {
+      const bbox = brushEngineRef.current.endStroke(eraseSettings.feather);
+      const postStrokePatch = BrushEngine.captureBoundingPatch(bgCtx, bbox);
+
+      studioUndoStack.push({
+        id: `stroke-${Date.now()}`,
+        timestamp: Date.now(),
+        description: activeTool === 'erase' ? 'Erase/Restore Stroke' : 'Paint Stroke',
+        rasterPatch: {
+          before: preStrokePatch,
+          after: postStrokePatch,
+        },
+      });
+      setPreStrokePatch(null);
+      return;
+    }
+
+    // 2. Finalize Live AI Inpaint
+    if (activeTool === 'inpaint' && bgCanvas && bgCtx) {
+      const bbox = brushEngineRef.current.endStroke(0);
+      if (bbox.width <= 5 || bbox.height <= 5) return;
+
+      const pad = 12;
+      const cropX = Math.max(0, bbox.x - pad);
+      const cropY = Math.max(0, bbox.y - pad);
+      const cropW = Math.min(imageWidth - cropX, bbox.width + pad * 2);
+      const cropH = Math.min(imageHeight - cropY, bbox.height + pad * 2);
+      const paddedBbox: BoundingBox = { x: cropX, y: cropY, width: cropW, height: cropH };
+
+      // Create cropped canvases
+      const patchCanvas = document.createElement('canvas');
+      patchCanvas.width = cropW;
+      patchCanvas.height = cropH;
+      const patchCtx = patchCanvas.getContext('2d');
+      patchCtx?.drawImage(bgCanvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+
+      const maskCanvas = document.createElement('canvas');
+      maskCanvas.width = cropW;
+      maskCanvas.height = cropH;
+      const maskCtx = maskCanvas.getContext('2d');
+      // Fill mask with white rectangle across stroke area
+      maskCtx?.fillRect(0, 0, cropW, cropH);
+
+      const preInpaintPatch = BrushEngine.captureBoundingPatch(bgCtx, paddedBbox);
+      redrawOverlay(); // clear mask overlay immediately
+
+      setIsAiProcessing(true);
+      try {
+        const inpaintedImg = await requestStudioInpaint(patchCanvas, maskCanvas, paddedBbox);
+        bgCtx.drawImage(inpaintedImg, cropX, cropY, cropW, cropH);
+        const postInpaintPatch = BrushEngine.captureBoundingPatch(bgCtx, paddedBbox);
+
+        studioUndoStack.push({
+          id: `inpaint-${Date.now()}`,
+          timestamp: Date.now(),
+          description: 'Live AI Inpaint',
+          rasterPatch: {
+            before: preInpaintPatch,
+            after: postInpaintPatch,
+          },
+        });
+      } catch (err) {
+        console.error('[Studio] Inpaint request failed:', err);
+      } finally {
+        setIsAiProcessing(false);
+      }
+      return;
+    }
+
+    // 3. Finalize Live AI Re-OCR Area
+    if (activeTool === 'ocr' && bgCanvas && bgCtx) {
+      const bbox = brushEngineRef.current.endStroke(0);
+      if (bbox.width <= 8 || bbox.height <= 8) return;
+
+      const paddedBbox: BoundingBox = {
+        x: Math.max(0, bbox.x - 8),
+        y: Math.max(0, bbox.y - 8),
+        width: Math.min(imageWidth - bbox.x, bbox.width + 16),
+        height: Math.min(imageHeight - bbox.y, bbox.height + 16),
+      };
+
+      const patchCanvas = document.createElement('canvas');
+      patchCanvas.width = paddedBbox.width;
+      patchCanvas.height = paddedBbox.height;
+      const patchCtx = patchCanvas.getContext('2d');
+      patchCtx?.drawImage(bgCanvas, paddedBbox.x, paddedBbox.y, paddedBbox.width, paddedBbox.height, 0, 0, paddedBbox.width, paddedBbox.height);
+
+      const preOcrPatch = BrushEngine.captureBoundingPatch(bgCtx, paddedBbox);
+      redrawOverlay(); // clear overlay immediately
+
+      setIsAiProcessing(true);
+      try {
+        const result = await requestStudioOcr(patchCanvas, paddedBbox);
+        bgCtx.drawImage(result.inpaintedImage, paddedBbox.x, paddedBbox.y, paddedBbox.width, paddedBbox.height);
+        const postOcrPatch = BrushEngine.captureBoundingPatch(bgCtx, paddedBbox);
+
+        const prevTexts = [...textObjects];
+        const nextTexts = [...textObjects, ...result.textObjects];
+        studioStore.setState({
+          textObjects: nextTexts,
+          selectedTextId: result.textObjects[0]?.id || selectedTextId,
+        });
+
+        studioUndoStack.push({
+          id: `ocr-${Date.now()}`,
+          timestamp: Date.now(),
+          description: 'Live AI Re-OCR',
+          rasterPatch: { before: preOcrPatch, after: postOcrPatch },
+          textObjects: { before: prevTexts, after: nextTexts },
+        });
+      } catch (err) {
+        console.error('[Studio] OCR request failed:', err);
+      } finally {
+        setIsAiProcessing(false);
+      }
+      return;
+    }
+
+    // 4. Transform Text Box Undo state
+    if (initialTransformState && selectedTextId) {
+      const current = textObjects.find((t) => t.id === selectedTextId);
+      if (current && JSON.stringify(current) !== JSON.stringify(initialTransformState)) {
+        const prev = textObjects.map((t) => (t.id === initialTransformState.id ? initialTransformState : t));
+        studioUndoStack.push({
+          id: `transform-${Date.now()}`,
+          timestamp: Date.now(),
+          description: 'Transform Text Box',
+          textObjects: { before: prev, after: textObjects },
+        });
+      }
+      setInitialTransformState(null);
+    }
+  };
+
+  // Floating Action Pill Handlers
+  const handleCopyStyle = () => {
+    const selected = textObjects.find((t) => t.id === selectedTextId);
+    if (!selected) return;
+    studioStore.setState({
+      clipboardStyle: {
+        fontFamily: selected.fontFamily,
+        fontSize: selected.fontSize,
+        color: selected.color,
+        strokeColor: selected.strokeColor,
+        strokeWidth: selected.strokeWidth,
+        align: selected.align,
+        isVertical: selected.isVertical,
+        shadowDistance: selected.shadowDistance,
+        shadowAngle: selected.shadowAngle,
+      },
+    });
+  };
+
+  const handlePasteStyle = () => {
+    if (!clipboardStyle || !selectedTextId) return;
+    const prev = [...textObjects];
+    const next = textObjects.map((t) => (t.id === selectedTextId ? { ...t, ...clipboardStyle } : t));
+    studioStore.setState({ textObjects: next });
+    studioUndoStack.push({
+      id: `paste-style-${Date.now()}`,
+      timestamp: Date.now(),
+      description: 'Paste Typography Style',
+      textObjects: { before: prev, after: next },
+    });
+  };
+
+  const handleDuplicateSelectedText = () => {
+    const selected = textObjects.find((t) => t.id === selectedTextId);
+    if (!selected) return;
+    const cloned: TextObject = {
+      ...selected,
+      id: `bubble-${Date.now()}`,
+      x: selected.x + 20,
+      y: selected.y + 20,
+    };
+    const prev = [...textObjects];
+    const next = [...textObjects, cloned];
+    studioStore.setState({ textObjects: next, selectedTextId: cloned.id });
+    studioUndoStack.push({
+      id: `duplicate-${Date.now()}`,
+      timestamp: Date.now(),
+      description: 'Duplicate Text Box',
+      textObjects: { before: prev, after: next },
+    });
+  };
+
+  const handleDeleteSelectedText = () => {
+    if (!selectedTextId) return;
+    const prev = [...textObjects];
+    const next = textObjects.filter((t) => t.id !== selectedTextId);
+    studioStore.setState({ textObjects: next, selectedTextId: null });
+    studioUndoStack.push({
+      id: `delete-${Date.now()}`,
+      timestamp: Date.now(),
+      description: 'Delete Text Box',
+      textObjects: { before: prev, after: next },
+    });
+  };
+
+  const handleRasterizeText = () => {
+    const selected = textObjects.find((t) => t.id === selectedTextId);
+    const bgCanvas = bgCanvasRef.current;
+    const bgCtx = bgCanvas?.getContext('2d', { willReadFrequently: true });
+    if (!selected || !bgCanvas || !bgCtx) return;
+
+    const bbox: BoundingBox = {
+      x: selected.x,
+      y: selected.y,
+      width: selected.width,
+      height: selected.height,
+    };
+    const prePatch = BrushEngine.captureBoundingPatch(bgCtx, bbox);
+
+    TextRenderer.renderText(bgCtx, selected);
+    const postPatch = BrushEngine.captureBoundingPatch(bgCtx, bbox);
+
+    const prevTexts = [...textObjects];
+    const nextTexts = textObjects.filter((t) => t.id !== selected.id);
+
+    studioStore.setState({ textObjects: nextTexts, selectedTextId: null });
+    studioUndoStack.push({
+      id: `rasterize-${Date.now()}`,
+      timestamp: Date.now(),
+      description: 'Rasterize Text to Background',
+      rasterPatch: { before: prePatch, after: postPatch },
+      textObjects: { before: prevTexts, after: nextTexts },
+    });
+  };
+
+  // Compute screen coordinates for floating action pill
+  const selectedObj = textObjects.find((t) => t.id === selectedTextId);
+  const pillPos = selectedObj && containerRef.current
+    ? imageToClient(
+        selectedObj.x + selectedObj.width / 2,
+        selectedObj.y,
+        containerRef.current.getBoundingClientRect(),
+        zoom,
+        pan,
+        imageWidth,
+        isCanvasFlipped
+      )
+    : null;
+
+  return (
+    <div
+      ref={containerRef}
+      onWheel={handleWheel}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      className={`relative w-full h-full overflow-hidden bg-[#090a0f] select-none ${
+        isSpacePanning ? 'cursor-grab active:cursor-grabbing' : ''
+      }`}
+    >
+      {/* Canvas Transform Stage */}
+      <div
+        style={{
+          transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom}) ${
+            isCanvasFlipped ? 'scaleX(-1)' : ''
+          }`,
+          transformOrigin: 'top left',
+          width: imageWidth,
+          height: imageHeight,
+        }}
+        className="absolute left-0 top-0 pointer-events-none"
+      >
+        {/* Working background raster canvas */}
+        <canvas ref={bgCanvasRef} className="absolute left-0 top-0 shadow-2xl" />
+
+        {/* Live overlay canvas for text, stickers, furniture */}
+        <canvas ref={overlayCanvasRef} className="absolute left-0 top-0" />
+      </div>
+
+      {/* Floating Action Pill Toolbar (Figma/Torii style) */}
+      {pillPos && selectedObj && !isSpacePanning && (
+        <div
+          style={{
+            left: `${pillPos.x}px`,
+            top: `${pillPos.y - 44}px`,
+            transform: 'translateX(-50%)',
+          }}
+          className="absolute z-40 flex items-center gap-0.5 p-1 rounded-xl border border-[#282d3f] bg-[#12141c]/95 backdrop-blur-md shadow-2xl text-slate-200"
+        >
+          <button
+            onClick={handleCopyStyle}
+            title="Copy Typography Style"
+            className="p-1.5 rounded-lg hover:bg-[#1c1f2e] text-slate-300 hover:text-white transition"
+          >
+            <Copy className="w-3.5 h-3.5" />
+          </button>
+          {clipboardStyle && (
+            <button
+              onClick={handlePasteStyle}
+              title="Paste Typography Style"
+              className="p-1.5 rounded-lg hover:bg-[#1c1f2e] text-indigo-400 hover:text-indigo-300 transition"
+            >
+              <ClipboardPaste className="w-3.5 h-3.5" />
+            </button>
+          )}
+          <button
+            onClick={handleDuplicateSelectedText}
+            title="Duplicate Bubble (Ctrl+D)"
+            className="p-1.5 rounded-lg hover:bg-[#1c1f2e] text-slate-300 hover:text-white transition"
+          >
+            <CopyPlus className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={handleRasterizeText}
+            title="Rasterize to Background Canvas"
+            className="p-1.5 rounded-lg hover:bg-[#1c1f2e] text-slate-300 hover:text-white transition"
+          >
+            <Layers className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={handleDeleteSelectedText}
+            title="Delete Bubble (Delete)"
+            className="p-1.5 rounded-lg hover:bg-red-950/40 text-red-400 hover:text-red-300 transition"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
+      {/* Local AI WebGPU Processing Spinner */}
+      {isAiProcessing && (
+        <div className="absolute top-4 right-4 z-50 flex items-center gap-2 px-3 py-1.5 rounded-xl border border-indigo-500/40 bg-indigo-950/80 backdrop-blur-md text-xs text-indigo-200 shadow-xl">
+          <Sparkles className="w-4 h-4 animate-spin text-indigo-400" />
+          <span>Local WebGPU Inference...</span>
+        </div>
+      )}
+    </div>
+  );
+};

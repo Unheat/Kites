@@ -18,7 +18,9 @@ export type MessageType =
   | 'CAPTURE_VISIBLE_TAB' // Content -> Background
   | 'TRANSLATE_CAPTURED_IMAGE' // Content -> Background
   | 'CAPTURE_TRANSLATED' // Background -> Content
-  | 'CAPTURE_TRANSLATION_ERROR'; // Background -> Content
+  | 'CAPTURE_TRANSLATION_ERROR' // Background -> Content
+  | 'STUDIO_INPAINT' // Studio -> Background -> Offscreen
+  | 'STUDIO_OCR'; // Studio -> Background -> Offscreen
 
 export interface TranslateImageMessage {
   type: 'TRANSLATE_IMAGE';
@@ -53,7 +55,22 @@ export interface ImageTranslatedMessage {
   };
 }
 export type RuntimeMessageTarget = 'background' | 'offscreen';
-export type RuntimeMessageSource = 'popup' | 'background' | 'offscreen' | 'dashboard' | 'content';
+export type RuntimeMessageSource = 'popup' | 'background' | 'offscreen' | 'dashboard' | 'content' | 'studio';
+
+export interface StudioInpaintPayload {
+  imagePatchBase64: string;
+  maskPatchBase64: string;
+  width: number;
+  height: number;
+}
+
+export interface StudioOcrPayload {
+  imagePatchBase64: string;
+  width: number;
+  height: number;
+  offsetX: number;
+  offsetY: number;
+}
 export type ModelCategory = 'translation' | 'inpaint' | 'ocr' | 'bubble';
 
 export interface ViewportSelection {

@@ -21,6 +21,14 @@ export class PipelineOrchestrator {
     this.inpaintManager = new InpaintManager();
   }
 
+  public getInpaintManager(): InpaintManager {
+    return this.inpaintManager;
+  }
+
+  public getOcrManager(): OcrManager {
+    return this.ocrManager;
+  }
+
   /**
    * Uses Simple Fill when a selected advanced inpaint model is not fully cached.
    *
