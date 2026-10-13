@@ -35,7 +35,6 @@ vi.mock('../engines/inpaint/AotInpaintEngine', () => ({ AotInpaintEngine: class 
 vi.mock('../engines/inpaint/LamaMangaInpaintEngine', () => ({ LamaMangaInpaintEngine: class { constructor() { return makeEngine('lama-manga'); } } }));
 vi.mock('../engines/inpaint/LamaBaseInpaintEngine', () => ({ LamaBaseInpaintEngine: class {} }));
 vi.mock('../engines/inpaint/NoneInpaintEngine', () => ({ NoneInpaintEngine: class { constructor() { return makeEngine('none'); } } }));
-vi.mock('../engines/inpaint/OriginalInpaintEngine', () => ({ OriginalInpaintEngine: class { constructor() { return makeEngine('original'); } } }));
 
 describe('InpaintManager lifecycle', () => {
   beforeEach(() => {

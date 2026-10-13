@@ -202,7 +202,7 @@ export class PipelineOrchestrator {
 
       // 4 + 5. Translation and Inpainting run concurrently.
       const inpaintPolygons = (ocrResult.rawPolygons || ocrResult.polygons || []) as Point2D[][];
-      const shouldInpaint = inpaintTier !== 'original' && inpaintTier !== 'none' && inpaintPolygons.length > 0;
+      const shouldInpaint = inpaintTier !== 'none' && inpaintPolygons.length > 0;
 
       let translatedTexts: string[];
       let cleanedImageBuffer: ArrayBuffer = imageBuffer;

@@ -162,7 +162,6 @@ graph TD
     EngineRouter -- Tier 3: AOT-GAN --> AotEngine[AotInpaintEngine: Polygon Mask + Quantized ONNX Model]
     EngineRouter -- Tier 4: LaMa AI --> LamaEngine[LamaInpaintEngine: Polygon Mask + Fourier CNN ONNX Model]
     EngineRouter -- Tier 5: None --> NoneEngine[NoneInpaintEngine: Bypass Erase]
-    EngineRouter -- Tier 6: Original --> OriginalEngine[OriginalInpaintEngine: Bypass All]
     
     ImageBuffer --> SimpleEngine
     Polygons -.-> SimpleEngine
@@ -174,14 +173,12 @@ graph TD
     ImageBuffer --> AotEngine
     ImageBuffer --> LamaEngine
     ImageBuffer --> NoneEngine
-    ImageBuffer --> OriginalEngine
     
     SimpleEngine --> CleanBuffer[Clean Text-Free Image]
     TeleaEngine --> CleanBuffer
     AotEngine --> CleanBuffer
     LamaEngine --> CleanBuffer
     NoneEngine --> CleanBuffer
-    OriginalEngine --> CleanBuffer
 ```
 
 #### The Binarizer (Handling the Border-Erase Problem)

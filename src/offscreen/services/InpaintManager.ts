@@ -5,10 +5,9 @@ import { AotInpaintEngine } from '../engines/inpaint/AotInpaintEngine';
 import { LamaMangaInpaintEngine } from '../engines/inpaint/LamaMangaInpaintEngine';
 import { LamaBaseInpaintEngine } from '../engines/inpaint/LamaBaseInpaintEngine';
 import { NoneInpaintEngine } from '../engines/inpaint/NoneInpaintEngine';
-import { OriginalInpaintEngine } from '../engines/inpaint/OriginalInpaintEngine';
 import type { InitializationLifecycleCallback } from './OcrManager';
 
-export type InpaintTier = 'simple' | 'telea' | 'aot' | 'aotgan' | 'lama-manga' | 'none' | 'original';
+export type InpaintTier = 'simple' | 'telea' | 'aot' | 'aotgan' | 'lama-manga' | 'none';
 type CanonicalInpaintTier = Exclude<InpaintTier, 'aot'>;
 
 /**
@@ -156,7 +155,6 @@ export class InpaintManager {
       case 'aotgan': engine = new AotInpaintEngine(this.platform); break;
       case 'lama-manga': engine = new LamaMangaInpaintEngine(this.platform); break;
       case 'none': engine = new NoneInpaintEngine(); break;
-      case 'original': engine = new OriginalInpaintEngine(); break;
       default: throw new Error(`[InpaintManager] Unknown inpainting tier: ${tier}`);
     }
     onInitialization?.('started');

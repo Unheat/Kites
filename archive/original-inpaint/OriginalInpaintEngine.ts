@@ -1,9 +1,12 @@
-import type { IInpaintEngine, Point2D } from './BaseInpaintEngine';
+import type { IInpaintEngine, Point2D } from '../../src/offscreen/engines/inpaint/BaseInpaintEngine';
 
 /**
- * Tier 6 Inpainting Engine: Original.
- * Bypasses the entire OCR and Translation masking pipeline for the image.
- * This class simply returns the original image buffer unmodified.
+ * ARCHIVED: Legacy Tier 6 Inpainting Engine: Original.
+ * 
+ * Archived because it is a 100% duplicate of Tier 5 NoneInpaintEngine ('none').
+ * Both engines simply return `imageBuffer.slice(0)` to preserve the original image unmodified
+ * and overlay translated text directly without erasing.
+ * InpaintManager and popup UI exclusively use 'none'.
  */
 export class OriginalInpaintEngine implements IInpaintEngine {
   /**
