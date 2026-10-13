@@ -4,7 +4,6 @@ import {
   Redo2,
   ZoomIn,
   ZoomOut,
-  FlipHorizontal,
   Search,
   FileText,
   Type,
@@ -76,7 +75,7 @@ export const Studio: React.FC<StudioProps> = ({
 }) => {
   const activeTool = useStudioStore((s) => s.activeTool);
   const zoom = useStudioStore((s) => s.zoom);
-  const isCanvasFlipped = useStudioStore((s) => s.isCanvasFlipped);
+  const isShowingOriginal = useStudioStore((s) => s.isShowingOriginal ?? s.isCanvasFlipped);
   const hideBoxes = useStudioStore((s) => s.hideBoxes);
   const activeModal = useStudioStore((s) => s.activeModal);
   const globalEditMode = useStudioStore((s) => s.globalEditMode);
@@ -402,16 +401,21 @@ export const Studio: React.FC<StudioProps> = ({
         <div className="w-full h-9 bg-[#141724] border-b border-[#262a3b] px-3 flex items-center justify-between text-xs text-slate-300 shrink-0 select-none z-30">
           <div className="flex items-center gap-2">
             <button
-              onClick={() => studioStore.setState({ isCanvasFlipped: !isCanvasFlipped })}
-              title="Show Original / Flipped image preview"
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-medium transition ${
-                isCanvasFlipped
+              onClick={() =>
+                studioStore.setState({
+                  isShowingOriginal: !isShowingOriginal,
+                  isCanvasFlipped: !isShowingOriginal,
+                })
+              }
+              title="Show Original untranslated image vs Translated image"
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-medium transition cursor-pointer ${
+                isShowingOriginal
                   ? 'border-[#f4446d] bg-[#f4446d]/15 text-[#f4446d]'
                   : 'border-[#262a3b] bg-[#090a0f] text-slate-300 hover:bg-[#1c1f2e]'
               }`}
             >
-              <FlipHorizontal className="w-3.5 h-3.5" />
-              <span>{isCanvasFlipped ? 'Unflip' : 'Show Original'}</span>
+              {isShowingOriginal ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+              <span>{isShowingOriginal ? 'Show Translated' : 'Show Original'}</span>
             </button>
 
             <button

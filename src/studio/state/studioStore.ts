@@ -56,6 +56,7 @@ export interface StudioState {
   zoom: number;
   pan: { x: number; y: number };
   isSpacePanning: boolean;
+  isShowingOriginal: boolean;
   isCanvasFlipped: boolean;
   hideBoxes: boolean;
   activeJobId: number | null;
@@ -100,6 +101,7 @@ const initialState: StudioState = {
   zoom: 1.0,
   pan: { x: 0, y: 0 },
   isSpacePanning: false,
+  isShowingOriginal: false,
   isCanvasFlipped: false,
   hideBoxes: false,
   activeJobId: null,

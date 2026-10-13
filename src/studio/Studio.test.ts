@@ -78,4 +78,12 @@ describe('Studio State Management', () => {
 
     expect(studioStore.getState().textObjects[0].text).toBe('Edited dialogue');
   });
+
+  it('toggles isShowingOriginal to switch between raw untranslated image and translated view', () => {
+    expect(studioStore.getState().isShowingOriginal).toBe(false);
+    studioStore.setState({ isShowingOriginal: true });
+    expect(studioStore.getState().isShowingOriginal).toBe(true);
+    studioStore.setState({ isShowingOriginal: false });
+    expect(studioStore.getState().isShowingOriginal).toBe(false);
+  });
 });

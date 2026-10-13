@@ -202,6 +202,22 @@ fs.mkdirSync(screenshotDir, { recursive: true });
       path: path.join(screenshotDir, '06_hide_boxes_clean_preview.png'),
     });
 
+    // Toggle Show Original (raw untranslated artwork view)
+    console.log('[Visual Test] Toggling Show Original...');
+    await page.click('button[title*="Show Original"]');
+    await new Promise((r) => setTimeout(r, 300));
+    await page.screenshot({
+      path: path.join(screenshotDir, '07_show_original_untranslated_preview.png'),
+    });
+
+    // Toggle back to Show Translated
+    console.log('[Visual Test] Toggling back to Show Translated...');
+    await page.click('button[title*="Show Original"]');
+    await new Promise((r) => setTimeout(r, 300));
+    await page.screenshot({
+      path: path.join(screenshotDir, '08_show_translated_restored.png'),
+    });
+
     console.log('[Visual Test] All visual test screenshots captured successfully!');
   } finally {
     await browser.close();

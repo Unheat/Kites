@@ -38,12 +38,13 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const spacerRef = useRef<HTMLDivElement>(null);
+  const originalCanvasRef = useRef<HTMLCanvasElement>(null);
   const bgCanvasRef = useRef<HTMLCanvasElement>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
 
   const activeTool = useStudioStore((s) => s.activeTool);
   const zoom = useStudioStore((s) => s.zoom);
-  const isCanvasFlipped = useStudioStore((s) => s.isCanvasFlipped);
+  const isShowingOriginal = useStudioStore((s) => s.isShowingOriginal ?? s.isCanvasFlipped);
   const hideBoxes = useStudioStore((s) => s.hideBoxes);
   const textObjects = useStudioStore((s) => s.textObjects);
   const selectedTextId = useStudioStore((s) => s.selectedTextId);
@@ -68,8 +69,19 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
   const imageWidth = originalImage?.naturalWidth || cleanedImage?.naturalWidth || 800;
   const imageHeight = originalImage?.naturalHeight || cleanedImage?.naturalHeight || 1200;
 
-  // Initialize and redraw background canvas
+  // Initialize and redraw background canvases
   useEffect(() => {
+    const origCanvas = originalCanvasRef.current;
+    if (origCanvas && originalImage && originalImage.complete && imageWidth > 0 && imageHeight > 0) {
+      origCanvas.width = imageWidth;
+      origCanvas.height = imageHeight;
+      const oCtx = origCanvas.getContext('2d');
+      if (oCtx) {
+        oCtx.clearRect(0, 0, imageWidth, imageHeight);
+        oCtx.drawImage(originalImage, 0, 0);
+      }
+    }
+
     const bgCanvas = bgCanvasRef.current;
     if (!bgCanvas || imageWidth <= 0 || imageHeight <= 0) return;
 
@@ -229,8 +241,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       e.clientY,
       overlay.getBoundingClientRect(),
       imageWidth,
-      imageHeight,
-      isCanvasFlipped
+      imageHeight
     );
   };
 
@@ -714,8 +725,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
         selectedObj.y,
         overlayCanvasRef.current.getBoundingClientRect(),
         imageWidth,
-        imageHeight,
-        isCanvasFlipped
+        imageHeight
       )
     : null;
 
@@ -736,13 +746,24 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
         }}
         className="relative block shrink-0 m-auto select-none"
       >
-        {/* Working background raster canvas */}
+        {/* Pristine original image canvas (visible when isShowingOriginal is true) */}
+        <canvas
+          ref={originalCanvasRef}
+          style={{
+            width: `${imageWidth * zoom}px`,
+            height: `${imageHeight * zoom}px`,
+            display: isShowingOriginal ? 'block' : 'none',
+          }}
+          className="block absolute top-0 left-0 shadow-2xl rounded-sm"
+        />
+
+        {/* Working background raster canvas (cleaned/painted artwork) */}
         <canvas
           ref={bgCanvasRef}
           style={{
             width: `${imageWidth * zoom}px`,
             height: `${imageHeight * zoom}px`,
-            transform: isCanvasFlipped ? 'scaleX(-1)' : 'none',
+            display: isShowingOriginal ? 'none' : 'block',
           }}
           className="block absolute top-0 left-0 shadow-2xl rounded-sm"
         />
@@ -756,7 +777,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
           style={{
             width: `${imageWidth * zoom}px`,
             height: `${imageHeight * zoom}px`,
-            transform: isCanvasFlipped ? 'scaleX(-1)' : 'none',
+            display: isShowingOriginal ? 'none' : 'block',
           }}
           className="block absolute top-0 left-0 cursor-crosshair"
         />
