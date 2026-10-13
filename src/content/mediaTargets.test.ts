@@ -254,4 +254,47 @@ describe('hover media resolution', () => {
     expect(resolveHoverMediaTarget(createHoverEvent(wrapper, [wrapper, document.body, document])))
       .toMatchObject({ imgElement: large, surfaceElement: large });
   });
+
+  it('filters hover targets using custom selector when provided', () => {
+    const reader = document.createElement('div');
+    reader.id = 'readerarea';
+    const readerImg = document.createElement('img');
+    readerImg.src = '/chapter1.jpg';
+    setRect(readerImg, LARGE_RECT);
+    reader.append(readerImg);
+
+    const sidebar = document.createElement('div');
+    sidebar.id = 'sidebar';
+    const sidebarImg = document.createElement('img');
+    sidebarImg.src = '/ad.jpg';
+    setRect(sidebarImg, LARGE_RECT);
+    sidebar.append(sidebarImg);
+
+    document.body.append(reader, sidebar);
+    Object.defineProperty(document, 'elementsFromPoint', { configurable: true, value: vi.fn(() => [readerImg]) });
+
+    // Matches custom selector
+    expect(
+      resolveHoverMediaTarget(createHoverEvent(readerImg, [readerImg, reader, document.body, document]), '#readerarea img')
+    ).toMatchObject({ imgElement: readerImg });
+
+    // Does not match custom selector
+    Object.defineProperty(document, 'elementsFromPoint', { configurable: true, value: vi.fn(() => [sidebarImg]) });
+    expect(
+      resolveHoverMediaTarget(createHoverEvent(sidebarImg, [sidebarImg, sidebar, document.body, document]), '#readerarea img')
+    ).toBeNull();
+  });
+
+  it('drops hover targets in noise containers when no custom selector is set', () => {
+    const aside = document.createElement('aside');
+    aside.className = 'sidebar';
+    const adImg = document.createElement('img');
+    adImg.src = '/banner.jpg';
+    setRect(adImg, LARGE_RECT);
+    aside.append(adImg);
+    document.body.append(aside);
+
+    Object.defineProperty(document, 'elementsFromPoint', { configurable: true, value: vi.fn(() => [adImg]) });
+    expect(resolveHoverMediaTarget(createHoverEvent(adImg, [adImg, aside, document.body, document]))).toBeNull();
+  });
 });

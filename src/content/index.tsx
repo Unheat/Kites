@@ -1505,7 +1505,7 @@ function GlobalOverlay() {
     const actions: ReadingShortcutActions<MediaTarget> = {
       getContext: () => {
         const cursor = lastCursorPositionRef.current;
-        const target = cursor ? resolveMediaTargetAtPoint(cursor.x, cursor.y) : null;
+        const target = cursor ? resolveMediaTargetAtPoint(cursor.x, cursor.y, getActiveCustomSelector()) : null;
         return {
           enabled: isEnabled,
           busy: isSnipping || translatingUrlsRef.current.size > 0 ||
@@ -1835,7 +1835,7 @@ function GlobalOverlay() {
         cancelHide();
         return;
       }
-      const mediaTarget = resolveHoverMediaTarget(event);
+      const mediaTarget = resolveHoverMediaTarget(event, getActiveCustomSelector());
       if (!mediaTarget) return;
       // WORKAROUND: [Tolerance halo cancels hide on exit] -> surfaceContainsPoint forgives
       // up to POINTER_TOLERANCE_PX (3px), so a cursor that just LEFT the image can still
@@ -1887,7 +1887,7 @@ function GlobalOverlay() {
     const resolveHoverAtCursor = (): void => {
       const cursor = lastCursorPositionRef.current;
       if (!cursor) return;
-      const mediaTarget = resolveMediaTargetAtPoint(cursor.x, cursor.y);
+      const mediaTarget = resolveMediaTargetAtPoint(cursor.x, cursor.y, getActiveCustomSelector());
       if (mediaTarget) {
         cancelHide();
         if (!activeImgRef.current || activeImgRef.current.surfaceElement !== mediaTarget.surfaceElement) {

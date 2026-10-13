@@ -415,17 +415,20 @@ export function discoverMediaTargets(root: ParentNode = document, customSelector
 
 /**
  * Builds media targets from candidate elements, deduplicates by surface, keeps only
- * targets containing the point, and returns the largest by rendered area.
+ * targets containing the point, filters noise containers or custom selectors, and
+ * returns the largest by rendered area.
  *
  * @param elements - Candidate elements (event targets, composed path, elementsFromPoint hits).
  * @param clientX - Horizontal viewport coordinate.
  * @param clientY - Vertical viewport coordinate.
+ * @param customSelector - Optional custom CSS selector override matching chapter images.
  * @returns Largest matching media target, or null.
  */
 function pickLargestTargetFromElements(
   elements: Iterable<Element>,
   clientX: number,
-  clientY: number
+  clientY: number,
+  customSelector?: string
 ): MediaTarget | null {
   const targets: MediaTarget[] = [];
   for (const element of elements) {
@@ -433,14 +436,30 @@ function pickLargestTargetFromElements(
       ? createMediaTarget(element)
       : createNonHtmlImageTarget(element);
     if (directTarget) targets.push(directTarget);
-    for (const child of Array.from(element.querySelectorAll(MEDIA_SELECTOR))) {
-      const childTarget = child instanceof HTMLImageElement ? createMediaTarget(child) : createNonHtmlImageTarget(child);
-      if (childTarget) targets.push(childTarget);
+    if (element !== document.body && element !== document.documentElement) {
+      for (const child of Array.from(element.querySelectorAll(MEDIA_SELECTOR))) {
+        const childTarget = child instanceof HTMLImageElement ? createMediaTarget(child) : createNonHtmlImageTarget(child);
+        if (childTarget) targets.push(childTarget);
+      }
     }
   }
 
   return targets
     .filter((target, index) => targets.findIndex((candidate) => candidate.surfaceElement === target.surfaceElement) === index)
+    .filter((target) => {
+      if (customSelector) {
+        try {
+          return Boolean(
+            target.surfaceElement.closest(customSelector) ||
+            target.sourceElement.closest(customSelector) ||
+            target.imgElement?.closest(customSelector)
+          );
+        } catch {
+          return false;
+        }
+      }
+      return !isElementInNoiseContainer(target.surfaceElement) && !isElementInNoiseContainer(target.sourceElement);
+    })
     .filter((target) => surfaceContainsPoint(target.surfaceElement, clientX, clientY))
     .sort((first, second) => {
       const firstRect = first.surfaceElement.getBoundingClientRect();
@@ -451,21 +470,24 @@ function pickLargestTargetFromElements(
 
 /**
  * Resolves hover media using composed paths, point hit-testing, descendants, and CSS backgrounds.
+ * Prioritizes customSelector when configured, and excludes noise containers when unconfigured.
  *
  * @param event - Mouse event used for target and pointer information.
+ * @param customSelector - Optional custom CSS selector override.
  * @returns Largest matching media target, or null.
  */
-export function resolveHoverMediaTarget(event: MouseEvent): MediaTarget | null {
+export function resolveHoverMediaTarget(event: MouseEvent, customSelector?: string): MediaTarget | null {
   const elements = new Set<Element>();
   if (event.target instanceof Element) elements.add(event.target);
   for (const node of event.composedPath()) if (node instanceof Element) elements.add(node);
   for (const element of document.elementsFromPoint?.(event.clientX, event.clientY) || []) elements.add(element);
 
-  return pickLargestTargetFromElements(elements, event.clientX, event.clientY);
+  return pickLargestTargetFromElements(elements, event.clientX, event.clientY, customSelector);
 }
 
 /**
  * Resolves the media target at a raw viewport point without a mouse event.
+ * Prioritizes customSelector when configured, and excludes noise containers when unconfigured.
  *
  * WORKAROUND: [Scrolling fires no boundary events] -> mouseover/mouseout only fire when the
  * pointer crosses element edges. When a tall page scrolls under a stationary cursor, no
@@ -475,9 +497,10 @@ export function resolveHoverMediaTarget(event: MouseEvent): MediaTarget | null {
  *
  * @param clientX - Horizontal viewport coordinate.
  * @param clientY - Vertical viewport coordinate.
+ * @param customSelector - Optional custom CSS selector override.
  * @returns Largest matching media target at the point, or null.
  */
-export function resolveMediaTargetAtPoint(clientX: number, clientY: number): MediaTarget | null {
+export function resolveMediaTargetAtPoint(clientX: number, clientY: number, customSelector?: string): MediaTarget | null {
   if (typeof document.elementsFromPoint !== 'function') return null;
-  return pickLargestTargetFromElements(document.elementsFromPoint(clientX, clientY), clientX, clientY);
+  return pickLargestTargetFromElements(document.elementsFromPoint(clientX, clientY), clientX, clientY, customSelector);
 }
