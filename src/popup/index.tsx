@@ -6,6 +6,7 @@ import EngineDropdown from './components/EngineDropdown';
 import SettingsView from './components/SettingsView';
 
 import { Settings, Home, Power, Crop } from 'lucide-react';
+import PageExportControl from './components/PageExportControl';
 
 import type { PopupState } from '../shared/types';
 import { DEFAULT_POPUP_STATE } from '../shared/types';
@@ -199,6 +200,7 @@ function PopupApp() {
 
         {/* Footer Action */}
         <div className="px-3.5 pb-3.5 flex flex-col gap-2">
+          <PageExportControl />
           <button
             onClick={async () => {
               try {

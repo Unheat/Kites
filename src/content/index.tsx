@@ -4,6 +4,7 @@ import './content.css';
 import { Languages, Eye, EyeOff, ExternalLink, X, Crop, RotateCcw, Download } from 'lucide-react';
 import type { PopupState, CropOverlayItem, ViewportSelection } from '../shared/types';
 import { STORAGE_KEYS } from '../shared/constants';
+import { createChapterTranslationRegistry, createChapterExporter, type ChapterTranslationRecord } from './chapterZip';
 import {
   normalizeSelection,
   calculateCaptureSourceRect,
@@ -255,15 +256,57 @@ function suppressParentBackgroundImage(img: HTMLImageElement, surfaceElement: HT
   }
 }
 
-export interface TranslatedImageRecord {
-  originalUrl: string;
-  translatedUrl: string;
-  jobId?: number;
-  showOriginal: boolean;
+export type TranslatedImageRecord = ChapterTranslationRecord;
+
+/** In-memory registry keeping track of translated images and their finished state, including detached pages. */
+export const translatedRegistry = createChapterTranslationRegistry({
+  getSourcePage: () => window.location.href,
+  createTranslatedUrl: createSafeBlobUrlFromData,
+  revokeTranslatedUrl: (url) => {
+    if (!url.startsWith('blob:')) return;
+    URL.revokeObjectURL(url);
+    activeObjectUrls.delete(url);
+  },
+});
+const chapterExporter = createChapterExporter({
+  getRecords: translatedRegistry.getRecords,
+  getSourcePage: () => window.location.href,
+  getTitle: () => document.title,
+});
+
+/**
+ * Stores queue-time document context before translation can finish after navigation or detachment.
+ * @param originalUrl - Requested image URL.
+ * @param target - Page surface available at queue time.
+ * @returns Nothing.
+ */
+function rememberChapterRequest(originalUrl: string, target: MediaTarget | null): void {
+  translatedRegistry.remember(originalUrl, target ?? undefined);
 }
 
-/** In-memory registry keeping track of translated images and their finished state. */
-export const translatedRegistry = new Map<string, TranslatedImageRecord>();
+// Native context-menu requests are queued by background, so capture their target before it detaches.
+// Keep one unconfirmed candidate separate from real overlay requests; unrelated menu choices
+// must not lock stale context for a later translation of the same URL.
+document.addEventListener('contextmenu', (event) => {
+  const target = resolveHoverMediaTarget(event as MouseEvent);
+  if (target) translatedRegistry.rememberContextMenu(target.srcUrl, target);
+}, true);
+
+// Top-frame v1: popup explicitly targets frameId 0, so embedded readers cannot create multiple archives.
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.target !== 'content' || message?.source !== 'popup' || message?.request !== true) return;
+  if (message.type === 'GET_CHAPTER_ZIP_STATUS') {
+    sendResponse(chapterExporter.getStatus());
+    return;
+  }
+  if (message.type === 'EXPORT_CHAPTER_ZIP') {
+    void chapterExporter.exportChapter().then(sendResponse).catch((error) => {
+      console.error('[Chapter ZIP] Message failed:', error);
+      sendResponse({ ...chapterExporter.getStatus(), phase: 'error', busy: false, message: 'ZIP export failed. Nothing downloaded.' });
+    });
+    return true;
+  }
+});
 
 /**
  * Attaches a MutationObserver shield to the translated image and visible media surface.
@@ -346,26 +389,20 @@ function attachReversionShield(img: HTMLImageElement, safeUrl: string, surfaceEl
  * srcset clearing, lazy attribute stripping, and parent background suppression.
  *
  * @param target - The target MediaTarget in the DOM.
- * @param bakedBase64 - The translated image data URL.
- * @param originalUrl - The original image URL for logging and attribution.
- * @param jobId - Optional database Job ID for direct studio editing.
+ * @param record - Already archived translation; DOM and ZIP share the same blob URL.
+ * @returns Nothing.
  */
-function replaceImageWithTranslation(target: MediaTarget, bakedBase64: string, originalUrl: string, jobId?: number): void {
+function replaceImageWithTranslation(target: MediaTarget, record: TranslatedImageRecord): void {
   const { imgElement: targetImg, sourceElement, surfaceElement, hiddenBacking, kind } = target;
-  const previousUrl = sourceElement.getAttribute('data-kites-applied-src');
-  const safeUrl = createSafeBlobUrlFromData(bakedBase64);
+  const { originalUrl, jobId, translatedUrl: safeUrl } = record;
+  // Archive completed result before touching the DOM; registry owns referenced blob lifetimes.
+  record.surfaceElement = surfaceElement;
+  record.sourceElement = sourceElement;
 
   if (jobId) {
     sourceElement.setAttribute('data-kites-job-id', String(jobId));
     surfaceElement.setAttribute('data-kites-job-id', String(jobId));
   }
-
-  translatedRegistry.set(originalUrl, {
-    originalUrl,
-    translatedUrl: safeUrl,
-    jobId,
-    showOriginal: false,
-  });
 
   runSelfMutation(() => {
     sourceElement.setAttribute('data-kites-applied-src', safeUrl);
@@ -397,10 +434,6 @@ function replaceImageWithTranslation(target: MediaTarget, bakedBase64: string, o
     }
   });
 
-  if (previousUrl?.startsWith('blob:') && previousUrl !== safeUrl) {
-    URL.revokeObjectURL(previousUrl);
-    activeObjectUrls.delete(previousUrl);
-  }
   console.log(`[Content Script] Successfully replaced image for: ${originalUrl}`);
 }
 
@@ -519,7 +552,7 @@ function TranslateButton({
   const [hasFailed, setHasFailed] = useState(false);
   const [isTranslated, setIsTranslated] = useState(() => {
     return Boolean(
-      translatedRegistry.has(srcUrl) ||
+      translatedRegistry.get(srcUrl) ||
       anchorElement.getAttribute('data-kites-translated') === 'true'
     );
   });
@@ -1262,22 +1295,27 @@ function GlobalOverlay() {
       setActiveImg(image);
       registerMediaTarget(image);
     }
+    // Lock queue-time document context: after SPA navigation the target may detach before completion.
+    rememberChapterRequest(srcUrl, image ?? resolveTargetMedia(srcUrl));
     setTranslatingUrls((current) => new Set(current).add(srcUrl));
     console.log('[Content Script] Sending TRANSLATE_IMAGE to background:', srcUrl);
 
     try {
       if (!chrome.runtime?.id) {
+        translatedRegistry.forget(srcUrl);
         clearTranslatingUrl(srcUrl);
         console.warn('[Content Script] Extension context invalidated. Please refresh the page.');
         return;
       }
       chrome.runtime.sendMessage({ type: 'TRANSLATE_IMAGE', url: srcUrl }, (response) => {
         if (chrome.runtime.lastError || response?.status === 'error') {
+          translatedRegistry.forget(srcUrl);
           clearTranslatingUrl(srcUrl);
           console.error('[Content Script] Message failed:', chrome.runtime.lastError?.message || response?.error);
         }
       });
     } catch (error) {
+      translatedRegistry.forget(srcUrl);
       clearTranslatingUrl(srcUrl);
       console.warn('[Content Script] Chrome runtime call failed (extension reloaded/invalidated):', error);
     }
@@ -1495,15 +1533,21 @@ function GlobalOverlay() {
       const { originalUrl, bakedBase64, jobId } = message.payload;
       clearTranslatingUrl(originalUrl);
 
-      if (message.type !== 'IMAGE_TRANSLATED' || !bakedBase64) return;
+      if (message.type !== 'IMAGE_TRANSLATED' || !bakedBase64) {
+        translatedRegistry.forget(originalUrl);
+        return;
+      }
       console.log(`[Content Script] Received translated image for: ${originalUrl}`);
       const target = resolveTargetMedia(originalUrl);
-      if (!target) {
-        console.warn(`[Content Script] Target media element could not be found in DOM for: ${originalUrl}`);
+      // Archive completed translation before requiring a DOM target; detached pages still enter the registry.
+      const record = translatedRegistry.complete(originalUrl, bakedBase64, jobId, target ?? undefined);
+      // Late results belong to the queued chapter, never a same-URL image in the new SPA chapter.
+      if (!record || record.sourcePage !== window.location.href || !target) {
+        console.warn(`[Content Script] Target media element detached or chapter changed; translation archived when context is known: ${originalUrl}`);
         return;
       }
 
-      replaceImageWithTranslation(target, bakedBase64, originalUrl, jobId);
+      replaceImageWithTranslation(target, record);
     };
 
     chrome.runtime.onMessage.addListener(handleMessage);
@@ -1525,10 +1569,13 @@ function GlobalOverlay() {
       const { sourceElement, srcUrl } = target;
       if (translatedSources.has(sourceElement) || queuedUrls.has(srcUrl)) return;
       registerMediaTarget(target);
+      // Lock queue-time position before auto-translate fires; the reader may navigate before completion.
+      rememberChapterRequest(srcUrl, target);
       queuedUrls.add(srcUrl);
       console.log('[Content Script] Auto-Translating visible image:', srcUrl);
       chrome.runtime.sendMessage({ type: 'TRANSLATE_IMAGE', url: srcUrl }, (response) => {
         if (chrome.runtime.lastError || response?.status === 'error') {
+          translatedRegistry.forget(srcUrl);
           queuedUrls.delete(srcUrl);
           console.error('[Content Script] Auto-Translate message failed:', chrome.runtime.lastError?.message || response?.error);
         }
