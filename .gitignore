@@ -27,6 +27,8 @@ dist-ssr
 .agents
 
 !docs/fullplan.md
+docs/torii_editor_port_full_plan.md
+.zcodeignore
 .env
 .env*
 .dev.vars
