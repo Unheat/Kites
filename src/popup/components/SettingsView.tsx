@@ -162,8 +162,41 @@ export default function SettingsView({ state, updateState }: SettingsViewProps) 
             )}
           </div>
 
+          {/* Manual Selection Method */}
+          <div className="pt-2 border-t border-[var(--color-dust)] border-opacity-30 flex flex-col gap-2">
+            <span className="font-medium block text-sm px-1">Manual Selection Method</span>
+            <div className="flex p-1 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md">
+              <button
+                onClick={() => updateState({ manualMode: 'hover' })}
+                className={`flex-1 py-1.5 text-sm font-medium rounded-sm transition-colors cursor-pointer ${
+                  state.manualMode === 'hover' 
+                    ? 'bg-[var(--color-paper)] text-[var(--color-ink)] shadow-sm' 
+                    : 'text-[var(--color-dust)] hover:text-[var(--color-ink)]'
+                }`}
+              >
+                Hover
+              </button>
+              <button
+                onClick={() => updateState({ manualMode: 'persistent' })}
+                className={`flex-1 py-1.5 text-sm font-medium rounded-sm transition-colors cursor-pointer ${
+                  state.manualMode === 'persistent' 
+                    ? 'bg-[var(--color-paper)] text-[var(--color-ink)] shadow-sm' 
+                    : 'text-[var(--color-dust)] hover:text-[var(--color-ink)]'
+                }`}
+              >
+                Persistent
+              </button>
+            </div>
+            {/* Dynamic Helper Text */}
+            <p className="text-xs text-[var(--color-dust)] px-1 leading-relaxed">
+              {state.manualMode === 'hover' 
+                ? 'translate button appears when hovering over images' 
+                : 'translate button is pinned to every detectable image'}
+            </p>
+          </div>
+
           {/* Max Queue Capacity Slider */}
-          <div>
+          <div className="pt-2 border-t border-[var(--color-dust)] border-opacity-30">
             <div className="flex justify-between items-center mb-2">
               <div className="flex items-center gap-1.5">
                 <span className="font-medium text-sm">Max Queue Capacity</span>
