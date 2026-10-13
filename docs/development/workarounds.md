@@ -47,7 +47,9 @@ This document preserves the complete technical background, rationale, and implem
 
 ## 3. SPA & Responsive Image Replacement Strategy (XianScan Reference Pattern)
 
-**Affected Files:** [`src/content/index.tsx`](file:///Users/dangtruongan/study/Kites/src/content/index.tsx)  
+**Affected Files:** [`src/content/contentUi.tsx`](file:///Users/dangtruongan/study/Kites/src/content/contentUi.tsx) (overlay, media replacement, and shared idle/busy control), [`src/content/index.tsx`](file:///Users/dangtruongan/study/Kites/src/content/index.tsx) (content bootstrap)
+
+**Control lifecycle note (2026-10-12):** Idle actions and queued/processing indicators share `TranslateButton`, including the existing tall-strip viewport clamp. Do not introduce a separate spinner positioning implementation. Background `IMAGE_QUEUED` acceptance pins per-image status independently of the current hover target; queue-limit feedback uses the same adjacent pill. See [Devlog 025](../dev-history/devlog/025_phase25_per_image_translation_controls.md).
 **Related Devlog:** [`014_phase14_spa_image_replacement_and_xianscan_pattern.md`](file:///Users/dangtruongan/study/Kites/docs/dev-history/devlog/014_phase14_spa_image_replacement_and_xianscan_pattern.md)
 
 * **Always wipe `srcset` when updating `src`:**

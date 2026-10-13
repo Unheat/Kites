@@ -6,7 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const offscreenState = vi.hoisted(() => {
   const state = {
     // Behavior of the offscreen document for job messages.
-    sendMessageBehavior: 'hang' as 'hang' | 'pong' | 'no-receiver' | 'respond-after-first' | 'gpu-crash',
+    sendMessageBehavior: 'hang' as 'hang' | 'pong' | 'no-receiver' | 'respond-after-first' | 'gpu-crash' | 'controlled',
+    pendingJobs: [] as Array<(response: any) => void>,
     // Custom error response when simulating pipeline/GPU crash
     customError: '',
     // Whether the document answers the OFFSCREEN_PING health probe.
@@ -17,9 +18,12 @@ const offscreenState = vi.hoisted(() => {
     hasDocument: false,
     createdCount: 0,
     closedCount: 0,
+    runtimeListener: undefined as undefined | ((message: any, sender: any, respond: (result: any) => void) => boolean | undefined),
+    contextMenuListener: undefined as undefined | ((info: any, tab: any) => Promise<void>),
     reset(): void {
       state.sendMessageBehavior = 'hang';
       state.customError = '';
+      state.pendingJobs = [];
       state.pingBehavior = 'pong';
       state.jobMessageCount = 0;
       state.hasDocument = false;
@@ -34,7 +38,7 @@ const offscreenState = vi.hoisted(() => {
     contextMenus: {
       removeAll: vi.fn((cb?: () => void) => cb?.()),
       create: vi.fn(),
-      onClicked: stubListener,
+      onClicked: { addListener: vi.fn((listener) => { state.contextMenuListener = listener; }) },
     },
     storage: {
       local: {
@@ -59,7 +63,7 @@ const offscreenState = vi.hoisted(() => {
     },
     runtime: {
       ...((globalThis as any).chrome?.runtime ?? {}),
-      onMessage: stubListener,
+      onMessage: { addListener: vi.fn((listener) => { state.runtimeListener = listener; }) },
       onStartup: stubListener,
       onInstalled: stubListener,
       sendMessage: vi.fn((message: any, callback?: (response: any) => void) => {
@@ -71,6 +75,10 @@ const offscreenState = vi.hoisted(() => {
           callback(response);
           delete (globalThis as any).chrome.runtime.lastError;
         };
+        if (behavior === 'controlled') {
+          state.pendingJobs.push(respond);
+          return;
+        }
         if (behavior === 'pong') {
           respond({ status: 'success', bakedBase64: 'data:image/png;base64,mock' });
           return;
@@ -115,8 +123,10 @@ import {
   sendMessageToOffscreen,
   processQueue,
   queueTranslation,
+  queueCapturedTranslation,
 } from './index';
 import { db } from '../db';
+import { STORAGE_KEYS } from '../shared/constants';
 
 const STALE_WINDOW_MS = 2 * 60 * 1000;
 
@@ -134,6 +144,8 @@ async function clearDatabase(): Promise<void> {
 beforeEach(async () => {
   offscreenState.reset();
   vi.clearAllMocks();
+  vi.mocked((globalThis as any).chrome.storage.local.get).mockResolvedValue({});
+  vi.mocked((globalThis as any).chrome.tabs.sendMessage).mockImplementation(() => Promise.resolve());
   await clearDatabase();
 });
 
@@ -287,7 +299,7 @@ async function waitForJobTerminalStatus(jobId: number, timeoutMs = 2000): Promis
 
 describe('sequential queue processing', () => {
   it('processes jobs strictly sequentially, running at most one active job in offscreen', async () => {
-    offscreenState.sendMessageBehavior = 'pong';
+    offscreenState.sendMessageBehavior = 'controlled';
 
     // Pre-seed image blob so fetch is bypassed
     const mockBlob = new Blob(['mock'], { type: 'image/png' });
@@ -309,11 +321,20 @@ describe('sequential queue processing', () => {
     await db.images.add({ jobId: job2Id, rawImageBlob: mockBlob });
 
     // Calling processQueue should pull job 1 and process it
-    await processQueue();
+    await Promise.all([processQueue(), processQueue(), processQueue()]);
+    await vi.waitFor(() => expect(offscreenState.pendingJobs).toHaveLength(1));
+    await Promise.all([processQueue(), processQueue()]);
+    expect(offscreenState.jobMessageCount).toBe(1);
+    expect((await db.translationJobs.get(job2Id))?.status).toBe('queued');
+    expect(await db.translationJobs.where('status').anyOf(['downloading', 'processing']).count()).toBe(1);
+    offscreenState.pendingJobs.shift()!({ status: 'success', bakedBase64: 'data:image/png;base64,mock' });
     const status1 = await waitForJobTerminalStatus(job1Id);
     expect(status1).toBe('completed');
 
-    // After job 1 completes, processQueue will have pulled job 2
+    // After job 1 completes, processQueue will have pulled job 2, never before.
+    await vi.waitFor(() => expect(offscreenState.pendingJobs).toHaveLength(1));
+    expect(offscreenState.jobMessageCount).toBe(2);
+    offscreenState.pendingJobs.shift()!({ status: 'success', bakedBase64: 'data:image/png;base64,mock' });
     const status2 = await waitForJobTerminalStatus(job2Id);
     expect(status2).toBe('completed');
   });
@@ -382,11 +403,214 @@ describe('WebGPU crash recovery', () => {
   });
 });
 
+/**
+ * Holds the offscreen slot without starting a pipeline, isolating waiting admissions.
+ * @returns The active job ID.
+ */
+async function seedActiveJob(): Promise<number> {
+  return (await db.translationJobs.add({
+    timestamp: Date.now(), status: 'processing', srcUrl: 'https://cdn.example.com/active.webp', tabId: 99,
+  })) as number;
+}
+
+/**
+ * Selects acceptance events from the tab-message stub.
+ * @returns Calls that announce IMAGE_QUEUED.
+ */
+function acceptedEvents() {
+  return vi.mocked((globalThis as any).chrome.tabs.sendMessage).mock.calls.filter(([, message]: any[]) => message.type === 'IMAGE_QUEUED');
+}
+
+/**
+ * Calls the registered runtime listener, preserving its asynchronous response contract.
+ * @param message - Runtime request to deliver.
+ * @param tabId - Sender's tab identity.
+ * @returns The background response.
+ */
+async function runtimeRequest(message: any, tabId = 1): Promise<any> {
+  return new Promise((resolve) => {
+    expect(offscreenState.runtimeListener!(message, { tab: { id: tabId } }, resolve)).toBe(true);
+  });
+}
+
+/**
+ * Lets any scheduled, gated dispatch finish before records are removed between tests.
+ * @returns Resolves after the gate is available again.
+ */
+async function settleDispatch(): Promise<void> {
+  // An admission on the same chain acts as a barrier without adding another job.
+  const active = await db.translationJobs.where('srcUrl').equals('https://cdn.example.com/active.webp').first();
+  if (active) await queueTranslation(active.srcUrl!, active.tabId);
+}
+
+const CAPTURE_DATA_URL = 'data:image/png;base64,bW9jaw==';
+
+describe('serialized queue admission', () => {
+  it.each([undefined, 'contextMenu', 'auto'])('uses generic acceptance for source %s and excludes active jobs from capacity', async (source) => {
+    await seedActiveJob();
+    const result = await queueTranslation('https://cdn.example.com/new.webp', 0, source);
+    expect(result).toEqual({ status: 'queued', jobId: expect.any(Number) });
+    expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(0, {
+      type: 'IMAGE_QUEUED', target: 'content', source: 'background', event: true,
+      payload: { originalUrl: 'https://cdn.example.com/new.webp', jobId: result.status === 'queued' ? result.jobId : undefined },
+    });
+    expect(await db.translationJobs.where('status').equals('queued').count()).toBe(1);
+    await settleDispatch();
+  });
+
+  it('routes actual context-menu and auto runtime requests through the same lifecycle', async () => {
+    await seedActiveJob();
+    vi.mocked((globalThis as any).chrome.storage.local.get).mockResolvedValue({ [STORAGE_KEYS.POPUP_STATE]: { concurrency: 2 } });
+    await offscreenState.contextMenuListener!({ menuItemId: 'translate-image', srcUrl: 'https://cdn.example.com/menu.webp' }, { id: 1 });
+    const result = await runtimeRequest({ type: 'TRANSLATE_IMAGE', payload: { srcUrl: 'https://cdn.example.com/auto.webp' }, source: 'auto' });
+    expect(result).toEqual({ status: 'queued', jobId: expect.any(Number) });
+    expect(acceptedEvents()).toHaveLength(2);
+    for (const [, event] of acceptedEvents()) {
+      expect(event).toMatchObject({ target: 'content', source: 'background', event: true, payload: { jobId: expect.any(Number) } });
+    }
+    await settleDispatch();
+  });
+
+  it('serializes a rapid URL burst without exceeding waiting capacity or accepting rejected URLs', async () => {
+    await seedActiveJob();
+    vi.mocked((globalThis as any).chrome.storage.local.get).mockResolvedValue({ [STORAGE_KEYS.POPUP_STATE]: { concurrency: 2 } });
+    const results = await Promise.all(Array.from({ length: 12 }, (_, index) => queueTranslation(`https://cdn.example.com/burst-${index}.webp`, 1)));
+    expect(results.filter((result) => result.status === 'queued')).toHaveLength(2);
+    expect(results.filter((result) => result.status === 'error')).toHaveLength(10);
+    expect(await db.translationJobs.where('status').equals('queued').count()).toBe(2);
+    expect(acceptedEvents()).toHaveLength(2);
+    for (const result of results.slice(2)) expect(result).toMatchObject({ status: 'error', code: 'QUEUE_FULL' });
+    await settleDispatch();
+  });
+
+  it.each(['capture-first', 'url-first'])('shares capacity between simultaneous captures and URLs (%s)', async (order) => {
+    await seedActiveJob();
+    const requests = order === 'capture-first'
+      ? [queueCapturedTranslation('burst', CAPTURE_DATA_URL, 1), queueTranslation('https://cdn.example.com/shared.webp', 1)]
+      : [queueTranslation('https://cdn.example.com/shared.webp', 1), queueCapturedTranslation('burst', CAPTURE_DATA_URL, 1)];
+    const results = await Promise.all(requests);
+    expect(results[0]).toMatchObject({ status: 'queued', jobId: expect.any(Number) });
+    expect(results[1]).toMatchObject({ status: 'error', code: 'QUEUE_FULL' });
+    expect(await db.translationJobs.where('status').equals('queued').count()).toBe(1);
+    expect(acceptedEvents()).toHaveLength(order === 'capture-first' ? 0 : 1);
+    if (order === 'capture-first') {
+      expect(await db.images.where('jobId').equals((results[0] as { jobId: number }).jobId).count()).toBe(1);
+    } else {
+      expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(1, {
+        type: 'CAPTURE_TRANSLATION_ERROR', payload: { requestId: 'burst', code: 'QUEUE_FULL', error: expect.stringContaining('full') },
+      });
+    }
+    await settleDispatch();
+  });
+
+  it('deduplicates simultaneous new requests before either can insert a second job', async () => {
+    await seedActiveJob();
+    const results = await Promise.all(Array.from({ length: 8 }, () => queueTranslation('https://cdn.example.com/same.webp', 1)));
+    expect(results[0]).toMatchObject({ status: 'queued', jobId: expect.any(Number) });
+    expect(results.every((result) => JSON.stringify(result) === JSON.stringify(results[0]))).toBe(true);
+    expect(await db.translationJobs.where('srcUrl').equals('https://cdn.example.com/same.webp').count()).toBe(1);
+    expect(acceptedEvents()).toHaveLength(8);
+    await settleDispatch();
+  });
+
+  it.each(['queued', 'downloading', 'processing'] as const)('replays an older-than-five-seconds %s duplicate without deleting or re-enqueueing', async (status) => {
+    if (status === 'queued') await seedActiveJob();
+    const jobId = await db.translationJobs.add({ timestamp: Date.now() - 10_000, status, srcUrl: 'https://cdn.example.com/duplicate.webp', tabId: 1 });
+    const original = await db.translationJobs.get(jobId);
+    const results = await Promise.all([queueTranslation(original!.srcUrl!, 1), queueTranslation(original!.srcUrl!, 1)]);
+    expect(results).toEqual([{ status: 'queued', jobId }, { status: 'queued', jobId }]);
+    expect(await db.translationJobs.get(jobId)).toEqual(original);
+    expect(await db.translationJobs.where('srcUrl').equals(original!.srcUrl!).count()).toBe(1);
+    expect(acceptedEvents()).toHaveLength(2);
+  });
+
+  it('rejects a cross-tab duplicate with terminal error and retains the owner', async () => {
+    const jobId = await db.translationJobs.add({ timestamp: Date.now() - 10_000, status: 'processing', srcUrl: 'https://cdn.example.com/owned.webp', tabId: 1 });
+    const result = await runtimeRequest({ type: 'TRANSLATE_IMAGE', url: 'https://cdn.example.com/owned.webp' }, 2);
+    expect(result).toMatchObject({ status: 'error', code: 'DUPLICATE_IN_OTHER_TAB' });
+    expect((await db.translationJobs.get(jobId))?.tabId).toBe(1);
+    expect(acceptedEvents()).toHaveLength(0);
+    expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(2, { type: 'TRANSLATION_ERROR', payload: { originalUrl: 'https://cdn.example.com/owned.webp', code: 'DUPLICATE_IN_OTHER_TAB', error: result.error } });
+  });
+
+  it('forwards URL and capture capacity rejection results rather than reporting queued', async () => {
+    await seedActiveJob();
+    const accepted = await runtimeRequest({ type: 'TRANSLATE_IMAGE', url: 'https://cdn.example.com/accepted.webp' });
+    const rejected = await runtimeRequest({ type: 'TRANSLATE_IMAGE', url: 'https://cdn.example.com/rejected.webp' });
+    const captureRejected = await runtimeRequest({ type: 'TRANSLATE_CAPTURED_IMAGE', payload: { requestId: 'full', dataUrl: CAPTURE_DATA_URL } });
+    expect(accepted).toEqual({ status: 'queued', jobId: expect.any(Number) });
+    expect(rejected).toMatchObject({ status: 'error', code: 'QUEUE_FULL' });
+    expect(captureRejected).toEqual(rejected);
+    expect(acceptedEvents()).toHaveLength(1);
+    await settleDispatch();
+  });
+
+  it('awaits acceptance before any dispatch, including an independently requested queue pass', async () => {
+    offscreenState.sendMessageBehavior = 'pong';
+    let releaseAcceptance!: () => void;
+    vi.mocked((globalThis as any).chrome.tabs.sendMessage).mockImplementation((_tabId: number, message: any) => message.type === 'IMAGE_QUEUED'
+      ? new Promise<void>((resolve) => { releaseAcceptance = resolve; })
+      : Promise.resolve());
+    const admission = queueTranslation('https://cdn.example.com/ordered.webp', 1);
+    await vi.waitFor(() => expect(acceptedEvents()).toHaveLength(1));
+    const jobId = acceptedEvents()[0][1].payload.jobId as number;
+    await db.images.add({ jobId, rawImageBlob: new Blob(['mock']) });
+    const dispatch = processQueue();
+    expect((await db.translationJobs.get(jobId))?.status).toBe('queued');
+    expect(offscreenState.jobMessageCount).toBe(0);
+    releaseAcceptance();
+    expect(await admission).toEqual({ status: 'queued', jobId });
+    await dispatch;
+    expect(await waitForJobTerminalStatus(jobId)).toBe('completed');
+  });
+
+  it('replaces terminal history only after admission succeeds', async () => {
+    await seedActiveJob();
+    const terminalId = await db.translationJobs.add({ timestamp: Date.now(), status: 'completed', srcUrl: 'https://cdn.example.com/retry.webp', tabId: 1 });
+    await db.images.add({ jobId: terminalId as number, rawImageBlob: new Blob(['history']) });
+    const result = await queueTranslation('https://cdn.example.com/retry.webp', 1);
+    expect(result).toMatchObject({ status: 'queued', jobId: expect.any(Number) });
+    expect(result.status === 'queued' && result.jobId).not.toBe(terminalId);
+    expect(await db.translationJobs.get(terminalId)).toBeUndefined();
+    expect(await db.images.where('jobId').equals(terminalId as number).count()).toBe(0);
+    const rejectedId = await db.translationJobs.add({ timestamp: Date.now(), status: 'error', srcUrl: 'https://cdn.example.com/full-retry.webp', tabId: 1 });
+    expect(await queueTranslation('https://cdn.example.com/full-retry.webp', 1)).toMatchObject({ status: 'error', code: 'QUEUE_FULL' });
+    expect(await db.translationJobs.get(rejectedId)).toBeDefined();
+    expect(acceptedEvents()).toHaveLength(1);
+    await settleDispatch();
+  });
+
+  it('rolls back capture admission if its image write fails, then admits the next URL', async () => {
+    await seedActiveJob();
+    const imageWrite = vi.spyOn(db.images, 'add').mockRejectedValueOnce(new Error('image write failed'));
+    try {
+      await expect(queueCapturedTranslation('rollback', CAPTURE_DATA_URL, 1)).rejects.toThrow('image write failed');
+    } finally {
+      imageWrite.mockRestore();
+    }
+    expect(await db.translationJobs.where('status').equals('queued').count()).toBe(0);
+    expect(acceptedEvents()).toHaveLength(0);
+    expect(await queueTranslation('https://cdn.example.com/after-rollback.webp', 1)).toMatchObject({ status: 'queued' });
+    await settleDispatch();
+  });
+
+  it('continues after failed delivery and after a rejected admission operation', async () => {
+    await seedActiveJob();
+    vi.mocked((globalThis as any).chrome.storage.local.get).mockRejectedValueOnce(new Error('storage unavailable'));
+    await expect(queueTranslation('https://cdn.example.com/broken.webp', 1)).rejects.toThrow('storage unavailable');
+    vi.mocked((globalThis as any).chrome.tabs.sendMessage).mockRejectedValueOnce(new Error('tab navigated'));
+    const result = await queueTranslation('https://cdn.example.com/recovered.webp', 1);
+    expect(result).toMatchObject({ status: 'queued', jobId: expect.any(Number) });
+    expect(await db.translationJobs.where('status').equals('queued').count()).toBe(1);
+    await settleDispatch();
+  });
+});
+
 describe('queue capacity limit', () => {
   it('rejects additional requests when the queue reaches configured maximum capacity', async () => {
     // Set popupState concurrency to 2
     (globalThis as any).chrome.storage.local.get.mockResolvedValue({
-      popupState: { concurrency: 2 },
+      [STORAGE_KEYS.POPUP_STATE]: { concurrency: 2 },
     });
 
     // Seed 2 queued jobs
@@ -404,7 +628,8 @@ describe('queue capacity limit', () => {
     });
 
     // Try to queue a 3rd job
-    await queueTranslation('https://cdn.example.com/q3.webp', 1);
+    const result = await queueTranslation('https://cdn.example.com/q3.webp', 1);
+    expect(result).toEqual({ status: 'error', code: 'QUEUE_FULL', error: expect.stringContaining('full') });
 
     // 3rd job must not be added to the queue
     const count = await db.translationJobs.where('srcUrl').equals('https://cdn.example.com/q3.webp').count();
@@ -416,6 +641,7 @@ describe('queue capacity limit', () => {
       type: 'TRANSLATION_ERROR',
       payload: {
         originalUrl: 'https://cdn.example.com/q3.webp',
+        code: 'QUEUE_FULL',
         error: expect.stringContaining('full'),
       },
     });

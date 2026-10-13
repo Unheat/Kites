@@ -9,9 +9,16 @@ import { resolveOcrTier } from '../offscreen/engines/ocr/ocrRegistry';
 import { normalizeRenderFontPresetId } from '../shared/renderFontPresets';
 import { oAuthManager } from './auth/OAuthManager';
 
-// Magic Number: Limit concurrency to avoid network/CPU throttling
-// We now dynamically load this from user's PopupState (fallback to 3)
-// const MAX_CONCURRENT_TRANSLATIONS = 3; //pass the param from UI here
+// Queue capacity bounds apply only to waiting jobs; the single active job is excluded.
+const MIN_QUEUE_CAPACITY = 1;
+const MAX_QUEUE_CAPACITY = 10;
+const QUEUE_FULL_ERROR = 'Translation queue is full. Please wait for current images to finish.';
+const DUPLICATE_OWNER_ERROR = 'This image is already queued or processing in another tab.';
+
+/** Admission responses distinguish accepted jobs from explicit, actionable rejections. */
+export type QueueAdmissionResult =
+  | { status: 'queued'; jobId: number }
+  | { status: 'error'; code: 'QUEUE_FULL' | 'DUPLICATE_IN_OTHER_TAB'; error: string };
 
 /**
  * How long a job may stay in an in-flight status ('processing'/'downloading') before the
@@ -161,7 +168,7 @@ chrome.contextMenus.onClicked.addListener(async (info: chrome.contextMenus.OnCli
     }
     console.log('[Background] Context menu clicked. Target URL:', info.srcUrl);
     try {
-      await queueTranslation(info.srcUrl, _tab?.id);
+      await queueTranslation(info.srcUrl, _tab?.id, 'contextMenu');
     } catch (error) {
       console.error('[Background] Context menu translation failed:', error);
     }
@@ -245,7 +252,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         }
         console.log('[Background] Received TRANSLATE_IMAGE from content script. URL:', srcUrl);
         queueTranslation(srcUrl, _sender.tab?.id)
-          .then(() => sendResponse({ status: 'queued' }))
+          .then((result) => sendResponse(result))
           .catch((err) => sendResponse({ status: 'error', error: err instanceof Error ? err.message : String(err) }));
       }).catch((err) => {
         sendResponse({ status: 'error', error: err instanceof Error ? err.message : String(err) });
@@ -287,7 +294,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       }
       console.log('[Background] Received TRANSLATE_CAPTURED_IMAGE from content script. Request ID:', requestId);
       queueCapturedTranslation(requestId, dataUrl, _sender.tab?.id)
-        .then(() => sendResponse({ status: 'queued' }))
+        .then((result) => sendResponse(result))
         .catch((err) => sendResponse({ status: 'error', error: err instanceof Error ? err.message : String(err) }));
     }).catch((err) => {
       sendResponse({ status: 'error', error: err instanceof Error ? err.message : String(err) });
@@ -505,6 +512,20 @@ chrome.runtime.onInstalled.addListener(async () => {
 // Atomic locks
 let creatingOffscreenPromise: Promise<void> | null = null;
 let isProcessingQueue = false;
+// Admissions and dispatch share this chain: no job can start before its acceptance
+// event settles, and URL/capture capacity checks cannot race each other's inserts.
+let queueAdmissionChain: Promise<void> = Promise.resolve();
+
+/**
+ * Serializes queue mutations without letting one rejected operation poison later work.
+ * @param operation - Admission or dispatch operation to execute exclusively.
+ * @returns The operation's result, preserving its rejection for the caller.
+ */
+function serializeQueueAdmission<T>(operation: () => Promise<T>): Promise<T> {
+  const pending = queueAdmissionChain.then(operation);
+  queueAdmissionChain = pending.then(() => undefined, () => undefined);
+  return pending;
+}
 
 /**
  * Ensures the offscreen document is booted up and ready to receive messages.
@@ -673,96 +694,147 @@ export async function sendMessageToOffscreen(message: any, timeoutMs: number = 3
 }
 
 /**
- * Inserts the image URL into the Dexie queue as "queued" and triggers the queue loop.
- * 
- * @param {string} srcUrl - The URL of the image to queue.
- * @param {number} tabId - The ID of the tab that requested the translation (for returning result).
- * @returns {Promise<void>}
+ * Checks waiting-only capacity while the caller holds the shared admission gate.
+ * @returns Whether another waiting job can be inserted.
  */
-export async function queueTranslation(srcUrl: string, tabId?: number) {
-  const existingJob = srcUrl ? await db.translationJobs.where('srcUrl').equals(srcUrl).first() : null;
-  const isStale = existingJob && (Date.now() - existingJob.timestamp > 5000);
-
-  if (existingJob && !isStale && ['queued', 'downloading', 'processing'].includes(existingJob.status as string)) {
-    console.log('[Background] URL already in active processing. Skipping duplicate:', srcUrl);
-    return;
-  }
-
-  if (existingJob) {
-    await deleteJobs([existingJob.id!]);
-  }
-
-  // Queue capacity guard: allow up to configured max queue capacity
+async function hasQueueCapacity(): Promise<boolean> {
   const stateData = await chrome.storage.local.get(STORAGE_KEYS.POPUP_STATE);
   const popupState = stateData[STORAGE_KEYS.POPUP_STATE] as PopupState | undefined;
-  const maxQueueCapacity = Math.min(10, Math.max(1, popupState?.concurrency || 3));
+  const maxQueueCapacity = Math.min(MAX_QUEUE_CAPACITY, Math.max(MIN_QUEUE_CAPACITY, popupState?.concurrency ?? MIN_QUEUE_CAPACITY));
   const queuedCount = await db.translationJobs.where('status').equals('queued').count();
-  if (queuedCount >= maxQueueCapacity) {
-    console.warn(`[Background] Translation queue is at maximum capacity (${queuedCount}/${maxQueueCapacity}). Rejecting request:`, srcUrl);
-    if (tabId) {
-      chrome.tabs.sendMessage(tabId, {
-        type: 'TRANSLATION_ERROR',
-        payload: { originalUrl: srcUrl, error: 'Translation queue is full. Please wait for current images to finish.' }
-      }).catch(() => {});
-    }
-    return;
-  }
+  return queuedCount < maxQueueCapacity;
+}
 
-  console.log('[Background] Queuing image URL:', srcUrl);
-  await db.translationJobs.add({
-    timestamp: Date.now(),
-    status: 'queued',
-    srcUrl: srcUrl,
-    tabId: tabId
+/**
+ * Sends the same addressed acceptance lifecycle for every URL admission and replay.
+ * Delivery failure must not discard an accepted job when its tab has navigated away.
+ * @param srcUrl - Original image URL.
+ * @param jobId - Accepted job identity.
+ * @param tabId - Requesting tab, when available.
+ * @returns Resolves after delivery settles, before queue dispatch can begin.
+ */
+async function notifyImageQueued(srcUrl: string, jobId: number, tabId?: number): Promise<void> {
+  if (tabId === undefined) return;
+  await chrome.tabs.sendMessage(tabId, {
+    type: 'IMAGE_QUEUED',
+    target: 'content',
+    source: 'background',
+    event: true,
+    payload: { originalUrl: srcUrl, jobId },
+  }).catch((error) => {
+    console.warn(`[Background] Failed to deliver acceptance for job ${jobId}:`, error);
   });
-  
-  // Kick off the queue processor
-  processQueue();
+}
+
+/**
+ * Reports an admission rejection without emitting an acceptance event.
+ * @param srcUrl - Original URL or capture identity.
+ * @param tabId - Requesting tab, when available.
+ * @param code - Machine-readable reason for rejection.
+ * @returns The structured error also returned to runtime request callers.
+ */
+async function rejectQueueAdmission(
+  srcUrl: string,
+  tabId: number | undefined,
+  code: 'QUEUE_FULL' | 'DUPLICATE_IN_OTHER_TAB',
+): Promise<QueueAdmissionResult> {
+  const error = code === 'QUEUE_FULL' ? QUEUE_FULL_ERROR : DUPLICATE_OWNER_ERROR;
+  console.warn(`[Background] Queue admission rejected (${code}):`, srcUrl);
+  if (tabId !== undefined) {
+    const isCapture = srcUrl.startsWith('kites-capture:');
+    await chrome.tabs.sendMessage(tabId, {
+      type: isCapture ? 'CAPTURE_TRANSLATION_ERROR' : 'TRANSLATION_ERROR',
+      payload: {
+        ...(isCapture ? { requestId: srcUrl.replace('kites-capture:', '') } : { originalUrl: srcUrl }),
+        code,
+        error,
+      },
+    }).catch(() => {});
+  }
+  return { status: 'error', code, error };
+}
+
+/**
+ * Queues an image URL by adding a job to IndexedDB and kicking off the queue processor.
+ * Live duplicates retain their owner and identity regardless of age; same-tab retries
+ * replay acceptance instead of inserting again. Only terminal jobs may be replaced.
+ *
+ * @param {string} srcUrl - Source URL of the image to translate.
+ * @param {number} [tabId] - ID of the tab that requested translation.
+ * @param {string} [source] - Originator for logging only; all sources share admission.
+ * @returns The accepted job ID, or an explicit rejection with its reason.
+ */
+export async function queueTranslation(srcUrl: string, tabId?: number, source?: string): Promise<QueueAdmissionResult> {
+  return serializeQueueAdmission(async () => {
+    const existingJobs = srcUrl ? await db.translationJobs.where('srcUrl').equals(srcUrl).toArray() : [];
+    const liveJob = existingJobs.find((job) => ['queued', 'downloading', 'processing'].includes(job.status ?? ''));
+    if (liveJob) {
+      if (liveJob.tabId !== tabId) {
+        return rejectQueueAdmission(srcUrl, tabId, 'DUPLICATE_IN_OTHER_TAB');
+      }
+      console.log('[Background] Replaying acceptance for existing job:', liveJob.id);
+      await notifyImageQueued(srcUrl, liveJob.id!, tabId);
+      return { status: 'queued', jobId: liveJob.id! };
+    }
+
+    // Check before deleting terminal history, so a rejected retry changes nothing.
+    if (!(await hasQueueCapacity())) {
+      return rejectQueueAdmission(srcUrl, tabId, 'QUEUE_FULL');
+    }
+    if (existingJobs.length) {
+      await deleteJobs(existingJobs.map((job) => job.id!));
+    }
+
+    console.log('[Background] Queuing image URL:', srcUrl, source);
+    const jobId = (await db.translationJobs.add({
+      timestamp: Date.now(),
+      status: 'queued',
+      srcUrl,
+      tabId,
+    })) as number;
+    await notifyImageQueued(srcUrl, jobId, tabId);
+
+    // Dispatch uses the same gate, so no earlier pipeline completion can race this event.
+    void processQueue();
+    return { status: 'queued', jobId };
+  });
 }
 
 /**
  * Queues a captured image (crop or screenshot) by saving its Blob to IndexedDB
- * and scheduling it in the background queue.
- * 
+ * and scheduling it in the background queue. Capture lifecycle messages stay unchanged;
+ * admission shares the URL gate and the job/blob insert is atomic before dispatch.
+ *
  * @param {string} requestId - Unique identifier for the capture session.
  * @param {string} dataUrl - Base64 data URL of the cropped screen area.
  * @param {number} [tabId] - ID of the tab that requested translation.
- * @returns {Promise<void>}
+ * @returns The accepted job ID, or an explicit capacity rejection.
  */
-async function queueCapturedTranslation(requestId: string, dataUrl: string, tabId?: number): Promise<void> {
-  const response = await fetch(dataUrl);
-  const blob = await response.blob();
-  const srcUrl = `kites-capture:${requestId}`;
+export async function queueCapturedTranslation(requestId: string, dataUrl: string, tabId?: number): Promise<QueueAdmissionResult> {
+  return serializeQueueAdmission(async () => {
+    const response = await fetch(dataUrl);
+    const blob = await response.blob();
+    const srcUrl = `kites-capture:${requestId}`;
 
-  const stateData = await chrome.storage.local.get(STORAGE_KEYS.POPUP_STATE);
-  const popupState = stateData[STORAGE_KEYS.POPUP_STATE] as PopupState | undefined;
-  const maxQueueCapacity = Math.min(10, Math.max(1, popupState?.concurrency || 3));
-  const queuedCount = await db.translationJobs.where('status').equals('queued').count();
-  if (queuedCount >= maxQueueCapacity) {
-    console.warn(`[Background] Translation queue is at maximum capacity (${queuedCount}/${maxQueueCapacity}). Rejecting capture request:`, srcUrl);
-    if (tabId) {
-      chrome.tabs.sendMessage(tabId, {
-        type: 'CAPTURE_TRANSLATION_ERROR',
-        payload: { requestId, error: 'Translation queue is full. Please wait for current images to finish.' }
-      }).catch(() => {});
+    if (!(await hasQueueCapacity())) {
+      return rejectQueueAdmission(srcUrl, tabId, 'QUEUE_FULL');
     }
-    return;
-  }
 
-  console.log('[Background] Queuing captured screen area:', srcUrl);
-  const jobId = (await db.translationJobs.add({
-    timestamp: Date.now(),
-    status: 'queued',
-    srcUrl,
-    tabId,
-  })) as number;
+    console.log('[Background] Queuing captured screen area:', srcUrl);
+    const jobId = await db.transaction('rw', db.translationJobs, db.images, async () => {
+      const id = (await db.translationJobs.add({
+        timestamp: Date.now(),
+        status: 'queued',
+        srcUrl,
+        tabId,
+      })) as number;
+      await db.images.add({ jobId: id, rawImageBlob: blob });
+      return id;
+    });
 
-  await db.images.add({
-    jobId,
-    rawImageBlob: blob,
+    void processQueue();
+    return { status: 'queued', jobId };
   });
-
-  processQueue();
 }
 
 /**
@@ -834,46 +906,51 @@ export async function reclaimStaleJobs(): Promise<void> {
   }
 }
 
+/**
+ * Dispatches at most one waiting job under the shared admission gate.
+ * @returns Resolves after dispatch or when the single offscreen pipeline is busy.
+ */
 export async function processQueue() {
   if (isProcessingQueue) return;
   isProcessingQueue = true;
-  
-  try {
-    // Reclaim slots held by dead jobs before counting capacity.
-    await reclaimStaleJobs();
 
-    // Check how many are currently active
-    const downloadingCount = await db.translationJobs.where('status').equals('downloading').count();
-    const processingCount = await db.translationJobs.where('status').equals('processing').count();
-    const activeCount = downloadingCount + processingCount;
-    
-    // Sequential Execution Guard:
-    // WebGPU and ONNX Runtime Web JSEP strictly require serialized execution on the Offscreen thread.
-    // Dispatching multiple tasks in parallel causes recursive WebGPU kernel invocation errors
-    // (e.g. kernel "[Transpose] Transpose" is not allowed to be called recursively).
-    // Therefore, exactly ONE image pipeline runs in Offscreen at a time.
-    if (activeCount >= 1) {
-      console.log(`[Background] Offscreen pipeline is busy with active job (${activeCount} running). Waiting for completion...`);
-      return;
+  return serializeQueueAdmission(async () => {
+    try {
+      // Reclaim slots held by dead jobs before counting capacity.
+      await reclaimStaleJobs();
+
+      // Check how many are currently active
+      const downloadingCount = await db.translationJobs.where('status').equals('downloading').count();
+      const processingCount = await db.translationJobs.where('status').equals('processing').count();
+      const activeCount = downloadingCount + processingCount;
+
+      // Sequential Execution Guard:
+      // WebGPU and ONNX Runtime Web JSEP strictly require serialized execution on the Offscreen thread.
+      // Dispatching multiple tasks in parallel causes recursive WebGPU kernel invocation errors
+      // (e.g. kernel "[Transpose] Transpose" is not allowed to be called recursively).
+      // Therefore, exactly ONE image pipeline runs in Offscreen at a time.
+      if (activeCount >= 1) {
+        console.log(`[Background] Offscreen pipeline is busy with active job (${activeCount} running). Waiting for completion...`);
+        return;
+      }
+
+      // Pull exactly the single oldest queued job to process next
+      const queuedJob = await db.translationJobs.where('status').equals('queued').first();
+      if (!queuedJob || !queuedJob.id || !queuedJob.srcUrl) return;
+
+      // Update status to prevent other queue loops from grabbing it. The timestamp is
+      // refreshed here so stale-job reclamation measures "last touched", not enqueue time.
+      await db.translationJobs.update(queuedJob.id, { status: 'downloading', timestamp: Date.now() });
+
+      processImageTranslation(queuedJob.id, queuedJob.srcUrl, queuedJob.tabId).catch(e => {
+        console.error(`[Background] Unhandled error processing job ${queuedJob.id}:`, e);
+      });
+    } catch (error) {
+      console.error('[Background] Error inside processQueue loop:', error);
+    } finally {
+      isProcessingQueue = false;
     }
-    
-    // Pull exactly the single oldest queued job to process next
-    const queuedJob = await db.translationJobs.where('status').equals('queued').first();
-    if (!queuedJob || !queuedJob.id || !queuedJob.srcUrl) return;
-    
-    // Update status to prevent other queue loops from grabbing it. The timestamp is
-    // refreshed here so stale-job reclamation measures "last touched", not enqueue time.
-    await db.translationJobs.update(queuedJob.id, { status: 'downloading', timestamp: Date.now() });
-    
-    processImageTranslation(queuedJob.id, queuedJob.srcUrl, queuedJob.tabId).catch(e => {
-      console.error(`[Background] Unhandled error processing job ${queuedJob.id}:`, e);
-    });
-    
-  } catch (error) {
-    console.error('[Background] Error inside processQueue loop:', error);
-  } finally {
-    isProcessingQueue = false;
-  }
+  });
 }
 
 /**

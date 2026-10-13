@@ -46,6 +46,8 @@ npm test
 - **Spatial Clustering Math:** Kruskal's MST algorithm, Euclidean distance thresholds, direction majority scoring, and convex hull overlap logic.
 - **Typesetting Heuristics:** 4-pass font fitting bounds, hyphenation triggers, tall-box aspect ratio clamping, and decollision matrix math.
 - **Database & Queue Lifecycle:** Dexie.js IndexedDB schema migrations, orphan job cleanup, and 7-day TTL pruning.
+- **Image Control Lifecycle:** `src/content/contentUi.test.tsx` exercises actual React overlay state with mocked Chrome events. Check independent pinned controls, queue rejection and transport failure, context-menu acceptance, Auto status-only controls, and the shared tall-webtoon viewport clamp. These tests validate UI state and positioning declarations; they do not prove browser CSS anchor rendering or real-model translation quality.
+- **Queue Admission:** `src/background/queueResilience.test.ts` covers serialized URL/capture admission, waiting-capacity rejection, accepted-job notification ordering, and active duplicate preservation. The configured capacity counts waiting jobs; one running inference job remains separate.
 
 ---
 
