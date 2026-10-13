@@ -9,6 +9,9 @@ import { resolveOcrTier } from '../offscreen/engines/ocr/ocrRegistry';
 import { normalizeRenderFontPresetId } from '../shared/renderFontPresets';
 import { normalizeGlossaryEntries } from '../shared/glossary';
 import { oAuthManager } from './auth/OAuthManager';
+import { registerReadingCommands } from './readingCommands';
+
+registerReadingCommands();
 
 // Magic Number: Limit concurrency to avoid network/CPU throttling
 // We now dynamically load this from user's PopupState (fallback to 3)

@@ -3,6 +3,7 @@ import type { PopupState, HistoryRetentionPeriod } from '../../shared/types';
 import { DEFAULT_POPUP_STATE } from '../../shared/types';
 import { Moon, Sun, KeyRound, Network, BookOpen } from 'lucide-react';
 import GlossaryPanel from './GlossaryPanel';
+import ReadingShortcutsHelp from './ReadingShortcutsHelp';
 import ApiManagerPanel from './ApiManagerPanel';
 import FallbackConfigPanel from './FallbackConfigPanel';
 import EngineSelectionPanel from './EngineSelectionPanel';
@@ -15,11 +16,27 @@ interface SettingsViewProps {
 }
 
 /**
- * Settings configuration view rendered in the extension popup.
+ * Hover-only "?" hint matching the engine panel tooltip pattern; keeps long
+ * descriptions out of the popup flow. Content stays in the DOM for screen readers.
  *
- * @param props - Component props containing current popup state and mutation callback.
- * @returns The rendered settings management panel.
+ * @param props - Optional id for aria-describedby wiring plus the hint content.
+ * @returns The rendered help icon with its tooltip.
  */
+function FieldHint({ id, children }: { id?: string; children: React.ReactNode }) {
+  return (
+    <div className="relative flex items-center">
+      <div className="peer w-3.5 h-3.5 rounded-full border border-[var(--color-dust)] flex items-center justify-center text-[9px] text-[var(--color-dust)] cursor-help hover:bg-[var(--color-dust)] hover:text-[var(--color-paper)] transition-colors flex-shrink-0">
+        ?
+      </div>
+      <div className="absolute left-0 top-full mt-1.5 w-[210px] z-50 opacity-0 pointer-events-none peer-hover:opacity-100 transition-opacity">
+        <div id={id} className="p-2 bg-[var(--color-ink)] text-[var(--color-paper)] text-[11px] leading-snug rounded-md shadow-xl border border-[var(--color-dust)]/20">
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function SettingsView({ state, updateState }: SettingsViewProps) {
   const [showApiManager, setShowApiManager] = useState(false);
   const [showFallbackConfig, setShowFallbackConfig] = useState(false);
@@ -133,9 +150,9 @@ export default function SettingsView({ state, updateState }: SettingsViewProps) 
             <p className="text-[11px] text-[var(--color-dust)] mb-2">
               Maximum images allowed in translation queue. Processed sequentially for GPU stability.
             </p>
-            <input 
-              type="range" 
-              min="1" 
+<input
+              type="range"
+              min="1"
               max="5"
               value={concurrency}
               onChange={(e) => updateState({ concurrency: parseInt(e.target.value, 10) })}
@@ -150,7 +167,14 @@ export default function SettingsView({ state, updateState }: SettingsViewProps) 
           {/* History Retention / Auto-Delete (Torii parity) */}
           <div className="pt-2 border-t border-[var(--color-dust)] border-opacity-30">
             <div className="flex justify-between items-center mb-1">
-              <label htmlFor="history-retention" className="font-medium text-sm">Auto-delete History</label>
+              <div className="flex items-center gap-1.5">
+                <label htmlFor="history-retention" className="font-medium text-sm">Auto-delete History</label>
+                <FieldHint id="history-retention-description">
+                  {state.historyRetention === 'never'
+                    ? 'Auto-delete is disabled. History is kept until you delete it manually.'
+                    : 'Deletes inactive job records and their cached images and text older than the selected window. Queued, downloading, and processing jobs are kept.'}
+                </FieldHint>
+              </div>
               <select
                 id="history-retention"
                 aria-describedby="history-retention-description"
@@ -164,12 +188,8 @@ export default function SettingsView({ state, updateState }: SettingsViewProps) 
                 <option value="never">Never</option>
               </select>
             </div>
-            <p id="history-retention-description" className="text-[11px] text-[var(--color-dust)]">
-              {state.historyRetention === 'never'
-                ? 'Auto-delete is disabled. History is kept until you delete it manually.'
-                : 'Deletes inactive job records and their cached images and text older than the selected window. Queued, downloading, and processing jobs are kept.'}
-            </p>
           </div>
+          <ReadingShortcutsHelp />
         </div>
       </div>
     </div>

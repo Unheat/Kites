@@ -5,6 +5,7 @@ import { Languages, Eye, EyeOff, ExternalLink, X, Crop, RotateCcw, Download } fr
 import type { PopupState, CropOverlayItem, ViewportSelection } from '../shared/types';
 import { STORAGE_KEYS } from '../shared/constants';
 import { createChapterTranslationRegistry, createChapterExporter, type ChapterTranslationRecord } from './chapterZip';
+import { handleReadingKeydown, handleReadingCommand, type ReadingShortcutActions } from './readingShortcuts';
 import {
   normalizeSelection,
   calculateCaptureSourceRect,
@@ -33,6 +34,7 @@ const REVEALED_BACKING_OPACITY = '1';
 const REVEALED_BACKING_Z_INDEX = '1';
 const REVEALED_BACKING_POINTER_EVENTS = 'none';
 const TRANSLATE_CONTROL_SELECTOR = '[data-kites-translate-control]';
+const IMAGE_DISPLAY_CHANGED_EVENT = 'kites-image-display-changed';
 // Avoid flashing cold-start copy for model setup that completes quickly.
 const MODEL_INITIALIZATION_LABEL_DELAY_MS = 700;
 const MODEL_INITIALIZATION_LABEL = 'Preparing AI · first use this session';
@@ -494,6 +496,9 @@ function toggleImageDisplay(target: MediaTarget, showOriginal: boolean): void {
       }
     }
   });
+  document.dispatchEvent(new CustomEvent(IMAGE_DISPLAY_CHANGED_EVENT, {
+    detail: { srcUrl: target.srcUrl, showOriginal },
+  }));
 }
 
 type OverlayImage = MediaTarget & {
@@ -570,6 +575,20 @@ function TranslateButton({
   });
 
   const activeTranslating = isTranslating || localTranslating;
+
+  useEffect(() => {
+    /**
+     * Keeps finished controls aligned with keyboard-driven display changes.
+     * @param event - Image display event containing the changed original URL.
+     * @returns Nothing.
+     */
+    const handleDisplayChange = (event: Event): void => {
+      const detail = (event as CustomEvent<{ srcUrl: string; showOriginal: boolean }>).detail;
+      if (detail?.srcUrl === srcUrl) setShowOriginal(detail.showOriginal);
+    };
+    document.addEventListener(IMAGE_DISPLAY_CHANGED_EVENT, handleDisplayChange);
+    return () => document.removeEventListener(IMAGE_DISPLAY_CHANGED_EVENT, handleDisplayChange);
+  }, [srcUrl]);
 
   const handleToggleOriginal = useCallback((e?: React.MouseEvent) => {
     if (e) {
@@ -1459,6 +1478,74 @@ function GlobalOverlay() {
     setCrops((prev) => prev.filter((c) => c.id !== id));
   }, []);
 
+  useEffect(() => {
+    if (!isEnabled) return;
+    const actions: ReadingShortcutActions<MediaTarget> = {
+      getContext: () => {
+        const cursor = lastCursorPositionRef.current;
+        const target = cursor ? resolveMediaTargetAtPoint(cursor.x, cursor.y) : null;
+        return {
+          enabled: isEnabled,
+          busy: isSnipping || translatingUrlsRef.current.size > 0 ||
+            crops.some((crop) => crop.status === 'capturing' || crop.status === 'translating'),
+          target,
+        };
+      },
+      hasTranslation: (target) => Boolean(translatedRegistry.get(target.srcUrl)),
+      toggleOriginal: (target) => {
+        const record = translatedRegistry.get(target.srcUrl);
+        if (record) toggleImageDisplay(target, !record.showOriginal);
+      },
+      translate: (target) => requestTranslation(target.srcUrl, {
+        ...target,
+        anchorName: getAnchorName(target.surfaceElement),
+      }),
+      startAreaSelection: () => setIsSnipping(true),
+    };
+    /**
+     * Saves live pointer coordinates for shortcut targeting in both manual modes.
+     * @param event - Pointer movement over the current document.
+     * @returns Nothing.
+     */
+    const trackPointer = (event: MouseEvent): void => {
+      lastCursorPositionRef.current = { x: event.clientX, y: event.clientY };
+    };
+    /**
+     * Clears stale hover context when the pointer leaves the document.
+     * @param event - Boundary event whose related target may be outside the document.
+     * @returns Nothing.
+     */
+    const clearPointer = (event: MouseEvent): void => {
+      if (!event.relatedTarget) lastCursorPositionRef.current = null;
+    };
+    /**
+     * Dispatches a guarded original-image toggle from the page keyboard.
+     * @param event - Keyboard event outside editable page controls.
+     * @returns Nothing.
+     */
+    const onKeydown = (event: KeyboardEvent): void => {
+      handleReadingKeydown(event, actions);
+    };
+    /**
+     * Routes browser commands without retaining an asynchronous response channel.
+     * @param message - Runtime command forwarded by background.
+     * @returns Nothing.
+     */
+    const onCommand = (message: unknown): void => {
+      handleReadingCommand(message, actions);
+    };
+    document.addEventListener('mousemove', trackPointer, { passive: true });
+    document.addEventListener('mouseout', clearPointer, { passive: true });
+    document.addEventListener('keydown', onKeydown);
+    chrome.runtime.onMessage.addListener(onCommand);
+    return () => {
+      document.removeEventListener('mousemove', trackPointer);
+      document.removeEventListener('mouseout', clearPointer);
+      document.removeEventListener('keydown', onKeydown);
+      chrome.runtime.onMessage.removeListener(onCommand);
+    };
+  }, [isEnabled, isSnipping, crops]);
+
   // Load user settings and react to popup updates.
   useEffect(() => {
     const loadSettings = () => {
@@ -1494,10 +1581,7 @@ function GlobalOverlay() {
   // Receive terminal job events, restore the image, and allow Hover mode to disappear again.
   useEffect(() => {
     const handleMessage = (message: any) => {
-      if (message.type === 'START_AREA_SELECTION') {
-        setIsSnipping(true);
-        return;
-      }
+      if (message.type === 'START_AREA_SELECTION') return;
 
       if (message.type === 'CAPTURE_TRANSLATED' && message.payload) {
         const { requestId, bakedBase64, jobId } = message.payload;
@@ -1744,7 +1828,15 @@ function GlobalOverlay() {
       setActiveImg({ ...mediaTarget, anchorName: getAnchorName(mediaTarget.surfaceElement) });
     };
     const handleMouseOut = (event: MouseEvent) => {
-      lastCursorPositionRef.current = { x: event.clientX, y: event.clientY };
+      // WORKAROUND: [Document-exit coordinates resurrect cleared pointer] -> a mouseout with
+      // no relatedTarget means the pointer left the window entirely. Reading shortcuts rely
+      // on lastCursorPositionRef being null at that moment to reject Alt+Shift+Z/F with no
+      // live target; writing the stale exit coordinates back (this listener registers after
+      // the shortcut listener) would let a command translate the last-hovered image after
+      // the user already left the page. Hide scheduling below still runs as usual.
+      if (event.relatedTarget) {
+        lastCursorPositionRef.current = { x: event.clientX, y: event.clientY };
+      }
       const current = activeImgRef.current;
       if (!current) return;
       const target = event.target as HTMLElement;
