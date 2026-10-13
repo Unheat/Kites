@@ -50,6 +50,7 @@ export interface ModelInitializationMessage {
 export interface ImageTranslatedMessage {
   type: 'IMAGE_TRANSLATED';
   payload: {
+    jobId?: number;
     originalUrl: string;
     bakedBase64: string;
   };

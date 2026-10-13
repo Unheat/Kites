@@ -26,7 +26,7 @@
   position: relative;
   z-index: 999999;
   border: none;
-  background-color: #ff2d75;
+  background-color: #f4446d;
   color: #ffffff;
   border-radius: 50%;
   display: flex;
@@ -38,7 +38,7 @@
   min-height: 32px;
   cursor: pointer;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
-  transition: background-color 0.2s ease, opacity 0.2s ease;
+  transition: background-color 0.2s ease, opacity 0.2s ease, transform 0.15s ease;
   flex-shrink: 0;
   pointer-events: auto;
 }
@@ -46,7 +46,55 @@
 #kites-translate-btn:hover,
 [data-kites-translate-button]:hover,
 .kites-translate-btn:hover {
-  background-color: #e02065;
+  background-color: #e0335c;
+  transform: scale(1.05);
+}
+
+.kites-finished-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  animation: kites-fade-in 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.kites-action-btn {
+  border: 1px solid #262a3b;
+  background-color: #12141c;
+  color: #ffffff;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  min-height: 28px;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+  transition: all 0.15s ease;
+  padding: 0;
+}
+
+.kites-action-btn:hover {
+  background-color: #1a1d29;
+  border-color: #f4446d;
+  color: #f4446d;
+  transform: scale(1.08);
+}
+
+.kites-action-btn:active {
+  transform: scale(0.95);
+}
+
+@keyframes kites-fade-in {
+  from {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 .kites-anim-spin {

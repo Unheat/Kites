@@ -109,3 +109,28 @@ src/studio/
 - **Visual E2E Puppeteer Suite:** Executed in `scripts/test-studio-v2-visual.js`, capturing 6 pixel-perfect verification screenshots with real manga speech bubbles.
 - **Full Test Suite:** 51 test files passed (417 total tests passing, 0 failures).
 - **Production Build:** Clean `tsc -b` and `vite build` completed successfully.
+
+---
+
+## 4. In-Page Post-Translation Finished Controls (Torii Port)
+
+### 4.1 State Memory & Action Cluster
+Ported Torii's finished-state controls to `src/content/index.tsx` (`TranslateButton`):
+- **State Memory (`translatedRegistry`):** Tracks each translated image's canonical original URL, safe blob URL, and database `jobId`. Even after navigating or moving the cursor away, re-hovering remembers that the image is translated.
+- **Action Cluster:** When translated, the control cluster seamlessly expands with three utility buttons alongside the primary toggle button:
+  1. **Toggle Original / Translated (`data-kites-toggle-btn`):** Switches between showing the translated artwork and previewing the raw original foreign text (`toggleImageDisplay`).
+  2. **Download Image (`data-kites-download-btn`):** Immediately triggers client-side download of the translated image blob without network round-trips.
+  3. **Edit in Studio (`data-kites-edit-btn`):** Directly opens the Studio tab (`index.html?jobId=${jobId}` via `OPEN_DASHBOARD`), automatically selecting that exact translated image from Dexie for editing.
+
+### 4.2 Reversion Shield Coexistence
+To prevent modern SPA frameworks (Twitter/X, Reddit, Threads) or Kites' own MutationObserver shield from mistaking a user's intentional "Show Original" preview for a hostile DOM reset:
+- Sets `data-kites-show-original="true"` on the source and surface elements.
+- `attachReversionShield` explicitly checks `img.getAttribute('data-kites-show-original') === 'true'` and ignores mutations while previewing original artwork, cleanly restoring full protection when toggled back to translated.
+
+---
+
+## 5. Verification Results
+
+- **Automated Puppeteer Integration Test:** `scripts/test-content-finished-buttons.js` passed with verified screenshot artifact (`scratches/test-artifacts/content-finished-buttons/01_finished_buttons_cluster.png`), confirming button appearance, toggle behavior, and Studio redirection with `?jobId=42`.
+- **Vitest Unit Tests:** All 51 test files and 417 tests passing.
+- **Production Build:** `npm run build` completed cleanly in 1.45s.

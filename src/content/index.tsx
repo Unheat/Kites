@@ -1,7 +1,7 @@
 import { createRoot } from 'react-dom/client';
 import { useEffect, useRef, useState, useCallback, useId } from 'react';
 import './content.css';
-import { Languages, Eye, EyeOff, ExternalLink, X, Crop, RotateCcw } from 'lucide-react';
+import { Languages, Eye, EyeOff, ExternalLink, X, Crop, RotateCcw, Download } from 'lucide-react';
 import type { PopupState, CropOverlayItem, ViewportSelection } from '../shared/types';
 import { STORAGE_KEYS } from '../shared/constants';
 import {
@@ -255,6 +255,16 @@ function suppressParentBackgroundImage(img: HTMLImageElement, surfaceElement: HT
   }
 }
 
+export interface TranslatedImageRecord {
+  originalUrl: string;
+  translatedUrl: string;
+  jobId?: number;
+  showOriginal: boolean;
+}
+
+/** In-memory registry keeping track of translated images and their finished state. */
+export const translatedRegistry = new Map<string, TranslatedImageRecord>();
+
 /**
  * Attaches a MutationObserver shield to the translated image and visible media surface.
  * If a host framework (React/Vue) or lazy-loader reverts source, visibility, or background state,
@@ -278,6 +288,11 @@ function attachReversionShield(img: HTMLImageElement, safeUrl: string, surfaceEl
 
   const observer = new MutationObserver((mutations) => {
     if (isSelfMutating) return;
+
+    // If user is previewing original image, do not revert back to translated
+    if (img.getAttribute('data-kites-show-original') === 'true') {
+      return;
+    }
 
     for (const mutation of mutations) {
       if (mutation.type === 'attributes') {
@@ -330,18 +345,32 @@ function attachReversionShield(img: HTMLImageElement, safeUrl: string, surfaceEl
  * Performs a resilient, native image replacement with SPA protection,
  * srcset clearing, lazy attribute stripping, and parent background suppression.
  *
- * @param targetImg - The target HTMLImageElement in the DOM.
+ * @param target - The target MediaTarget in the DOM.
  * @param bakedBase64 - The translated image data URL.
  * @param originalUrl - The original image URL for logging and attribution.
+ * @param jobId - Optional database Job ID for direct studio editing.
  */
-function replaceImageWithTranslation(target: MediaTarget, bakedBase64: string, originalUrl: string): void {
+function replaceImageWithTranslation(target: MediaTarget, bakedBase64: string, originalUrl: string, jobId?: number): void {
   const { imgElement: targetImg, sourceElement, surfaceElement, hiddenBacking, kind } = target;
   const previousUrl = sourceElement.getAttribute('data-kites-applied-src');
   const safeUrl = createSafeBlobUrlFromData(bakedBase64);
 
+  if (jobId) {
+    sourceElement.setAttribute('data-kites-job-id', String(jobId));
+    surfaceElement.setAttribute('data-kites-job-id', String(jobId));
+  }
+
+  translatedRegistry.set(originalUrl, {
+    originalUrl,
+    translatedUrl: safeUrl,
+    jobId,
+    showOriginal: false,
+  });
+
   runSelfMutation(() => {
     sourceElement.setAttribute('data-kites-applied-src', safeUrl);
     sourceElement.setAttribute('data-kites-translated', 'true');
+    surfaceElement.setAttribute('data-kites-translated', 'true');
     if (targetImg) {
       sanitizeImageAttributes(targetImg);
       targetImg.src = safeUrl;
@@ -373,6 +402,65 @@ function replaceImageWithTranslation(target: MediaTarget, bakedBase64: string, o
     activeObjectUrls.delete(previousUrl);
   }
   console.log(`[Content Script] Successfully replaced image for: ${originalUrl}`);
+}
+
+/**
+ * Toggles an image between its translated version and its original artwork.
+ *
+ * @param target - Target media item in the DOM.
+ * @param showOriginal - Whether to show the original image (true) or translated (false).
+ */
+function toggleImageDisplay(target: MediaTarget, showOriginal: boolean): void {
+  const { imgElement: targetImg, sourceElement, surfaceElement, kind } = target;
+  const record = translatedRegistry.get(target.srcUrl);
+  if (record) {
+    record.showOriginal = showOriginal;
+  }
+
+  runSelfMutation(() => {
+    if (showOriginal) {
+      sourceElement.setAttribute('data-kites-show-original', 'true');
+      surfaceElement.setAttribute('data-kites-show-original', 'true');
+
+      if (targetImg) {
+        const origSrc = targetImg.getAttribute('data-kites-orig-src') || target.srcUrl;
+        const origSrcset = targetImg.getAttribute('data-kites-orig-srcset');
+        targetImg.src = origSrc;
+        if (origSrcset) {
+          targetImg.srcset = origSrcset;
+        }
+        const origBg = surfaceElement.getAttribute('data-kites-orig-bg');
+        if (origBg) {
+          surfaceElement.style.backgroundImage = origBg;
+        }
+      } else if (kind === 'background') {
+        const origBg = surfaceElement.getAttribute('data-kites-orig-bg') || '';
+        surfaceElement.style.backgroundImage = origBg;
+      } else {
+        const origSrc = sourceElement.getAttribute('data-kites-orig-src') || target.srcUrl;
+        sourceElement.setAttribute('href', origSrc);
+        sourceElement.setAttributeNS('http://www.w3.org/1999/xlink', 'href', origSrc);
+      }
+    } else {
+      sourceElement.removeAttribute('data-kites-show-original');
+      surfaceElement.removeAttribute('data-kites-show-original');
+
+      const appliedSrc = sourceElement.getAttribute('data-kites-applied-src') || record?.translatedUrl;
+      if (appliedSrc) {
+        if (targetImg) {
+          targetImg.src = appliedSrc;
+          targetImg.srcset = '';
+          targetImg.removeAttribute('srcset');
+          suppressParentBackgroundImage(targetImg, surfaceElement);
+        } else if (kind === 'background') {
+          surfaceElement.style.backgroundImage = `url("${appliedSrc}")`;
+        } else {
+          sourceElement.setAttribute('href', appliedSrc);
+          sourceElement.setAttributeNS('http://www.w3.org/1999/xlink', 'href', appliedSrc);
+        }
+      }
+    }
+  });
 }
 
 type OverlayImage = MediaTarget & {
@@ -429,7 +517,81 @@ function TranslateButton({
   // looked like nothing happened. The button shows the failure briefly, then returns to
   // its idle look so the next click reads as a retry.
   const [hasFailed, setHasFailed] = useState(false);
+  const [isTranslated, setIsTranslated] = useState(() => {
+    return Boolean(
+      translatedRegistry.has(srcUrl) ||
+      anchorElement.getAttribute('data-kites-translated') === 'true'
+    );
+  });
+  const [showOriginal, setShowOriginal] = useState(() => {
+    return Boolean(
+      translatedRegistry.get(srcUrl)?.showOriginal ||
+      anchorElement.getAttribute('data-kites-show-original') === 'true'
+    );
+  });
+  const [jobId, setJobId] = useState<number | null>(() => {
+    const reg = translatedRegistry.get(srcUrl)?.jobId;
+    if (reg) return reg;
+    const attr = anchorElement.getAttribute('data-kites-job-id');
+    return attr ? Number(attr) : null;
+  });
+
   const activeTranslating = isTranslating || localTranslating;
+
+  const handleToggleOriginal = useCallback((e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    const nextShowOriginal = !showOriginal;
+    setShowOriginal(nextShowOriginal);
+    const target = resolveTargetMedia(srcUrl);
+    if (target) {
+      toggleImageDisplay(target, nextShowOriginal);
+    }
+  }, [showOriginal, srcUrl]);
+
+  const handleDownload = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const target = resolveTargetMedia(srcUrl);
+    const downloadUrl =
+      target?.sourceElement.getAttribute('data-kites-applied-src') ||
+      translatedRegistry.get(srcUrl)?.translatedUrl;
+    if (!downloadUrl) return;
+
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    link.download = `kites-translated-${Date.now()}.png`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }, [srcUrl]);
+
+  const handleEditInStudio = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const target = resolveTargetMedia(srcUrl);
+    const targetJobId =
+      jobId ||
+      translatedRegistry.get(srcUrl)?.jobId ||
+      (target ? Number(target.sourceElement.getAttribute('data-kites-job-id')) : null);
+
+    try {
+      chrome.runtime.sendMessage({
+        target: 'background',
+        source: 'content',
+        request: true,
+        type: 'OPEN_DASHBOARD',
+        payload: targetJobId ? { jobId: targetJobId } : undefined,
+      });
+    } catch {
+      const studioUrl = targetJobId
+        ? chrome.runtime.getURL(`index.html?jobId=${targetJobId}`)
+        : chrome.runtime.getURL('index.html');
+      window.open(studioUrl, '_blank');
+    }
+  }, [jobId, srcUrl]);
 
   useEffect(() => {
     if (buttonRef.current) {
@@ -551,6 +713,11 @@ function TranslateButton({
             }, TRANSLATION_FAILURE_VISIBLE_MS);
           } else {
             setHasFailed(false);
+            setIsTranslated(true);
+            setShowOriginal(false);
+            if (message.payload.jobId) {
+              setJobId(message.payload.jobId);
+            }
           }
         }
       }
@@ -604,6 +771,10 @@ function TranslateButton({
             }
             setHasFailed(false);
           }
+          if (isTranslated && !activeTranslating) {
+            handleToggleOriginal(event);
+            return;
+          }
           setLocalTranslating(true);
           onTranslate(srcUrl);
         }}
@@ -615,25 +786,48 @@ function TranslateButton({
           minWidth: '32px',
           minHeight: '32px',
           borderRadius: '50%',
-          backgroundColor: hasFailed ? '#dc2626' : '#ff2d75',
+          backgroundColor: hasFailed ? '#dc2626' : '#f4446d',
           border: 'none',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           cursor: activeTranslating ? 'wait' : 'pointer',
           color: '#ffffff',
-          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.25)',
+          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
           flexShrink: 0,
           pointerEvents: 'auto',
+          transition: 'all 0.15s ease',
         }}
-        title={hasFailed ? TRANSLATION_FAILURE_LABEL : 'Translate Image'}
-        aria-label={hasFailed
-          ? TRANSLATION_FAILURE_LABEL
-          : showInitializationLabel ? MODEL_INITIALIZATION_LABEL : 'Translate Image'}
+        title={
+          hasFailed
+            ? TRANSLATION_FAILURE_LABEL
+            : isTranslated && !activeTranslating
+            ? showOriginal
+              ? 'Show Translated Image'
+              : 'Show Original Image'
+            : 'Translate Image'
+        }
+        aria-label={
+          hasFailed
+            ? TRANSLATION_FAILURE_LABEL
+            : showInitializationLabel
+            ? MODEL_INITIALIZATION_LABEL
+            : isTranslated && !activeTranslating
+            ? showOriginal
+              ? 'Show Translated Image'
+              : 'Show Original Image'
+            : 'Translate Image'
+        }
         aria-describedby={showInitializationLabel && !hasFailed ? initializationLabelId : undefined}
       >
         {hasFailed ? (
           <X size={18} aria-hidden="true" />
+        ) : isTranslated && !activeTranslating ? (
+          showOriginal ? (
+            <EyeOff size={18} aria-hidden="true" />
+          ) : (
+            <Eye size={18} aria-hidden="true" />
+          )
         ) : (
           <Languages
             size={18}
@@ -643,6 +837,99 @@ function TranslateButton({
           />
         )}
       </button>
+
+      {isTranslated && !activeTranslating && (
+        <div
+          className="kites-finished-actions"
+          data-kites-finished-actions="true"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+          }}
+        >
+          <button
+            type="button"
+            data-kites-toggle-btn="true"
+            onClick={handleToggleOriginal}
+            className="kites-action-btn"
+            style={{
+              width: '28px',
+              height: '28px',
+              minWidth: '28px',
+              minHeight: '28px',
+              borderRadius: '50%',
+              backgroundColor: showOriginal ? '#f4446d' : '#12141c',
+              border: showOriginal ? '1px solid #f4446d' : '1px solid #262a3b',
+              color: '#ffffff',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              boxShadow: '0 2px 6px rgba(0, 0, 0, 0.35)',
+              transition: 'all 0.15s ease',
+            }}
+            title={showOriginal ? 'Show Translated Image' : 'Show Original Image'}
+            aria-label={showOriginal ? 'Show Translated Image' : 'Show Original Image'}
+          >
+            {showOriginal ? <EyeOff size={14} /> : <Eye size={14} />}
+          </button>
+
+          <button
+            type="button"
+            data-kites-download-btn="true"
+            onClick={handleDownload}
+            className="kites-action-btn"
+            style={{
+              width: '28px',
+              height: '28px',
+              minWidth: '28px',
+              minHeight: '28px',
+              borderRadius: '50%',
+              backgroundColor: '#12141c',
+              border: '1px solid #262a3b',
+              color: '#ffffff',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              boxShadow: '0 2px 6px rgba(0, 0, 0, 0.35)',
+              transition: 'all 0.15s ease',
+            }}
+            title="Download Translated Image"
+            aria-label="Download Translated Image"
+          >
+            <Download size={14} />
+          </button>
+
+          <button
+            type="button"
+            data-kites-edit-btn="true"
+            onClick={handleEditInStudio}
+            className="kites-action-btn"
+            style={{
+              width: '28px',
+              height: '28px',
+              minWidth: '28px',
+              minHeight: '28px',
+              borderRadius: '50%',
+              backgroundColor: '#12141c',
+              border: '1px solid #262a3b',
+              color: '#ffffff',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              boxShadow: '0 2px 6px rgba(0, 0, 0, 0.35)',
+              transition: 'all 0.15s ease',
+            }}
+            title="Edit in Studio (New Tab)"
+            aria-label="Edit in Studio"
+          >
+            <ExternalLink size={14} />
+          </button>
+        </div>
+      )}
       {showInitializationLabel && (
         <span
           id={initializationLabelId}
@@ -1205,9 +1492,8 @@ function GlobalOverlay() {
 
       if (!message.payload || (message.type !== 'IMAGE_TRANSLATED' && message.type !== 'TRANSLATION_ERROR')) return;
 
-      const { originalUrl, bakedBase64 } = message.payload;
+      const { originalUrl, bakedBase64, jobId } = message.payload;
       clearTranslatingUrl(originalUrl);
-      setActiveImg((current) => current?.srcUrl === originalUrl ? null : current);
 
       if (message.type !== 'IMAGE_TRANSLATED' || !bakedBase64) return;
       console.log(`[Content Script] Received translated image for: ${originalUrl}`);
@@ -1217,7 +1503,7 @@ function GlobalOverlay() {
         return;
       }
 
-      replaceImageWithTranslation(target, bakedBase64, originalUrl);
+      replaceImageWithTranslation(target, bakedBase64, originalUrl, jobId);
     };
 
     chrome.runtime.onMessage.addListener(handleMessage);

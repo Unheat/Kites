@@ -115,7 +115,13 @@ export default function App() {
       const allJobs = await db.translationJobs.orderBy('timestamp').reverse().toArray();
       setJobs(allJobs);
       if (allJobs.length > 0) {
-        setActiveJobId((curr) => curr ?? allJobs[0].id ?? null);
+        const params = new URLSearchParams(window.location.search);
+        const queryJobId = params.get('jobId') ? Number(params.get('jobId')) : null;
+        if (queryJobId && allJobs.some((j) => j.id === queryJobId)) {
+          setActiveJobId(queryJobId);
+        } else {
+          setActiveJobId((curr) => curr ?? allJobs[0].id ?? null);
+        }
       }
       return allJobs;
     } catch (err) {

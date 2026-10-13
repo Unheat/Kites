@@ -113,6 +113,11 @@ function resolveBestSrcsetUrl(srcset: string): string {
  * @returns Best usable source URL, or an empty string.
  */
 export function resolveElementSource(element: Element): string {
+  const origSrc = element.getAttribute('data-kites-orig-src');
+  if (origSrc && !isPlaceholderSource(origSrc)) {
+    return origSrc;
+  }
+
   const directCandidates: string[] = [];
   if (element instanceof HTMLImageElement) {
     directCandidates.push(element.currentSrc, element.src, element.getAttribute('src') || '');

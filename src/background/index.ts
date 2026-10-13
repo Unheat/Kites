@@ -296,7 +296,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === 'OPEN_DASHBOARD') {
-    chrome.tabs.create({ url: chrome.runtime.getURL('index.html') });
+    const targetJobId = message.payload?.jobId;
+    const url = targetJobId ? chrome.runtime.getURL(`index.html?jobId=${targetJobId}`) : chrome.runtime.getURL('index.html');
+    chrome.tabs.create({ url });
     sendResponse({ status: 'success' });
     return true;
   }
@@ -936,6 +938,7 @@ async function processImageTranslation(jobId: number, srcUrl: string, tabId?: nu
         chrome.tabs.sendMessage(tabId, {
           type: 'IMAGE_TRANSLATED',
           payload: {
+            jobId,
             originalUrl: srcUrl,
             bakedBase64: offscreenResponse.bakedBase64
           }

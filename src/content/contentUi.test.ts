@@ -80,11 +80,27 @@ describe('Frontend UI & Button CSS Contract', () => {
     expect(wrapperStyle.position).toBe('fixed');
     expect(wrapperStyle.zIndex).toBe('999999');
 
-    // Button MUST have non-zero dimensions and brand background color
+    // Button MUST have non-zero dimensions and brand background color (#f4446d)
     expect(buttonStyle.width).toBe('32px');
     expect(buttonStyle.height).toBe('32px');
     expect(buttonStyle.borderRadius).toBe('50%');
-    expect(buttonStyle.backgroundColor).toBe('rgb(255, 45, 117)');
+    expect(buttonStyle.backgroundColor).toBe('rgb(244, 68, 109)');
+
+    // Finished actions and utility button classes in content.css
+    const finishedActions = document.createElement('div');
+    finishedActions.className = 'kites-finished-actions';
+    document.body.appendChild(finishedActions);
+    const finishedStyle = window.getComputedStyle(finishedActions);
+    expect(finishedStyle.display).toBe('flex');
+    expect(finishedStyle.alignItems).toBe('center');
+
+    const actionBtn = document.createElement('button');
+    actionBtn.className = 'kites-action-btn';
+    document.body.appendChild(actionBtn);
+    const actionStyle = window.getComputedStyle(actionBtn);
+    expect(actionStyle.width).toBe('28px');
+    expect(actionStyle.height).toBe('28px');
+    expect(actionStyle.borderRadius).toBe('50%');
   });
 });
 
