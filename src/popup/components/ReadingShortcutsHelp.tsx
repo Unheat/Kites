@@ -26,6 +26,11 @@ const SHORTCUTS: ShortcutEntry[] = [
     note: 'Draw a rectangle on screen to capture and translate.',
   },
   {
+    keys: 'Alt + Shift + R',
+    label: 'Open Chapter Reader',
+    note: 'Launch fullscreen distraction-free reader for translated pages.',
+  },
+  {
     keys: 'F',
     label: 'Toggle original / translated',
     note: 'Only active when hovering a translated image. Ignored inside text fields.',

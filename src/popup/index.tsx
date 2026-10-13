@@ -7,6 +7,7 @@ import SettingsView from './components/SettingsView';
 
 import { Settings, Home, Power, Crop, Globe } from 'lucide-react';
 import PageExportControl from './components/PageExportControl';
+import ReaderLaunchControl from './components/ReaderLaunchControl';
 
 import type { PopupState } from '../shared/types';
 import { DEFAULT_POPUP_STATE } from '../shared/types';
@@ -140,12 +141,14 @@ function PopupApp() {
     };
   }, []);
 
-  // Apply dark mode to HTML tag
+  // Apply dark mode to HTML and body tags
   useEffect(() => {
     if (state.isDark) {
       document.documentElement.classList.add('dark');
+      document.body.classList.add('dark');
     } else {
       document.documentElement.classList.remove('dark');
+      document.body.classList.remove('dark');
     }
   }, [state.isDark]);
 
@@ -187,7 +190,7 @@ function PopupApp() {
   if (!isLoaded) return null;
 
   return (
-    <div className="flex flex-col bg-[var(--color-paper)] text-[var(--color-ink)] font-body relative" style={{ width: '320px' }}>
+    <div className="w-full min-h-full flex flex-col bg-[var(--color-paper)] text-[var(--color-ink)] font-body relative">
       
       {/* Header */}
       <div className="flex justify-between items-center mb-2.5 p-3.5 pb-0">
@@ -260,6 +263,7 @@ function PopupApp() {
 
         {/* Footer Action */}
         <div className="px-3.5 pb-3.5 flex flex-col gap-2">
+          <ReaderLaunchControl />
           <PageExportControl />
           <button
             onClick={async () => {

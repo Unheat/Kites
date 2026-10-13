@@ -32,6 +32,10 @@ describe('readingCommandMessage', () => {
     expect(readingCommandMessage('start-screen-crop')).toEqual({ type: 'START_AREA_SELECTION' });
   });
 
+  it('maps open-chapter-reader', () => {
+    expect(readingCommandMessage('open-chapter-reader')).toEqual({ type: 'OPEN_CHAPTER_READER' });
+  });
+
   it.each(['unknown', '_execute_action', 'torii_translate', ''])('returns null for %s', (command) => {
     expect(readingCommandMessage(command)).toBeNull();
   });

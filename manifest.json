@@ -28,6 +28,10 @@
     "start-screen-crop": {
       "suggested_key": { "default": "Alt+Shift+X" },
       "description": "Select a screen area to translate"
+    },
+    "open-chapter-reader": {
+      "suggested_key": { "default": "Alt+Shift+R" },
+      "description": "Open distraction-free chapter reader"
     }
   },
   "permissions": [

@@ -11,6 +11,7 @@ export interface ReadingShortcutActions<T> {
   toggleOriginal: (target: T) => void;
   translate: (target: T) => void;
   startAreaSelection: () => void;
+  openChapterReader?: () => void;
 }
 
 // F is deliberately the only page-level shortcut. Space must retain page scrolling.
@@ -72,10 +73,15 @@ export function handleReadingKeydown<T>(event: KeyboardEvent, actions: ReadingSh
  */
 export function handleReadingCommand<T>(message: unknown, actions: ReadingShortcutActions<T>): boolean {
   if (!message || typeof message !== 'object' || !('type' in message)) return false;
-  if (message.type !== 'TRANSLATE_HOVERED_IMAGE' && message.type !== 'START_AREA_SELECTION') return false;
+  if (
+    message.type !== 'TRANSLATE_HOVERED_IMAGE' &&
+    message.type !== 'START_AREA_SELECTION' &&
+    message.type !== 'OPEN_CHAPTER_READER'
+  ) return false;
   const { enabled, busy, target } = actions.getContext();
   if (!enabled || busy) return true;
   if (message.type === 'START_AREA_SELECTION') actions.startAreaSelection();
+  else if (message.type === 'OPEN_CHAPTER_READER') actions.openChapterReader?.();
   else if (target !== null) actions.translate(target);
   return true;
 }

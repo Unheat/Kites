@@ -1,4 +1,6 @@
-export type ReadingCommandMessage = { type: 'TRANSLATE_HOVERED_IMAGE' | 'START_AREA_SELECTION' };
+export type ReadingCommandMessage = {
+  type: 'TRANSLATE_HOVERED_IMAGE' | 'START_AREA_SELECTION' | 'OPEN_CHAPTER_READER';
+};
 
 /** Minimal Chrome surface keeps registration safe in older unit-test mocks. */
 export interface ReadingCommandsApi {
@@ -23,6 +25,7 @@ const TOP_FRAME_ID = 0;
 export function readingCommandMessage(command: string): ReadingCommandMessage | null {
   if (command === 'translate-hovered-image') return { type: 'TRANSLATE_HOVERED_IMAGE' };
   if (command === 'start-screen-crop') return { type: 'START_AREA_SELECTION' };
+  if (command === 'open-chapter-reader') return { type: 'OPEN_CHAPTER_READER' };
   return null;
 }
 

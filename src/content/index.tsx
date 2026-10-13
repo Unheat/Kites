@@ -5,7 +5,9 @@ import { Languages, Eye, EyeOff, ExternalLink, X, Crop, RotateCcw, Download } fr
 import type { PopupState, CropOverlayItem, ViewportSelection, SiteSelectorRule } from '../shared/types';
 import { STORAGE_KEYS } from '../shared/constants';
 import { isDomainDisabled, findMatchingSiteRule } from '../shared/siteRules';
-import { createChapterTranslationRegistry, createChapterExporter, type ChapterTranslationRecord } from './chapterZip';
+import { createChapterTranslationRegistry, createChapterExporter, orderChapterImages, type ChapterTranslationRecord } from './chapterZip';
+import ChapterReaderModal from './ChapterReaderModal';
+import ChapterReaderFloatingPill from './ChapterReaderFloatingPill';
 import { handleReadingKeydown, handleReadingCommand, type ReadingShortcutActions } from './readingShortcuts';
 import {
   normalizeSelection,
@@ -308,6 +310,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       sendResponse({ ...chapterExporter.getStatus(), phase: 'error', busy: false, message: 'ZIP export failed. Nothing downloaded.' });
     });
     return true;
+  }
+  if (message.type === 'OPEN_CHAPTER_READER') {
+    document.dispatchEvent(new CustomEvent('kites-open-chapter-reader'));
+    sendResponse({ status: 'success' });
+    return;
   }
 });
 
@@ -1277,6 +1284,8 @@ function GlobalOverlay() {
   const [translatingUrls, setTranslatingUrls] = useState<Set<string>>(new Set());
   const [isSnipping, setIsSnipping] = useState<boolean>(false);
   const [crops, setCrops] = useState<CropOverlayItem[]>([]);
+  const [isReaderOpen, setIsReaderOpen] = useState<boolean>(false);
+  const [isPillDismissed, setIsPillDismissed] = useState<boolean>(false);
 
   const activeImgRef = useRef(activeImg);
   const translatingUrlsRef = useRef(translatingUrls);
@@ -1291,6 +1300,12 @@ function GlobalOverlay() {
   const getActiveCustomSelector = (): string | undefined => {
     return findMatchingSiteRule(window.location.hostname, siteRulesRef.current)?.selector;
   };
+
+  useEffect(() => {
+    const handleOpenReader = () => setIsReaderOpen(true);
+    document.addEventListener('kites-open-chapter-reader', handleOpenReader);
+    return () => document.removeEventListener('kites-open-chapter-reader', handleOpenReader);
+  }, []);
 
   /**
    * Marks an image URL as no longer translating so its button leaves the spinner state.
@@ -1508,6 +1523,7 @@ function GlobalOverlay() {
         anchorName: getAnchorName(target.surfaceElement),
       }),
       startAreaSelection: () => setIsSnipping(true),
+      openChapterReader: () => setIsReaderOpen(true),
     };
     /**
      * Saves live pointer coordinates for shortcut targeting in both manual modes.
@@ -1953,6 +1969,24 @@ function GlobalOverlay() {
           anchorElement={activeImg.surfaceElement}
           isTranslating={translatingUrls.has(activeImg.srcUrl)}
           onTranslate={(srcUrl) => requestTranslation(srcUrl, activeImg)}
+        />
+      )}
+
+      {/* Full-Screen Distraction-Free Chapter Reader Modal */}
+      <ChapterReaderModal
+        isOpen={isReaderOpen}
+        onClose={() => setIsReaderOpen(false)}
+        records={orderChapterImages(translatedRegistry.getRecords(), window.location.href) as ChapterTranslationRecord[]}
+        title={document.title}
+        onExportZip={() => void chapterExporter.exportChapter()}
+      />
+
+      {/* Floating Reader Launch Pill */}
+      {!isReaderOpen && !isPillDismissed && (
+        <ChapterReaderFloatingPill
+          pageCount={orderChapterImages(translatedRegistry.getRecords(), window.location.href).length}
+          onOpen={() => setIsReaderOpen(true)}
+          onDismiss={() => setIsPillDismissed(true)}
         />
       )}
     </>
