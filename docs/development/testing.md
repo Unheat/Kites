@@ -45,7 +45,12 @@ npm test
 - **Backend Orchestrators:** Translation waterfall failover logic, circuit breaking, token-bucket rate limiting, and Delimiter formatting (`TranslationManager.test.ts`).
 - **Spatial Clustering Math:** Kruskal's MST algorithm, Euclidean distance thresholds, direction majority scoring, and convex hull overlap logic.
 - **Typesetting Heuristics:** 4-pass font fitting bounds, hyphenation triggers, tall-box aspect ratio clamping, and decollision matrix math.
-- **Database & Queue Lifecycle:** Dexie.js IndexedDB schema migrations, orphan job cleanup, and 7-day TTL pruning.
+- **Database & Queue Lifecycle:** Dexie.js IndexedDB schema migrations, orphan job cleanup, and configurable history retention (1 day, 1 week, 1 month, or Never). Cleanup excludes active jobs and skips deletion when settings cannot be read.
+- **Chapter ZIP Export:** Page-scoped reading order, detached-image retention, ZIP contents, size limits, partial failures, and duplicate-export protection (`chapterZip.test.ts`).
+- **Translation Glossary:** Bounded dictionary normalization, per-request terminology snapshots, prompt data boundaries, and forwarding through the translation waterfall (`glossary.test.ts`, `BaseLlmTranslationEngine.test.ts`, `TranslationManager.test.ts`).
+- **Reading Shortcuts:** Editable-field and modifier guards, original/translated toggling, and top-frame command routing (`readingShortcuts.test.ts`, `readingCommands.test.ts`).
+
+Use the supported `npm test` command. Bare `npx vitest run` also discovers archived engines under `archive/`; those preserved tests refer to removed dependencies and old import paths and are not part of the active source suite.
 
 ---
 

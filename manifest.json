@@ -20,6 +20,16 @@
       "128": "icons/icon128.png"
     }
   },
+  "commands": {
+    "translate-hovered-image": {
+      "suggested_key": { "default": "Alt+Shift+Z" },
+      "description": "Translate the image under the pointer"
+    },
+    "start-screen-crop": {
+      "suggested_key": { "default": "Alt+Shift+X" },
+      "description": "Select a screen area to translate"
+    }
+  },
   "permissions": [
     "activeTab",
     "storage",

@@ -143,14 +143,16 @@ export default function SettingsView({ state, updateState }: SettingsViewProps) 
 
           {/* Max Queue Capacity Slider */}
           <div>
-            <div className="flex justify-between items-center mb-1">
-              <span className="font-medium text-sm">Max Queue Capacity</span>
+            <div className="flex justify-between items-center mb-2">
+              <div className="flex items-center gap-1.5">
+                <span className="font-medium text-sm">Max Queue Capacity</span>
+                <FieldHint>
+                  Maximum images allowed in translation queue. Processed sequentially for GPU stability.
+                </FieldHint>
+              </div>
               <span className="text-sm font-bold text-[var(--color-editorial)]">{state.concurrency}</span>
             </div>
-            <p className="text-[11px] text-[var(--color-dust)] mb-2">
-              Maximum images allowed in translation queue. Processed sequentially for GPU stability.
-            </p>
-<input
+            <input
               type="range"
               min="1"
               max="5"
