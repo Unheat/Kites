@@ -191,6 +191,14 @@ fs.mkdirSync(screenshotDir, { recursive: true });
     });
     await new Promise((r) => setTimeout(r, 200));
 
+    // Click on OCR Tool (Ctrl+4)
+    console.log('[Visual Test] Selecting Re-OCR tool...');
+    await page.click('button[title*="OCR"]');
+    await new Promise((r) => setTimeout(r, 300));
+    await page.screenshot({
+      path: path.join(screenshotDir, '04c_ocr_tool_settings.png'),
+    });
+
     // Click on Text Tool (Ctrl+5) and select first bubble
     console.log('[Visual Test] Selecting Text tool...');
     await page.click('button[title*="Text & Typography"]');

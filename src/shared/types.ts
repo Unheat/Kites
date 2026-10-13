@@ -67,7 +67,14 @@ export interface StudioInpaintPayload {
 }
 
 export interface StudioOcrPayload {
+  /** Pristine original-art crop used only for recognition. */
   imagePatchBase64: string;
+  /** Current edited raster crop used for cleaning; defaults to the recognition crop. */
+  backgroundPatchBase64?: string;
+  /** Translate recognized text unless explicitly false. */
+  translate?: boolean;
+  /** Clean detected regions unless explicitly false. */
+  inpaint?: boolean;
   width: number;
   height: number;
   offsetX: number;

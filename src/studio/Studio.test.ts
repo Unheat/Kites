@@ -101,4 +101,55 @@ describe('Studio State Management', () => {
     studioStore.setEngineSelection('inpaint', 'telea');
     expect(studioStore.getState().selectedInpaintEngineId).toBe('telea');
   });
+
+  it('restores compound raster patch and text objects in a single undo step', () => {
+    let restoredRasterX = -1;
+    let restoredTextCount = -1;
+
+    const dummyImageData = {} as ImageData;
+    studioUndoStack.push({
+      id: 'ocr-action',
+      timestamp: Date.now(),
+      description: 'Live AI Re-OCR',
+      rasterPatch: {
+        before: { x: 50, y: 60, width: 100, height: 100, patchImageData: dummyImageData },
+        after: { x: 50, y: 60, width: 100, height: 100, patchImageData: dummyImageData },
+      },
+      textObjects: {
+        before: [],
+        after: [{ id: 'b-1', x: 50, y: 60, width: 80, height: 40, text: 'New', fontSize: 16, fontFamily: 'sans', color: '#000' }],
+      },
+    });
+
+    studioUndoStack.undo({
+      applyRasterPatch: (patch) => {
+        restoredRasterX = patch.x;
+      },
+      applyTextObjects: (objs) => {
+        restoredTextCount = objs.length;
+      },
+    });
+
+    expect(restoredRasterX).toBe(50);
+    expect(restoredTextCount).toBe(0);
+  });
+
+  it('manages OCR settings state with scanSource, translate, and inpaint toggles', () => {
+    expect(studioStore.getState().ocrSettings.scanSource).toBe('original');
+    expect(studioStore.getState().ocrSettings.translate).toBe(true);
+    expect(studioStore.getState().ocrSettings.inpaint).toBe(true);
+
+    studioStore.setState({
+      ocrSettings: {
+        ...studioStore.getState().ocrSettings,
+        scanSource: 'background',
+        translate: false,
+        inpaint: false,
+      },
+    });
+
+    expect(studioStore.getState().ocrSettings.scanSource).toBe('background');
+    expect(studioStore.getState().ocrSettings.translate).toBe(false);
+    expect(studioStore.getState().ocrSettings.inpaint).toBe(false);
+  });
 });

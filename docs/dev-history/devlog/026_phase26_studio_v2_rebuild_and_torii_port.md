@@ -145,15 +145,27 @@ Unlike Torii which only provides a single paid cloud endpoint and basic fill, Ki
 - Models not yet cached on disk display an inline **Download Button** with size estimation.
 - Clicking dispatches `START_MODEL_DOWNLOAD` to the background queue and binds to the `MODEL_DOWNLOAD_PROGRESS` event bus, rendering an inline progress bar and percentage directly in Studio.
 
+### 5.4 Multi-Source Re-OCR, Optional Steps & Compound Undo Fix
+- **3-Way Scan Source Selector (`ocrSettings.scanSource`):**
+  1. `Original` (default): crops from `originalImage` containing raw un-erased foreign text.
+  2. `Inpainted BG`: crops from `bgCanvas` containing cleaned/painted artwork.
+  3. `Translated`: crops from a composite of `bgCanvas` and rendered text layers (`overlayCanvas`).
+- **Independent Post-Recognition Flags (`translate`, `inpaint`):**
+  - Turning off `translate` keeps raw source text in the spawned text box.
+  - Turning off `inpaint` leaves the artwork untouched (OCR-only mode).
+  - Empty recognition displays clear feedback without dirtying the undo history or running unneeded cleaning.
+- **Unified Working Canvas Undo/Redo:**
+  - Resolved root cause where `document.querySelector('canvas')` targeted the hidden `originalCanvasRef` rather than the working raster. Marked working background with `data-studio-working-background="true"`.
+  - Compound undo actions restore both `rasterPatch.before` and `textObjects.before` synchronously in a single Ctrl+Z keystroke.
+
 ---
 
 ## 6. Verification Results
 
-- **Automated Puppeteer Integration Test:** `scripts/test-content-finished-buttons.js` passed with verified screenshot artifact (`scratches/test-artifacts/content-finished-buttons/01_finished_buttons_cluster.png`), confirming button appearance, toggle behavior, and Studio redirection with `?jobId=42`.
-- **Studio Visual Regression Runner:** `scripts/test-studio-v2-visual.js` captured all artifacts including:
-  - `04_inpaint_tool_settings.png`: StudioEngineSelector integrated into Inpaint tool card.
-  - `04b_inpaint_tier_dropdown_open.png`: Multi-tier dropdown open with download buttons and tags.
-  - `07_show_original_untranslated_preview.png`: Raw untranslated artwork display without horizontal mirror inversion.
-  - `08_show_translated_restored.png`: Translated typography restored.
-- **Vitest Unit Tests:** All 51 test files and 419 unit tests passing (`npm test`).
-- **Production Build:** `npm run build` completed cleanly in 1.39s.
+- **Automated Puppeteer Integration Test:** `scripts/test-content-finished-buttons.js` passed with verified screenshot artifact (`scratches/test-artifacts/content-finished-buttons/01_finished_buttons_cluster.png`).
+- **Studio Visual Regression Runner:** `scripts/test-studio-v2-visual.js` verified:
+  - `04c_ocr_tool_settings.png`: 3-way scan source and independent translate/inpaint toggles.
+  - `04_inpaint_tool_settings.png` & `04b_inpaint_tier_dropdown_open.png`: Multi-tier engine selector and live download options.
+  - `07_show_original_untranslated_preview.png` & `08_show_translated_restored.png`: True untranslated base preview.
+- **Vitest Unit Tests:** All 53 test files and 464 unit tests passing (`npm test`).
+- **Production Build:** `npm run build` completed cleanly in 1.58s.

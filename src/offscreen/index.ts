@@ -2,6 +2,7 @@ import type { ModelInitializationMessage, ModelInitializationPhase, ProcessJobMe
 import type { Point2D } from './engines/inpaint/BaseInpaintEngine';
 import { pipelineOrchestrator } from './services/PipelineOrchestrator';
 import { translationManager } from './services/TranslationManager';
+import { runStudioOcr, type StudioOcrResponse } from './services/StudioOcr';
 import { CustomApiEngine } from './engines/translation/CustomApiEngine';
 import { inpaintRegistry } from './engines/inpaint/inpaintRegistry';
 import { ocrRegistry, resolveOcrTier } from './engines/ocr/ocrRegistry';
@@ -567,83 +568,28 @@ async function handleStudioInpaint(payload: StudioInpaintPayload): Promise<{ inp
 }
 
 /**
- * Executes localized re-OCR, background inpainting, and translation for Studio V2.
+ * Executes localized re-OCR, optional background inpainting, and translation for Studio V2.
+ * @param payload - Original crop, edited background, page offsets, and optional steps.
+ * @returns Page-space text objects and cleaned or unchanged patch; failures reach the RPC caller.
  */
-async function handleStudioOcr(payload: StudioOcrPayload): Promise<{
-  inpaintedPatchBase64: string;
-  textObjects: Array<{
-    id: string;
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-    text: string;
-    originalText: string;
-  }>;
-}> {
-  const imageRes = await fetch(payload.imagePatchBase64);
-  const imageBuf = await imageRes.arrayBuffer();
-
-  const popupState = await new Promise<any>((resolve) => {
-    chrome.runtime.sendMessage({ type: 'GET_POPUP_STATE' }, (res) => resolve(res || {}));
+async function handleStudioOcr(payload: StudioOcrPayload): Promise<StudioOcrResponse> {
+  return runStudioOcr(payload, {
+    getPopupState: () => new Promise((resolve, reject) => {
+      chrome.runtime.sendMessage({
+        type: 'GET_POPUP_STATE', target: 'background', source: 'offscreen', request: true,
+      }, (response) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message || 'Failed to load Studio OCR settings.'));
+        } else if (!response || response.status === 'error') {
+          reject(new Error(response?.error || 'Studio OCR settings are unavailable.'));
+        } else {
+          resolve(response);
+        }
+      });
+    }),
+    getOcrManager: () => pipelineOrchestrator.getOcrManager(),
+    getInpaintManager: () => pipelineOrchestrator.getInpaintManager(),
+    translationManager,
+    blobToBase64,
   });
-
-  const ocrTier = payload.ocrEngineId || popupState.activeOcrId || 'v6-small';
-  const ocrResult = await pipelineOrchestrator.getOcrManager().processImage(imageBuf, ocrTier, {
-    sourceLang: popupState.sourceLang !== 'auto' ? popupState.sourceLang : undefined,
-    pageWidth: payload.width,
-    pageHeight: payload.height,
-  });
-
-  let translatedTexts: string[] = [];
-  if (ocrResult.texts && ocrResult.texts.length > 0) {
-    const sourceLang = popupState.sourceLang || 'auto';
-    const targetLang = popupState.targetLang || 'en';
-    const effectivePopupState = payload.translationEngineId
-      ? { ...popupState, activeEngineId: payload.translationEngineId }
-      : popupState;
-    try {
-      translatedTexts = await translationManager.processTranslation(
-        ocrResult.texts,
-        sourceLang,
-        targetLang,
-        () => {},
-        effectivePopupState
-      );
-    } catch {
-      translatedTexts = ocrResult.texts;
-    }
-  }
-
-  const inpaintTier = payload.inpaintEngineId || popupState.activeInpaintId || 'lama-manga';
-  let cleanedBuffer = imageBuf;
-  if (ocrResult.polygons && ocrResult.polygons.length > 0) {
-    cleanedBuffer = await pipelineOrchestrator.getInpaintManager().eraseText(imageBuf, ocrResult.polygons, inpaintTier);
-  }
-
-  const cleanedBlob = new Blob([cleanedBuffer], { type: 'image/png' });
-  const cleanedBase64 = await blobToBase64(cleanedBlob);
-
-  const textObjects = (ocrResult.polygons || []).map((poly: Point2D[], idx: number) => {
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const p of poly) {
-      if (p.x < minX) minX = p.x;
-      if (p.x > maxX) maxX = p.x;
-      if (p.y < minY) minY = p.y;
-      if (p.y > maxY) maxY = p.y;
-    }
-    const width = Math.max(20, maxX - minX);
-    const height = Math.max(20, maxY - minY);
-    return {
-      id: `ocr-${Date.now()}-${idx}`,
-      x: payload.offsetX + minX,
-      y: payload.offsetY + minY,
-      width,
-      height,
-      text: translatedTexts[idx] || ocrResult.texts[idx] || '',
-      originalText: ocrResult.texts[idx] || '',
-    };
-  });
-
-  return { inpaintedPatchBase64: cleanedBase64, textObjects };
 }

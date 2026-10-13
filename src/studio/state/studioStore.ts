@@ -46,9 +46,14 @@ export interface InpaintSettingsState {
   size: number;
 }
 
+export type OcrScanSource = 'original' | 'background' | 'composition';
+
 export interface OcrSettingsState {
+  scanSource: OcrScanSource;
   shape: BrushShape;
   size: number;
+  translate: boolean;
+  inpaint: boolean;
 }
 
 export interface StudioState {
@@ -57,6 +62,7 @@ export interface StudioState {
   zoom: number;
   pan: { x: number; y: number };
   isSpacePanning: boolean;
+  isAiProcessing: boolean;
   isShowingOriginal: boolean;
   isCanvasFlipped: boolean;
   hideBoxes: boolean;
@@ -110,6 +116,7 @@ const initialState: StudioState = {
   zoom: 1.0,
   pan: { x: 0, y: 0 },
   isSpacePanning: false,
+  isAiProcessing: false,
   isShowingOriginal: false,
   isCanvasFlipped: false,
   hideBoxes: false,
@@ -145,8 +152,11 @@ const initialState: StudioState = {
     size: 40,
   },
   ocrSettings: {
+    scanSource: 'original',
     shape: 'circle',
     size: 40,
+    translate: true,
+    inpaint: true,
   },
 
   textObjects: [],

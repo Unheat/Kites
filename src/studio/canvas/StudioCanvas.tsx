@@ -19,6 +19,7 @@ import { BrushEngine } from './BrushEngine';
 import { TextRenderer } from './TextRenderer';
 import { CanvasFurniture } from './CanvasFurniture';
 import { WarpMesh } from './WarpMesh';
+import { createStudioOcrCrops } from './studioOcrCrop';
 import { requestStudioInpaint, requestStudioOcr } from '../bridge/offscreenStudioBridge';
 import type {
   BoundingBox,
@@ -63,6 +64,8 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
   const [isPointerDown, setIsPointerDown] = useState(false);
   const [isSpacePanning, setIsSpacePanning] = useState(false);
   const [isAiProcessing, setIsAiProcessing] = useState(false);
+  const aiProcessingRef = useRef(false);
+  const [ocrFeedback, setOcrFeedback] = useState<string | null>(null);
   const [activeHandle, setActiveHandle] = useState<TransformHandle | null>(null);
   const [dragStartPoint, setDragStartPoint] = useState<Point | null>(null);
   const [initialTransformState, setInitialTransformState] = useState<TextObject | null>(null);
@@ -249,7 +252,8 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
 
   // Pointer Down
   const handlePointerDown = (e: React.PointerEvent) => {
-    if (e.button !== 0) return;
+    if (e.button !== 0 || aiProcessingRef.current || isAiProcessing || isShowingOriginal) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
     const pt = getPointerImageCoords(e);
     setIsPointerDown(true);
     setDragStartPoint(pt);
@@ -307,7 +311,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
     if (activeTool === 'inpaint' || activeTool === 'ocr') {
       const brushSize = activeTool === 'inpaint' ? inpaintSettings.size : ocrSettings.size;
       brushEngineRef.current.beginStroke(pt, {
-        shape: 'circle',
+        shape: activeTool === 'inpaint' ? inpaintSettings.shape : ocrSettings.shape,
         size: brushSize,
         feather: 0,
       });
@@ -436,7 +440,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
     if (activeTool === 'inpaint' || activeTool === 'ocr') {
       const brushSize = activeTool === 'inpaint' ? inpaintSettings.size : ocrSettings.size;
       brushEngineRef.current.extendStroke(pt, {
-        shape: 'circle',
+        shape: activeTool === 'inpaint' ? inpaintSettings.shape : ocrSettings.shape,
         size: brushSize,
         feather: 0,
       });
@@ -484,6 +488,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
 
   // Pointer Up
   const handlePointerUp = async () => {
+    if (!isPointerDown || aiProcessingRef.current) return;
     setIsPointerDown(false);
     setActiveHandle(null);
     setDragStartPoint(null);
@@ -569,48 +574,57 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       const bbox = brushEngineRef.current.endStroke(0);
       if (bbox.width <= 8 || bbox.height <= 8) return;
 
-      const paddedBbox: BoundingBox = {
-        x: Math.max(0, bbox.x - 8),
-        y: Math.max(0, bbox.y - 8),
-        width: Math.min(imageWidth - bbox.x, bbox.width + 16),
-        height: Math.min(imageHeight - bbox.y, bbox.height + 16),
-      };
-
-      const patchCanvas = document.createElement('canvas');
-      patchCanvas.width = paddedBbox.width;
-      patchCanvas.height = paddedBbox.height;
-      const patchCtx = patchCanvas.getContext('2d');
-      patchCtx?.drawImage(bgCanvas, paddedBbox.x, paddedBbox.y, paddedBbox.width, paddedBbox.height, 0, 0, paddedBbox.width, paddedBbox.height);
-
-      const preOcrPatch = BrushEngine.captureBoundingPatch(bgCtx, paddedBbox);
       redrawOverlay();
-
+      setOcrFeedback(null);
+      aiProcessingRef.current = true;
       setIsAiProcessing(true);
       try {
-        const result = await requestStudioOcr(patchCanvas, paddedBbox, {
+        const crops = createStudioOcrCrops(
+          originalImage,
+          bgCanvas,
+          overlayCanvasRef.current,
+          bbox,
+          ocrSettings.scanSource
+        );
+        const paddedBbox = crops.bounds;
+        const preOcrPatch = ocrSettings.inpaint
+          ? BrushEngine.captureBoundingPatch(bgCtx, paddedBbox) : undefined;
+        const result = await requestStudioOcr(crops.recognition, paddedBbox, {
           ocrEngineId: selectedOcrEngineId,
           inpaintEngineId: selectedInpaintEngineId,
+          translate: ocrSettings.translate,
+          inpaint: ocrSettings.inpaint,
+          backgroundPatchBase64: ocrSettings.inpaint ? crops.background.toDataURL('image/png') : undefined,
         });
-        bgCtx.drawImage(result.inpaintedImage, paddedBbox.x, paddedBbox.y, paddedBbox.width, paddedBbox.height);
-        const postOcrPatch = BrushEngine.captureBoundingPatch(bgCtx, paddedBbox);
+        if (result.textObjects.length === 0) {
+          setOcrFeedback('No text found in the selected area. Try selecting the whole text line.');
+          return;
+        }
+        if (ocrSettings.inpaint) {
+          bgCtx.drawImage(result.inpaintedImage, paddedBbox.x, paddedBbox.y, paddedBbox.width, paddedBbox.height);
+        }
+        const postOcrPatch = ocrSettings.inpaint
+          ? BrushEngine.captureBoundingPatch(bgCtx, paddedBbox) : undefined;
 
-        const prevTexts = [...textObjects];
-        const nextTexts = [...textObjects, ...result.textObjects];
+        const prevTexts = [...studioStore.getState().textObjects];
+        const nextTexts = [...prevTexts, ...result.textObjects];
         studioStore.setState({
           textObjects: nextTexts,
-          selectedTextId: result.textObjects[0]?.id || selectedTextId,
+          selectedTextId: result.textObjects[0].id,
         });
-
+        setOcrFeedback(`Recognized ${result.textObjects.length} text box${result.textObjects.length === 1 ? '' : 'es'}.`);
         studioUndoStack.push({
           id: `ocr-${Date.now()}`,
           timestamp: Date.now(),
           description: 'Live AI Re-OCR',
-          rasterPatch: { before: preOcrPatch, after: postOcrPatch },
+          ...(preOcrPatch && postOcrPatch ? { rasterPatch: { before: preOcrPatch, after: postOcrPatch } } : {}),
           textObjects: { before: prevTexts, after: nextTexts },
         });
       } catch (err) {
         console.error('[Studio] OCR request failed:', err);
+        setOcrFeedback(err instanceof Error ? err.message : 'OCR failed. Try again.');
       } finally {
+        aiProcessingRef.current = false;
         setIsAiProcessing(false);
       }
       return;
@@ -770,6 +784,8 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
         {/* Working background raster canvas (cleaned/painted artwork) */}
         <canvas
           ref={bgCanvasRef}
+          data-studio-working-background="true"
+          id="studio-working-background"
           style={{
             width: `${imageWidth * zoom}px`,
             height: `${imageHeight * zoom}px`,
@@ -794,7 +810,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       </div>
 
       {/* Floating Action Pill Toolbar (Figma/Torii style) */}
-      {pillPos && selectedObj && !isSpacePanning && !hideBoxes && (
+      {pillPos && selectedObj && !isShowingOriginal && !isSpacePanning && !hideBoxes && (
         <div
           style={{
             left: `${pillPos.x}px`,
@@ -840,6 +856,15 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
           >
             <Trash2 className="w-3.5 h-3.5" />
           </button>
+        </div>
+      )}
+
+      {activeTool === 'ocr' && ocrFeedback && !isAiProcessing && (
+        <div role="status" className="fixed bottom-6 right-6 z-50 max-w-sm rounded-xl border border-[#282d3f] bg-[#12141c] px-4 py-3 text-xs text-slate-200 shadow-xl">
+          <div className="flex items-start gap-3">
+            <span>{ocrFeedback}</span>
+            <button type="button" aria-label="Dismiss OCR message" onClick={() => setOcrFeedback(null)} className="text-slate-400 hover:text-white">×</button>
+          </div>
         </div>
       )}
 

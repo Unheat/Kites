@@ -54,9 +54,10 @@ export async function requestStudioInpaint(
 /**
  * Dispatches a localized Re-OCR, translation, and inpainting request to the offscreen document.
  *
- * @param patchCanvas - Canvas element holding the cropped artwork patch.
+ * @param patchCanvas - Canvas crop from the original untranslated artwork for recognition.
  * @param bbox - Bounding coordinates and dimensions of the cropped region.
- * @returns Cleaned patch image element and list of newly recognized/translated TextObjects.
+ * @param overrides - Engine selections, optional steps, and current background patch for cleaning.
+ * @returns Background patch image and editable recognized or translated TextObjects.
  */
 export async function requestStudioOcr(
   patchCanvas: HTMLCanvasElement,
@@ -65,6 +66,9 @@ export async function requestStudioOcr(
     ocrEngineId?: string;
     inpaintEngineId?: string;
     translationEngineId?: string;
+    translate?: boolean;
+    inpaint?: boolean;
+    backgroundPatchBase64?: string;
   }
 ): Promise<{
   inpaintedImage: HTMLImageElement;
@@ -101,6 +105,9 @@ export async function requestStudioOcr(
           ocrEngineId: overrides?.ocrEngineId,
           inpaintEngineId: overrides?.inpaintEngineId,
           translationEngineId: overrides?.translationEngineId,
+          translate: overrides?.translate,
+          inpaint: overrides?.inpaint,
+          backgroundPatchBase64: overrides?.backgroundPatchBase64,
         },
       },
       (res) => {

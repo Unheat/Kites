@@ -160,10 +160,19 @@ export const Studio: React.FC<StudioProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
+  const getWorkingCanvas = (): HTMLCanvasElement | null => {
+    return (
+      document.querySelector('canvas[data-studio-working-background="true"]') ||
+      document.querySelector('#studio-working-background') ||
+      document.querySelectorAll('canvas')[1] ||
+      document.querySelector('canvas')
+    );
+  };
+
   const handleUndo = () => {
     studioUndoStack.undo({
       applyRasterPatch: (patch: BoundedDirtyRectPatch) => {
-        const canvas = document.querySelector('canvas') as HTMLCanvasElement;
+        const canvas = getWorkingCanvas();
         const ctx = canvas?.getContext('2d');
         if (ctx) ctx.putImageData(patch.patchImageData, patch.x, patch.y);
       },
@@ -179,7 +188,7 @@ export const Studio: React.FC<StudioProps> = ({
   const handleRedo = () => {
     studioUndoStack.redo({
       applyRasterPatch: (patch: BoundedDirtyRectPatch) => {
-        const canvas = document.querySelector('canvas') as HTMLCanvasElement;
+        const canvas = getWorkingCanvas();
         const ctx = canvas?.getContext('2d');
         if (ctx) ctx.putImageData(patch.patchImageData, patch.x, patch.y);
       },
@@ -212,7 +221,7 @@ export const Studio: React.FC<StudioProps> = ({
     if (!onSave) return;
     setIsSaving(true);
     try {
-      const bgCanvas = document.querySelector('canvas') as HTMLCanvasElement;
+      const bgCanvas = getWorkingCanvas();
       const exportCanvas = document.createElement('canvas');
       exportCanvas.width = imageWidth;
       exportCanvas.height = imageHeight;
