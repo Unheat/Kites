@@ -1,5 +1,5 @@
 import { db, cleanupOldJobs, deleteJobs, type TranslationJob } from '../db';
-import type { ProcessJobMessage, PopupState, PreloadActiveEngineMessage, BubbleDetectionMode } from '../shared/types';
+import type { ProcessJobMessage, PopupState, PreloadActiveEngineMessage, BubbleDetectionMode, HistoryRetentionPeriod } from '../shared/types';
 import { DEFAULT_POPUP_STATE } from '../shared/types';
 import { CLOUDFLARE_QUOTA_DEFAULT_ENDPOINT, STORAGE_KEYS } from '../shared/constants';
 import modelsRegistryData from '../shared/models-registry.json';
@@ -7,7 +7,12 @@ import { normalizeCustomApiConfig } from '../shared/customApi';
 import { inpaintRegistry } from '../offscreen/engines/inpaint/inpaintRegistry';
 import { resolveOcrTier } from '../offscreen/engines/ocr/ocrRegistry';
 import { normalizeRenderFontPresetId } from '../shared/renderFontPresets';
+import { normalizeGlossaryEntries } from '../shared/glossary';
+import { normalizeDisabledDomains, normalizeSiteRules, isDomainDisabled } from '../shared/siteRules';
 import { oAuthManager } from './auth/OAuthManager';
+import { registerReadingCommands } from './readingCommands';
+
+registerReadingCommands();
 
 // Magic Number: Limit concurrency to avoid network/CPU throttling
 // We now dynamically load this from user's PopupState (fallback to 3)
@@ -49,7 +54,7 @@ const OFFSCREEN_RECREATE_DELAY_MS = 500;
 
 /**
  * Removes translation engines that are no longer supported from stored popup settings
- * and normalizes render font presets to an allowlisted preset ID.
+ * and normalizes render font presets and history retention to allowlisted values.
  *
  * @param popupState - The persisted popup state to validate.
  * @returns The normalized popup state and whether it needs to be saved.
@@ -103,6 +108,12 @@ export function normalizePopupState(popupState: Partial<PopupState> | undefined)
     completedState.bubbleMode === 'neural-mask'
       ? completedState.bubbleMode
       : 'off';
+  const historyRetention: HistoryRetentionPeriod =
+    completedState.historyRetention === '1day' ||
+    completedState.historyRetention === '1month' ||
+    completedState.historyRetention === 'never'
+      ? completedState.historyRetention
+      : DEFAULT_POPUP_STATE.historyRetention;
   const state: PopupState = {
     ...completedState,
     webgpuSupported: completedState.webgpuSupported === true ? true : null,
@@ -112,6 +123,11 @@ export function normalizePopupState(popupState: Partial<PopupState> | undefined)
     activeOcrId,
     renderFontPresetId,
     bubbleMode,
+    historyRetention,
+    glossaryEnabled: completedState.glossaryEnabled === true,
+    glossaryEntries: normalizeGlossaryEntries(completedState.glossaryEntries),
+    disabledDomains: normalizeDisabledDomains(completedState.disabledDomains),
+    siteRules: normalizeSiteRules(completedState.siteRules),
     fallbackChain,
   };
   const changed = JSON.stringify(state) !== JSON.stringify(popupState ?? {});
@@ -155,8 +171,8 @@ chrome.contextMenus.onClicked.addListener(async (info: chrome.contextMenus.OnCli
   if (info.menuItemId === 'translate-image' && info.srcUrl) {
     const data = await chrome.storage.local.get(STORAGE_KEYS.POPUP_STATE);
     const popupState = data[STORAGE_KEYS.POPUP_STATE] as PopupState | undefined;
-    if (popupState && popupState.isExtensionEnabled === false) {
-      console.log('[Background] Context menu ignored: Kites extension is disabled.');
+    if (popupState && (popupState.isExtensionEnabled === false || isDomainDisabled(_tab?.url || '', popupState.disabledDomains))) {
+      console.log('[Background] Context menu ignored: Kites extension is disabled on this domain.');
       return;
     }
     console.log('[Background] Context menu clicked. Target URL:', info.srcUrl);
@@ -168,8 +184,8 @@ chrome.contextMenus.onClicked.addListener(async (info: chrome.contextMenus.OnCli
   } else if (info.menuItemId === 'translate-area' && _tab?.id) {
     const data = await chrome.storage.local.get(STORAGE_KEYS.POPUP_STATE);
     const popupState = data[STORAGE_KEYS.POPUP_STATE] as PopupState | undefined;
-    if (popupState && popupState.isExtensionEnabled === false) {
-      console.log('[Background] Context menu ignored: Kites extension is disabled.');
+    if (popupState && (popupState.isExtensionEnabled === false || isDomainDisabled(_tab?.url || '', popupState.disabledDomains))) {
+      console.log('[Background] Context menu ignored: Kites extension is disabled on this domain.');
       return;
     }
     console.log('[Background] Context menu Crop & Translate Area clicked for tab:', _tab.id);
@@ -238,9 +254,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (srcUrl) {
       chrome.storage.local.get(STORAGE_KEYS.POPUP_STATE).then((data) => {
         const popupState = data[STORAGE_KEYS.POPUP_STATE] as PopupState | undefined;
-        if (popupState && popupState.isExtensionEnabled === false) {
-          console.warn('[Background] Rejected TRANSLATE_IMAGE: Kites extension is disabled.');
-          sendResponse({ status: 'error', error: 'Extension is disabled' });
+        const tabUrl = _sender.tab?.url;
+        if (popupState && (popupState.isExtensionEnabled === false || isDomainDisabled(tabUrl || '', popupState.disabledDomains))) {
+          console.warn('[Background] Rejected TRANSLATE_IMAGE: Kites extension or domain is disabled.');
+          sendResponse({ status: 'error', error: 'Extension is disabled on this domain' });
           return;
         }
         console.log('[Background] Received TRANSLATE_IMAGE from content script. URL:', srcUrl);
@@ -252,6 +269,57 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       });
       return true; // Keep message channel open for async response
     }
+  }
+
+  if (message.type === 'BATCH_QUEUE_TRANSLATIONS') {
+    const urls: string[] = message.payload?.urls || message.urls || [];
+    const targetTabId: number | undefined = message.tabId || _sender.tab?.id;
+    if (urls.length > 0) {
+      chrome.storage.local.get(STORAGE_KEYS.POPUP_STATE).then(async (data) => {
+        const popupState = data[STORAGE_KEYS.POPUP_STATE] as PopupState | undefined;
+        let tabUrl = _sender.tab?.url;
+        if (!tabUrl && targetTabId) {
+          try {
+            const tab = await chrome.tabs.get(targetTabId);
+            tabUrl = tab?.url;
+          } catch {}
+        }
+        if (popupState && (popupState.isExtensionEnabled === false || isDomainDisabled(tabUrl || '', popupState.disabledDomains))) {
+          sendResponse({ status: 'error', error: 'Extension is disabled on this domain' });
+          return;
+        }
+
+        console.log(`[Background] Received BATCH_QUEUE_TRANSLATIONS for ${urls.length} images.`);
+        let queuedCount = 0;
+        for (const url of urls) {
+          try {
+            await queueTranslation(url, targetTabId, true);
+            queuedCount++;
+          } catch (err) {
+            console.warn(`[Background] Failed to queue batch image ${url}:`, err);
+          }
+        }
+        sendResponse({ status: 'success', queuedCount, total: urls.length });
+      }).catch((err) => {
+        sendResponse({ status: 'error', error: err instanceof Error ? err.message : String(err) });
+      });
+      return true; // Keep message channel open for async response
+    } else {
+      sendResponse({ status: 'error', error: 'No URLs provided' });
+      return false;
+    }
+  }
+
+  if (message.type === 'GET_QUEUE_STATUS') {
+    (async () => {
+      try {
+        const jobs = await db.translationJobs.toArray();
+        sendResponse({ status: 'success', jobs });
+      } catch (err) {
+        sendResponse({ status: 'error', error: String(err) });
+      }
+    })();
+    return true;
   }
 
   if (message.type === 'CAPTURE_VISIBLE_TAB') {
@@ -280,9 +348,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
     chrome.storage.local.get(STORAGE_KEYS.POPUP_STATE).then(async (data) => {
       const popupState = data[STORAGE_KEYS.POPUP_STATE] as PopupState | undefined;
-      if (popupState && popupState.isExtensionEnabled === false) {
-        console.warn('[Background] Rejected TRANSLATE_CAPTURED_IMAGE: Kites extension is disabled.');
-        sendResponse({ status: 'error', error: 'Extension is disabled' });
+      const tabUrl = _sender.tab?.url;
+      if (popupState && (popupState.isExtensionEnabled === false || isDomainDisabled(tabUrl || '', popupState.disabledDomains))) {
+        console.warn('[Background] Rejected TRANSLATE_CAPTURED_IMAGE: Kites extension or domain is disabled.');
+        sendResponse({ status: 'error', error: 'Extension is disabled on this domain' });
         return;
       }
       console.log('[Background] Received TRANSLATE_CAPTURED_IMAGE from content script. Request ID:', requestId);
@@ -296,7 +365,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === 'OPEN_DASHBOARD') {
-    chrome.tabs.create({ url: chrome.runtime.getURL('index.html') });
+    const targetJobId = message.payload?.jobId;
+    const url = targetJobId ? chrome.runtime.getURL(`index.html?jobId=${targetJobId}`) : chrome.runtime.getURL('index.html');
+    chrome.tabs.create({ url });
     sendResponse({ status: 'success' });
     return true;
   }
@@ -429,7 +500,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   // ownership, background and offscreen both handled the popup request and competed to
   // answer, producing closed message ports and silent model downloads. Do not remove
   // these route guards or forward the original unaddressed message. See devlog 015.
-  if (message.target === 'background' && message.request === true && (message.type === 'PROCESS_JOB' || message.type === 'START_MODEL_DOWNLOAD' || message.type === 'CHECK_MODEL_STATUS' || message.type === 'GET_MODEL_STATUSES' || message.type === 'CHECK_WEBGPU_SUPPORT' || message.type === 'PRELOAD_ACTIVE_ENGINE' || message.type === 'GET_ACTIVE_DOWNLOADS' || message.type === 'VALIDATE_CUSTOM_API')) {
+  if (message.target === 'background' && message.request === true && (message.type === 'PROCESS_JOB' || message.type === 'START_MODEL_DOWNLOAD' || message.type === 'CHECK_MODEL_STATUS' || message.type === 'GET_MODEL_STATUSES' || message.type === 'CHECK_WEBGPU_SUPPORT' || message.type === 'PRELOAD_ACTIVE_ENGINE' || message.type === 'GET_ACTIVE_DOWNLOADS' || message.type === 'VALIDATE_CUSTOM_API' || message.type === 'STUDIO_INPAINT' || message.type === 'STUDIO_OCR')) {
     console.log(`[Background] Received ${message.type}. Forwarding to Offscreen...`);
     sendMessageToOffscreen(message)
       .then((res) => sendResponse(res))
@@ -672,14 +743,17 @@ export async function sendMessageToOffscreen(message: any, timeoutMs: number = 3
   throw new Error(`Message ${message.type} to offscreen timed out after ${timeoutMs}ms`);
 }
 
+const MAX_BATCH_QUEUE_CAPACITY = 100;
+
 /**
  * Inserts the image URL into the Dexie queue as "queued" and triggers the queue loop.
  * 
  * @param {string} srcUrl - The URL of the image to queue.
- * @param {number} tabId - The ID of the tab that requested the translation (for returning result).
+ * @param {number} [tabId] - The ID of the tab that requested the translation (for returning result).
+ * @param {boolean} [isBatch=false] - Whether this is a batch queue from the chapter scanner.
  * @returns {Promise<void>}
  */
-export async function queueTranslation(srcUrl: string, tabId?: number) {
+export async function queueTranslation(srcUrl: string, tabId?: number, isBatch = false) {
   const existingJob = srcUrl ? await db.translationJobs.where('srcUrl').equals(srcUrl).first() : null;
   const isStale = existingJob && (Date.now() - existingJob.timestamp > 5000);
 
@@ -692,10 +766,12 @@ export async function queueTranslation(srcUrl: string, tabId?: number) {
     await deleteJobs([existingJob.id!]);
   }
 
-  // Queue capacity guard: allow up to configured max queue capacity
+  // Queue capacity guard: allow up to configured max queue capacity, or MAX_BATCH_QUEUE_CAPACITY for batch panel
   const stateData = await chrome.storage.local.get(STORAGE_KEYS.POPUP_STATE);
   const popupState = stateData[STORAGE_KEYS.POPUP_STATE] as PopupState | undefined;
-  const maxQueueCapacity = Math.min(10, Math.max(1, popupState?.concurrency || 3));
+  const maxQueueCapacity = isBatch
+    ? MAX_BATCH_QUEUE_CAPACITY
+    : Math.min(10, Math.max(1, popupState?.concurrency || 3));
   const queuedCount = await db.translationJobs.where('status').equals('queued').count();
   if (queuedCount >= maxQueueCapacity) {
     console.warn(`[Background] Translation queue is at maximum capacity (${queuedCount}/${maxQueueCapacity}). Rejecting request:`, srcUrl);
@@ -936,6 +1012,7 @@ async function processImageTranslation(jobId: number, srcUrl: string, tabId?: nu
         chrome.tabs.sendMessage(tabId, {
           type: 'IMAGE_TRANSLATED',
           payload: {
+            jobId,
             originalUrl: srcUrl,
             bakedBase64: offscreenResponse.bakedBase64
           }

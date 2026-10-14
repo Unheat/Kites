@@ -80,11 +80,27 @@ describe('Frontend UI & Button CSS Contract', () => {
     expect(wrapperStyle.position).toBe('fixed');
     expect(wrapperStyle.zIndex).toBe('999999');
 
-    // Button MUST have non-zero dimensions and brand background color
+    // Button MUST have non-zero dimensions and brand background color (#f4446d)
     expect(buttonStyle.width).toBe('32px');
     expect(buttonStyle.height).toBe('32px');
     expect(buttonStyle.borderRadius).toBe('50%');
-    expect(buttonStyle.backgroundColor).toBe('rgb(255, 45, 117)');
+    expect(buttonStyle.backgroundColor).toBe('rgb(244, 68, 109)');
+
+    // Finished actions and utility button classes in content.css
+    const finishedActions = document.createElement('div');
+    finishedActions.className = 'kites-finished-actions';
+    document.body.appendChild(finishedActions);
+    const finishedStyle = window.getComputedStyle(finishedActions);
+    expect(finishedStyle.display).toBe('flex');
+    expect(finishedStyle.alignItems).toBe('center');
+
+    const actionBtn = document.createElement('button');
+    actionBtn.className = 'kites-action-btn';
+    document.body.appendChild(actionBtn);
+    const actionStyle = window.getComputedStyle(actionBtn);
+    expect(actionStyle.width).toBe('28px');
+    expect(actionStyle.height).toBe('28px');
+    expect(actionStyle.borderRadius).toBe('50%');
   });
 });
 
@@ -184,5 +200,36 @@ describe('Manga Reader & Nested Image Hover Handling Logic', () => {
     const targets = discoverMediaTargets();
     expect(targets).toHaveLength(1);
     expect(targets[0].srcUrl).toBe('https://i7.nhentai.net/galleries/12345/1.jpg');
+  });
+
+  it('cleanses stale kites attributes and detects new image when single-page reader navigates to next page', () => {
+    const img = document.createElement('img');
+    img.src = 'blob:chrome-extension://1234/translated-blob';
+    img.setAttribute('data-kites-translated', 'true');
+    img.setAttribute('data-kites-orig-src', 'https://i7.nhentai.net/galleries/12345/4.jpg');
+    img.setAttribute('data-kites-applied-src', 'blob:chrome-extension://1234/translated-blob');
+    img.setAttribute('data-kites-job-id', '42');
+    document.body.appendChild(img);
+
+    // Host site single-page reader (nhentai) navigates to page 5 on the recycled <img> element
+    img.src = 'https://i7.nhentai.net/galleries/12345/5.jpg';
+
+    // resolveImageSource should detect that current src is 5.jpg (neither blob nor 4.jpg)
+    const newSource = resolveImageSource(img);
+    expect(newSource).toBe('https://i7.nhentai.net/galleries/12345/5.jpg');
+
+    // Stale kites attributes should be cleared so the element is recognized as fresh
+    expect(img.hasAttribute('data-kites-translated')).toBe(false);
+    expect(img.hasAttribute('data-kites-applied-src')).toBe(false);
+    expect(img.hasAttribute('data-kites-orig-src')).toBe(false);
+    expect(img.hasAttribute('data-kites-job-id')).toBe(false);
+  });
+
+  it('verifies content.css defines scoped styles for chapter reader modal and floating pill', () => {
+    const css = fs.readFileSync(CONTENT_CSS_PATH, 'utf-8');
+    expect(css).toContain('.kites-reader-modal');
+    expect(css).toContain('.kites-reader-header');
+    expect(css).toContain('.kites-reader-viewport');
+    expect(css).toContain('.kites-reader-pill');
   });
 });

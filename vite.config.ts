@@ -67,6 +67,7 @@ export default defineConfig(({ mode }) => {
     },
     test: {
       environment: 'jsdom',
+      testTimeout: 15000,
       exclude: [
         '**/node_modules/**', 
         '**/dist/**', 

@@ -1,9 +1,15 @@
 import { createRoot } from 'react-dom/client';
 import { useEffect, useRef, useState, useCallback, useId } from 'react';
 import './content.css';
-import { Languages, Eye, EyeOff, ExternalLink, X, Crop, RotateCcw } from 'lucide-react';
-import type { PopupState, CropOverlayItem, ViewportSelection } from '../shared/types';
+import { Languages, Eye, EyeOff, ExternalLink, X, Crop, RotateCcw, Download } from 'lucide-react';
+import type { PopupState, CropOverlayItem, ViewportSelection, SiteSelectorRule } from '../shared/types';
 import { STORAGE_KEYS } from '../shared/constants';
+import { isDomainDisabled, findMatchingSiteRule } from '../shared/siteRules';
+import { createChapterTranslationRegistry, createChapterExporter, type ChapterTranslationRecord } from './chapterZip';
+import ChapterReaderModal, { type ChapterReaderPage } from './ChapterReaderModal';
+import ChapterReaderFloatingPill from './ChapterReaderFloatingPill';
+import { scanChapterPages, fastScrollPreload } from './scanner';
+import { handleReadingKeydown, handleReadingCommand, type ReadingShortcutActions } from './readingShortcuts';
 import {
   normalizeSelection,
   calculateCaptureSourceRect,
@@ -15,6 +21,7 @@ import {
 import {
   collectQueryRoots,
   discoverMediaTargets,
+  isPlaceholderSource,
   normalizeMediaUrl,
   resolveHoverMediaTarget,
   resolveImageSource,
@@ -32,6 +39,7 @@ const REVEALED_BACKING_OPACITY = '1';
 const REVEALED_BACKING_Z_INDEX = '1';
 const REVEALED_BACKING_POINTER_EVENTS = 'none';
 const TRANSLATE_CONTROL_SELECTOR = '[data-kites-translate-control]';
+const IMAGE_DISPLAY_CHANGED_EVENT = 'kites-image-display-changed';
 // Avoid flashing cold-start copy for model setup that completes quickly.
 const MODEL_INITIALIZATION_LABEL_DELAY_MS = 700;
 const MODEL_INITIALIZATION_LABEL = 'Preparing AI · first use this session';
@@ -255,6 +263,98 @@ function suppressParentBackgroundImage(img: HTMLImageElement, surfaceElement: HT
   }
 }
 
+export type TranslatedImageRecord = ChapterTranslationRecord;
+
+/** In-memory registry keeping track of translated images and their finished state, including detached pages. */
+export const translatedRegistry = createChapterTranslationRegistry({
+  getSourcePage: () => window.location.href,
+  createTranslatedUrl: createSafeBlobUrlFromData,
+  revokeTranslatedUrl: (url) => {
+    if (!url.startsWith('blob:')) return;
+    URL.revokeObjectURL(url);
+    activeObjectUrls.delete(url);
+  },
+});
+const chapterExporter = createChapterExporter({
+  getRecords: translatedRegistry.getRecords,
+  getSourcePage: () => window.location.href,
+  getTitle: () => document.title,
+});
+
+/**
+ * Stores queue-time document context before translation can finish after navigation or detachment.
+ * @param originalUrl - Requested image URL.
+ * @param target - Page surface available at queue time.
+ * @returns Nothing.
+ */
+function rememberChapterRequest(originalUrl: string, target: MediaTarget | null): void {
+  translatedRegistry.remember(originalUrl, target ?? undefined);
+}
+
+// Native context-menu requests are queued by background, so capture their target before it detaches.
+// Keep one unconfirmed candidate separate from real overlay requests; unrelated menu choices
+// must not lock stale context for a later translation of the same URL.
+document.addEventListener('contextmenu', (event) => {
+  const target = resolveHoverMediaTarget(event as MouseEvent);
+  if (target) translatedRegistry.rememberContextMenu(target.srcUrl, target);
+}, true);
+
+let cachedSiteRules: SiteSelectorRule[] = [];
+export function getActiveCustomSelector(): string | undefined {
+  return findMatchingSiteRule(window.location.hostname, cachedSiteRules)?.selector;
+}
+
+// Top-frame v1: popup explicitly targets frameId 0, so embedded readers cannot create multiple archives.
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.target !== 'content' || message?.source !== 'popup' || message?.request !== true) return;
+  if (message.type === 'GET_CHAPTER_ZIP_STATUS') {
+    sendResponse(chapterExporter.getStatus());
+    return;
+  }
+  if (message.type === 'EXPORT_CHAPTER_ZIP') {
+    void chapterExporter.exportChapter().then(sendResponse).catch((error) => {
+      console.error('[Chapter ZIP] Message failed:', error);
+      sendResponse({ ...chapterExporter.getStatus(), phase: 'error', busy: false, message: 'ZIP export failed. Nothing downloaded.' });
+    });
+    return true;
+  }
+  if (message.type === 'OPEN_CHAPTER_READER') {
+    document.dispatchEvent(new CustomEvent('kites-open-chapter-reader'));
+    sendResponse({ status: 'success' });
+    return;
+  }
+  if (message.type === 'SCAN_CHAPTER_PAGES') {
+    const isTranslatedCheck = (url: string) => {
+      const reg = translatedRegistry.get(url);
+      return {
+        isTranslated: Boolean(reg?.translatedUrl),
+        translatedUrl: reg?.translatedUrl,
+      };
+    };
+    const pages = scanChapterPages(document, getActiveCustomSelector(), isTranslatedCheck);
+    sendResponse({ status: 'success', pages });
+    return;
+  }
+  if (message.type === 'FAST_SCROLL_PRELOAD') {
+    const isTranslatedCheck = (url: string) => {
+      const reg = translatedRegistry.get(url);
+      return {
+        isTranslated: Boolean(reg?.translatedUrl),
+        translatedUrl: reg?.translatedUrl,
+      };
+    };
+    void fastScrollPreload(document, getActiveCustomSelector(), isTranslatedCheck)
+      .then((pages) => {
+        sendResponse({ status: 'success', pages });
+      })
+      .catch((err) => {
+        console.warn('[Scanner] Fast scroll preload failed:', err);
+        sendResponse({ status: 'error', error: String(err), pages: [] });
+      });
+    return true;
+  }
+});
+
 /**
  * Attaches a MutationObserver shield to the translated image and visible media surface.
  * If a host framework (React/Vue) or lazy-loader reverts source, visibility, or background state,
@@ -282,7 +382,35 @@ function attachReversionShield(img: HTMLImageElement, safeUrl: string, surfaceEl
     for (const mutation of mutations) {
       if (mutation.type === 'attributes') {
         const appliedSrc = img.getAttribute('data-kites-applied-src') || safeUrl;
-        if (mutation.attributeName === 'src' && appliedSrc && img.src !== appliedSrc) {
+        const origSrc = img.getAttribute('data-kites-orig-src');
+        if (mutation.attributeName === 'src') {
+          const currentSrc = img.getAttribute('src') || img.src;
+          if (!currentSrc || currentSrc === appliedSrc) continue;
+
+          // If user is previewing original image, do not revert back to translated
+          if (img.getAttribute('data-kites-show-original') === 'true') {
+            continue;
+          }
+
+          // Check if host updated the element with a COMPLETELY NEW image (e.g. reader navigated to next page)
+          // An SPA reset sets src back to origSrc. If new src is neither appliedSrc nor origSrc, it's a new image!
+          const isSameImageReset = Boolean(origSrc && (currentSrc === origSrc || currentSrc.includes(origSrc)));
+          if (!isSameImageReset && !isPlaceholderSource(currentSrc)) {
+            console.log('[Content Script] New image detected on recycled element; disconnecting shield and resetting translation state.');
+            observer.disconnect();
+            activeShieldObservers.delete(img);
+            img.removeAttribute('data-kites-translated');
+            img.removeAttribute('data-kites-applied-src');
+            img.removeAttribute('data-kites-show-original');
+            img.removeAttribute('data-kites-orig-src');
+            img.removeAttribute('data-kites-orig-srcset');
+            img.removeAttribute('data-kites-job-id');
+            surfaceElement.removeAttribute('data-kites-translated');
+            surfaceElement.removeAttribute('data-kites-show-original');
+            surfaceElement.removeAttribute('data-kites-job-id');
+            continue;
+          }
+
           console.log('[Content Script] Host SPA reset detected on src, restoring translated image.');
           runSelfMutation(() => {
             img.src = appliedSrc;
@@ -330,18 +458,26 @@ function attachReversionShield(img: HTMLImageElement, safeUrl: string, surfaceEl
  * Performs a resilient, native image replacement with SPA protection,
  * srcset clearing, lazy attribute stripping, and parent background suppression.
  *
- * @param targetImg - The target HTMLImageElement in the DOM.
- * @param bakedBase64 - The translated image data URL.
- * @param originalUrl - The original image URL for logging and attribution.
+ * @param target - The target MediaTarget in the DOM.
+ * @param record - Already archived translation; DOM and ZIP share the same blob URL.
+ * @returns Nothing.
  */
-function replaceImageWithTranslation(target: MediaTarget, bakedBase64: string, originalUrl: string): void {
+function replaceImageWithTranslation(target: MediaTarget, record: TranslatedImageRecord): void {
   const { imgElement: targetImg, sourceElement, surfaceElement, hiddenBacking, kind } = target;
-  const previousUrl = sourceElement.getAttribute('data-kites-applied-src');
-  const safeUrl = createSafeBlobUrlFromData(bakedBase64);
+  const { originalUrl, jobId, translatedUrl: safeUrl } = record;
+  // Archive completed result before touching the DOM; registry owns referenced blob lifetimes.
+  record.surfaceElement = surfaceElement;
+  record.sourceElement = sourceElement;
+
+  if (jobId) {
+    sourceElement.setAttribute('data-kites-job-id', String(jobId));
+    surfaceElement.setAttribute('data-kites-job-id', String(jobId));
+  }
 
   runSelfMutation(() => {
     sourceElement.setAttribute('data-kites-applied-src', safeUrl);
     sourceElement.setAttribute('data-kites-translated', 'true');
+    surfaceElement.setAttribute('data-kites-translated', 'true');
     if (targetImg) {
       sanitizeImageAttributes(targetImg);
       targetImg.src = safeUrl;
@@ -368,11 +504,69 @@ function replaceImageWithTranslation(target: MediaTarget, bakedBase64: string, o
     }
   });
 
-  if (previousUrl?.startsWith('blob:') && previousUrl !== safeUrl) {
-    URL.revokeObjectURL(previousUrl);
-    activeObjectUrls.delete(previousUrl);
-  }
   console.log(`[Content Script] Successfully replaced image for: ${originalUrl}`);
+}
+
+/**
+ * Toggles an image between its translated version and its original artwork.
+ *
+ * @param target - Target media item in the DOM.
+ * @param showOriginal - Whether to show the original image (true) or translated (false).
+ */
+function toggleImageDisplay(target: MediaTarget, showOriginal: boolean): void {
+  const { imgElement: targetImg, sourceElement, surfaceElement, kind } = target;
+  const record = translatedRegistry.get(target.srcUrl);
+  if (record) {
+    record.showOriginal = showOriginal;
+  }
+
+  runSelfMutation(() => {
+    if (showOriginal) {
+      sourceElement.setAttribute('data-kites-show-original', 'true');
+      surfaceElement.setAttribute('data-kites-show-original', 'true');
+
+      if (targetImg) {
+        const origSrc = targetImg.getAttribute('data-kites-orig-src') || target.srcUrl;
+        const origSrcset = targetImg.getAttribute('data-kites-orig-srcset');
+        targetImg.src = origSrc;
+        if (origSrcset) {
+          targetImg.srcset = origSrcset;
+        }
+        const origBg = surfaceElement.getAttribute('data-kites-orig-bg');
+        if (origBg) {
+          surfaceElement.style.backgroundImage = origBg;
+        }
+      } else if (kind === 'background') {
+        const origBg = surfaceElement.getAttribute('data-kites-orig-bg') || '';
+        surfaceElement.style.backgroundImage = origBg;
+      } else {
+        const origSrc = sourceElement.getAttribute('data-kites-orig-src') || target.srcUrl;
+        sourceElement.setAttribute('href', origSrc);
+        sourceElement.setAttributeNS('http://www.w3.org/1999/xlink', 'href', origSrc);
+      }
+    } else {
+      sourceElement.removeAttribute('data-kites-show-original');
+      surfaceElement.removeAttribute('data-kites-show-original');
+
+      const appliedSrc = sourceElement.getAttribute('data-kites-applied-src') || record?.translatedUrl;
+      if (appliedSrc) {
+        if (targetImg) {
+          targetImg.src = appliedSrc;
+          targetImg.srcset = '';
+          targetImg.removeAttribute('srcset');
+          suppressParentBackgroundImage(targetImg, surfaceElement);
+        } else if (kind === 'background') {
+          surfaceElement.style.backgroundImage = `url("${appliedSrc}")`;
+        } else {
+          sourceElement.setAttribute('href', appliedSrc);
+          sourceElement.setAttributeNS('http://www.w3.org/1999/xlink', 'href', appliedSrc);
+        }
+      }
+    }
+  });
+  document.dispatchEvent(new CustomEvent(IMAGE_DISPLAY_CHANGED_EVENT, {
+    detail: { srcUrl: target.srcUrl, showOriginal },
+  }));
 }
 
 type OverlayImage = MediaTarget & {
@@ -429,7 +623,144 @@ function TranslateButton({
   // looked like nothing happened. The button shows the failure briefly, then returns to
   // its idle look so the next click reads as a retry.
   const [hasFailed, setHasFailed] = useState(false);
+
+  const isElementTranslated = useCallback(() => {
+    const hasAttr = anchorElement.getAttribute('data-kites-translated') === 'true';
+    if (!hasAttr) return false;
+
+    const img = anchorElement instanceof HTMLImageElement ? anchorElement : anchorElement.querySelector('img');
+    if (img) {
+      const appliedSrc = img.getAttribute('data-kites-applied-src') || anchorElement.getAttribute('data-kites-applied-src');
+      const origSrc = img.getAttribute('data-kites-orig-src') || anchorElement.getAttribute('data-kites-orig-src');
+      const currentSrc = img.currentSrc || img.src || '';
+      const showingOriginal =
+        img.getAttribute('data-kites-show-original') === 'true' ||
+        anchorElement.getAttribute('data-kites-show-original') === 'true';
+
+      if (showingOriginal) {
+        return Boolean(origSrc && (currentSrc === origSrc || currentSrc.includes(origSrc)));
+      }
+      return Boolean(appliedSrc && currentSrc === appliedSrc);
+    }
+
+    return true;
+  }, [anchorElement]);
+
+  const [isTranslated, setIsTranslated] = useState(isElementTranslated);
+  const [showOriginal, setShowOriginal] = useState(() => {
+    return Boolean(
+      translatedRegistry.get(srcUrl)?.showOriginal ||
+      anchorElement.getAttribute('data-kites-show-original') === 'true'
+    );
+  });
+  const [jobId, setJobId] = useState<number | null>(() => {
+    const reg = translatedRegistry.get(srcUrl)?.jobId;
+    if (reg) return reg;
+    const attr = anchorElement.getAttribute('data-kites-job-id');
+    return attr ? Number(attr) : null;
+  });
+
   const activeTranslating = isTranslating || localTranslating;
+
+  useEffect(() => {
+    const update = () => {
+      setIsTranslated(isElementTranslated());
+      setShowOriginal(
+        translatedRegistry.get(srcUrl)?.showOriginal ??
+        (anchorElement.getAttribute('data-kites-show-original') === 'true')
+      );
+      const reg = translatedRegistry.get(srcUrl)?.jobId;
+      const attr = anchorElement.getAttribute('data-kites-job-id');
+      setJobId(reg ?? (attr ? Number(attr) : null));
+    };
+
+    update();
+
+    const observer = new MutationObserver(update);
+    observer.observe(anchorElement, {
+      attributes: true,
+      attributeFilter: ['src', 'data-kites-translated', 'data-kites-applied-src', 'data-kites-show-original'],
+    });
+
+    const img = anchorElement instanceof HTMLImageElement ? null : anchorElement.querySelector('img');
+    if (img) {
+      observer.observe(img, {
+        attributes: true,
+        attributeFilter: ['src', 'data-kites-translated', 'data-kites-applied-src', 'data-kites-show-original'],
+      });
+    }
+
+    return () => observer.disconnect();
+  }, [srcUrl, anchorElement, isElementTranslated]);
+
+  useEffect(() => {
+    /**
+     * Keeps finished controls aligned with keyboard-driven display changes.
+     * @param event - Image display event containing the changed original URL.
+     * @returns Nothing.
+     */
+    const handleDisplayChange = (event: Event): void => {
+      const detail = (event as CustomEvent<{ srcUrl: string; showOriginal: boolean }>).detail;
+      if (detail?.srcUrl === srcUrl) setShowOriginal(detail.showOriginal);
+    };
+    document.addEventListener(IMAGE_DISPLAY_CHANGED_EVENT, handleDisplayChange);
+    return () => document.removeEventListener(IMAGE_DISPLAY_CHANGED_EVENT, handleDisplayChange);
+  }, [srcUrl]);
+
+  const handleToggleOriginal = useCallback((e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    const nextShowOriginal = !showOriginal;
+    setShowOriginal(nextShowOriginal);
+    const target = resolveTargetMedia(srcUrl);
+    if (target) {
+      toggleImageDisplay(target, nextShowOriginal);
+    }
+  }, [showOriginal, srcUrl]);
+
+  const handleDownload = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const target = resolveTargetMedia(srcUrl);
+    const downloadUrl =
+      target?.sourceElement.getAttribute('data-kites-applied-src') ||
+      translatedRegistry.get(srcUrl)?.translatedUrl;
+    if (!downloadUrl) return;
+
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    link.download = `kites-translated-${Date.now()}.png`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }, [srcUrl]);
+
+  const handleEditInStudio = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const target = resolveTargetMedia(srcUrl);
+    const targetJobId =
+      jobId ||
+      translatedRegistry.get(srcUrl)?.jobId ||
+      (target ? Number(target.sourceElement.getAttribute('data-kites-job-id')) : null);
+
+    try {
+      chrome.runtime.sendMessage({
+        target: 'background',
+        source: 'content',
+        request: true,
+        type: 'OPEN_DASHBOARD',
+        payload: targetJobId ? { jobId: targetJobId } : undefined,
+      });
+    } catch {
+      const studioUrl = targetJobId
+        ? chrome.runtime.getURL(`index.html?jobId=${targetJobId}`)
+        : chrome.runtime.getURL('index.html');
+      window.open(studioUrl, '_blank');
+    }
+  }, [jobId, srcUrl]);
 
   useEffect(() => {
     if (buttonRef.current) {
@@ -551,6 +882,11 @@ function TranslateButton({
             }, TRANSLATION_FAILURE_VISIBLE_MS);
           } else {
             setHasFailed(false);
+            setIsTranslated(true);
+            setShowOriginal(false);
+            if (message.payload.jobId) {
+              setJobId(message.payload.jobId);
+            }
           }
         }
       }
@@ -615,21 +951,34 @@ function TranslateButton({
           minWidth: '32px',
           minHeight: '32px',
           borderRadius: '50%',
-          backgroundColor: hasFailed ? '#dc2626' : '#ff2d75',
+          backgroundColor: hasFailed ? '#dc2626' : '#f4446d',
           border: 'none',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           cursor: activeTranslating ? 'wait' : 'pointer',
           color: '#ffffff',
-          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.25)',
+          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
           flexShrink: 0,
           pointerEvents: 'auto',
+          transition: 'all 0.15s ease',
         }}
-        title={hasFailed ? TRANSLATION_FAILURE_LABEL : 'Translate Image'}
-        aria-label={hasFailed
-          ? TRANSLATION_FAILURE_LABEL
-          : showInitializationLabel ? MODEL_INITIALIZATION_LABEL : 'Translate Image'}
+        title={
+          hasFailed
+            ? TRANSLATION_FAILURE_LABEL
+            : isTranslated && !activeTranslating
+            ? 'Re-translate Image'
+            : 'Translate Image'
+        }
+        aria-label={
+          hasFailed
+            ? TRANSLATION_FAILURE_LABEL
+            : showInitializationLabel
+            ? MODEL_INITIALIZATION_LABEL
+            : isTranslated && !activeTranslating
+            ? 'Re-translate Image'
+            : 'Translate Image'
+        }
         aria-describedby={showInitializationLabel && !hasFailed ? initializationLabelId : undefined}
       >
         {hasFailed ? (
@@ -643,6 +992,99 @@ function TranslateButton({
           />
         )}
       </button>
+
+      {isTranslated && !activeTranslating && (
+        <div
+          className="kites-finished-actions"
+          data-kites-finished-actions="true"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+          }}
+        >
+          <button
+            type="button"
+            data-kites-toggle-btn="true"
+            onClick={handleToggleOriginal}
+            className="kites-action-btn"
+            style={{
+              width: '28px',
+              height: '28px',
+              minWidth: '28px',
+              minHeight: '28px',
+              borderRadius: '50%',
+              backgroundColor: showOriginal ? '#f4446d' : '#12141c',
+              border: showOriginal ? '1px solid #f4446d' : '1px solid #262a3b',
+              color: '#ffffff',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              boxShadow: '0 2px 6px rgba(0, 0, 0, 0.35)',
+              transition: 'all 0.15s ease',
+            }}
+            title={showOriginal ? 'Show Translated Image' : 'Show Original Image'}
+            aria-label={showOriginal ? 'Show Translated Image' : 'Show Original Image'}
+          >
+            {showOriginal ? <EyeOff size={14} /> : <Eye size={14} />}
+          </button>
+
+          <button
+            type="button"
+            data-kites-download-btn="true"
+            onClick={handleDownload}
+            className="kites-action-btn"
+            style={{
+              width: '28px',
+              height: '28px',
+              minWidth: '28px',
+              minHeight: '28px',
+              borderRadius: '50%',
+              backgroundColor: '#12141c',
+              border: '1px solid #262a3b',
+              color: '#ffffff',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              boxShadow: '0 2px 6px rgba(0, 0, 0, 0.35)',
+              transition: 'all 0.15s ease',
+            }}
+            title="Download Translated Image"
+            aria-label="Download Translated Image"
+          >
+            <Download size={14} />
+          </button>
+
+          <button
+            type="button"
+            data-kites-edit-btn="true"
+            onClick={handleEditInStudio}
+            className="kites-action-btn"
+            style={{
+              width: '28px',
+              height: '28px',
+              minWidth: '28px',
+              minHeight: '28px',
+              borderRadius: '50%',
+              backgroundColor: '#12141c',
+              border: '1px solid #262a3b',
+              color: '#ffffff',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              boxShadow: '0 2px 6px rgba(0, 0, 0, 0.35)',
+              transition: 'all 0.15s ease',
+            }}
+            title="Edit in Studio (New Tab)"
+            aria-label="Edit in Studio"
+          >
+            <ExternalLink size={14} />
+          </button>
+        </div>
+      )}
       {showInitializationLabel && (
         <span
           id={initializationLabelId}
@@ -937,14 +1379,83 @@ function GlobalOverlay() {
   const [translatingUrls, setTranslatingUrls] = useState<Set<string>>(new Set());
   const [isSnipping, setIsSnipping] = useState<boolean>(false);
   const [crops, setCrops] = useState<CropOverlayItem[]>([]);
+  const [isReaderOpen, setIsReaderOpen] = useState<boolean>(false);
+  const [isPillDismissed, setIsPillDismissed] = useState<boolean>(false);
+  const [chapterPages, setChapterPages] = useState<ChapterReaderPage[]>([]);
+  const [isTranslatingChapter, setIsTranslatingChapter] = useState<boolean>(false);
 
   const activeImgRef = useRef(activeImg);
   const translatingUrlsRef = useRef(translatingUrls);
+  const siteRulesRef = useRef<SiteSelectorRule[]>([]);
   // Last known pointer position for scroll-driven hover re-resolution (scroll fires no
   // mouse events, so the hover target must be re-derived from the last cursor position).
   const lastCursorPositionRef = useRef<{ x: number; y: number } | null>(null);
   activeImgRef.current = activeImg;
   translatingUrlsRef.current = translatingUrls;
+
+  /** Resolves the custom image selector for this domain if configured in site rules. */
+  const getActiveCustomSelector = (): string | undefined => {
+    return findMatchingSiteRule(window.location.hostname, siteRulesRef.current)?.selector;
+  };
+
+  /** Scans the document for all comic chapter pages and keeps translation states updated. */
+  const refreshChapterPages = useCallback(() => {
+    const isTranslatedCheck = (url: string) => {
+      const reg = translatedRegistry.get(url);
+      return {
+        isTranslated: Boolean(reg?.translatedUrl),
+        translatedUrl: reg?.translatedUrl,
+      };
+    };
+    const scanned = scanChapterPages(document, getActiveCustomSelector(), isTranslatedCheck);
+    setChapterPages(scanned);
+    return scanned;
+  }, []);
+
+  useEffect(() => {
+    if (!isEnabled) return;
+    refreshChapterPages();
+    const interval = setInterval(() => {
+      if (!isReaderOpen) refreshChapterPages();
+    }, 4000);
+    return () => clearInterval(interval);
+  }, [isEnabled, isReaderOpen, refreshChapterPages]);
+
+  const handleTranslateChapter = useCallback(async (urls: string[]) => {
+    if (urls.length === 0) return;
+    setIsTranslatingChapter(true);
+
+    for (const url of urls) {
+      rememberChapterRequest(url, resolveTargetMedia(url));
+    }
+
+    setChapterPages((prev) =>
+      prev.map((page) =>
+        urls.includes(page.url) && !page.isTranslated
+          ? { ...page, status: 'queued' as const }
+          : page
+      )
+    );
+
+    try {
+      await chrome.runtime.sendMessage({
+        type: 'BATCH_QUEUE_TRANSLATIONS',
+        payload: { urls },
+      });
+    } catch (err) {
+      console.warn('[Content Script] Failed to dispatch batch chapter translation:', err);
+      setIsTranslatingChapter(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const handleOpenReader = () => {
+      refreshChapterPages();
+      setIsReaderOpen(true);
+    };
+    document.addEventListener('kites-open-chapter-reader', handleOpenReader);
+    return () => document.removeEventListener('kites-open-chapter-reader', handleOpenReader);
+  }, [refreshChapterPages]);
 
   /**
    * Marks an image URL as no longer translating so its button leaves the spinner state.
@@ -971,26 +1482,52 @@ function GlobalOverlay() {
   const requestTranslation = (srcUrl: string, image?: OverlayImage): void => {
     if (!srcUrl || translatingUrlsRef.current.has(srcUrl)) return;
 
+    const target = image ?? resolveTargetMedia(srcUrl);
+    const cachedRecord = translatedRegistry.get(srcUrl);
+    // If translation was already completed in this session and cached in registry, but the host site
+    // just loaded or refreshed the raw image (e.g. single-page reader navigated back), re-apply instantly!
+    const targetEl = target?.sourceElement || target?.imgElement;
+    if (
+      cachedRecord &&
+      cachedRecord.translatedUrl &&
+      target &&
+      targetEl &&
+      targetEl.getAttribute('data-kites-translated') !== 'true'
+    ) {
+      console.log('[Content Script] Re-applying existing translation from memory for:', srcUrl);
+      if (image) {
+        setActiveImg(image);
+        registerMediaTarget(image);
+      }
+      replaceImageWithTranslation(target, cachedRecord);
+      return;
+    }
+
     if (image) {
       setActiveImg(image);
       registerMediaTarget(image);
     }
+    // Lock queue-time document context: after SPA navigation the target may detach before completion.
+    rememberChapterRequest(srcUrl, target);
     setTranslatingUrls((current) => new Set(current).add(srcUrl));
     console.log('[Content Script] Sending TRANSLATE_IMAGE to background:', srcUrl);
 
     try {
       if (!chrome.runtime?.id) {
+        translatedRegistry.forget(srcUrl);
         clearTranslatingUrl(srcUrl);
         console.warn('[Content Script] Extension context invalidated. Please refresh the page.');
         return;
       }
       chrome.runtime.sendMessage({ type: 'TRANSLATE_IMAGE', url: srcUrl }, (response) => {
         if (chrome.runtime.lastError || response?.status === 'error') {
+          translatedRegistry.forget(srcUrl);
           clearTranslatingUrl(srcUrl);
           console.error('[Content Script] Message failed:', chrome.runtime.lastError?.message || response?.error);
         }
       });
     } catch (error) {
+      translatedRegistry.forget(srcUrl);
       clearTranslatingUrl(srcUrl);
       console.warn('[Content Script] Chrome runtime call failed (extension reloaded/invalidated):', error);
     }
@@ -1134,25 +1671,101 @@ function GlobalOverlay() {
     setCrops((prev) => prev.filter((c) => c.id !== id));
   }, []);
 
+  useEffect(() => {
+    if (!isEnabled) return;
+    const actions: ReadingShortcutActions<MediaTarget> = {
+      getContext: () => {
+        const cursor = lastCursorPositionRef.current;
+        const target = cursor ? resolveMediaTargetAtPoint(cursor.x, cursor.y, getActiveCustomSelector()) : null;
+        return {
+          enabled: isEnabled,
+          busy: isSnipping || translatingUrlsRef.current.size > 0 ||
+            crops.some((crop) => crop.status === 'capturing' || crop.status === 'translating'),
+          target,
+        };
+      },
+      hasTranslation: (target) => Boolean(translatedRegistry.get(target.srcUrl)),
+      toggleOriginal: (target) => {
+        const record = translatedRegistry.get(target.srcUrl);
+        if (record) toggleImageDisplay(target, !record.showOriginal);
+      },
+      translate: (target) => requestTranslation(target.srcUrl, {
+        ...target,
+        anchorName: getAnchorName(target.surfaceElement),
+      }),
+      startAreaSelection: () => setIsSnipping(true),
+      openChapterReader: () => {
+        refreshChapterPages();
+        setIsReaderOpen(true);
+      },
+    };
+    /**
+     * Saves live pointer coordinates for shortcut targeting in both manual modes.
+     * @param event - Pointer movement over the current document.
+     * @returns Nothing.
+     */
+    const trackPointer = (event: MouseEvent): void => {
+      lastCursorPositionRef.current = { x: event.clientX, y: event.clientY };
+    };
+    /**
+     * Clears stale hover context when the pointer leaves the document.
+     * @param event - Boundary event whose related target may be outside the document.
+     * @returns Nothing.
+     */
+    const clearPointer = (event: MouseEvent): void => {
+      if (!event.relatedTarget) lastCursorPositionRef.current = null;
+    };
+    /**
+     * Dispatches a guarded original-image toggle from the page keyboard.
+     * @param event - Keyboard event outside editable page controls.
+     * @returns Nothing.
+     */
+    const onKeydown = (event: KeyboardEvent): void => {
+      handleReadingKeydown(event, actions);
+    };
+    /**
+     * Routes browser commands without retaining an asynchronous response channel.
+     * @param message - Runtime command forwarded by background.
+     * @returns Nothing.
+     */
+    const onCommand = (message: unknown): void => {
+      handleReadingCommand(message, actions);
+    };
+    document.addEventListener('mousemove', trackPointer, { passive: true });
+    document.addEventListener('mouseout', clearPointer, { passive: true });
+    document.addEventListener('keydown', onKeydown);
+    chrome.runtime.onMessage.addListener(onCommand);
+    return () => {
+      document.removeEventListener('mousemove', trackPointer);
+      document.removeEventListener('mouseout', clearPointer);
+      document.removeEventListener('keydown', onKeydown);
+      chrome.runtime.onMessage.removeListener(onCommand);
+    };
+  }, [isEnabled, isSnipping, crops]);
+
   // Load user settings and react to popup updates.
   useEffect(() => {
+    const applyState = (state: PopupState) => {
+      cachedSiteRules = state.siteRules || [];
+      siteRulesRef.current = state.siteRules || [];
+      const currentHost = window.location.hostname;
+      const disabled = isDomainDisabled(currentHost, state.disabledDomains);
+      setIsEnabled((state.isExtensionEnabled ?? true) && !disabled);
+      setMode(state.manualMode || 'hover');
+      setAutoTranslate(state.isAuto || false);
+    };
+
     const loadSettings = () => {
       chrome.storage.local.get(STORAGE_KEYS.POPUP_STATE, (data) => {
         const state = data[STORAGE_KEYS.POPUP_STATE] as PopupState | undefined;
-        if (state) {
-          setIsEnabled(state.isExtensionEnabled ?? true);
-          setMode(state.manualMode || 'hover');
-          setAutoTranslate(state.isAuto || false);
-        }
+        if (state) applyState(state);
       });
     };
     loadSettings();
     const handleStorageChange = (changes: { [key: string]: chrome.storage.StorageChange }, area: string) => {
       if (area !== 'local' || !changes[STORAGE_KEYS.POPUP_STATE]?.newValue) return;
       const state = changes[STORAGE_KEYS.POPUP_STATE].newValue as PopupState;
-      setIsEnabled(state.isExtensionEnabled ?? true);
-      setMode(state.manualMode || 'hover');
-      setAutoTranslate(state.isAuto || false);
+      applyState(state);
     };
     chrome.storage.onChanged.addListener(handleStorageChange);
     return () => chrome.storage.onChanged.removeListener(handleStorageChange);
@@ -1169,10 +1782,7 @@ function GlobalOverlay() {
   // Receive terminal job events, restore the image, and allow Hover mode to disappear again.
   useEffect(() => {
     const handleMessage = (message: any) => {
-      if (message.type === 'START_AREA_SELECTION') {
-        setIsSnipping(true);
-        return;
-      }
+      if (message.type === 'START_AREA_SELECTION') return;
 
       if (message.type === 'CAPTURE_TRANSLATED' && message.payload) {
         const { requestId, bakedBase64, jobId } = message.payload;
@@ -1205,19 +1815,48 @@ function GlobalOverlay() {
 
       if (!message.payload || (message.type !== 'IMAGE_TRANSLATED' && message.type !== 'TRANSLATION_ERROR')) return;
 
-      const { originalUrl, bakedBase64 } = message.payload;
+      const { originalUrl, bakedBase64, jobId } = message.payload;
       clearTranslatingUrl(originalUrl);
-      setActiveImg((current) => current?.srcUrl === originalUrl ? null : current);
 
-      if (message.type !== 'IMAGE_TRANSLATED' || !bakedBase64) return;
+      if (message.type !== 'IMAGE_TRANSLATED' || !bakedBase64) {
+        translatedRegistry.forget(originalUrl);
+        setChapterPages((prev) =>
+          prev.map((page) =>
+            page.url === originalUrl ? { ...page, status: 'error' as const } : page
+          )
+        );
+        return;
+      }
       console.log(`[Content Script] Received translated image for: ${originalUrl}`);
       const target = resolveTargetMedia(originalUrl);
-      if (!target) {
-        console.warn(`[Content Script] Target media element could not be found in DOM for: ${originalUrl}`);
+      // Archive completed translation before requiring a DOM target; detached pages still enter the registry.
+      const record = translatedRegistry.complete(originalUrl, bakedBase64, jobId, target ?? undefined);
+
+      // Reactively update chapter reader modal pages with the new translated image!
+      setChapterPages((prev) => {
+        const next = prev.map((page) =>
+          page.url === originalUrl
+            ? {
+                ...page,
+                isTranslated: true,
+                translatedUrl: record?.translatedUrl || createSafeBlobUrlFromData(bakedBase64),
+                status: 'completed' as const,
+              }
+            : page
+        );
+        if (next.every((p) => p.isTranslated)) {
+          setIsTranslatingChapter(false);
+        }
+        return next;
+      });
+
+      // Late results belong to the queued chapter, never a same-URL image in the new SPA chapter.
+      if (!record || record.sourcePage !== window.location.href || !target) {
+        console.warn(`[Content Script] Target media element detached or chapter changed; translation archived when context is known: ${originalUrl}`);
         return;
       }
 
-      replaceImageWithTranslation(target, bakedBase64, originalUrl);
+      replaceImageWithTranslation(target, record);
     };
 
     chrome.runtime.onMessage.addListener(handleMessage);
@@ -1239,10 +1878,13 @@ function GlobalOverlay() {
       const { sourceElement, srcUrl } = target;
       if (translatedSources.has(sourceElement) || queuedUrls.has(srcUrl)) return;
       registerMediaTarget(target);
+      // Lock queue-time position before auto-translate fires; the reader may navigate before completion.
+      rememberChapterRequest(srcUrl, target);
       queuedUrls.add(srcUrl);
       console.log('[Content Script] Auto-Translating visible image:', srcUrl);
       chrome.runtime.sendMessage({ type: 'TRANSLATE_IMAGE', url: srcUrl }, (response) => {
         if (chrome.runtime.lastError || response?.status === 'error') {
+          translatedRegistry.forget(srcUrl);
           queuedUrls.delete(srcUrl);
           console.error('[Content Script] Auto-Translate message failed:', chrome.runtime.lastError?.message || response?.error);
         }
@@ -1257,7 +1899,7 @@ function GlobalOverlay() {
     });
 
     const observeImages = () => {
-      for (const target of discoverMediaTargets()) {
+      for (const target of discoverMediaTargets(document, getActiveCustomSelector())) {
         if (!observedSurfaces.has(target.surfaceElement)) {
           observedSurfaces.add(target.surfaceElement);
           targetsBySurface.set(target.surfaceElement, target);
@@ -1311,7 +1953,7 @@ function GlobalOverlay() {
     const observedMutationRoots = new WeakSet<Node>();
     let timeoutId: number | null = null;
     const updateImages = () => {
-      setConsistentImages(discoverMediaTargets()
+      setConsistentImages(discoverMediaTargets(document, getActiveCustomSelector())
         .map((target) => ({ ...target, anchorName: getAnchorName(target.anchorElement) })));
       for (const root of collectQueryRoots(document)) {
         if (root === document || observedMutationRoots.has(root)) continue;
@@ -1392,7 +2034,7 @@ function GlobalOverlay() {
         cancelHide();
         return;
       }
-      const mediaTarget = resolveHoverMediaTarget(event);
+      const mediaTarget = resolveHoverMediaTarget(event, getActiveCustomSelector());
       if (!mediaTarget) return;
       // WORKAROUND: [Tolerance halo cancels hide on exit] -> surfaceContainsPoint forgives
       // up to POINTER_TOLERANCE_PX (3px), so a cursor that just LEFT the image can still
@@ -1411,7 +2053,15 @@ function GlobalOverlay() {
       setActiveImg({ ...mediaTarget, anchorName: getAnchorName(mediaTarget.surfaceElement) });
     };
     const handleMouseOut = (event: MouseEvent) => {
-      lastCursorPositionRef.current = { x: event.clientX, y: event.clientY };
+      // WORKAROUND: [Document-exit coordinates resurrect cleared pointer] -> a mouseout with
+      // no relatedTarget means the pointer left the window entirely. Reading shortcuts rely
+      // on lastCursorPositionRef being null at that moment to reject Alt+Shift+Z/F with no
+      // live target; writing the stale exit coordinates back (this listener registers after
+      // the shortcut listener) would let a command translate the last-hovered image after
+      // the user already left the page. Hide scheduling below still runs as usual.
+      if (event.relatedTarget) {
+        lastCursorPositionRef.current = { x: event.clientX, y: event.clientY };
+      }
       const current = activeImgRef.current;
       if (!current) return;
       const target = event.target as HTMLElement;
@@ -1436,7 +2086,7 @@ function GlobalOverlay() {
     const resolveHoverAtCursor = (): void => {
       const cursor = lastCursorPositionRef.current;
       if (!cursor) return;
-      const mediaTarget = resolveMediaTargetAtPoint(cursor.x, cursor.y);
+      const mediaTarget = resolveMediaTargetAtPoint(cursor.x, cursor.y, getActiveCustomSelector());
       if (mediaTarget) {
         cancelHide();
         if (!activeImgRef.current || activeImgRef.current.surfaceElement !== mediaTarget.surfaceElement) {
@@ -1518,6 +2168,29 @@ function GlobalOverlay() {
           anchorElement={activeImg.surfaceElement}
           isTranslating={translatingUrls.has(activeImg.srcUrl)}
           onTranslate={(srcUrl) => requestTranslation(srcUrl, activeImg)}
+        />
+      )}
+
+      {/* Full-Screen Distraction-Free Chapter Reader Modal */}
+      <ChapterReaderModal
+        isOpen={isReaderOpen}
+        onClose={() => setIsReaderOpen(false)}
+        pages={chapterPages}
+        title={document.title}
+        onExportZip={() => void chapterExporter.exportChapter()}
+        onTranslateAll={handleTranslateChapter}
+        isTranslatingChapter={isTranslatingChapter}
+      />
+
+      {/* Floating Reader Launch Pill */}
+      {!isReaderOpen && !isPillDismissed && (
+        <ChapterReaderFloatingPill
+          pageCount={chapterPages.length}
+          onOpen={() => {
+            refreshChapterPages();
+            setIsReaderOpen(true);
+          }}
+          onDismiss={() => setIsPillDismissed(true)}
         />
       )}
     </>

@@ -6,12 +6,23 @@ import type { BoxRect } from '../../utils/bubbleExpansion';
 // faint screentones from being swallowed into the bubble mask.
 /** Ring distance in pixels outside the text box where background samples are taken. */
 export const ADAPTIVE_LUM_SAMPLE_OFFSET = 4;
-/** Subtracted from the sampled background luminance to derive the dynamic threshold. */
+/** Subtracted from (or added to for dark bubbles) sampled background luminance to derive threshold. */
 export const ADAPTIVE_LUM_MARGIN = 35;
-/** Lower bound of the derived dynamic threshold (never binarize below this). */
+/** Lower bound of the derived dynamic threshold for bright bubbles (never binarize below this). */
 export const ADAPTIVE_LUM_FLOOR = 130;
 /** Fallback binarization threshold when no background sample is available (legacy hardcoded value). */
 export const DEFAULT_LUMINANCE_THRESHOLD = 200;
+
+/** Number of luminance quantization bins for interior polarity analysis. Aligned with SimpleInpaintEngine. */
+export const LUMINANCE_HISTOGRAM_BINS = 16;
+/** Upper bound bin index considered dark background paper (bins 0..5 correspond to lum 0..95). */
+export const DARK_PAPER_MAX_BIN = 5;
+/** Lower bound bin index considered bright background paper (bins 10..15 correspond to lum 160..255). */
+export const BRIGHT_PAPER_MIN_BIN = 10;
+/** Upper ceiling threshold for dark background paper binarization. */
+export const DARK_PAPER_LUMINANCE_CEILING = 95;
+/** Fallback binarization threshold for dark bubbles when no ring sample is available. */
+export const DEFAULT_DARK_LUMINANCE_THRESHOLD = 50;
 
 export interface ImagePatchData {
   width: number;
@@ -27,7 +38,7 @@ export interface BubbleShapeEvidence {
   width: number;
   height: number;
   interior: Uint8Array;
-  /** Observed light pixels only, excluding force-filled OCR rectangles. */
+  /** Observed paper pixels (light or dark depending on polarity), excluding force-filled OCR rectangles. */
   observedInterior: Uint8Array;
   eroded: Uint8Array;
   carrierBox?: BoxRect;
@@ -102,22 +113,32 @@ export class HeuristicBubbleExtractor {
     const patchW = Math.max(10, Math.round(origPatchW * scale));
     const patchH = Math.max(10, Math.round(origPatchH * scale));
 
-    // Adaptive luminance: anchor the binarization threshold to the actual background ring around
-    // the text. Translucent bubbles over dark artwork render as grey (RGB ~130-190) and the legacy
-    // hardcoded 200 threshold cut them apart mid-chamber; sampling the background keeps them one
-    // connected chamber. An explicit options.luminanceThreshold override still wins, and the legacy
-    // DEFAULT_LUMINANCE_THRESHOLD applies when no ring sample is available (e.g. text box hugging
-    // the image edge).
-    let lumThresh = DEFAULT_LUMINANCE_THRESHOLD;
+    // Adaptive dual-polarity luminance:
+    // Pass 1: analyze dominant background paper polarity inside the text box.
+    // Paper occupies ~70-85% of interior area while glyph ink is ~15-30%.
+    // Mode (peakBin <= 5) indicates dark paper (e.g. scream or demonic speech bubbles).
+    const peakBin = HeuristicBubbleExtractor.sampleInteriorPolarity(
+      data, imgW, imgH, channels, textBox
+    );
+    const isDarkBubble = peakBin <= DARK_PAPER_MAX_BIN;
+
+    const bgLum = HeuristicBubbleExtractor.sampleBackgroundLuminance(
+      data, imgW, imgH, channels, textBox, minX, minY, maxX, maxY
+    );
+
+    let lumThresh: number;
+    let darkThresh: number;
     if (options.luminanceThreshold !== undefined) {
       lumThresh = options.luminanceThreshold;
+      darkThresh = options.luminanceThreshold;
+    } else if (isDarkBubble) {
+      const darkBase = bgLum !== null ? bgLum : DEFAULT_DARK_LUMINANCE_THRESHOLD;
+      darkThresh = Math.min(DARK_PAPER_LUMINANCE_CEILING, darkBase + ADAPTIVE_LUM_MARGIN);
+      lumThresh = DEFAULT_LUMINANCE_THRESHOLD;
     } else {
-      const bgLum = HeuristicBubbleExtractor.sampleBackgroundLuminance(
-        data, imgW, imgH, channels, textBox, minX, minY, maxX, maxY
-      );
-      if (bgLum !== null) {
-        lumThresh = Math.max(ADAPTIVE_LUM_FLOOR, bgLum - ADAPTIVE_LUM_MARGIN);
-      }
+      const lightBase = bgLum !== null ? bgLum : DEFAULT_LUMINANCE_THRESHOLD;
+      lumThresh = Math.max(ADAPTIVE_LUM_FLOOR, lightBase - ADAPTIVE_LUM_MARGIN);
+      darkThresh = DEFAULT_DARK_LUMINANCE_THRESHOLD;
     }
 
     // Filter nearby text boxes that intersect the patch so their dark glyph pixels
@@ -129,9 +150,9 @@ export class HeuristicBubbleExtractor {
       : [textBox];
 
     // 3. Build binary mask of bubble interior
-    // Pixel is interior if inside any known text box or has light luminance (white bubble)
+    // Pixel is interior if inside any known text box or matches dominant paper polarity
     const mask = new Uint8Array(patchW * patchH);
-    // Validation keeps only observed light pixels: force-filled OCR rectangles must never
+    // Validation keeps only observed paper pixels: force-filled OCR rectangles must never
     // manufacture connectivity across artwork or a border between unrelated bubbles.
     const observedInterior = options.onShapeEvidence ? new Uint8Array(patchW * patchH) : undefined;
 
@@ -153,10 +174,12 @@ export class HeuristicBubbleExtractor {
         const r = data[pIdx];
         const g = data[pIdx + 1];
         const b = data[pIdx + 2];
-        const isLight = r >= lumThresh && g >= lumThresh && b >= lumThresh;
+        const isPaper = isDarkBubble
+          ? (r <= darkThresh && g <= darkThresh && b <= darkThresh)
+          : (r >= lumThresh && g >= lumThresh && b >= lumThresh);
 
-        if (isLight && observedInterior) observedInterior[py * patchW + px] = 1;
-        if (inText || isLight) {
+        if (isPaper && observedInterior) observedInterior[py * patchW + px] = 1;
+        if (inText || isPaper) {
           mask[py * patchW + px] = 1;
         }
       }
@@ -457,5 +480,52 @@ export class HeuristicBubbleExtractor {
     samples.sort((a, b) => a - b);
     const mid = samples.length >> 1;
     return samples.length % 2 === 1 ? samples[mid] : Math.round((samples[mid - 1] + samples[mid]) / 2);
+  }
+
+  /**
+   * Samples interior pixels of the text box into a 16-bin luminance histogram to detect
+   * dominant background paper polarity (paper takes ~70%-85% area; glyph ink ~15%-30%).
+   * Aligned with SimpleInpaintEngine (PR #13 / Issue #12).
+   *
+   * @param data - Pixel buffer.
+   * @param imgW - Image width in pixels.
+   * @param imgH - Image height in pixels.
+   * @param channels - Bytes per pixel (3 or 4).
+   * @param textBox - Bounding box of the text block.
+   * @returns Dominant peak bin index (0..15).
+   */
+  static sampleInteriorPolarity(
+    data: Uint8ClampedArray | Uint8Array,
+    imgW: number,
+    imgH: number,
+    channels: number,
+    textBox: BoxRect
+  ): number {
+    const hist = new Uint32Array(LUMINANCE_HISTOGRAM_BINS);
+    const startX = Math.max(0, Math.round(textBox.x));
+    const startY = Math.max(0, Math.round(textBox.y));
+    const endX = Math.min(imgW, Math.round(textBox.x + textBox.w));
+    const endY = Math.min(imgH, Math.round(textBox.y + textBox.h));
+
+    const step = Math.max(1, Math.floor(Math.max(endX - startX, endY - startY) / 30));
+
+    for (let y = startY; y < endY; y += step) {
+      for (let x = startX; x < endX; x += step) {
+        const idx = (y * imgW + x) * channels;
+        const lum = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
+        const bin = Math.min(LUMINANCE_HISTOGRAM_BINS - 1, Math.floor(lum / 16));
+        hist[bin]++;
+      }
+    }
+
+    let peakBin = 0;
+    let peakCount = 0;
+    for (let b = 0; b < LUMINANCE_HISTOGRAM_BINS; b++) {
+      if (hist[b] > peakCount) {
+        peakCount = hist[b];
+        peakBin = b;
+      }
+    }
+    return peakBin;
   }
 }

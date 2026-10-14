@@ -156,4 +156,80 @@ describe('HeuristicBubbleExtractor', () => {
 
     expect(HeuristicBubbleExtractor.extractCarrierBox(image, textBox)).toBeNull();
   });
+
+  it('detects interior polarity using 16-bin luminance histogram', () => {
+    const W = 40;
+    const H = 40;
+    // Dark bubble with white glyph strokes
+    const darkData = new Uint8ClampedArray(W * H * 4).fill(25);
+    // 20% white text glyphs
+    for (let i = 0; i < (W * H * 0.2); i++) {
+      darkData[i * 4] = 255;
+      darkData[i * 4 + 1] = 255;
+      darkData[i * 4 + 2] = 255;
+    }
+    const darkBin = HeuristicBubbleExtractor.sampleInteriorPolarity(
+      darkData, W, H, 4, { x: 0, y: 0, w: W, h: H }
+    );
+    expect(darkBin).toBeLessThanOrEqual(5);
+
+    // Bright bubble with dark glyph strokes
+    const lightData = new Uint8ClampedArray(W * H * 4).fill(245);
+    for (let i = 0; i < (W * H * 0.2); i++) {
+      lightData[i * 4] = 10;
+      lightData[i * 4 + 1] = 10;
+      lightData[i * 4 + 2] = 10;
+    }
+    const lightBin = HeuristicBubbleExtractor.sampleInteriorPolarity(
+      lightData, W, H, 4, { x: 0, y: 0, w: W, h: H }
+    );
+    expect(lightBin).toBeGreaterThanOrEqual(10);
+  });
+
+  it('extracts enclosed dark bubble chamber with white text on light background (dual-polarity)', () => {
+    const W = 300;
+    const H = 300;
+    // Light page background (gray 240)
+    const data = new Uint8ClampedArray(W * H * 4).fill(240);
+    // Draw dark bubble (center 150, 150, radius 60, dark gray 25)
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        if ((x - 150) ** 2 + (y - 150) ** 2 <= 60 ** 2) {
+          const idx = (y * W + x) * 4;
+          data[idx] = 25;
+          data[idx + 1] = 25;
+          data[idx + 2] = 25;
+          data[idx + 3] = 255;
+        }
+      }
+    }
+
+    // Inside text box, draw white glyph strokes (~20% of text box area)
+    const textBox: BoxRect = { x: 135, y: 130, w: 30, h: 40 };
+    for (let y = textBox.y + 5; y < textBox.y + textBox.h - 5; y += 4) {
+      for (let x = textBox.x + 5; x < textBox.x + textBox.w - 5; x++) {
+        const idx = (y * W + x) * 4;
+        data[idx] = 255;
+        data[idx + 1] = 255;
+        data[idx + 2] = 255;
+      }
+    }
+
+    const image: ImagePatchData = { width: W, height: H, data };
+    let evidence: import('./HeuristicBubbleExtractor').BubbleShapeEvidence | undefined;
+    const carrier = HeuristicBubbleExtractor.extractCarrierBox(image, textBox, {
+      onShapeEvidence: (shape) => { evidence = shape; },
+    });
+
+    expect(carrier).not.toBeNull();
+    if (carrier) {
+      expect(carrier.x).toBeLessThanOrEqual(textBox.x);
+      expect(carrier.y).toBeLessThanOrEqual(textBox.y);
+      expect(carrier.x + carrier.w).toBeGreaterThanOrEqual(textBox.x + textBox.w);
+      expect(carrier.y + carrier.h).toBeGreaterThanOrEqual(textBox.y + textBox.h);
+      expect(carrier.w).toBeGreaterThan(80);
+      expect(carrier.h).toBeGreaterThan(80);
+    }
+    expect(evidence?.observedInterior.some((val) => val === 1)).toBe(true);
+  });
 });

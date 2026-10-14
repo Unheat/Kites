@@ -87,6 +87,21 @@ describe('CustomApiEngine', () => {
     }));
   });
 
+  it.each([
+    ['openai', validOpenAiReply], ['openai-compatible', validOpenAiReply],
+    ['gemini', validGeminiReply], ['claude', validClaudeReply],
+  ] as const)('forwards glossary through %s provider payload', async (provider, reply) => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse(reply));
+    const engine = await createEngine({ ...openAiConfig, provider, baseUrl: 'https://example.com/v1' });
+    await engine.translate(['Name'], 'en', 'en', {
+      glossaryEnabled: true, glossaryEntries: [{ source: 'Name', target: 'Preferred' }],
+    });
+    const body = JSON.parse(fetchMock.mock.calls[0][1]?.body as string);
+    expect(JSON.stringify(body)).toContain('GLOSSARY_JSON');
+    expect(JSON.stringify(body)).toContain('Preferred');
+    expect(JSON.stringify(body)).toContain('untrusted literal terminology data');
+  });
+
   it('handles Gemini generateContent endpoint correctly with Keyed JSON', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse(validGeminiReply));
     const engine = await createEngine({ ...openAiConfig, provider: 'gemini' });

@@ -18,7 +18,9 @@ export type MessageType =
   | 'CAPTURE_VISIBLE_TAB' // Content -> Background
   | 'TRANSLATE_CAPTURED_IMAGE' // Content -> Background
   | 'CAPTURE_TRANSLATED' // Background -> Content
-  | 'CAPTURE_TRANSLATION_ERROR'; // Background -> Content
+  | 'CAPTURE_TRANSLATION_ERROR' // Background -> Content
+  | 'STUDIO_INPAINT' // Studio -> Background -> Offscreen
+  | 'STUDIO_OCR'; // Studio -> Background -> Offscreen
 
 export interface TranslateImageMessage {
   type: 'TRANSLATE_IMAGE';
@@ -48,12 +50,39 @@ export interface ModelInitializationMessage {
 export interface ImageTranslatedMessage {
   type: 'IMAGE_TRANSLATED';
   payload: {
+    jobId?: number;
     originalUrl: string;
     bakedBase64: string;
   };
 }
 export type RuntimeMessageTarget = 'background' | 'offscreen';
-export type RuntimeMessageSource = 'popup' | 'background' | 'offscreen' | 'dashboard' | 'content';
+export type RuntimeMessageSource = 'popup' | 'background' | 'offscreen' | 'dashboard' | 'content' | 'studio';
+
+export interface StudioInpaintPayload {
+  imagePatchBase64: string;
+  maskPatchBase64: string;
+  width: number;
+  height: number;
+  engineId?: string;
+}
+
+export interface StudioOcrPayload {
+  /** Pristine original-art crop used only for recognition. */
+  imagePatchBase64: string;
+  /** Current edited raster crop used for cleaning; defaults to the recognition crop. */
+  backgroundPatchBase64?: string;
+  /** Translate recognized text unless explicitly false. */
+  translate?: boolean;
+  /** Clean detected regions unless explicitly false. */
+  inpaint?: boolean;
+  width: number;
+  height: number;
+  offsetX: number;
+  offsetY: number;
+  ocrEngineId?: string;
+  inpaintEngineId?: string;
+  translationEngineId?: string;
+}
 export type ModelCategory = 'translation' | 'inpaint' | 'ocr' | 'bubble';
 
 export interface ViewportSelection {
@@ -153,8 +182,17 @@ export interface UserAccountInfo {
 }
 
 import type { RenderFontPresetId } from './renderFontPresets';
+import type { GlossaryEntry } from './glossary';
 
 export type BubbleDetectionMode = 'off' | 'heuristic' | 'neural' | 'neural-mask';
+export type HistoryRetentionPeriod = '1day' | '1week' | '1month' | 'never';
+
+/** Custom CSS image selector rule for tricky or non-standard manga reader sites. */
+export interface SiteSelectorRule {
+  domain: string;
+  selector: string;
+  enabled: boolean;
+}
 
 export interface PopupState {
   isExtensionEnabled: boolean;
@@ -169,6 +207,11 @@ export interface PopupState {
   activeOcrId: string;
   renderFontPresetId: RenderFontPresetId;
   bubbleMode: BubbleDetectionMode;
+  historyRetention: HistoryRetentionPeriod;
+  glossaryEnabled: boolean;
+  glossaryEntries: GlossaryEntry[];
+  disabledDomains: string[];
+  siteRules: SiteSelectorRule[];
   fallbackChain: string[];
   customApis: CustomApiConfig[];
   webgpuSupported: boolean | null;
@@ -195,6 +238,11 @@ export const DEFAULT_POPUP_STATE: PopupState = {
   activeOcrId: 'v6-small',
   renderFontPresetId: 'standard',
   bubbleMode: 'off',
+  historyRetention: '1week',
+  glossaryEnabled: false,
+  glossaryEntries: [],
+  disabledDomains: [],
+  siteRules: [],
   fallbackChain: [],
   customApis: [],
   webgpuSupported: null,

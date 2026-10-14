@@ -1,3 +1,5 @@
+import { AD_NOISE_CONTAINER_SELECTORS, MANGA_READER_CONTAINER_SELECTORS } from '../shared/siteRules';
+
 export const MIN_MEDIA_WIDTH_PX = 150;
 export const MIN_MEDIA_HEIGHT_PX = 150;
 const MAX_SURFACE_ANCESTOR_DEPTH = 3;
@@ -80,7 +82,7 @@ export function normalizeMediaUrl(url: string): string {
  * @param url - Candidate image URL.
  * @returns Whether the URL should be ignored in favor of another source.
  */
-function isPlaceholderSource(url: string): boolean {
+export function isPlaceholderSource(url: string): boolean {
   if (!url) return true;
   if (url.startsWith('data:image/svg+xml')) return true;
   if (url.startsWith('data:image/gif;base64,R0lGODlhAQAB')) return true;
@@ -113,6 +115,33 @@ function resolveBestSrcsetUrl(srcset: string): string {
  * @returns Best usable source URL, or an empty string.
  */
 export function resolveElementSource(element: Element): string {
+  const origSrc = element.getAttribute('data-kites-orig-src');
+  if (origSrc && !isPlaceholderSource(origSrc)) {
+    if (element instanceof HTMLImageElement) {
+      const appliedSrc = element.getAttribute('data-kites-applied-src');
+      const currentSrc = element.currentSrc || element.src || '';
+      // If currentSrc is neither applied blob nor origSrc (e.g. host single-page reader navigated to next page),
+      // the DOM element has been recycled for a new image. Clear stale Kites attributes so the new image is recognized.
+      if (
+        currentSrc &&
+        !isPlaceholderSource(currentSrc) &&
+        currentSrc !== appliedSrc &&
+        currentSrc !== origSrc
+      ) {
+        element.removeAttribute('data-kites-orig-src');
+        element.removeAttribute('data-kites-orig-srcset');
+        element.removeAttribute('data-kites-applied-src');
+        element.removeAttribute('data-kites-translated');
+        element.removeAttribute('data-kites-show-original');
+        element.removeAttribute('data-kites-job-id');
+      } else {
+        return origSrc;
+      }
+    } else {
+      return origSrc;
+    }
+  }
+
   const directCandidates: string[] = [];
   if (element instanceof HTMLImageElement) {
     directCandidates.push(element.currentSrc, element.src, element.getAttribute('src') || '');
@@ -133,7 +162,19 @@ export function resolveElementSource(element: Element): string {
   // directCandidates fallback.
   const realDirect = directCandidates.find((candidate) =>
     candidate && !isPlaceholderSource(candidate) && !candidate.startsWith('data:image/svg+xml'));
-  if (realDirect) return realDirect;
+  const normalizeCandidateUrl = (url: string): string => {
+    if (!url) return '';
+    const trimmed = url.trim();
+    if (trimmed.startsWith('//')) {
+      const proto = typeof window !== 'undefined' && window.location?.protocol.startsWith('http')
+        ? window.location.protocol
+        : 'https:';
+      return `${proto}${trimmed}`;
+    }
+    return trimmed;
+  };
+
+  if (realDirect) return normalizeCandidateUrl(realDirect);
 
   const srcsets = [element.getAttribute('srcset') || ''];
   if (element.parentElement instanceof HTMLPictureElement) {
@@ -143,18 +184,19 @@ export function resolveElementSource(element: Element): string {
   }
   for (const srcset of srcsets) {
     const candidate = resolveBestSrcsetUrl(srcset);
-    if (candidate && !isPlaceholderSource(candidate)) return candidate;
+    if (candidate && !isPlaceholderSource(candidate)) return normalizeCandidateUrl(candidate);
   }
 
   for (const attribute of Array.from(element.attributes)) {
     if (attribute.name === 'src' || attribute.name === 'srcset') continue;
     if (!LAZY_SOURCE_ATTRIBUTE.test(attribute.name)) continue;
-    const candidate = attribute.name.toLowerCase().includes('srcset')
+    const rawVal = attribute.name.toLowerCase().includes('srcset')
       ? resolveBestSrcsetUrl(attribute.value)
       : attribute.value.trim();
-    if (candidate && !isPlaceholderSource(candidate)) return candidate;
+    if (rawVal && !isPlaceholderSource(rawVal)) return normalizeCandidateUrl(rawVal);
   }
-  return directCandidates.find(Boolean) || '';
+  const fallback = directCandidates.find(Boolean) || '';
+  return normalizeCandidateUrl(fallback);
 }
 
 /**
@@ -346,16 +388,58 @@ export function collectQueryRoots(root: ParentNode): ParentNode[] {
 }
 
 /**
+ * Checks whether an element is located inside an advertisement or noise container,
+ * unless it is contained within an established manga reader container.
+ *
+ * @param element - DOM element to test.
+ * @returns Whether the element is likely non-chapter ad/sidebar noise.
+ */
+export function isElementInNoiseContainer(element: Element): boolean {
+  for (const readerSelector of MANGA_READER_CONTAINER_SELECTORS) {
+    try {
+      if (element.closest(readerSelector)) return false;
+    } catch {}
+  }
+  for (const noiseSelector of AD_NOISE_CONTAINER_SELECTORS) {
+    try {
+      if (element.closest(noiseSelector)) return true;
+    } catch {}
+  }
+  return false;
+}
+
+/**
  * Discovers document media targets and removes duplicates sharing one source or surface.
+ * Prioritizes user-configured custom selectors when available, and excludes noise/ad containers.
  *
  * @param root - Document or subtree to scan.
+ * @param customSelector - Optional custom CSS selector override matching image elements.
  * @returns Unique validated media targets.
  */
-export function discoverMediaTargets(root: ParentNode = document): MediaTarget[] {
+export function discoverMediaTargets(root: ParentNode = document, customSelector?: string): MediaTarget[] {
   const seenSurfaces = new Set<HTMLElement>();
   const targets: MediaTarget[] = [];
+
+  if (customSelector) {
+    for (const queryRoot of collectQueryRoots(root)) {
+      try {
+        for (const element of Array.from(queryRoot.querySelectorAll(customSelector))) {
+          const target = element instanceof HTMLImageElement ? createMediaTarget(element) : createNonHtmlImageTarget(element);
+          if (!target || seenSurfaces.has(target.surfaceElement)) continue;
+          seenSurfaces.add(target.surfaceElement);
+          targets.push(target);
+        }
+      } catch (err) {
+        console.warn('[MediaTargets] Custom selector query failed:', err);
+      }
+    }
+    if (targets.length > 0) return targets;
+  }
+
+  const MEDIA_QUERY_SELECTOR = 'img, picture img, svg image, [style*="background-image"]';
   for (const queryRoot of collectQueryRoots(root)) {
-    for (const element of Array.from(queryRoot.querySelectorAll('*'))) {
+    for (const element of Array.from(queryRoot.querySelectorAll(MEDIA_QUERY_SELECTOR))) {
+      if (isElementInNoiseContainer(element)) continue;
       const target = element instanceof HTMLImageElement ? createMediaTarget(element) : createNonHtmlImageTarget(element);
       if (!target || seenSurfaces.has(target.surfaceElement)) continue;
       seenSurfaces.add(target.surfaceElement);
@@ -367,17 +451,20 @@ export function discoverMediaTargets(root: ParentNode = document): MediaTarget[]
 
 /**
  * Builds media targets from candidate elements, deduplicates by surface, keeps only
- * targets containing the point, and returns the largest by rendered area.
+ * targets containing the point, filters noise containers or custom selectors, and
+ * returns the largest by rendered area.
  *
  * @param elements - Candidate elements (event targets, composed path, elementsFromPoint hits).
  * @param clientX - Horizontal viewport coordinate.
  * @param clientY - Vertical viewport coordinate.
+ * @param customSelector - Optional custom CSS selector override matching chapter images.
  * @returns Largest matching media target, or null.
  */
 function pickLargestTargetFromElements(
   elements: Iterable<Element>,
   clientX: number,
-  clientY: number
+  clientY: number,
+  customSelector?: string
 ): MediaTarget | null {
   const targets: MediaTarget[] = [];
   for (const element of elements) {
@@ -385,14 +472,30 @@ function pickLargestTargetFromElements(
       ? createMediaTarget(element)
       : createNonHtmlImageTarget(element);
     if (directTarget) targets.push(directTarget);
-    for (const child of Array.from(element.querySelectorAll(MEDIA_SELECTOR))) {
-      const childTarget = child instanceof HTMLImageElement ? createMediaTarget(child) : createNonHtmlImageTarget(child);
-      if (childTarget) targets.push(childTarget);
+    if (element !== document.body && element !== document.documentElement) {
+      for (const child of Array.from(element.querySelectorAll(MEDIA_SELECTOR))) {
+        const childTarget = child instanceof HTMLImageElement ? createMediaTarget(child) : createNonHtmlImageTarget(child);
+        if (childTarget) targets.push(childTarget);
+      }
     }
   }
 
   return targets
     .filter((target, index) => targets.findIndex((candidate) => candidate.surfaceElement === target.surfaceElement) === index)
+    .filter((target) => {
+      if (customSelector) {
+        try {
+          return Boolean(
+            target.surfaceElement.closest(customSelector) ||
+            target.sourceElement.closest(customSelector) ||
+            target.imgElement?.closest(customSelector)
+          );
+        } catch {
+          return false;
+        }
+      }
+      return !isElementInNoiseContainer(target.surfaceElement) && !isElementInNoiseContainer(target.sourceElement);
+    })
     .filter((target) => surfaceContainsPoint(target.surfaceElement, clientX, clientY))
     .sort((first, second) => {
       const firstRect = first.surfaceElement.getBoundingClientRect();
@@ -403,21 +506,24 @@ function pickLargestTargetFromElements(
 
 /**
  * Resolves hover media using composed paths, point hit-testing, descendants, and CSS backgrounds.
+ * Prioritizes customSelector when configured, and excludes noise containers when unconfigured.
  *
  * @param event - Mouse event used for target and pointer information.
+ * @param customSelector - Optional custom CSS selector override.
  * @returns Largest matching media target, or null.
  */
-export function resolveHoverMediaTarget(event: MouseEvent): MediaTarget | null {
+export function resolveHoverMediaTarget(event: MouseEvent, customSelector?: string): MediaTarget | null {
   const elements = new Set<Element>();
   if (event.target instanceof Element) elements.add(event.target);
   for (const node of event.composedPath()) if (node instanceof Element) elements.add(node);
   for (const element of document.elementsFromPoint?.(event.clientX, event.clientY) || []) elements.add(element);
 
-  return pickLargestTargetFromElements(elements, event.clientX, event.clientY);
+  return pickLargestTargetFromElements(elements, event.clientX, event.clientY, customSelector);
 }
 
 /**
  * Resolves the media target at a raw viewport point without a mouse event.
+ * Prioritizes customSelector when configured, and excludes noise containers when unconfigured.
  *
  * WORKAROUND: [Scrolling fires no boundary events] -> mouseover/mouseout only fire when the
  * pointer crosses element edges. When a tall page scrolls under a stationary cursor, no
@@ -427,9 +533,10 @@ export function resolveHoverMediaTarget(event: MouseEvent): MediaTarget | null {
  *
  * @param clientX - Horizontal viewport coordinate.
  * @param clientY - Vertical viewport coordinate.
+ * @param customSelector - Optional custom CSS selector override.
  * @returns Largest matching media target at the point, or null.
  */
-export function resolveMediaTargetAtPoint(clientX: number, clientY: number): MediaTarget | null {
+export function resolveMediaTargetAtPoint(clientX: number, clientY: number, customSelector?: string): MediaTarget | null {
   if (typeof document.elementsFromPoint !== 'function') return null;
-  return pickLargestTargetFromElements(document.elementsFromPoint(clientX, clientY), clientX, clientY);
+  return pickLargestTargetFromElements(document.elementsFromPoint(clientX, clientY), clientX, clientY, customSelector);
 }

@@ -34,6 +34,7 @@
     "dexie": "^4.4.4",
     "hyphenation.en-us": "^0.2.1",
     "hypher": "^0.2.5",
+    "jszip": "3.10.2",
     "lucide-react": "^1.24.0",
     "minisearch": "^7.2.0",
     "onnxruntime-web": "^1.30.0",

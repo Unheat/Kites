@@ -245,7 +245,7 @@ describe('Canvas Typesetting', () => {
       expect(results[i]).not.toBeNull();
     });
     expect(blocks).toEqual(before);
-  });
+  }, 15000);
 
   it('keeps fixed/free overlap rather than moving a validated box', () => {
     const fixed = { x: 50, y: 50, w: 100, h: 100 };

@@ -5,6 +5,7 @@ import {
   type LlmChatMessage,
 } from './BaseLlmTranslationEngine';
 import { checkWebGPUAvailability } from '../../utils/hardware';
+import type { TranslationOptions } from './BaseEngine';
 
 /** Default segment batch size for on-device WebLLM inference (fits full page in 1 pass) */
 const DEFAULT_WEBLLM_BATCH_SIZE = 15;
@@ -111,13 +112,18 @@ export class WebLLMEngine extends BaseLlmTranslationEngine {
   /**
    * Translates an array of text blocks by grouping them into chunks and invoking WebGPU-accelerated LLM completions.
    * Ensures the engine has been initialized before proceeding.
+   * @param texts - Source text blocks in reading order.
+   * @param sourceLangId - Source language code or name; defaults to automatic detection.
+   * @param targetLangId - Target language code or name; defaults to English.
+   * @param options - Request-local glossary forwarded to the shared LLM prompt builder.
+   * @returns Translated strings aligned with the input array.
    */
-  override async translate(texts: string[], sourceLangId = 'auto', targetLangId = 'en'): Promise<string[]> {
+  override async translate(texts: string[], sourceLangId = 'auto', targetLangId = 'en', options?: TranslationOptions): Promise<string[]> {
     if (!this.engine) {
       throw new Error('WebLLMEngine is not initialized. Call init() first.');
     }
 
-    return await super.translate(texts, sourceLangId, targetLangId);
+    return await super.translate(texts, sourceLangId, targetLangId, options);
   }
 
   /**

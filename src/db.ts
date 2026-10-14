@@ -1,7 +1,17 @@
 import Dexie, { type EntityTable } from 'dexie';
+import type { HistoryRetentionPeriod } from './shared/types';
+import { STORAGE_KEYS } from './shared/constants';
 
+// Retention presets use elapsed 24-hour days; a month is a fixed 30-day window.
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 export const JOB_RETENTION_DAYS = 7;
+
+export const RETENTION_PERIOD_DAYS: Readonly<Record<HistoryRetentionPeriod, number | null>> = {
+  '1day': 1,
+  '1week': JOB_RETENTION_DAYS,
+  '1month': 30,
+  'never': null,
+};
 
 export interface TranslationJob {
   id?: number;
@@ -82,26 +92,79 @@ export async function deleteJobs(jobIds: number[]): Promise<void> {
 }
 
 /**
- * Deletes translation jobs older than the specified retention window.
+ * Deletes inactive translation jobs older than the specified retention window.
  * Associated image and text records are removed in the same transaction.
+ * Queued, downloading, and processing jobs are never eligible for auto-deletion.
  *
- * @param daysToKeep - Number of days to retain jobs (default 7).
- * @returns Resolves when cleanup completes or logs an error on failure.
+ * @param retentionOrDays - Retention preset or positive finite days. When omitted,
+ * reads saved settings, defaulting to seven days only when no preference exists.
+ * @returns Resolves after cleanup, or skips deletion for disabled/invalid retention
+ * and settings read failures; database failures are logged.
  */
-export async function cleanupOldJobs(daysToKeep: number = JOB_RETENTION_DAYS): Promise<void> {
+export async function cleanupOldJobs(
+  retentionOrDays?: number | HistoryRetentionPeriod
+): Promise<void> {
+  let retention: unknown = retentionOrDays;
+  if (retention === undefined && typeof chrome !== 'undefined') {
+    try {
+      if (!chrome.storage?.local) {
+        console.error('[Database] Settings storage unavailable. Skipping cleanup.');
+        return;
+      }
+      const data: Record<string, unknown> = await chrome.storage.local.get(STORAGE_KEYS.POPUP_STATE);
+      const state = data[STORAGE_KEYS.POPUP_STATE];
+      if (state !== undefined && (state === null || typeof state !== 'object' || Array.isArray(state))) {
+        console.error('[Database] Invalid saved settings. Skipping cleanup.');
+        return;
+      }
+      retention = (state as { historyRetention?: unknown } | undefined)?.historyRetention;
+    } catch (error) {
+      // A failed read must not override a possibly saved "never" preference.
+      console.error('[Database] Failed to read retention settings. Skipping cleanup:', error);
+      return;
+    }
+  }
+
+  let daysToKeep: number | null;
+  if (retention === undefined) {
+    daysToKeep = JOB_RETENTION_DAYS;
+  } else if (typeof retention === 'number' && retentionOrDays !== undefined) {
+    daysToKeep = retention;
+  } else if (typeof retention === 'string' && Object.prototype.hasOwnProperty.call(RETENTION_PERIOD_DAYS, retention)) {
+    daysToKeep = RETENTION_PERIOD_DAYS[retention as HistoryRetentionPeriod];
+  } else {
+    console.error('[Database] Invalid retention setting. Skipping cleanup.');
+    return;
+  }
+
+  if (daysToKeep === null) {
+    console.log('[Database] Auto-delete disabled ("never"). Skipping cleanup.');
+    return;
+  }
+  if (!Number.isFinite(daysToKeep) || daysToKeep <= 0) {
+    console.error('[Database] Retention days must be positive and finite. Skipping cleanup.');
+    return;
+  }
+
   const cutoffTime = Date.now() - (daysToKeep * MILLISECONDS_PER_DAY);
   try {
     console.log(`[Database] Running cleanup for jobs older than ${daysToKeep} days...`);
-    const oldJobKeys = await db.translationJobs.where('timestamp').below(cutoffTime).primaryKeys();
-    const oldJobs = oldJobKeys.filter((jobId): jobId is number => jobId !== undefined);
-    if (oldJobs.length > 0) {
-      await deleteJobs(oldJobs);
-      console.log(`[Database] Cleaned up ${oldJobs.length} old jobs.`);
-    } else {
-      console.log(`[Database] No old jobs to clean up.`);
-    }
+    // Select and cascade under one write lock so an inactive job cannot become
+    // active between the eligibility check and deletion in another context.
+    await db.transaction('rw', db.translationJobs, db.images, db.textBlocks, async () => {
+      const oldJobKeys = await db.translationJobs.where('timestamp').below(cutoffTime)
+        .filter((job) => job.status === undefined || job.status === 'completed' || job.status === 'error')
+        .primaryKeys();
+      const oldJobs = oldJobKeys.filter((jobId): jobId is number => jobId !== undefined);
+      if (oldJobs.length > 0) {
+        await deleteJobs(oldJobs);
+        console.log(`[Database] Cleaned up ${oldJobs.length} old jobs.`);
+      } else {
+        console.log('[Database] No old jobs to clean up.');
+      }
+    });
   } catch (error) {
-    console.error(`[Database] Cleanup failed:`, error);
+    console.error('[Database] Cleanup failed:', error);
   }
 }
 

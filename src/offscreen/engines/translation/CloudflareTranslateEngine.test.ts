@@ -78,6 +78,22 @@ describe('CloudflareTranslateEngine Keyed JSON Protocol', () => {
     expect(requestBody.messages[1].content).toContain('"b0":"Bonjour"');
   });
 
+  it('forwards inherited BaseLlm glossary data through Cloudflare messages without changing schema', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
+      choices: [{ message: { content: '{"b0":"Preferred"}' } }],
+    }), { status: 200 }));
+    await engine.translate(['Name'], 'en', 'en', {
+      glossaryEnabled: true, glossaryEntries: [{ source: 'Name', target: 'Preferred' }],
+    });
+    const body = JSON.parse(fetchSpy.mock.calls[0][1]?.body as string);
+    expect(body.messages[0].content).toContain('untrusted literal terminology data');
+    expect(body.messages[0].content).not.toContain('"target":"Preferred"');
+    expect(body.messages[1].content).toContain('"target":"Preferred"');
+    // Worker endpoint keeps its existing plain-message contract; BaseLlm owns alignment.
+    expect(body.messages[1].content).toContain('"b0":"Name"');
+    expect(body.messages[0].content).toContain('Keep every output key exactly as required');
+  });
+
   it('preserves alignment without shifting when upstream model drops a key', async () => {
     const mockResponse = {
       choices: [
