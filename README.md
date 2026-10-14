@@ -106,6 +106,18 @@ Hover over any comic panel on Twitter/X, Pixiv, or manga sites. An unobtrusive f
 
 ---
 
+## 📖 Chapter Reader & Fast Scan
+
+Read entire manga or webtoon chapters in one distraction-free view with automatic batch detection, continuous vertical webtoon mode, and multi-page translation:
+
+[![Kites Chapter Reader](./README_images/UI-feature/chapter-reader.jpg)](./README_images/UI-feature/chapter-reader.jpg)
+
+- **Fast Scan:** Automatically auto-scrolls and queues all lazy-loaded manga panels across chapter pages.
+- **Flexible Reader Modes:** Seamlessly switch between Webtoon continuous vertical strips, Single page, and Double spread layouts.
+- **Batch Chapter Translation:** Translate the entire chapter in one click with progress tracking and offline preservation.
+
+---
+
 ## 🛠️ Built-in Kites Studio
 
 Need to polish a scanlation or adjust phrasing? Open the full-screen **Kites Studio** straight from the extension.
@@ -126,15 +138,19 @@ Customize target languages, neural OCR models, and inpainting algorithms from th
 <div align="center">
 <table>
   <tr>
-    <th width="45%" align="center">Clean Quick Menu</th>
-    <th width="55%" align="center">Customizable Engine Settings</th>
+    <th width="33%" align="center">Quick Control Popup</th>
+    <th width="33%" align="center">Chapter Reader &amp; Scanner</th>
+    <th width="34%" align="center">Customizable Engine Settings</th>
   </tr>
   <tr>
     <td align="center">
-      <img src="./README_images/UI-feature/main-panel.jpg" alt="Kites Main Popup" width="85%" />
+      <img src="./README_images/UI-feature/main-panel.jpg" alt="Kites Main Popup" width="95%" />
     </td>
     <td align="center">
-      <img src="./README_images/UI-feature/setting-panel.jpg" alt="Kites Settings Panel" width="85%" />
+      <img src="./README_images/UI-feature/reader-panel.jpg" alt="Kites Chapter Reader and Scanner Panel" width="95%" />
+    </td>
+    <td align="center">
+      <img src="./README_images/UI-feature/setting-panel.jpg" alt="Kites Settings Panel" width="95%" />
     </td>
   </tr>
 </table>

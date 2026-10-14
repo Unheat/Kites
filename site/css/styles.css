@@ -805,17 +805,23 @@ header {
   display: block;
 }
 
-/* Extension Popup & Settings Side-by-Side */
+/* Extension Popup, Reader, and Settings Row */
 .extension-panels-row {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 32px;
+  gap: 28px;
   margin-bottom: 48px;
 }
 
-@media (min-width: 800px) {
+@media (min-width: 700px) and (max-width: 1023px) {
   .extension-panels-row {
     grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (min-width: 1024px) {
+  .extension-panels-row {
+    grid-template-columns: repeat(3, 1fr);
   }
 }
 
