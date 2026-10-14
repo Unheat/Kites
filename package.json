@@ -28,7 +28,7 @@
     "@ai-sdk/anthropic": "^3.0.117",
     "@ai-sdk/google": "^3.0.122",
     "@ai-sdk/openai": "^3.0.112",
-    "@mlc-ai/web-llm": "^0.2.84",
+    "@mlc-ai/web-llm": "^0.2.86",
     "@paddleocr/paddleocr-js": "^0.4.2",
     "ai": "^6.0.280",
     "clipper-lib": "^6.4.2",
