@@ -6,6 +6,9 @@ import {
   Trash2,
   Layers,
   Sparkles,
+  Edit3,
+  Check,
+  Languages,
 } from 'lucide-react';
 import { studioStore, useStudioStore } from '../state/studioStore';
 import { studioUndoStack } from '../state/undoStack';
@@ -49,6 +52,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
   const hideBoxes = useStudioStore((s) => s.hideBoxes);
   const textObjects = useStudioStore((s) => s.textObjects);
   const selectedTextId = useStudioStore((s) => s.selectedTextId);
+  const editingTextId = useStudioStore((s) => s.editingTextId);
   const clipboardStyle = useStudioStore((s) => s.clipboardStyle);
   const eraseSettings = useStudioStore((s) => s.eraseSettings);
   const paintSettings = useStudioStore((s) => s.paintSettings);
@@ -61,6 +65,10 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
   const appearance = useStudioStore((s) => s.appearance);
 
   const brushEngineRef = useRef<BrushEngine>(new BrushEngine());
+  const inlineTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const inlineInitialTextRef = useRef<TextObject[] | null>(null);
+  const lastClickRef = useRef<{ time: number; id: string | null }>({ time: 0, id: null });
+  const [copiedOrigPill, setCopiedOrigPill] = useState(false);
   const [isPointerDown, setIsPointerDown] = useState(false);
   const [isSpacePanning, setIsSpacePanning] = useState(false);
   const [isAiProcessing, setIsAiProcessing] = useState(false);
@@ -142,7 +150,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
 
     // 2. Render Text Objects
     for (const obj of textObjects) {
-      if (obj.isVisible === false) continue;
+      if (obj.isVisible === false || obj.id === editingTextId) continue;
 
       if (obj.warpPreset && obj.warpPreset !== 'none' && obj.quadPoints) {
         const tempCanvas = document.createElement('canvas');
@@ -161,14 +169,14 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       }
     }
 
-    // 3. Render transform furniture if not in hideBoxes mode
+    // 3. Render transform furniture if not in hideBoxes mode and not actively typing inline
     if (!hideBoxes) {
       const selectedObj = textObjects.find((t) => t.id === selectedTextId);
-      if (selectedObj) {
+      if (selectedObj && selectedObj.id !== editingTextId) {
         CanvasFurniture.drawSelectionFurniture(ctx, selectedObj, appearance.selectedBoxBorderColor);
       }
     }
-  }, [imageWidth, imageHeight, textObjects, imageLayers, selectedTextId, selectedImageLayerId, appearance, hideBoxes]);
+  }, [imageWidth, imageHeight, textObjects, imageLayers, selectedTextId, selectedImageLayerId, editingTextId, appearance, hideBoxes]);
 
   useEffect(() => {
     redrawOverlay();
@@ -189,6 +197,13 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
         e.preventDefault();
         handleDeleteSelectedText();
       }
+      if (e.key === 'Enter' && selectedTextId && !editingTextId) {
+        const target = e.target as HTMLElement;
+        if (target.tagName !== 'INPUT' && target.tagName !== 'TEXTAREA' && !target.isContentEditable) {
+          e.preventDefault();
+          studioStore.setState({ editingTextId: selectedTextId });
+        }
+      }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd' && selectedTextId) {
         e.preventDefault();
         handleDuplicateSelectedText();
@@ -207,7 +222,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [selectedTextId]);
+  }, [selectedTextId, editingTextId]);
 
   // Mouse wheel listener: natural scrolling vs cursor-centered zoom
   const handleWheel = (e: React.WheelEvent) => {
@@ -340,20 +355,38 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       }
 
       if (clickedObj) {
+        const now = Date.now();
+        const isDoubleClick =
+          lastClickRef.current.id === clickedObj.id && now - lastClickRef.current.time < 350;
+        lastClickRef.current = { time: now, id: clickedObj.id };
+
         studioStore.setState({ selectedTextId: clickedObj.id });
+
+        if (isDoubleClick) {
+          studioStore.setState({ editingTextId: clickedObj.id });
+          return;
+        }
+
         setActiveHandle('nw');
         setInitialTransformState({ ...clickedObj });
         return;
       }
 
+      // Clicked outside text objects
+      if (editingTextId) {
+        studioStore.setState({ editingTextId: null });
+      }
+
       if (activeTool === 'text') {
+        const id = `bubble-${Date.now()}`;
         const newObj: TextObject = {
-          id: `bubble-${Date.now()}`,
-          x: Math.round(pt.x - 60),
-          y: Math.round(pt.y - 20),
-          width: 120,
-          height: 40,
+          id,
+          x: Math.round(pt.x - 70),
+          y: Math.round(pt.y - 25),
+          width: 140,
+          height: 50,
           text: 'New Dialogue',
+          originalText: undefined,
           fontSize: 18,
           fontFamily: 'WildWords, CCWildWords, sans-serif',
           color: '#000000',
@@ -364,11 +397,11 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
         };
         const prev = [...textObjects];
         const next = [...textObjects, newObj];
-        studioStore.setState({ textObjects: next, selectedTextId: newObj.id });
+        studioStore.setState({ textObjects: next, selectedTextId: id, editingTextId: id });
         studioUndoStack.push({
           id: `create-bubble-${Date.now()}`,
           timestamp: Date.now(),
-          description: 'Create Text Bubble',
+          description: 'Create Empty Text Box',
           textObjects: { before: prev, after: next },
         });
         return;
@@ -741,8 +774,45 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
     });
   };
 
+  // Focus inline textarea when inline editing mode activates
+  useEffect(() => {
+    if (editingTextId && inlineTextareaRef.current) {
+      inlineTextareaRef.current.focus();
+      inlineTextareaRef.current.select();
+    }
+  }, [editingTextId]);
+
+  const handleInlineTextChange = (newText: string) => {
+    if (!editingTextId) return;
+    if (!inlineInitialTextRef.current) {
+      inlineInitialTextRef.current = [...textObjects];
+    }
+    const next = textObjects.map((t) =>
+      t.id === editingTextId ? { ...t, text: newText, lines: undefined } : t
+    );
+    studioStore.setState({ textObjects: next });
+  };
+
+  const handleFinishInlineEdit = () => {
+    if (inlineInitialTextRef.current) {
+      const prev = inlineInitialTextRef.current;
+      const current = studioStore.getState().textObjects;
+      inlineInitialTextRef.current = null;
+      if (JSON.stringify(prev) !== JSON.stringify(current)) {
+        studioUndoStack.push({
+          id: `inline-text-edit-${Date.now()}`,
+          timestamp: Date.now(),
+          description: 'Edit Dialogue Text',
+          textObjects: { before: prev, after: current },
+        });
+      }
+    }
+    studioStore.setState({ editingTextId: null });
+  };
+
   // Compute screen coordinates for floating action pill
   const selectedObj = textObjects.find((t) => t.id === selectedTextId);
+  const editingObj = textObjects.find((t) => t.id === editingTextId);
   const pillPos = selectedObj && overlayCanvasRef.current
     ? imageToClient(
         selectedObj.x + selectedObj.width / 2,
@@ -807,56 +877,150 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
           }}
           className="block absolute top-0 left-0 cursor-crosshair"
         />
+
+        {/* Layer 4: Direct In-Place Text Editor Overlay */}
+        {editingTextId && editingObj && (
+          <div
+            style={{
+              position: 'absolute',
+              left: `${editingObj.x * zoom}px`,
+              top: `${editingObj.y * zoom}px`,
+              width: `${Math.max(40, editingObj.width * zoom)}px`,
+              height: `${Math.max(28, editingObj.height * zoom)}px`,
+              transform: editingObj.rotation ? `rotate(${editingObj.rotation}deg)` : undefined,
+              transformOrigin: 'center center',
+              zIndex: 35,
+            }}
+            onPointerDown={(e) => e.stopPropagation()}
+            onPointerMove={(e) => e.stopPropagation()}
+            onPointerUp={(e) => e.stopPropagation()}
+          >
+            <textarea
+              ref={inlineTextareaRef}
+              value={editingObj.text}
+              onChange={(e) => handleInlineTextChange(e.target.value)}
+              onBlur={handleFinishInlineEdit}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  handleFinishInlineEdit();
+                }
+                e.stopPropagation();
+              }}
+              style={{
+                width: '100%',
+                height: '100%',
+                fontSize: `${Math.max(10, editingObj.fontSize * zoom)}px`,
+                fontFamily: editingObj.fontFamily || 'sans-serif',
+                color: editingObj.color || '#000000',
+                textAlign: editingObj.align || 'center',
+                lineHeight: editingObj.lineSpacing || 1.2,
+                backgroundColor: 'rgba(255, 255, 255, 0.94)',
+                border: '2px solid #f4446d',
+                borderRadius: '6px',
+                padding: '4px',
+                outline: 'none',
+                resize: 'none',
+                boxShadow: '0 8px 30px rgba(0,0,0,0.6)',
+                boxSizing: 'border-box',
+                overflow: 'hidden',
+              }}
+              autoFocus
+            />
+          </div>
+        )}
       </div>
 
       {/* Floating Action Pill Toolbar (Figma/Torii style) */}
       {pillPos && selectedObj && !isShowingOriginal && !isSpacePanning && !hideBoxes && (
-        <div
-          style={{
-            left: `${pillPos.x}px`,
-            top: `${pillPos.y - 44}px`,
-            transform: 'translateX(-50%)',
-          }}
-          className="fixed z-40 flex items-center gap-0.5 p-1 rounded-xl border border-[#282d3f] bg-[#12141c]/95 backdrop-blur-md shadow-2xl text-slate-200"
-        >
-          <button
-            onClick={handleCopyStyle}
-            title="Copy Typography Style"
-            className="p-1.5 rounded-lg hover:bg-[#1c1f2e] text-slate-300 hover:text-white transition"
+        <>
+          {/* Floating Original Text Bar (Mapped from selected bubble) */}
+          {selectedObj.originalText && (
+            <div
+              style={{
+                left: `${pillPos.x}px`,
+                top: `${pillPos.y - 82}px`,
+                transform: 'translateX(-50%)',
+              }}
+              className="fixed z-40 flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-[#282d3f] bg-[#12141c]/95 backdrop-blur-md shadow-2xl text-slate-200 max-w-sm pointer-events-auto"
+            >
+              <span className="text-[10px] uppercase font-bold text-[#f4446d] tracking-wider shrink-0 flex items-center gap-1">
+                <Languages className="w-3 h-3" />
+                OCR:
+              </span>
+              <span
+                className="text-xs text-slate-300 truncate max-w-[200px] font-sans"
+                title={selectedObj.originalText}
+              >
+                {selectedObj.originalText}
+              </span>
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(selectedObj.originalText!);
+                  setCopiedOrigPill(true);
+                  setTimeout(() => setCopiedOrigPill(false), 1500);
+                }}
+                title="Copy original OCR text"
+                className="p-1 rounded text-slate-400 hover:text-white hover:bg-[#1c1f2e] transition shrink-0"
+              >
+                {copiedOrigPill ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+              </button>
+            </div>
+          )}
+
+          <div
+            style={{
+              left: `${pillPos.x}px`,
+              top: `${pillPos.y - 44}px`,
+              transform: 'translateX(-50%)',
+            }}
+            className="fixed z-40 flex items-center gap-0.5 p-1 rounded-xl border border-[#282d3f] bg-[#12141c]/95 backdrop-blur-md shadow-2xl text-slate-200"
           >
-            <Copy className="w-3.5 h-3.5" />
-          </button>
-          {clipboardStyle && (
             <button
-              onClick={handlePasteStyle}
-              title="Paste Typography Style"
+              onClick={() => studioStore.setState({ editingTextId: selectedObj.id })}
+              title="Edit Dialogue (Double-click bubble or Enter)"
               className="p-1.5 rounded-lg hover:bg-[#1c1f2e] text-[#f4446d] hover:text-[#e0355e] transition"
             >
-              <ClipboardPaste className="w-3.5 h-3.5" />
+              <Edit3 className="w-3.5 h-3.5" />
             </button>
-          )}
-          <button
-            onClick={handleDuplicateSelectedText}
-            title="Duplicate Bubble (Ctrl+D)"
-            className="p-1.5 rounded-lg hover:bg-[#1c1f2e] text-slate-300 hover:text-white transition"
-          >
-            <CopyPlus className="w-3.5 h-3.5" />
-          </button>
-          <button
-            onClick={handleRasterizeText}
-            title="Rasterize to Background Canvas"
-            className="p-1.5 rounded-lg hover:bg-[#1c1f2e] text-slate-300 hover:text-white transition"
-          >
-            <Layers className="w-3.5 h-3.5" />
-          </button>
-          <button
-            onClick={handleDeleteSelectedText}
-            title="Delete Bubble (Delete)"
-            className="p-1.5 rounded-lg hover:bg-[#f4446d]/15 text-[#f4446d] hover:text-[#e0355e] transition"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-          </button>
-        </div>
+            <button
+              onClick={handleCopyStyle}
+              title="Copy Typography Style"
+              className="p-1.5 rounded-lg hover:bg-[#1c1f2e] text-slate-300 hover:text-white transition"
+            >
+              <Copy className="w-3.5 h-3.5" />
+            </button>
+            {clipboardStyle && (
+              <button
+                onClick={handlePasteStyle}
+                title="Paste Typography Style"
+                className="p-1.5 rounded-lg hover:bg-[#1c1f2e] text-[#f4446d] hover:text-[#e0355e] transition"
+              >
+                <ClipboardPaste className="w-3.5 h-3.5" />
+              </button>
+            )}
+            <button
+              onClick={handleDuplicateSelectedText}
+              title="Duplicate Bubble (Ctrl+D)"
+              className="p-1.5 rounded-lg hover:bg-[#1c1f2e] text-slate-300 hover:text-white transition"
+            >
+              <CopyPlus className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={handleRasterizeText}
+              title="Rasterize to Background Canvas"
+              className="p-1.5 rounded-lg hover:bg-[#1c1f2e] text-slate-300 hover:text-white transition"
+            >
+              <Layers className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={handleDeleteSelectedText}
+              title="Delete Bubble (Delete)"
+              className="p-1.5 rounded-lg hover:bg-[#f4446d]/15 text-[#f4446d] hover:text-[#e0355e] transition"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </>
       )}
 
       {activeTool === 'ocr' && ocrFeedback && !isAiProcessing && (

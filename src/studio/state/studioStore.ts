@@ -87,8 +87,10 @@ export interface StudioState {
   textObjects: TextObject[];
   selectedTextId: string | null;
   selectedTextIds: string[];
+  editingTextId: string | null;
   clipboardStyle: Partial<TextObject> | null;
   globalEditMode: boolean;
+  originalImage: HTMLImageElement | null;
 
   imageLayers: ImageLayer[];
   selectedImageLayerId: string | null;
@@ -162,8 +164,10 @@ const initialState: StudioState = {
   textObjects: [],
   selectedTextId: null,
   selectedTextIds: [],
+  editingTextId: null,
   clipboardStyle: null,
   globalEditMode: false,
+  originalImage: null,
 
   imageLayers: [],
   selectedImageLayerId: null,

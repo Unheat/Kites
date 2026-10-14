@@ -90,6 +90,11 @@ export const Studio: React.FC<StudioProps> = ({
   const imageWidth = originalImage?.naturalWidth || cleanedImage?.naturalWidth || 800;
   const imageHeight = originalImage?.naturalHeight || cleanedImage?.naturalHeight || 1200;
 
+  // Synchronize originalImage into studioStore
+  useEffect(() => {
+    studioStore.setState({ originalImage });
+  }, [originalImage]);
+
   // Initialize text objects
   useEffect(() => {
     if (initialTextObjects && initialTextObjects.length > 0) {

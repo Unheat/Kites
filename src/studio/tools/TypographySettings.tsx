@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Bold,
   Italic,
@@ -6,6 +6,14 @@ import {
   AlignCenter,
   AlignRight,
   CaseUpper,
+  Copy,
+  Check,
+  RotateCcw,
+  Edit3,
+  Languages,
+  Type,
+  Image as ImageIcon,
+  Plus,
 } from 'lucide-react';
 import { studioStore, useStudioStore } from '../state/studioStore';
 import { studioUndoStack } from '../state/undoStack';
@@ -15,8 +23,44 @@ export const TypographySettings: React.FC = () => {
   const textObjects = useStudioStore((s) => s.textObjects);
   const selectedTextId = useStudioStore((s) => s.selectedTextId);
   const globalEditMode = useStudioStore((s) => s.globalEditMode);
+  const originalImage = useStudioStore((s) => s.originalImage);
 
   const selectedObj = textObjects.find((t) => t.id === selectedTextId);
+
+  const [copiedOriginal, setCopiedOriginal] = useState(false);
+  const [isEditingOriginal, setIsEditingOriginal] = useState(false);
+  const [showCropPreview, setShowCropPreview] = useState(true);
+
+  const cropCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const initialTextObjectsRef = useRef<TextObject[] | null>(null);
+
+  // Render crop preview of original manga panel containing the selected text bubble
+  useEffect(() => {
+    if (!cropCanvasRef.current || !originalImage || !selectedObj || !showCropPreview) return;
+    const canvas = cropCanvasRef.current;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const padX = Math.max(16, Math.round(selectedObj.width * 0.15));
+    const padY = Math.max(16, Math.round(selectedObj.height * 0.15));
+    const sx = Math.max(0, Math.round(selectedObj.x - padX));
+    const sy = Math.max(0, Math.round(selectedObj.y - padY));
+    const sw = Math.min(originalImage.naturalWidth - sx, Math.round(selectedObj.width + padX * 2));
+    const sh = Math.min(originalImage.naturalHeight - sy, Math.round(selectedObj.height + padY * 2));
+
+    if (sw <= 0 || sh <= 0) return;
+
+    canvas.width = sw;
+    canvas.height = sh;
+    ctx.clearRect(0, 0, sw, sh);
+    ctx.drawImage(originalImage, sx, sy, sw, sh, 0, 0, sw, sh);
+
+    // Outline the speech bubble bounds in signature rose
+    ctx.strokeStyle = '#f4446d';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 4]);
+    ctx.strokeRect(selectedObj.x - sx, selectedObj.y - sy, selectedObj.width, selectedObj.height);
+  }, [originalImage, selectedObj, showCropPreview]);
 
   const updateSelected = (partial: Partial<TextObject>) => {
     const prev = [...textObjects];
@@ -39,19 +83,141 @@ export const TypographySettings: React.FC = () => {
     });
   };
 
+  // Dialogue text editing handlers
+  const handleTextChange = (newText: string) => {
+    if (!initialTextObjectsRef.current) {
+      initialTextObjectsRef.current = [...textObjects];
+    }
+    const next = textObjects.map((t) =>
+      t.id === obj.id ? { ...t, text: newText, lines: undefined } : t
+    );
+    studioStore.setState({ textObjects: next });
+  };
+
+  const handleTextBlur = () => {
+    if (initialTextObjectsRef.current) {
+      const prev = initialTextObjectsRef.current;
+      const current = studioStore.getState().textObjects;
+      initialTextObjectsRef.current = null;
+      if (JSON.stringify(prev) !== JSON.stringify(current)) {
+        studioUndoStack.push({
+          id: `text-edit-${Date.now()}`,
+          timestamp: Date.now(),
+          description: 'Edit Dialogue Text',
+          textObjects: { before: prev, after: current },
+        });
+      }
+    }
+  };
+
+  const handleCopyOriginal = () => {
+    if (!obj.originalText) return;
+    navigator.clipboard.writeText(obj.originalText);
+    setCopiedOriginal(true);
+    setTimeout(() => setCopiedOriginal(false), 1500);
+  };
+
+  const handleUpdateOriginalText = (newOriginal: string) => {
+    const prev = [...textObjects];
+    const next = textObjects.map((t) =>
+      t.id === obj.id ? { ...t, originalText: newOriginal } : t
+    );
+    studioStore.setState({ textObjects: next });
+    studioUndoStack.push({
+      id: `orig-text-edit-${Date.now()}`,
+      timestamp: Date.now(),
+      description: 'Update Original OCR Text',
+      textObjects: { before: prev, after: next },
+    });
+  };
+
+  const handleRevertToOriginal = () => {
+    if (!obj.originalText) return;
+    const prev = [...textObjects];
+    const next = textObjects.map((t) =>
+      t.id === obj.id ? { ...t, text: obj.originalText!, lines: undefined } : t
+    );
+    studioStore.setState({ textObjects: next });
+    studioUndoStack.push({
+      id: `revert-dialogue-${Date.now()}`,
+      timestamp: Date.now(),
+      description: 'Revert to Original Text',
+      textObjects: { before: prev, after: next },
+    });
+  };
+
+  const handleClearText = () => {
+    const prev = [...textObjects];
+    const next = textObjects.map((t) =>
+      t.id === obj.id ? { ...t, text: '', lines: undefined } : t
+    );
+    studioStore.setState({ textObjects: next });
+    studioUndoStack.push({
+      id: `clear-dialogue-${Date.now()}`,
+      timestamp: Date.now(),
+      description: 'Clear Dialogue Text',
+      textObjects: { before: prev, after: next },
+    });
+  };
+
+  const handleAddNewEmptyTextBox = () => {
+    const id = `bubble-${Date.now()}`;
+    const imgW = studioStore.getState().originalImage?.naturalWidth || 800;
+    const imgH = studioStore.getState().originalImage?.naturalHeight || 1200;
+    const newObj: TextObject = {
+      id,
+      x: Math.round(imgW / 2 - 70),
+      y: Math.round(imgH / 2 - 25),
+      width: 140,
+      height: 50,
+      text: 'New Dialogue',
+      originalText: undefined,
+      fontSize: 18,
+      fontFamily: 'WildWords, CCWildWords, sans-serif',
+      color: '#000000',
+      strokeColor: '#ffffff',
+      strokeWidth: 2,
+      align: 'center',
+      isVertical: false,
+    };
+    const prev = [...textObjects];
+    const next = [...textObjects, newObj];
+    studioStore.setState({
+      textObjects: next,
+      selectedTextId: id,
+      editingTextId: id,
+      activeTool: 'text',
+    });
+    studioUndoStack.push({
+      id: `add-empty-box-${Date.now()}`,
+      timestamp: Date.now(),
+      description: 'Add Empty Text Box',
+      textObjects: { before: prev, after: next },
+    });
+  };
+
   if (!selectedObj && !globalEditMode) {
     return (
-      <div className="p-5 text-center text-xs text-slate-400">
-        <p>No text bubble selected.</p>
-        <p className="mt-1 text-[11px] text-slate-500">
-          Click any text box on the canvas or enable <strong>Global Edit Mode</strong> below.
+      <div className="p-5 text-center text-xs text-slate-400 space-y-3">
+        <p className="font-medium text-slate-300">No text bubble selected.</p>
+        <p className="text-[11px] text-slate-500">
+          Click any text box on canvas, add a new empty text box, or enable <strong>Global Edit Mode</strong>.
         </p>
-        <button
-          onClick={() => studioStore.setState({ globalEditMode: true })}
-          className="mt-3 px-3 py-1.5 rounded-lg border border-[#282d3f] bg-[#1c1f2e] text-red-400 hover:bg-[#282d3f] transition"
-        >
-          Enable Global Edit Mode
-        </button>
+        <div className="flex flex-col gap-2 pt-1">
+          <button
+            onClick={handleAddNewEmptyTextBox}
+            className="w-full py-2 px-3 rounded-lg bg-[#f4446d] hover:bg-[#e0355e] text-white text-xs font-semibold shadow-md shadow-[rgba(244,68,109,0.35)] transition flex items-center justify-center gap-1.5"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            Add Empty Text Box
+          </button>
+          <button
+            onClick={() => studioStore.setState({ globalEditMode: true })}
+            className="w-full py-1.5 px-3 rounded-lg border border-[#282d3f] bg-[#1c1f2e] text-[#f4446d] hover:bg-[#282d3f] transition"
+          >
+            Enable Global Edit Mode
+          </button>
+        </div>
       </div>
     );
   }
@@ -59,19 +225,157 @@ export const TypographySettings: React.FC = () => {
   const obj = selectedObj || textObjects[0] || ({} as Partial<TextObject>);
 
   return (
-    <div className="space-y-4 text-xs text-slate-200">
+    <div className="space-y-3.5 text-xs text-slate-200">
       <div className="flex items-center justify-between pb-2 border-b border-[#282d3f]">
-        <h3 className="font-semibold text-sm text-slate-100">Typography</h3>
-        <label className="flex items-center gap-1.5 text-[11px] text-red-400 font-medium cursor-pointer">
+        <div className="flex items-center gap-2">
+          <h3 className="font-semibold text-sm text-slate-100">Typography</h3>
+          <button
+            onClick={handleAddNewEmptyTextBox}
+            title="Create an empty text box without OCR source"
+            className="px-2 py-0.5 rounded-md bg-[#f4446d]/15 hover:bg-[#f4446d]/25 border border-[#f4446d]/40 text-[#f4446d] text-[11px] font-medium transition flex items-center gap-1"
+          >
+            <Plus className="w-3 h-3" />
+            Add Box
+          </button>
+        </div>
+        <label className="flex items-center gap-1.5 text-[11px] text-[#f4446d] font-medium cursor-pointer">
           <input
             type="checkbox"
             checked={globalEditMode}
             onChange={(e) => studioStore.setState({ globalEditMode: e.target.checked })}
-            className="rounded border-[#282d3f] bg-[#090a0f] text-red-600 focus:ring-0"
+            className="rounded border-[#282d3f] bg-[#090a0f] text-[#f4446d] focus:ring-0 accent-[#f4446d]"
           />
           All Bubbles
         </label>
       </div>
+
+      {/* ======================================================== */}
+      {/* 1. ORIGINAL OCR SOURCE TEXT SECTION                      */}
+      {/* ======================================================== */}
+      <div className="space-y-1.5 p-2.5 rounded-xl bg-[#090a0f] border border-[#262a3b]">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1.5 text-slate-300 font-semibold text-xs">
+            <Languages className="w-3.5 h-3.5 text-[#f4446d]" />
+            <span>Original Source (OCR)</span>
+          </div>
+          <div className="flex items-center gap-1">
+            {originalImage && (
+              <button
+                onClick={() => setShowCropPreview(!showCropPreview)}
+                title={showCropPreview ? 'Hide original panel crop' : 'Peek original panel crop'}
+                className={`p-1 rounded text-[10px] transition ${
+                  showCropPreview ? 'bg-[#1c1f2e] text-[#f4446d]' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <ImageIcon className="w-3 h-3" />
+              </button>
+            )}
+            {obj.originalText && (
+              <button
+                onClick={handleCopyOriginal}
+                title="Copy original OCR text"
+                className="px-2 py-0.5 rounded text-[10px] font-medium bg-[#1c1f2e] text-slate-300 hover:text-white hover:bg-[#282d3f] transition flex items-center gap-1"
+              >
+                {copiedOriginal ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                {copiedOriginal ? 'Copied' : 'Copy'}
+              </button>
+            )}
+            <button
+              onClick={() => setIsEditingOriginal(!isEditingOriginal)}
+              title={isEditingOriginal ? 'Done editing original OCR' : 'Edit original OCR transcription'}
+              className={`p-1 rounded text-[10px] transition ${
+                isEditingOriginal
+                  ? 'bg-[#f4446d]/20 text-[#f4446d]'
+                  : 'text-slate-400 hover:text-white hover:bg-[#1c1f2e]'
+              }`}
+            >
+              <Edit3 className="w-3 h-3" />
+            </button>
+          </div>
+        </div>
+
+        {/* Visual crop preview from original raw manga page */}
+        {originalImage && obj.originalText && showCropPreview && (
+          <div className="relative rounded-lg overflow-hidden border border-[#262a3b] bg-black/50 my-1.5 flex items-center justify-center">
+            <canvas ref={cropCanvasRef} className="max-w-full max-h-24 object-contain" />
+          </div>
+        )}
+
+        {/* Original text content */}
+        {isEditingOriginal ? (
+          <textarea
+            value={obj.originalText ?? ''}
+            onChange={(e) => handleUpdateOriginalText(e.target.value)}
+            placeholder="Edit original raw text (e.g. Japanese, Korean)..."
+            rows={2}
+            className="w-full rounded-lg border border-[#f4446d]/60 bg-[#12141c] p-2 text-xs text-slate-200 focus:outline-hidden resize-none font-sans"
+          />
+        ) : (
+          <div className="p-2 rounded-lg bg-[#12141c]/70 border border-[#262a3b]/60 text-xs text-slate-300 max-h-24 overflow-y-auto select-text leading-relaxed font-sans">
+            {obj.originalText ? (
+              obj.originalText
+            ) : (
+              <div className="flex items-center justify-between text-slate-400 text-[11px]">
+                <span className="italic">None (Manual text box)</span>
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#1c1f2e] text-slate-500 font-mono">
+                  No source OCR
+                </span>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* ======================================================== */}
+      {/* 2. TRANSLATION / DIALOGUE EDITOR TEXTAREA                */}
+      {/* ======================================================== */}
+      <div className="space-y-1.5 p-2.5 rounded-xl bg-[#090a0f] border border-[#262a3b]">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1.5 text-slate-300 font-semibold text-xs">
+            <Type className="w-3.5 h-3.5 text-[#f4446d]" />
+            <span>Dialogue Text</span>
+          </div>
+          <div className="flex items-center gap-1">
+            {obj.originalText && (
+              <button
+                onClick={handleRevertToOriginal}
+                title="Reset dialogue to original OCR text"
+                className="px-2 py-0.5 rounded text-[10px] font-medium bg-[#1c1f2e] text-slate-400 hover:text-white hover:bg-[#282d3f] transition flex items-center gap-1"
+              >
+                <RotateCcw className="w-3 h-3" />
+                Revert
+              </button>
+            )}
+            <button
+              onClick={handleClearText}
+              title="Clear dialogue text"
+              className="px-1.5 py-0.5 rounded text-[10px] text-slate-400 hover:text-[#f4446d] hover:bg-[#1c1f2e] transition"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+
+        <textarea
+          value={obj.text ?? ''}
+          onChange={(e) => handleTextChange(e.target.value)}
+          onBlur={handleTextBlur}
+          placeholder="Type translation dialogue here..."
+          rows={3}
+          className="w-full rounded-lg border border-[#262a3b] bg-[#12141c] p-2.5 text-xs text-slate-100 placeholder:text-slate-600 focus:border-[#f4446d] focus:outline-hidden transition resize-y min-h-[64px] max-h-48 leading-relaxed font-sans"
+        />
+
+        <div className="flex items-center justify-between text-[10px] text-slate-500 pt-0.5">
+          <span>
+            {(obj.text || '').length} chars • {(obj.text || '').split('\n').filter(Boolean).length || 1} lines
+          </span>
+          <span className="text-slate-500 text-[10px]">Updates canvas live</span>
+        </div>
+      </div>
+
+      {/* ======================================================== */}
+      {/* 3. TYPOGRAPHY CONTROLS (Font, Size, Align, Color)        */}
+      {/* ======================================================== */}
 
       {/* Font Family */}
       <div>
@@ -103,7 +407,7 @@ export const TypographySettings: React.FC = () => {
             max="120"
             value={obj.fontSize || 16}
             onChange={(e) => updateSelected({ fontSize: Number(e.target.value) })}
-            className="w-full accent-red-500"
+            className="w-full accent-[#f4446d]"
           />
         </div>
         <div>
@@ -118,7 +422,7 @@ export const TypographySettings: React.FC = () => {
             step="0.1"
             value={obj.lineSpacing || 1.2}
             onChange={(e) => updateSelected({ lineSpacing: Number(e.target.value) })}
-            className="w-full accent-red-500"
+            className="w-full accent-[#f4446d]"
           />
         </div>
       </div>
@@ -129,7 +433,7 @@ export const TypographySettings: React.FC = () => {
           onClick={() => updateSelected({ bold: !obj.bold })}
           className={`p-2 rounded-lg border transition ${
             obj.bold
-              ? 'border-red-500 bg-red-950/40 text-red-400'
+              ? 'border-[#f4446d] bg-[#f4446d]/15 text-[#f4446d]'
               : 'border-[#282d3f] bg-[#090a0f] text-slate-400'
           }`}
           title="Bold"
@@ -140,7 +444,7 @@ export const TypographySettings: React.FC = () => {
           onClick={() => updateSelected({ italic: !obj.italic })}
           className={`p-2 rounded-lg border transition ${
             obj.italic
-              ? 'border-red-500 bg-red-950/40 text-red-400'
+              ? 'border-[#f4446d] bg-[#f4446d]/15 text-[#f4446d]'
               : 'border-[#282d3f] bg-[#090a0f] text-slate-400'
           }`}
           title="Italic"
@@ -151,7 +455,7 @@ export const TypographySettings: React.FC = () => {
           onClick={() => updateSelected({ uppercase: !obj.uppercase, lowercase: false })}
           className={`p-2 rounded-lg border transition ${
             obj.uppercase
-              ? 'border-red-500 bg-red-950/40 text-red-400'
+              ? 'border-[#f4446d] bg-[#f4446d]/15 text-[#f4446d]'
               : 'border-[#282d3f] bg-[#090a0f] text-slate-400'
           }`}
           title="Uppercase"
@@ -162,7 +466,7 @@ export const TypographySettings: React.FC = () => {
           onClick={() => updateSelected({ align: 'left' })}
           className={`p-2 rounded-lg border transition ${
             obj.align === 'left'
-              ? 'border-red-500 bg-red-950/40 text-red-400'
+              ? 'border-[#f4446d] bg-[#f4446d]/15 text-[#f4446d]'
               : 'border-[#282d3f] bg-[#090a0f] text-slate-400'
           }`}
           title="Align Left"
@@ -173,7 +477,7 @@ export const TypographySettings: React.FC = () => {
           onClick={() => updateSelected({ align: 'center' })}
           className={`p-2 rounded-lg border transition ${
             obj.align === 'center' || !obj.align
-              ? 'border-red-500 bg-red-950/40 text-red-400'
+              ? 'border-[#f4446d] bg-[#f4446d]/15 text-[#f4446d]'
               : 'border-[#282d3f] bg-[#090a0f] text-slate-400'
           }`}
           title="Align Center"
@@ -184,7 +488,7 @@ export const TypographySettings: React.FC = () => {
           onClick={() => updateSelected({ align: 'right' })}
           className={`p-2 rounded-lg border transition ${
             obj.align === 'right'
-              ? 'border-red-500 bg-red-950/40 text-red-400'
+              ? 'border-[#f4446d] bg-[#f4446d]/15 text-[#f4446d]'
               : 'border-[#282d3f] bg-[#090a0f] text-slate-400'
           }`}
           title="Align Right"
@@ -203,7 +507,7 @@ export const TypographySettings: React.FC = () => {
           type="checkbox"
           checked={obj.isVertical || false}
           onChange={(e) => updateSelected({ isVertical: e.target.checked })}
-          className="rounded border-[#282d3f] bg-[#12141c] text-red-600 focus:ring-0"
+          className="rounded border-[#282d3f] bg-[#12141c] text-[#f4446d] focus:ring-0 accent-[#f4446d]"
         />
       </div>
 
@@ -216,7 +520,7 @@ export const TypographySettings: React.FC = () => {
               type="checkbox"
               checked={obj.isGradient || false}
               onChange={(e) => updateSelected({ isGradient: e.target.checked })}
-              className="rounded border-[#282d3f] bg-[#090a0f] text-red-600 focus:ring-0"
+              className="rounded border-[#282d3f] bg-[#090a0f] text-[#f4446d] focus:ring-0 accent-[#f4446d]"
             />
             Linear Gradient
           </label>
@@ -264,7 +568,7 @@ export const TypographySettings: React.FC = () => {
             max="20"
             value={obj.strokeWidth || 0}
             onChange={(e) => updateSelected({ strokeWidth: Number(e.target.value) })}
-            className="flex-1 accent-red-500"
+            className="flex-1 accent-[#f4446d]"
           />
         </div>
 
@@ -281,7 +585,7 @@ export const TypographySettings: React.FC = () => {
               max="25"
               value={obj.shadowDistance || 0}
               onChange={(e) => updateSelected({ shadowDistance: Number(e.target.value) })}
-              className="w-full accent-red-500"
+              className="w-full accent-[#f4446d]"
             />
           </div>
           <div>
@@ -295,7 +599,7 @@ export const TypographySettings: React.FC = () => {
               max="360"
               value={obj.shadowAngle || 45}
               onChange={(e) => updateSelected({ shadowAngle: Number(e.target.value) })}
-              className="w-full accent-red-500"
+              className="w-full accent-[#f4446d]"
             />
           </div>
         </div>
@@ -331,7 +635,7 @@ export const TypographySettings: React.FC = () => {
                 max="30"
                 value={obj.backgroundPadding || 4}
                 onChange={(e) => updateSelected({ backgroundPadding: Number(e.target.value) })}
-                className="w-full accent-red-500"
+                className="w-full accent-[#f4446d]"
               />
             </div>
             <div>
@@ -345,7 +649,7 @@ export const TypographySettings: React.FC = () => {
                 max="50"
                 value={obj.backgroundBorderRadius || 0}
                 onChange={(e) => updateSelected({ backgroundBorderRadius: Number(e.target.value) })}
-                className="w-full accent-red-500"
+                className="w-full accent-[#f4446d]"
               />
             </div>
           </div>

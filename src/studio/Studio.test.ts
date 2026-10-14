@@ -152,4 +152,150 @@ describe('Studio State Management', () => {
     expect(studioStore.getState().ocrSettings.translate).toBe(false);
     expect(studioStore.getState().ocrSettings.inpaint).toBe(false);
   });
+
+  it('manages editingTextId and originalImage references in studioStore', () => {
+    expect(studioStore.getState().editingTextId).toBeNull();
+    expect(studioStore.getState().originalImage).toBeNull();
+
+    studioStore.setState({ editingTextId: 'bubble-42' });
+    expect(studioStore.getState().editingTextId).toBe('bubble-42');
+
+    const dummyImg = { naturalWidth: 800, naturalHeight: 1200 } as unknown as HTMLImageElement;
+    studioStore.setState({ originalImage: dummyImg });
+    expect(studioStore.getState().originalImage).toBe(dummyImg);
+  });
+
+  it('allows updating dialogue text and restoring via undo stack', () => {
+    const bubble: TextObject = {
+      id: 'b-dialogue-1',
+      x: 100,
+      y: 150,
+      width: 140,
+      height: 50,
+      text: 'ngọt ngào',
+      originalText: '甘い...',
+      fontSize: 20,
+      fontFamily: 'WildWords',
+      color: '#000000',
+    };
+
+    studioStore.setState({ textObjects: [bubble], selectedTextId: bubble.id });
+
+    // Simulate user editing dialogue text
+    const editedText = 'rất ngọt ngào';
+    const nextObjects = studioStore.getState().textObjects.map((t) =>
+      t.id === bubble.id ? { ...t, text: editedText, lines: undefined } : t
+    );
+
+    studioUndoStack.push({
+      id: 'edit-dialogue-test',
+      timestamp: Date.now(),
+      description: 'Edit Dialogue Text',
+      textObjects: { before: [bubble], after: nextObjects },
+    });
+    studioStore.setState({ textObjects: nextObjects });
+
+    expect(studioStore.getState().textObjects[0].text).toBe('rất ngọt ngào');
+    expect(studioStore.getState().textObjects[0].originalText).toBe('甘い...');
+
+    // Undo dialogue edit
+    studioUndoStack.undo({
+      applyTextObjects: (objs) => studioStore.setState({ textObjects: objs }),
+    });
+
+    expect(studioStore.getState().textObjects[0].text).toBe('ngọt ngào');
+  });
+
+  it('reverts dialogue text back to original OCR text', () => {
+    const bubble: TextObject = {
+      id: 'b-dialogue-2',
+      x: 50,
+      y: 50,
+      width: 120,
+      height: 40,
+      text: 'Changed text',
+      originalText: '元のテキスト',
+      fontSize: 16,
+      fontFamily: 'WildWords',
+      color: '#000000',
+    };
+
+    studioStore.setState({ textObjects: [bubble], selectedTextId: bubble.id });
+
+    // Revert to original
+    const reverted = studioStore.getState().textObjects.map((t) =>
+      t.id === bubble.id ? { ...t, text: t.originalText!, lines: undefined } : t
+    );
+    studioStore.setState({ textObjects: reverted });
+
+    expect(studioStore.getState().textObjects[0].text).toBe('元のテキスト');
+  });
+
+  it('allows correcting originalText OCR errors with undo tracking', () => {
+    const bubble: TextObject = {
+      id: 'b-dialogue-3',
+      x: 50,
+      y: 50,
+      width: 120,
+      height: 40,
+      text: 'Translation',
+      originalText: 'Typo in OCR',
+      fontSize: 16,
+      fontFamily: 'WildWords',
+      color: '#000000',
+    };
+
+    studioStore.setState({ textObjects: [bubble], selectedTextId: bubble.id });
+
+    const corrected = studioStore.getState().textObjects.map((t) =>
+      t.id === bubble.id ? { ...t, originalText: 'Corrected OCR Text' } : t
+    );
+
+    studioUndoStack.push({
+      id: 'edit-orig-test',
+      timestamp: Date.now(),
+      description: 'Update Original OCR Text',
+      textObjects: { before: [bubble], after: corrected },
+    });
+    studioStore.setState({ textObjects: corrected });
+
+    expect(studioStore.getState().textObjects[0].originalText).toBe('Corrected OCR Text');
+
+    // Undo original OCR correction
+    studioUndoStack.undo({
+      applyTextObjects: (objs) => studioStore.setState({ textObjects: objs }),
+    });
+    expect(studioStore.getState().textObjects[0].originalText).toBe('Typo in OCR');
+  });
+
+  it('creates an empty text box without original OCR text mapping and supports full editing', () => {
+    const emptyBox: TextObject = {
+      id: 'b-empty-1',
+      x: 120,
+      y: 120,
+      width: 140,
+      height: 50,
+      text: 'Manual Dialogue',
+      originalText: undefined,
+      fontSize: 18,
+      fontFamily: 'WildWords',
+      color: '#000000',
+    };
+
+    studioStore.setState({ textObjects: [emptyBox], selectedTextId: emptyBox.id, editingTextId: emptyBox.id });
+
+    expect(studioStore.getState().textObjects[0].originalText).toBeUndefined();
+    expect(studioStore.getState().textObjects[0].text).toBe('Manual Dialogue');
+    expect(studioStore.getState().editingTextId).toBe('b-empty-1');
+
+    // Verify it acts like a normal text box with style updates
+    const styled = studioStore.getState().textObjects.map((t) =>
+      t.id === emptyBox.id ? { ...t, fontSize: 24, bold: true } : t
+    );
+    studioStore.setState({ textObjects: styled });
+
+    expect(studioStore.getState().textObjects[0].fontSize).toBe(24);
+    expect(studioStore.getState().textObjects[0].bold).toBe(true);
+    expect(studioStore.getState().textObjects[0].originalText).toBeUndefined();
+  });
 });
