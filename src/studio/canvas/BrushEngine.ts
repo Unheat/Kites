@@ -34,11 +34,15 @@ export class BrushEngine {
   private scratchCanvas: HTMLCanvasElement | null = null;
   private scratchCtx: CanvasRenderingContext2D | null = null;
 
+  // Clean snapshot of target canvas captured before stroke begins
+  private snapshotCanvas: HTMLCanvasElement | null = null;
+  private snapshotCtx: CanvasRenderingContext2D | null = null;
+
   private canvasWidth = 0;
   private canvasHeight = 0;
 
   /**
-   * Initializes or resizes internal mask and scratch canvases.
+   * Initializes or resizes internal mask, scratch, and snapshot canvases.
    *
    * @param width - Base canvas width in pixels.
    * @param height - Base canvas height in pixels.
@@ -60,6 +64,56 @@ export class BrushEngine {
     }
     this.scratchCanvas.width = width;
     this.scratchCanvas.height = height;
+
+    if (!this.snapshotCanvas) {
+      this.snapshotCanvas = document.createElement('canvas');
+      this.snapshotCtx = this.snapshotCanvas.getContext('2d');
+    }
+    this.snapshotCanvas.width = width;
+    this.snapshotCanvas.height = height;
+  }
+
+  /**
+   * Captures a clean snapshot of the target canvas before a stroke begins.
+   * This baseline prevents compounding artifacts during active drag and provides
+   * the 'before' patch for undo history.
+   *
+   * @param targetCtx - Canvas context to snapshot.
+   */
+  public saveSnapshot(targetCtx: CanvasRenderingContext2D): void {
+    const width = targetCtx.canvas.width || this.canvasWidth;
+    const height = targetCtx.canvas.height || this.canvasHeight;
+
+    if (!this.snapshotCanvas || !this.snapshotCtx) {
+      this.snapshotCanvas = document.createElement('canvas');
+      this.snapshotCtx = this.snapshotCanvas.getContext('2d');
+    }
+    if (this.snapshotCanvas.width !== width || this.snapshotCanvas.height !== height) {
+      this.snapshotCanvas.width = width;
+      this.snapshotCanvas.height = height;
+    }
+    if (this.snapshotCtx) {
+      this.snapshotCtx.clearRect(0, 0, width, height);
+      this.snapshotCtx.drawImage(targetCtx.canvas, 0, 0);
+    }
+  }
+
+  /**
+   * Retrieves the snapshot canvas captured at the start of the current stroke.
+   *
+   * @returns Snapshot canvas or null if uninitialized.
+   */
+  public getSnapshotCanvas(): HTMLCanvasElement | null {
+    return this.snapshotCanvas;
+  }
+
+  /**
+   * Returns whether a stroke is currently in progress.
+   *
+   * @returns True if drawing, false otherwise.
+   */
+  public getIsDrawing(): boolean {
+    return this.isDrawing;
   }
 
   /**
@@ -115,14 +169,16 @@ export class BrushEngine {
   }
 
   /**
-   * Finalizes the current stroke and returns the tight stroked bounding box with padding.
+   * Computes the bounding box of the stroke accumulated so far, expanded by feather padding.
+   * Does NOT finalize drawing state.
    *
    * @param feather - Feather radius to expand bounding box.
    * @returns Clamped bounding box of modified canvas region.
    */
-  public endStroke(feather: number = 0): BoundingBox {
-    this.isDrawing = false;
-    this.prevPoint = null;
+  public getStrokeBoundingBox(feather: number = 0): BoundingBox {
+    if (!Number.isFinite(this.minX) || !Number.isFinite(this.minY) || this.minX > this.maxX || this.minY > this.maxY) {
+      return { x: 0, y: 0, width: 0, height: 0 };
+    }
 
     const pad = Math.ceil(feather * 2) + 4;
     const clampedX = Math.max(0, this.minX - pad);
@@ -139,7 +195,21 @@ export class BrushEngine {
   }
 
   /**
+   * Finalizes the current stroke and returns the tight stroked bounding box with padding.
+   *
+   * @param feather - Feather radius to expand bounding box.
+   * @returns Clamped bounding box of modified canvas region.
+   */
+  public endStroke(feather: number = 0): BoundingBox {
+    const bbox = this.getStrokeBoundingBox(feather);
+    this.isDrawing = false;
+    this.prevPoint = null;
+    return bbox;
+  }
+
+  /**
    * Applies the Erase/Restore brush composite to the target canvas.
+   * Does NOT finalize the stroke, preserving drawing state for continuous pointer dragging.
    *
    * @param targetCtx - Canvas context where artwork is being edited.
    * @param sourceImage - Image source to restore from (original artwork or clean background).
@@ -152,18 +222,23 @@ export class BrushEngine {
   ): void {
     if (!this.dabCanvas || !this.scratchCanvas || !this.scratchCtx) return;
 
-    const bbox = this.endStroke(feather);
+    const bbox = this.getStrokeBoundingBox(feather);
     if (bbox.width <= 0 || bbox.height <= 0) return;
 
     const { x, y, width: w, height: h } = bbox;
 
-    // 1. Clear scratch buffer slice
+    // 1. Restore target canvas slice from pre-stroke snapshot to prevent compounding
+    if (this.snapshotCanvas) {
+      targetCtx.drawImage(this.snapshotCanvas, x, y, w, h, x, y, w, h);
+    }
+
+    // 2. Clear scratch buffer slice
     this.scratchCtx.clearRect(0, 0, w, h);
 
-    // 2. Draw source image patch onto scratch
+    // 3. Draw source image patch onto scratch
     this.scratchCtx.drawImage(sourceImage, x, y, w, h, 0, 0, w, h);
 
-    // 3. Mask with accumulated stroke dabs using destination-in
+    // 4. Mask with accumulated stroke dabs using destination-in
     this.scratchCtx.globalCompositeOperation = 'destination-in';
     if (feather > 0) {
       this.scratchCtx.filter = `blur(${feather}px)`;
@@ -172,12 +247,13 @@ export class BrushEngine {
     this.scratchCtx.filter = 'none';
     this.scratchCtx.globalCompositeOperation = 'source-over';
 
-    // 4. Stamp masked restoration back onto target canvas
+    // 5. Stamp masked restoration back onto target canvas
     targetCtx.drawImage(this.scratchCanvas, 0, 0, w, h, x, y, w, h);
   }
 
   /**
    * Applies the Paint brush stroke to the target canvas.
+   * Does NOT finalize the stroke, preserving drawing state for continuous pointer dragging.
    *
    * @param targetCtx - Canvas context being painted.
    * @param options - Stroke color, pattern, blur, or transparency mode.
@@ -185,11 +261,16 @@ export class BrushEngine {
   public applyPaint(targetCtx: CanvasRenderingContext2D, options: StrokeOptions): void {
     if (!this.dabCanvas || !this.scratchCanvas || !this.scratchCtx) return;
 
-    const bbox = this.endStroke(options.feather);
+    const bbox = this.getStrokeBoundingBox(options.feather);
     if (bbox.width <= 0 || bbox.height <= 0) return;
 
     const { x, y, width: w, height: h } = bbox;
     const mode = options.paintMode || 'color';
+
+    // 1. Restore target canvas slice from pre-stroke snapshot to prevent compounding
+    if (this.snapshotCanvas) {
+      targetCtx.drawImage(this.snapshotCanvas, x, y, w, h, x, y, w, h);
+    }
 
     if (mode === 'color') {
       this.scratchCtx.clearRect(0, 0, w, h);
@@ -219,7 +300,8 @@ export class BrushEngine {
       const radius = options.blurRadius ?? 6;
       this.scratchCtx.clearRect(0, 0, w, h);
       this.scratchCtx.filter = `blur(${radius}px)`;
-      this.scratchCtx.drawImage(targetCtx.canvas, x, y, w, h, 0, 0, w, h);
+      const blurSource = this.snapshotCanvas ?? targetCtx.canvas;
+      this.scratchCtx.drawImage(blurSource, x, y, w, h, 0, 0, w, h);
       this.scratchCtx.filter = 'none';
 
       this.scratchCtx.globalCompositeOperation = 'destination-in';

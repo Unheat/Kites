@@ -78,7 +78,6 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
   const [activeHandle, setActiveHandle] = useState<TransformHandle | null>(null);
   const [dragStartPoint, setDragStartPoint] = useState<Point | null>(null);
   const [initialTransformState, setInitialTransformState] = useState<TextObject | null>(null);
-  const [preStrokePatch, setPreStrokePatch] = useState<any>(null);
 
   const imageWidth = originalImage?.naturalWidth || cleanedImage?.naturalWidth || 800;
   const imageHeight = originalImage?.naturalHeight || cleanedImage?.naturalHeight || 1200;
@@ -283,34 +282,26 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
 
     // Erase / Restore Brush
     if (activeTool === 'erase' && bgCtx) {
-      const radius = eraseSettings.size / 2;
-      const initialBbox: BoundingBox = {
-        x: pt.x - radius,
-        y: pt.y - radius,
-        width: eraseSettings.size,
-        height: eraseSettings.size,
-      };
-      setPreStrokePatch(BrushEngine.captureBoundingPatch(bgCtx, initialBbox));
-
+      brushEngineRef.current.saveSnapshot(bgCtx);
       brushEngineRef.current.beginStroke(pt, {
         shape: eraseSettings.shape,
         size: eraseSettings.size,
         feather: eraseSettings.feather,
       });
+
+      const sourceImage: CanvasImageSource =
+        eraseSettings.source === 'original' && originalImage
+          ? originalImage
+          : ((cleanedImage || bgCanvas) as CanvasImageSource);
+      if (sourceImage) {
+        brushEngineRef.current.applyEraseRestore(bgCtx, sourceImage, eraseSettings.feather);
+      }
       return;
     }
 
     // Paint Brush
     if (activeTool === 'paint' && bgCtx) {
-      const radius = paintSettings.size / 2;
-      const initialBbox: BoundingBox = {
-        x: pt.x - radius,
-        y: pt.y - radius,
-        width: paintSettings.size,
-        height: paintSettings.size,
-      };
-      setPreStrokePatch(BrushEngine.captureBoundingPatch(bgCtx, initialBbox));
-
+      brushEngineRef.current.saveSnapshot(bgCtx);
       brushEngineRef.current.beginStroke(pt, {
         shape: paintSettings.shape,
         size: paintSettings.size,
@@ -319,6 +310,15 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
         paintMode: paintSettings.mode,
         blurRadius: paintSettings.blurRadius,
         patternScale: paintSettings.patternScale,
+      });
+
+      brushEngineRef.current.applyPaint(bgCtx, {
+        shape: paintSettings.shape,
+        size: paintSettings.size,
+        feather: paintSettings.feather,
+        color: paintSettings.color,
+        paintMode: paintSettings.mode,
+        blurRadius: paintSettings.blurRadius,
       });
       return;
     }
@@ -531,20 +531,26 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
     const bgCtx = bgCanvas?.getContext('2d', { willReadFrequently: true });
 
     // Erase or Paint stroke undo patch
-    if ((activeTool === 'erase' || activeTool === 'paint') && bgCtx && preStrokePatch) {
-      const bbox = brushEngineRef.current.endStroke(eraseSettings.feather);
-      const postStrokePatch = BrushEngine.captureBoundingPatch(bgCtx, bbox);
+    if ((activeTool === 'erase' || activeTool === 'paint') && bgCtx) {
+      const feather = activeTool === 'erase' ? eraseSettings.feather : paintSettings.feather;
+      const bbox = brushEngineRef.current.endStroke(feather);
+      const snapshotCanvas = brushEngineRef.current.getSnapshotCanvas();
+      const snapshotCtx = snapshotCanvas?.getContext('2d');
 
-      studioUndoStack.push({
-        id: `stroke-${Date.now()}`,
-        timestamp: Date.now(),
-        description: activeTool === 'erase' ? 'Erase/Restore Stroke' : 'Paint Stroke',
-        rasterPatch: {
-          before: preStrokePatch,
-          after: postStrokePatch,
-        },
-      });
-      setPreStrokePatch(null);
+      if (snapshotCtx && bbox.width > 0 && bbox.height > 0) {
+        const beforePatch = BrushEngine.captureBoundingPatch(snapshotCtx, bbox);
+        const postStrokePatch = BrushEngine.captureBoundingPatch(bgCtx, bbox);
+
+        studioUndoStack.push({
+          id: `stroke-${Date.now()}`,
+          timestamp: Date.now(),
+          description: activeTool === 'erase' ? 'Erase/Restore Stroke' : 'Paint Stroke',
+          rasterPatch: {
+            before: beforePatch,
+            after: postStrokePatch,
+          },
+        });
+      }
       return;
     }
 
@@ -901,6 +907,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
           style={{
             width: `${imageWidth * zoom}px`,
             height: `${imageHeight * zoom}px`,
