@@ -102,19 +102,22 @@ Hover over any comic panel on Twitter/X, Pixiv, or manga sites. An unobtrusive f
 - 🖱️ **Hover:** Translate instantly by hovering over any comic panel.
 - 📌 **Persistent:** Keep translate badges visible on all comic images.
 - 🚀 **Auto-Translate:** Automatically translates new panels as you scroll down the page.
+- ✂️ **Screen Crop:** Translate protected canvas elements, WebGL games, or custom crops via right-click or `Ctrl/Alt + Shift + X`.
+- ⚡ **Reading Hotkeys:** Press `F` to instantly peek at the original raw image, `Ctrl/Alt + Shift + Z` to translate the hovered panel, and `Ctrl/Alt + Shift + M` to open the chapter reader.
 - 🎯 **Right Click:** Translate any image on the web via the browser context menu.
 
 ---
 
 ## 📖 Chapter Reader & Fast Scan
 
-Read entire manga or webtoon chapters in one distraction-free view with automatic batch detection, continuous vertical webtoon mode, and multi-page translation:
+Read entire manga or webtoon chapters in one distraction-free view with automatic batch detection, continuous vertical webtoon mode, multi-page translation, and offline ZIP export:
 
 [![Kites Chapter Reader](./README_images/UI-feature/chapter-reader.jpg)](./README_images/UI-feature/chapter-reader.png)
 
 - **Fast Scan:** Automatically auto-scrolls and queues all lazy-loaded manga panels across chapter pages.
 - **Flexible Reader Modes:** Seamlessly switch between Webtoon continuous vertical strips, Single page, and Double spread layouts.
 - **Batch Chapter Translation:** Translate the entire chapter in one click with progress tracking and offline preservation.
+- **1-Click Chapter ZIP Export:** Package all translated pages into a clean, numbered ZIP archive for offline reading and archiving with zero server uploads.
 
 ---
 
@@ -124,7 +127,9 @@ Need to polish a scanlation or adjust phrasing? Open the full-screen **Kites Stu
 
 [![Kites Studio](./README_images/UI-feature/kite_studio_editing.jpg)](./README_images/UI-feature/studio-editor.png)
 
+- **Direct Inline Editing:** Double-click any speech balloon to edit dialogue directly in place with subpixel vertical centering and live typesetting reflow.
 - **Interactive Canvas:** Drag and resize speech bubbles with 8-point handles.
+- **Localized AI Inpaint Brush:** Erase artwork defects, speech bubbles, or untranslated SFX with brush stroke precision.
 - **Side-by-Side Verification:** Compare original, cleaned, and typeset views with one click.
 - **Typography Control:** Live font sizing, colors, alignment, and line height adjustments.
 - **1-Click Export:** Download clean, translated pages at original resolution.
@@ -156,13 +161,16 @@ Customize target languages, neural OCR models, and inpainting algorithms from th
 </table>
 </div>
 
+- **Custom Glossary:** Define character names, honorifics, and specialized terminology to guide local and cloud LLM outputs.
+- **Site Domain Rules:** Enable, disable, or assign custom element selectors per domain.
+
 ---
 
 ## 🧠 Powered by Modern AI
 
 | Component | Options | Description |
 | :--- | :--- | :--- |
-| **Translation** | **WebLLM** *(Local WebGPU)*<br/>**Cloud Shared Pool** *(Free)*<br/>**Google Translate**<br/>**Custom API** *(OpenAI, Claude, Gemini)* | Run local LLMs right in your browser (Llama 3.2, Qwen 2.5), use our free community pool, or connect your own API key. |
+| **Translation** | **WebLLM** *(Local WebGPU)*<br/>**Cloud Shared Pool** *(Free)*<br/>**Google Translate**<br/>**Custom API** *(OpenAI, Claude, Gemini)* | Run local LLMs right in your browser (Qwen 3.5, Qwen 3, Gemma 3, Llama 3.2), use our free community pool, or connect your own API key. |
 | **Inpainting** | **LaMa Manga** *(Neural)*<br/>**AOT-GAN** *(Fast Neural)*<br/>**Telea Diffusion** *(Instant)*<br/>**Simple Fill** | Erases text strictly inside character boundaries to preserve comic art. |
 | **OCR** | **PaddleOCR v3 – v6** | Industry-standard multilingual text detection and recognition with seamless 1D webtoon strip tiling. |
 | **Bubble Fit** | **Neural YOLO** *(WebGPU)*<br/>**Heuristic** *(Instant)*<br/>**Classic MST** | Expands dialogue into natural balloon whitespace with tail severing, eliminating tiny fonts. |
