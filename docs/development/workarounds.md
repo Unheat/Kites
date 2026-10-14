@@ -91,3 +91,38 @@ This document preserves the complete technical background, rationale, and implem
 * **Avoid silent single-threaded WASM CPU fallback:**
   When WebGPU session creation fails on `.ort`, the engine silently falls back to browser WASM CPU (single-threaded). On real manga pages (`image6.jpg` with `v6-medium`), recognition latency jumps from 4,177ms on GPU to 218,995ms on WASM (~52x slowdown). Serving un-baked `.onnx` models allows WebGPU JSEP to compile the graph natively.
 
+---
+
+## 6. Studio Interactive Hotkeys & Stale Store Closures
+
+**Affected Files:** [`src/studio/canvas/StudioCanvas.tsx`](file:///Users/dangtruongan/study/Kites/src/studio/canvas/StudioCanvas.tsx)  
+**Related Devlog:** [`040_phase40_codebase_audit_hotkey_closures_and_inpaint_masking.md`](file:///Users/dangtruongan/study/Kites/docs/dev-history/devlog/040_phase40_codebase_audit_hotkey_closures_and_inpaint_masking.md)
+
+* **Always read live state from `studioStore.getState().textObjects` inside keyboard listeners:**
+  Canvas hotkey listeners (`Delete`, `Backspace`, `Ctrl+D`, `Space`) attach at window scope inside `useEffect`. If handlers read component-scoped `textObjects` from the React render closure, modifying or moving other text boxes leaves the listener bound to an outdated snapshot. When the user subsequently deletes or duplicates a box, the stale array silently overwrites and deletes all intervening edits.
+* **Hoist store-direct mutation handlers above event listeners:**
+  Wrap handlers in `useCallback` and list them explicitly in the keyboard listener's dependency array to guarantee complete lifecycle tracking without React Hook exhaustive-deps warnings.
+
+---
+
+## 7. Studio Localized Inpaint Masking vs Blanket Bounding Box
+
+**Affected Files:** [`src/studio/canvas/StudioCanvas.tsx`](file:///Users/dangtruongan/study/Kites/src/studio/canvas/StudioCanvas.tsx), [`src/studio/canvas/BrushEngine.ts`](file:///Users/dangtruongan/study/Kites/src/studio/canvas/BrushEngine.ts), [`src/offscreen/index.ts`](file:///Users/dangtruongan/study/Kites/src/offscreen/index.ts), [`src/offscreen/utils/maskPolygonExtractor.ts`](file:///Users/dangtruongan/study/Kites/src/offscreen/utils/maskPolygonExtractor.ts)  
+**Related Devlog:** [`040_phase40_codebase_audit_hotkey_closures_and_inpaint_masking.md`](file:///Users/dangtruongan/study/Kites/docs/dev-history/devlog/040_phase40_codebase_audit_hotkey_closures_and_inpaint_masking.md)
+
+* **Preserve the Polygon-Only Engine Contract via Mask Connected-Component Extraction:**
+  Per ADR-002 and fullplan Section F, all inpainting engines receive text polygons only (`maskPolygons: Point2D[][]`). For user-drawn inpaint brush strokes in Studio, never fill a blanket rectangle `fillRect(0, 0, w, h)` across the whole padded crop.
+* **Extract stroke bounding polygons from the mask alpha channel:**
+  Export the stroke raster via `brushEngine.getDabCanvas()` into `maskCanvas` offset by crop bounds. In offscreen `handleStudioInpaint`, parse the mask raster through `extractMaskPolygons()` to extract padded 4-point bounding polygons wrapping only the drawn stroke blobs. This confines inpainting strictly to brushed pixels and preserves context across the rest of the patch.
+
+---
+
+## 8. Decoupled Background Translation Job Completion
+
+**Affected Files:** [`src/background/index.ts`](file:///Users/dangtruongan/study/Kites/src/background/index.ts)  
+**Related Devlog:** [`040_phase40_codebase_audit_hotkey_closures_and_inpaint_masking.md`](file:///Users/dangtruongan/study/Kites/docs/dev-history/devlog/040_phase40_codebase_audit_hotkey_closures_and_inpaint_masking.md)
+
+* **Never condition `db.translationJobs.update(jobId, { status: 'completed' })` on `tabId`:**
+  `tabId` is optional across the background translation pipeline (`queueTranslation`, batch queueing, Studio operations). If the tab ID is missing or the tab closes while the pipeline is in flight, translation nevertheless succeeds and writes its baked image. Coupling the database status update to `&& tabId` leaves successful jobs permanently stuck in status `'processing'` until the 2-minute stale-job timeout forces an error. Mark database status `'completed'` unconditionally on pipeline success, and guard only the UI message dispatch with `if (tabId)`.
+
+

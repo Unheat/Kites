@@ -10,14 +10,19 @@ interface AccountCardProps {
 export const AccountCard: React.FC<AccountCardProps> = ({ userAccount, onAccountChange }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const userAccountRef = React.useRef(userAccount);
+  userAccountRef.current = userAccount;
+  const onAccountChangeRef = React.useRef(onAccountChange);
+  onAccountChangeRef.current = onAccountChange;
 
   // Automatically refresh live quota from worker on mount when signed in
   React.useEffect(() => {
     if (userAccount?.signedIn && typeof chrome !== 'undefined' && chrome?.runtime?.sendMessage) {
       chrome.runtime.sendMessage({ type: 'REFRESH_CLOUD_QUOTA' }, (res) => {
-        if (res?.success && res.quota && userAccount) {
-          onAccountChange({
-            ...userAccount,
+        const latestAccount = userAccountRef.current;
+        if (res?.success && res.quota && latestAccount) {
+          onAccountChangeRef.current({
+            ...latestAccount,
             quotaRemaining: res.quota.remaining,
             quotaResetsAt: res.quota.resetsAt
           });

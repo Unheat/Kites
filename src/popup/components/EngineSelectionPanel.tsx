@@ -90,6 +90,8 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
   const customApisRef = useRef(state.customApis);
   const readyModelIds = useRef(new Set<string>());
   const stateRef = useRef(state);
+  const updateStateRef = useRef(updateState);
+  updateStateRef.current = updateState;
 
   /**
    * Queues one model download through the background-owned RPC route.
@@ -226,6 +228,10 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
   ]);
 
   const [baseEngines, setBaseEngines] = useState<Engine[]>([]);
+  const inpaintBaseEnginesRef = useRef(inpaintBaseEngines);
+  inpaintBaseEnginesRef.current = inpaintBaseEngines;
+  const ocrBaseEnginesRef = useRef(ocrBaseEngines);
+  ocrBaseEnginesRef.current = ocrBaseEngines;
 
   useEffect(() => {
     ModelRegistry.getAvailableEngines().then((engines) => {
@@ -246,8 +252,8 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
       }
       const modelIds = [
         ...engines.filter(engine => engine.hardware === 'WebGPU').map(engine => engine.id),
-        ...inpaintBaseEngines.map(engine => engine.id),
-        ...ocrBaseEngines.map(engine => engine.id),
+        ...inpaintBaseEnginesRef.current.map(engine => engine.id),
+        ...ocrBaseEnginesRef.current.map(engine => engine.id),
         'bubble-yolo',
       ];
       chrome.runtime.sendMessage({ type: 'GET_MODEL_STATUSES', target: 'background', source: 'popup', request: true, payload: { modelIds } }, (response) => {
@@ -264,8 +270,8 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
           isDownloaded: Boolean(engine.isDownloaded || readyModelIds.current.has(engine.id) || response.statuses[engine.id]),
         }));
         const hydratedTranslation = hydrate(engines);
-        const hydratedInpaint = hydrate(inpaintBaseEngines);
-        const hydratedOcr = hydrate(ocrBaseEngines);
+        const hydratedInpaint = hydrate(inpaintBaseEnginesRef.current);
+        const hydratedOcr = hydrate(ocrBaseEnginesRef.current);
         setBaseEngines(hydratedTranslation);
         setInpaintBaseEngines(hydratedInpaint);
         setOcrBaseEngines(hydratedOcr);
@@ -286,7 +292,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
         if (bubbleUnavailable) repairs.bubbleMode = 'off';
         if (Object.keys(repairs).length > 0) {
           console.warn('[EngineSelectionPanel] Resetting unavailable local model selections.', repairs);
-          updateState(repairs);
+          updateStateRef.current(repairs);
         }
       });
     });

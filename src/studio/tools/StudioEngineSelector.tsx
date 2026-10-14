@@ -98,7 +98,7 @@ export const StudioEngineSelector: React.FC<StudioEngineSelectorProps> = ({ cate
       chrome.runtime.onMessage.addListener(handleMessage);
       return () => chrome.runtime.onMessage.removeListener(handleMessage);
     }
-  }, []);
+  }, [options]);
 
   // Dismiss on outside click
   useEffect(() => {

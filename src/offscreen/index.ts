@@ -1,5 +1,6 @@
 import type { ModelInitializationMessage, ModelInitializationPhase, ProcessJobMessage, StudioInpaintPayload, StudioOcrPayload } from '../shared/types';
 import type { Point2D } from './engines/inpaint/BaseInpaintEngine';
+import { extractMaskPolygons } from './utils/maskPolygonExtractor';
 import { pipelineOrchestrator } from './services/PipelineOrchestrator';
 import { translationManager } from './services/TranslationManager';
 import { runStudioOcr, type StudioOcrResponse } from './services/StudioOcr';
@@ -401,25 +402,21 @@ async function handleStartDownload(modelId: string, category?: string) {
     status: 'Downloading...'
   };
 
-  try {
-    await translationManager.downloadModel(modelId, progressCallback);
-    
-    if (activeDownloads[modelId]) {
-      activeDownloads[modelId].maxProgress = 1;
-      activeDownloads[modelId].status = 'ready';
-    }
-
-    chrome.runtime.sendMessage({
-      type: 'MODEL_DOWNLOAD_PROGRESS',
-      payload: {
-        modelId,
-        progress: 1,
-        status: 'ready'
-      }
-    }).catch(() => {});
-  } catch (err) {
-    throw err;
+  await translationManager.downloadModel(modelId, progressCallback);
+  
+  if (activeDownloads[modelId]) {
+    activeDownloads[modelId].maxProgress = 1;
+    activeDownloads[modelId].status = 'ready';
   }
+
+  chrome.runtime.sendMessage({
+    type: 'MODEL_DOWNLOAD_PROGRESS',
+    payload: {
+      modelId,
+      progress: 1,
+      status: 'ready'
+    }
+  }).catch(() => {});
 }
 
 async function handleCheckStatus(modelId: string): Promise<boolean> {
@@ -553,14 +550,36 @@ async function handleStudioInpaint(payload: StudioInpaintPayload): Promise<{ inp
   });
   const inpaintTier = payload.engineId || popupState.activeInpaintId || 'lama-manga';
 
-  const patchPoly: Point2D[] = [
-    { x: 0, y: 0 },
-    { x: payload.width, y: 0 },
-    { x: payload.width, y: payload.height },
-    { x: 0, y: payload.height },
-  ];
+  let maskPolygons: Point2D[][] = [];
+  if (payload.maskPatchBase64) {
+    try {
+      const maskRes = await fetch(payload.maskPatchBase64);
+      const maskBlob = await maskRes.blob();
+      const maskBitmap = await createImageBitmap(maskBlob);
+      const canvas = new OffscreenCanvas(maskBitmap.width, maskBitmap.height);
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(maskBitmap, 0, 0);
+        const imgData = ctx.getImageData(0, 0, maskBitmap.width, maskBitmap.height);
+        maskPolygons = extractMaskPolygons(imgData);
+      }
+      maskBitmap.close();
+    } catch (e) {
+      console.warn('[Offscreen] Failed to extract polygons from maskPatchBase64:', e);
+    }
+  }
 
-  const cleanedBuffer = await pipelineOrchestrator.getInpaintManager().eraseText(imageBuf, [patchPoly], inpaintTier);
+  // Fallback to full patch polygon if no stroke mask was drawn or extraction produced no polygons
+  if (maskPolygons.length === 0) {
+    maskPolygons = [[
+      { x: 0, y: 0 },
+      { x: payload.width, y: 0 },
+      { x: payload.width, y: payload.height },
+      { x: 0, y: payload.height },
+    ]];
+  }
+
+  const cleanedBuffer = await pipelineOrchestrator.getInpaintManager().eraseText(imageBuf, maskPolygons, inpaintTier);
   const cleanedBlob = new Blob([cleanedBuffer], { type: 'image/png' });
   const cleanedBase64 = await blobToBase64(cleanedBlob);
 

@@ -994,29 +994,31 @@ async function processImageTranslation(jobId: number, srcUrl: string, tabId?: nu
     
     console.log(`[Background] Offscreen completed job ${jobId} with status:`, offscreenResponse?.status);
     
-    if (offscreenResponse?.status === 'success' && offscreenResponse?.bakedBase64 && tabId) {
+    if (offscreenResponse?.status === 'success' && offscreenResponse?.bakedBase64) {
       await db.translationJobs.update(jobId, { status: 'completed' });
-      if (srcUrl.startsWith('kites-capture:')) {
-        const requestId = srcUrl.replace('kites-capture:', '');
-        console.log(`[Background] Sending CAPTURE_TRANSLATED to tab ${tabId} for request ${requestId}...`);
-        chrome.tabs.sendMessage(tabId, {
-          type: 'CAPTURE_TRANSLATED',
-          payload: {
-            requestId,
-            jobId,
-            bakedBase64: offscreenResponse.bakedBase64
-          }
-        }).catch(() => {});
-      } else {
-        console.log(`[Background] Sending IMAGE_TRANSLATED back to tab ${tabId}...`);
-        chrome.tabs.sendMessage(tabId, {
-          type: 'IMAGE_TRANSLATED',
-          payload: {
-            jobId,
-            originalUrl: srcUrl,
-            bakedBase64: offscreenResponse.bakedBase64
-          }
-        }).catch(() => {});
+      if (tabId) {
+        if (srcUrl.startsWith('kites-capture:')) {
+          const requestId = srcUrl.replace('kites-capture:', '');
+          console.log(`[Background] Sending CAPTURE_TRANSLATED to tab ${tabId} for request ${requestId}...`);
+          chrome.tabs.sendMessage(tabId, {
+            type: 'CAPTURE_TRANSLATED',
+            payload: {
+              requestId,
+              jobId,
+              bakedBase64: offscreenResponse.bakedBase64
+            }
+          }).catch(() => {});
+        } else {
+          console.log(`[Background] Sending IMAGE_TRANSLATED back to tab ${tabId}...`);
+          chrome.tabs.sendMessage(tabId, {
+            type: 'IMAGE_TRANSLATED',
+            payload: {
+              jobId,
+              originalUrl: srcUrl,
+              bakedBase64: offscreenResponse.bakedBase64
+            }
+          }).catch(() => {});
+        }
       }
     } else if (offscreenResponse?.status === 'error') {
       throw new Error(offscreenResponse.error || 'Offscreen translation pipeline failed');
