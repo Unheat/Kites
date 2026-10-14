@@ -144,6 +144,120 @@
     "engine": "webllm"
   },
   {
+    "id": "gemma3-1b-it-q4f16_1-MLC",
+    "name": "gemma3-1b-it-q4f16_1-MLC",
+    "vramEstimate": "~711 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "gemma-4-E2B-it-q4f16_1-MLC",
+    "name": "gemma-4-E2B-it-q4f16_1-MLC",
+    "vramEstimate": "~3387 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "gemma-4-E2B-it-q4f32_1-MLC",
+    "name": "gemma-4-E2B-it-q4f32_1-MLC",
+    "vramEstimate": "~3863 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Ministral-3-3B-Instruct-2512-BF16-q4f16_1-MLC",
+    "name": "Ministral-3-3B-Instruct-2512-BF16-q4f16_1-MLC",
+    "vramEstimate": "~2864 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Ministral-3-3B-Instruct-2512-BF16-q4f32_1-MLC",
+    "name": "Ministral-3-3B-Instruct-2512-BF16-q4f32_1-MLC",
+    "vramEstimate": "~3532 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen3.5-0.8B-q4f16_1-MLC",
+    "name": "Qwen3.5-0.8B-q4f16_1-MLC",
+    "vramEstimate": "~1629 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen3.5-0.8B-q4f32_1-MLC",
+    "name": "Qwen3.5-0.8B-q4f32_1-MLC",
+    "vramEstimate": "~1894 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen3.5-2B-q4f16_1-MLC",
+    "name": "Qwen3.5-2B-q4f16_1-MLC",
+    "vramEstimate": "~2245 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen3.5-2B-q4f32_1-MLC",
+    "name": "Qwen3.5-2B-q4f32_1-MLC",
+    "vramEstimate": "~2592 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen3.5-4B-q4f16_1-MLC",
+    "name": "Qwen3.5-4B-q4f16_1-MLC",
+    "vramEstimate": "~3868 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen3.5-4B-q4f32_1-MLC",
+    "name": "Qwen3.5-4B-q4f32_1-MLC",
+    "vramEstimate": "~4680 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen3.5-9B-q4f16_1-MLC",
+    "name": "Qwen3.5-9B-q4f16_1-MLC",
+    "vramEstimate": "~6433 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen3.5-9B-q4f32_1-MLC",
+    "name": "Qwen3.5-9B-q4f32_1-MLC",
+    "vramEstimate": "~7545 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen3-1.7B-q4f16_1-MLC",
+    "name": "Qwen3-1.7B-q4f16_1-MLC",
+    "vramEstimate": "~2037 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen3-1.7B-q4f32_1-MLC",
+    "name": "Qwen3-1.7B-q4f32_1-MLC",
+    "vramEstimate": "~2635 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen3-4B-q4f16_1-MLC",
+    "name": "Qwen3-4B-q4f16_1-MLC",
+    "vramEstimate": "~3432 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen3-4B-q4f32_1-MLC",
+    "name": "Qwen3-4B-q4f32_1-MLC",
+    "vramEstimate": "~4328 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen3-8B-q4f16_1-MLC",
+    "name": "Qwen3-8B-q4f16_1-MLC",
+    "vramEstimate": "~5696 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "Qwen3-8B-q4f32_1-MLC",
+    "name": "Qwen3-8B-q4f32_1-MLC",
+    "vramEstimate": "~6853 MB",
+    "engine": "webllm"
+  },
+  {
     "id": "Qwen2.5-0.5B-Instruct-q4f16_1-MLC",
     "name": "Qwen2.5-0.5B-Instruct-q4f16_1-MLC",
     "vramEstimate": "~945 MB",
