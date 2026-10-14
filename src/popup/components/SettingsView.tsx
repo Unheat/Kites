@@ -11,6 +11,8 @@ import EngineSelectionPanel from './EngineSelectionPanel';
 import GpuAccelerationPanel from './GpuAccelerationPanel';
 import { AccountCard } from './AccountCard';
 
+import HelpTooltip from './HelpTooltip';
+
 interface SettingsViewProps {
   state: PopupState;
   updateState: (updates: Partial<PopupState>) => void;
@@ -24,18 +26,7 @@ interface SettingsViewProps {
  * @returns The rendered help icon with its tooltip.
  */
 function FieldHint({ id, children }: { id?: string; children: React.ReactNode }) {
-  return (
-    <div className="relative flex items-center">
-      <div className="peer w-3.5 h-3.5 rounded-full border border-[var(--color-dust)] flex items-center justify-center text-[9px] text-[var(--color-dust)] cursor-help hover:bg-[var(--color-dust)] hover:text-[var(--color-paper)] transition-colors flex-shrink-0">
-        ?
-      </div>
-      <div className="absolute left-0 top-full mt-1.5 w-[210px] z-50 opacity-0 pointer-events-none peer-hover:opacity-100 transition-opacity">
-        <div id={id} className="p-2 bg-[var(--color-ink)] text-[var(--color-paper)] text-[11px] leading-snug rounded-md shadow-xl border border-[var(--color-dust)]/20">
-          {children}
-        </div>
-      </div>
-    </div>
-  );
+  return <HelpTooltip id={id} content={children} size="sm" />;
 }
 
 export default function SettingsView({ state, updateState }: SettingsViewProps) {

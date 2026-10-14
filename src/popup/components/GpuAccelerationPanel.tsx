@@ -3,6 +3,7 @@ import { ChevronDown } from 'lucide-react';
 import type { PopupState } from '../../shared/types';
 import { ModelRegistry } from '../services/ModelRegistry';
 import type { Engine } from './EngineSelectionPanel';
+import HelpTooltip from './HelpTooltip';
 
 interface GpuAccelerationPanelProps {
   state: PopupState;
@@ -40,15 +41,12 @@ export default function GpuAccelerationPanel({ state, updateState }: GpuAccelera
 
   return (
     <div className="flex flex-col gap-1.5">
-      <div className="flex items-center gap-1.5 mb-1 relative">
+      <div className="flex items-center gap-1.5 mb-1">
         <span className="font-medium text-sm">GPU Acceleration</span>
-        <div className="peer w-4 h-4 rounded-full border border-[var(--color-dust)] flex items-center justify-center text-[10px] text-[var(--color-dust)] cursor-help hover:bg-[var(--color-dust)] hover:text-[var(--color-paper)] transition-colors">?</div>
-        
-        <div className="absolute left-0 top-full pt-1.5 w-[260px] max-w-[85vw] z-50 opacity-0 pointer-events-none peer-hover:opacity-100 transition-opacity">
-          <div className="p-2.5 bg-[var(--color-ink)] text-[var(--color-paper)] text-xs rounded-md shadow-xl">
-            Run models locally on your graphics card for maximum speed. Turn off specific pipelines below if memory is limited.
-          </div>
-        </div>
+        <HelpTooltip
+          size="md"
+          content="Run models locally on your graphics card for maximum speed. Turn off specific pipelines below if memory is limited."
+        />
       </div>
 
       <div className="relative">

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { X, Plus, Globe, Trash2 } from 'lucide-react';
 import type { PopupState, SiteSelectorRule } from '../../shared/types';
 import { normalizeDomain, isValidCssSelector } from '../../shared/siteRules';
+import HelpTooltip from './HelpTooltip';
 
 interface SiteRulesPanelProps {
   state: PopupState;
@@ -79,17 +80,10 @@ export default function SiteRulesPanel({ state, updateState, onClose }: SiteRule
         <div className="flex items-center gap-2">
           <Globe size={16} className="text-[var(--color-dust)]" />
           <span className="font-medium text-sm">Site Rules & Domains</span>
-          {/* Help tooltip */}
-          <div className="relative flex items-center">
-            <div className="peer w-3.5 h-3.5 rounded-full border border-[var(--color-dust)] flex items-center justify-center text-[9px] text-[var(--color-dust)] cursor-help hover:bg-[var(--color-dust)] hover:text-[var(--color-paper)] transition-colors flex-shrink-0">
-              ?
-            </div>
-            <div className="absolute left-0 top-full mt-1.5 w-[210px] z-50 opacity-0 pointer-events-none peer-hover:opacity-100 transition-opacity">
-              <div className="p-2 bg-[var(--color-ink)] text-[var(--color-paper)] text-[11px] leading-snug rounded-md shadow-xl border border-[var(--color-dust)]/20">
-                Disable Kites on specific domains or configure custom CSS image selectors for complex manga reader sites.
-              </div>
-            </div>
-          </div>
+          <HelpTooltip
+            size="sm"
+            content="Disable Kites on specific domains or configure custom CSS image selectors for complex manga reader sites."
+          />
         </div>
         <button
           aria-label="Close site rules panel"

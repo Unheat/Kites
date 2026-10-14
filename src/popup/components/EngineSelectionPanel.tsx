@@ -6,6 +6,7 @@ import MiniSearch from 'minisearch';
 import { ModelRegistry } from '../services/ModelRegistry';
 import { isLlmGpuAvailable } from '../../shared/utils/hardwareUtils';
 import { RENDER_FONT_PRESETS, normalizeRenderFontPresetId } from '../../shared/renderFontPresets';
+import HelpTooltip from './HelpTooltip';
 
 export interface BubbleModeOption {
   id: BubbleDetectionMode;
@@ -79,7 +80,6 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
   const [isOpenOcr, setIsOpenOcr] = useState(false);
   const [isOpenRenderFont, setIsOpenRenderFont] = useState(false);
   const [isOpenBubbleMode, setIsOpenBubbleMode] = useState(false);
-  const [hoveredBubbleTip, setHoveredBubbleTip] = useState<string | null>(null);
   const [isNeuralDownloaded, setIsNeuralDownloaded] = useState(false);
   const [showAddApi, setShowAddApi] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -353,15 +353,17 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
     <div className="flex flex-col gap-3">
       {/* Translation Engine Selector */}
       <div className="flex flex-col gap-1.5">
-        <div className="flex items-center gap-1.5 mb-1 relative">
+        <div className="flex items-center gap-1.5 mb-1">
           <h2 className="text-sm font-medium">Translation Engine</h2>
-          <div className="peer w-4 h-4 rounded-full border border-[var(--color-dust)] flex items-center justify-center text-[10px] text-[var(--color-dust)] cursor-help hover:bg-[var(--color-dust)] hover:text-[var(--color-paper)] transition-colors">?</div>
-          
-          <div className="absolute left-0 top-full pt-1.5 w-[280px] max-w-[85vw] z-50 opacity-0 pointer-events-none peer-hover:opacity-100 transition-opacity">
-            <div className="p-2.5 bg-[var(--color-ink)] text-[var(--color-paper)] text-xs rounded-md shadow-xl">
-              <span className="font-semibold text-[var(--color-paper)]">[CPU] Local</span> models run on your processor. <span className="font-semibold text-[var(--color-paper)]">[WEBGPU] Local</span> models use your graphics card for faster speeds.
-            </div>
-          </div>
+          <HelpTooltip
+            size="md"
+            content={
+              <>
+                <span className="font-semibold text-[var(--color-paper)]">[CPU] Local</span> models run on your processor.{' '}
+                <span className="font-semibold text-[var(--color-paper)]">[WEBGPU] Local</span> models use your graphics card for faster speeds.
+              </>
+            }
+          />
         </div>
 
         <div className="relative flex flex-col">
@@ -486,14 +488,15 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                               className="absolute right-2 top-1/2 -translate-y-1/2 z-20 flex items-center"
                               onClick={(e) => e.stopPropagation()}
                             >
-                              <div className="peer w-3.5 h-3.5 rounded-full border border-[var(--color-dust)] flex items-center justify-center text-[9px] text-[var(--color-dust)] cursor-help hover:bg-[var(--color-dust)] hover:text-[var(--color-paper)] transition-colors flex-shrink-0">
-                                ?
-                              </div>
-                              <div className="absolute right-0 top-full mt-1.5 w-[210px] z-50 opacity-0 pointer-events-none peer-hover:opacity-100 transition-opacity">
-                                <div className="p-2 bg-[var(--color-ink)] text-[var(--color-paper)] text-[11px] leading-snug rounded-md shadow-xl border border-[var(--color-dust)]/20">
-                                  Sign in with Google in <span className="font-semibold text-[var(--color-editorial)]">Settings</span> to use the free shared pool (100 free translations/day).
-                                </div>
-                              </div>
+                              <HelpTooltip
+                                size="sm"
+                                width={210}
+                                content={
+                                  <>
+                                    Sign in with Google in <span className="font-semibold text-[var(--color-editorial)]">Settings</span> to use the free shared pool (100 free translations/day).
+                                  </>
+                                }
+                              />
                             </div>
                           )}
                         </div>
@@ -534,15 +537,12 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
 
       {/* Image Cleaning Engine Selector */}
       <div className="flex flex-col gap-1.5">
-        <div className="flex items-center gap-1.5 mb-1 relative">
+        <div className="flex items-center gap-1.5 mb-1">
           <h2 className="text-sm font-medium">Image Cleaning Engine</h2>
-          <div className="peer w-4 h-4 rounded-full border border-[var(--color-dust)] flex items-center justify-center text-[10px] text-[var(--color-dust)] cursor-help hover:bg-[var(--color-dust)] hover:text-[var(--color-paper)] transition-colors">?</div>
-          
-          <div className="absolute left-0 top-full pt-1.5 w-[280px] max-w-[85vw] z-50 opacity-0 pointer-events-none peer-hover:opacity-100 transition-opacity">
-            <div className="p-2.5 bg-[var(--color-ink)] text-[var(--color-paper)] text-xs rounded-md shadow-xl">
-              Select inpainting engine for text removal. Higher tiers like LaMa & AOT-GAN provide seamless results.
-            </div>
-          </div>
+          <HelpTooltip
+            size="md"
+            content="Select inpainting engine for text removal. Higher tiers like LaMa & AOT-GAN provide seamless results."
+          />
         </div>
 
         <div className="relative flex flex-col">
@@ -639,15 +639,12 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
 
       {/* OCR Engine Selector */}
       <div className="flex flex-col gap-1.5">
-        <div className="flex items-center gap-1.5 mb-1 relative">
+        <div className="flex items-center gap-1.5 mb-1">
           <h2 className="text-sm font-medium">OCR Engine</h2>
-          <div className="peer w-4 h-4 rounded-full border border-[var(--color-dust)] flex items-center justify-center text-[10px] text-[var(--color-dust)] cursor-help hover:bg-[var(--color-dust)] hover:text-[var(--color-paper)] transition-colors">?</div>
-          
-          <div className="absolute left-0 top-full pt-1.5 w-[280px] max-w-[85vw] z-50 opacity-0 pointer-events-none peer-hover:opacity-100 transition-opacity">
-            <div className="p-2.5 bg-[var(--color-ink)] text-[var(--color-paper)] text-xs rounded-md shadow-xl">
-              Select PaddleOCR text detection and recognition model tier. v6-small is fast and lightweight. Higher tiers provide enhanced precision for specialized scripts.
-            </div>
-          </div>
+          <HelpTooltip
+            size="md"
+            content="Select PaddleOCR text detection and recognition model tier. v6-small is fast and lightweight. Higher tiers provide enhanced precision for specialized scripts."
+          />
         </div>
 
         <div className="relative flex flex-col">
@@ -802,15 +799,12 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
 
         return (
           <div className="flex flex-col gap-1.5">
-            <div className="flex items-center gap-1.5 mb-1 relative">
+            <div className="flex items-center gap-1.5 mb-1">
               <h2 className="text-sm font-medium">Layout & Bubble Fit</h2>
-              <div className="peer w-4 h-4 rounded-full border border-[var(--color-dust)] flex items-center justify-center text-[10px] text-[var(--color-dust)] cursor-help hover:bg-[var(--color-dust)] hover:text-[var(--color-paper)] transition-colors">?</div>
-              
-              <div className="absolute left-0 top-full pt-1.5 w-[280px] max-w-[85vw] z-50 opacity-0 pointer-events-none peer-hover:opacity-100 transition-opacity">
-                <div className="p-2.5 bg-[var(--color-ink)] text-[var(--color-paper)] text-xs rounded-md shadow-xl">
-                  Speech bubbles expand horizontal layout space and center translated text inside the balloon chamber, preventing tiny 6px fonts.
-                </div>
-              </div>
+              <HelpTooltip
+                size="md"
+                content="Speech bubbles expand horizontal layout space and center translated text inside the balloon chamber, preventing tiny 6px fonts."
+              />
             </div>
 
             <div className="relative flex flex-col">
@@ -887,27 +881,11 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                               <span className="truncate pr-1 text-sm">{opt.name}</span>
                             </button>
                             {opt.tooltip && (
-                              <div
-                                className="relative inline-flex items-center"
-                                onClick={(e) => e.stopPropagation()}
-                                onMouseEnter={() => setHoveredBubbleTip(opt.id)}
-                                onMouseLeave={() => setHoveredBubbleTip(null)}
-                              >
-                                <div className="peer w-3.5 h-3.5 rounded-full border border-[var(--color-dust)]/60 flex items-center justify-center text-[9px] text-[var(--color-dust)] cursor-help hover:border-[var(--color-ink)] hover:text-[var(--color-ink)] transition-colors flex-shrink-0">
-                                  ?
-                                </div>
-                                <div
-                                  className={`absolute ${
-                                    opt.id === 'neural' ? 'bottom-full mb-1.5' : 'top-full mt-1.5'
-                                  } left-0 w-[220px] max-w-[80vw] z-50 pointer-events-none transition-opacity duration-150 ${
-                                    hoveredBubbleTip === opt.id ? 'opacity-100' : 'opacity-0'
-                                  } peer-hover:opacity-100`}
-                                >
-                                  <div className="p-2 bg-[var(--color-ink)] text-[var(--color-paper)] text-[11px] font-normal leading-snug rounded-md shadow-xl border border-[var(--color-dust)]/20">
-                                    {opt.tooltip}
-                                  </div>
-                                </div>
-                              </div>
+                              <HelpTooltip
+                                size="sm"
+                                width={220}
+                                content={opt.tooltip}
+                              />
                             )}
                           </div>
                           <div className="flex-shrink-0 ml-2">
