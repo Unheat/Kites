@@ -6,6 +6,7 @@ import {
   MAX_GLOSSARY_TERM_LENGTH,
   type GlossaryEntry,
 } from '../../shared/glossary';
+import HelpTooltip from './HelpTooltip';
 
 /**
  * Minimal glossary state slice; the caller owns persistence and complete popup state.
@@ -73,6 +74,18 @@ export default function GlossaryPanel({
         <div className="flex items-center gap-2">
           <BookOpen size={16} className="text-[var(--color-dust)]" />
           <span className="font-medium text-sm">Translation Glossary</span>
+          <HelpTooltip
+            size="sm"
+            content={
+              <>
+                Map source terms to preferred translations for WebLLM, Custom API, and Shared Pool.
+                LLMs may not always follow these preferences. Google Translate does not support glossary in Kites.
+                <span className="block mt-1 text-[var(--color-dust)]">
+                  When using Custom API or Shared Pool, glossary terms are included in translation prompts sent to the respective cloud provider. Do not add sensitive data.
+                </span>
+              </>
+            }
+          />
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -96,17 +109,6 @@ export default function GlossaryPanel({
           </button>
         </div>
       </div>
-
-      <p className="text-[11px] text-[var(--color-dust)] mb-2">
-        Map source terms to preferred translations for WebLLM, Custom API, and Shared Pool.
-        LLMs may not always follow these preferences. Google Translate does not support glossary in Kites.
-      </p>
-
-      {/* Privacy notice for cloud/custom engines */}
-      <p className="text-[10px] text-[var(--color-dust)] mb-3 italic">
-        When using Custom API or Shared Pool, glossary terms are included in translation prompts
-        sent to the respective cloud provider. Do not add sensitive data.
-      </p>
 
       {/* Existing entries */}
       {entries.length > 0 && (
