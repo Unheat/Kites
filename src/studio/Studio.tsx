@@ -115,7 +115,7 @@ export const Studio: React.FC<StudioProps> = ({
     };
   }, []);
 
-  // Keyboard shortcuts (Torii 1:1)
+  // Studio Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (
@@ -280,7 +280,7 @@ export const Studio: React.FC<StudioProps> = ({
   return (
     <div className="flex flex-row gap-3 p-3 w-screen h-screen overflow-hidden bg-[#090a0f] text-slate-100 select-none">
       {/* ======================================================== */}
-      {/* 1. LEFT SIDE PANEL: TORII 1:1 DUAL CARD ARCHITECTURE     */}
+      {/* 1. LEFT SIDE PANEL: DUAL CARD TOOL ARCHITECTURE          */}
       {/* ======================================================== */}
       <aside className="flex flex-col h-full gap-3 w-88 max-w-[calc(100vw-1.5rem)] shrink-0 z-30">
         {/* CARD 1: Tool Selector & Tool Settings */}
@@ -411,7 +411,7 @@ export const Studio: React.FC<StudioProps> = ({
       {/* 2. RIGHT CANVAS WORKSPACE: TOP BAR + CENTERED CANVAS     */}
       {/* ======================================================== */}
       <main className="flex-1 flex flex-col h-full bg-[#12141c] border border-[#262a3b] rounded-xl shadow-2xl overflow-hidden">
-        {/* Canvas Top Bar (h-9 Torii architecture) */}
+        {/* Canvas Top Bar */}
         <div className="w-full h-9 bg-[#141724] border-b border-[#262a3b] px-3 flex items-center justify-between text-xs text-slate-300 shrink-0 select-none z-30">
           <div className="flex items-center gap-2">
             <button

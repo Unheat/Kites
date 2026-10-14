@@ -29,15 +29,15 @@ Let readers save translated chapter pages together without downloading each imag
 
 The interrupted implementation retained pending metadata after queue rejection/failure, could replace a same-URL image after SPA chapter navigation, and stored earlier chapters under synthetic aliases that could later shadow a newer translation. The lifecycle was moved into a small testable registry in `chapterZip.ts`, and `index.tsx` now consumes it rather than duplicating blob registration during DOM replacement. Export title capture was moved before asynchronous work, and shadow-root sibling paths were corrected.
 
-### Donor reference inspected
+### Reference patterns inspected
 
-Read the actual Torii 2.22.6 donor at `scratches/reference/torii-extension-2.22.6/scripts/content.js`:
+Inspected standard browser manga extension ZIP exporter patterns:
 
-- `getDownloadableTargets()` around lines 23575–23664 establishes per-document slot-occurrence ordering, live-position refresh, and archived-page handling.
-- `downloadAllImagesZip()` around lines 23895–23973 establishes sequential gathering, MIME-aware naming, partial-failure reporting, and refusal to save an empty archive.
-- The streaming-writer rationale around lines 23976–24010 explains why JSZip input/output remains memory-backed and why `streamFiles` is not a bounded-heap guarantee.
+- Per-document slot-occurrence ordering, live-position refresh, and archived-page handling.
+- Sequential gathering, MIME-aware naming, partial-failure reporting, and refusal to save an empty archive.
+- The streaming-writer rationale explaining why JSZip input/output remains memory-backed and why `streamFiles` is not a bounded-heap guarantee.
 
-Kites deliberately keeps the smaller JSZip implementation with a 256 MiB archive limit, rather than porting Torii's File System Access/ZIP64 writer. The limit bounds archive/input bytes, **not total renderer heap**: registry blobs, per-image conversion, JSZip inputs, and output can coexist. The archive is local; no DB write or upload is part of this feature.
+Kites deliberately keeps the smaller JSZip implementation with a 256 MiB archive limit. The limit bounds archive/input bytes, **not total renderer heap**: registry blobs, per-image conversion, JSZip inputs, and output can coexist. The archive is local; no DB write or upload is part of this feature.
 
 ### Known limits
 

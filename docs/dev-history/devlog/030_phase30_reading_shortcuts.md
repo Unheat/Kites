@@ -22,7 +22,7 @@ Two Chrome extension commands registered in `manifest.json`:
 | `translate-hovered-image`| `Alt+Shift+Z`     | `TRANSLATE_HOVERED_IMAGE` |
 | `start-screen-crop`      | `Alt+Shift+X`     | `START_AREA_SELECTION`    |
 
-These defaults use Chrome-supported `Alt` + `Shift` + letter combinations. Chrome does not require `Alt` specifically: extension shortcuts must include `Ctrl` or `Alt` (with platform-specific mappings), while `Shift` is optional. These match Torii's `torii_translate` and `torii_screencrop` defaults verbatim, easing migration for users switching from Torii. Users can reassign the two command combinations at `chrome://extensions/shortcuts`; the content-side unmodified F key is fixed and is not listed there.
+These defaults use Chrome-supported `Alt` + `Shift` + letter combinations. Chrome does not require `Alt` specifically: extension shortcuts must include `Ctrl` or `Alt` (with platform-specific mappings), while `Shift` is optional. Users can reassign the two command combinations at `chrome://extensions/shortcuts`; the content-side unmodified F key is fixed and is not listed there.
 
 ### Content Reading Helper Key
 

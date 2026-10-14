@@ -16,7 +16,7 @@ Allow users to easily disable Kites on specific domains with a single click in t
 ### 3. Architecture Decisions
 
 #### 3.1 Blacklist Mode as Default
-Following donor analysis (Torii and XianScan), manga reader extensions deliver the best UX when running everywhere by default, allowing quick opt-out for problematic domains:
+Following donor analysis (XianScan and community readers), manga reader extensions deliver the best UX when running everywhere by default, allowing quick opt-out for problematic domains:
 - `disabledDomains: string[]` stored in `PopupState` (`chrome.storage.local`).
 - Normalized to unique, lowercase hostnames supporting both exact match (`mangadex.org`) and wildcard subdomains (`*.bato.to`).
 

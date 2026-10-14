@@ -912,7 +912,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
         isSpacePanning ? 'cursor-grab active:cursor-grabbing' : ''
       }`}
     >
-      {/* Centered Canvas Spacer: Torii m-auto architecture */}
+      {/* Centered Canvas Spacer: m-auto architecture */}
       <div
         ref={spacerRef}
         style={{
@@ -1016,7 +1016,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
         )}
       </div>
 
-      {/* Floating Action Pill Toolbar (Figma/Torii style) */}
+      {/* Floating Action Pill Toolbar */}
       {pillPos && selectedObj && !isShowingOriginal && !isSpacePanning && !hideBoxes && (
         <>
           {/* Floating Original Text Bar (Mapped from selected bubble) */}

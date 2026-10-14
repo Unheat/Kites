@@ -1,5 +1,5 @@
 /**
- * Puppeteer automated test script verifying the Torii-style post-translation finished controls:
+ * Puppeteer automated test script verifying the post-translation finished controls:
  * 1. An image is translated.
  * 2. It remembers its translated state.
  * 3. Hovering / interacting reveals the finished action buttons: Toggle, Download, Edit in Studio.

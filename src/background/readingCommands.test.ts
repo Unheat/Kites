@@ -36,7 +36,7 @@ describe('readingCommandMessage', () => {
     expect(readingCommandMessage('open-chapter-reader')).toEqual({ type: 'OPEN_CHAPTER_READER' });
   });
 
-  it.each(['unknown', '_execute_action', 'torii_translate', ''])('returns null for %s', (command) => {
+  it.each(['unknown', '_execute_action', 'custom_translate', ''])('returns null for %s', (command) => {
     expect(readingCommandMessage(command)).toBeNull();
   });
 });

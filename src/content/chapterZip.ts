@@ -199,7 +199,7 @@ function comparePaths(a: number[] | null, b: number[] | null): number {
 
 /**
  * Snapshots current-context records, refreshing live positions without losing detached ones.
- * Torii's slot occurrence ordering interleaves reused slots; distinct slots follow DOM paths.
+ * Slot occurrence ordering interleaves reused slots; distinct slots follow DOM paths.
  * @param records - Completed registry records; original-display state is deliberately irrelevant.
  * @param sourcePage - Current document URL, not database history.
  * @returns Unique translated pages in reading order, independent of completion order.

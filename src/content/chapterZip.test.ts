@@ -71,7 +71,7 @@ describe('chapterZip', () => {
       ]);
     });
 
-    it('interleaves reused slots across navigation sequences (Torii pattern)', () => {
+    it('interleaves reused slots across navigation sequences (ordered slot pattern)', () => {
       const sourcePage = 'https://example.com/reader?ch=1';
       // Single reusable canvas/viewer slot [0, 0] receiving page after page
       const records: ChapterImageRecord[] = [

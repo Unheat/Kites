@@ -9,7 +9,7 @@
 
 ## Objective
 
-Add a user-facing retention setting (1 day / 1 week / 1 month / Never) for automatic cleanup of old translation jobs, images, and text records from IndexedDB. The prior codebase hard-coded a seven-day TTL with no UI control. This phase introduces Torii-parity retention controls while enforcing strict safety invariants: active jobs must never be deleted, and storage read failures must never cause destructive fallback behavior.
+Add a user-facing retention setting (1 day / 1 week / 1 month / Never) for automatic cleanup of old translation jobs, images, and text records from IndexedDB. The prior codebase hard-coded a seven-day TTL with no UI control. This phase introduces configurable retention controls while enforcing strict safety invariants: active jobs must never be deleted, and storage read failures must never cause destructive fallback behavior.
 
 ---
 

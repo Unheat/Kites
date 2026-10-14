@@ -1,4 +1,4 @@
-# Devlog 026: Phase 26 — Kites Studio V2 Rebuild & Torii 1:1 Feature Port
+# Devlog 026: Phase 26 — Kites Studio V2 Rebuild & Canvas Architecture Port
 
 **Date:** 2026-10-12  
 **Branch:** `feat/studio-editor-v2-rebuild`  
@@ -14,14 +14,14 @@ The original Kites Studio (`src/App.tsx`) was created in Phase 11 as a minimal r
 - **Zero Raster Editing:** Could not fix imperfect inpainting or paint custom patches.
 - **Restricted Typography:** Lacked CJK vertical text layout, outline stroke drop shadows, gradients, and 4-point perspective warp.
 
-By auditing the **Koharu Manga Editor** (`v0.83.5`) and reverse-engineering the **Torii Manga Translator Chrome extension** (`v2.22.6`), we ported Torii's battle-tested Canvas 2D editing architecture into a modular, production-grade Studio V2 for Kites while decoupling it from remote cloud credit walls.
+By auditing the **Koharu Manga Editor** (`v0.83.5`) and modern Canvas 2D editing architectures, we designed a modular, production-grade Studio V2 for Kites while keeping it 100% client-side and free of remote credit walls.
 
 ---
 
 ## 2. Key Architectural Invariants
 
 ### 2.1 The Privacy Boundary: Local WebGPU vs. Cloud API
-In Torii, live inpaint and live re-OCR operations crop small bounding boxes and POST them to a cloud endpoint (`https://api.toriitranslate.com/api/inpaint`), consuming paid user credits.
+In typical cloud translation editors, live inpaint and live re-OCR operations crop small bounding boxes and POST them to a cloud endpoint, consuming paid user credits.
 
 In Kites Studio V2:
 - The editor crops the exact same tight padded bounding box (e.g. 150×150 px).
@@ -30,7 +30,7 @@ In Kites Studio V2:
 
 ### 2.2 Bounded Dirty-Rect Undo/Redo
 Saving full `getImageData()` for a 2000×8000px webtoon requires ~64MB per snapshot, rapidly exhausting tab memory.
-Studio V2 adopts Torii's bounded patch algorithm:
+Studio V2 adopts a bounded patch algorithm:
 - Only captures `getImageData()` of the stroked bounding box (`minX, minY, w, h` + padding), typically ~150×150px (~90KB).
 - Restores patches instantaneously via `ctx.putImageData(patch.patchImageData, patch.x, patch.y)`.
 - Text edits and layer transforms store serialized JSON state snapshots.
@@ -78,7 +78,7 @@ src/studio/
 
 ---
 
-## 4. Layout & UI/UX Alignment (Torii 1:1 Parity)
+## 4. Layout & UI/UX Alignment
 
 1. **Left Panel Dual-Card Structure:**
    - Consolidated tools and tool settings into a single cohesive left panel (`w-88` ~352px).
@@ -87,7 +87,7 @@ src/studio/
    - Removed disconnected right-hand inspector panel.
 
 2. **Canvas Viewport Centering & Zero-Void Architecture:**
-   - Swapped out brittle absolute translation offsets for Torii's `margin: auto` centered `#canvas-spacer` inside a native scrollable container (`overflow-auto flex flex-1 p-4`).
+   - Swapped out brittle absolute translation offsets for a `margin: auto` centered `#canvas-spacer` inside a native scrollable container (`overflow-auto flex flex-1 p-4`).
    - Eliminates empty black space above the manga page while retaining smooth native document scrolling and cursor-anchored Ctrl-zoom.
 
 3. **Typesetting & Latin Word Rendering Fix:**
@@ -112,27 +112,27 @@ src/studio/
 
 ---
 
-## 4. In-Page Post-Translation Finished Controls (Torii Port)
+## 6. In-Page Post-Translation Finished Controls
 
-### 4.1 State Memory & Action Cluster
-Ported Torii's finished-state controls to `src/content/index.tsx` (`TranslateButton`):
+### 6.1 State Memory & Action Cluster
+Implemented finished-state controls in `src/content/index.tsx` (`TranslateButton`):
 - **State Memory (`translatedRegistry`):** Tracks each translated image's canonical original URL, safe blob URL, and database `jobId`. Even after navigating or moving the cursor away, re-hovering remembers that the image is translated.
 - **Action Cluster:** When translated, the control cluster seamlessly expands with three utility buttons alongside the primary toggle button:
   1. **Toggle Original / Translated (`data-kites-toggle-btn`):** Switches between showing the translated artwork and previewing the raw original foreign text (`toggleImageDisplay`).
   2. **Download Image (`data-kites-download-btn`):** Immediately triggers client-side download of the translated image blob without network round-trips.
   3. **Edit in Studio (`data-kites-edit-btn`):** Directly opens the Studio tab (`index.html?jobId=${jobId}` via `OPEN_DASHBOARD`), automatically selecting that exact translated image from Dexie for editing.
 
-### 4.2 Reversion Shield Coexistence
+### 6.2 Reversion Shield Coexistence
 To prevent modern SPA frameworks (Twitter/X, Reddit, Threads) or Kites' own MutationObserver shield from mistaking a user's intentional "Show Original" preview for a hostile DOM reset:
 - Sets `data-kites-show-original="true"` on the source and surface elements.
 - `attachReversionShield` explicitly checks `img.getAttribute('data-kites-show-original') === 'true'` and ignores mutations while previewing original artwork, cleanly restoring full protection when toggled back to translated.
 
 ---
 
-## 5. In-Studio Multi-Tier Engine Selection & Global/Local Sync
+## 7. In-Studio Multi-Tier Engine Selection & Global/Local Sync
 
-### 5.1 Architecture & Parity with Extension Popup
-Unlike Torii which only provides a single paid cloud endpoint and basic fill, Kites incorporates multi-tier local and WebGPU engines directly selectable inside Studio:
+### 7.1 Architecture & Parity with Extension Popup
+Unlike single-model cloud systems, Kites incorporates multi-tier local and WebGPU engines directly selectable inside Studio:
 - **Inpaint Tiers:** `Simple Fill` (fast color), `Telea Diffusion` (fast diffusion), `LaMa Manga` (neural dynamic patch, ~50MB), `AOT-GAN` (neural high-detail, ~60MB), and `None (Bypass)`.
 - **OCR Tiers:** `PaddleOCR v6 Small` (~4MB), `v6 Medium` (~8MB), `v6 Tiny` (~2MB), `v5 Mobile` (~4MB), and `v5 Server` (~20MB).
 
