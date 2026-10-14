@@ -185,7 +185,7 @@ export const TypographySettings: React.FC = () => {
     studioStore.setState({
       textObjects: next,
       selectedTextId: id,
-      editingTextId: id,
+      editingTextId: null, // Keep canvas transparent directly
       activeTool: 'text',
     });
     studioUndoStack.push({
@@ -196,58 +196,59 @@ export const TypographySettings: React.FC = () => {
     });
   };
 
-  if (!selectedObj && !globalEditMode) {
-    return (
-      <div className="p-5 text-center text-xs text-slate-400 space-y-3">
-        <p className="font-medium text-slate-300">No text bubble selected.</p>
-        <p className="text-[11px] text-slate-500">
-          Click any text box on canvas, add a new empty text box, or enable <strong>Global Edit Mode</strong>.
-        </p>
-        <div className="flex flex-col gap-2 pt-1">
-          <button
-            onClick={handleAddNewEmptyTextBox}
-            className="w-full py-2 px-3 rounded-lg bg-[#f4446d] hover:bg-[#e0355e] text-white text-xs font-semibold shadow-md shadow-[rgba(244,68,109,0.35)] transition flex items-center justify-center gap-1.5"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            Add Empty Text Box
-          </button>
-          <button
-            onClick={() => studioStore.setState({ globalEditMode: true })}
-            className="w-full py-1.5 px-3 rounded-lg border border-[#282d3f] bg-[#1c1f2e] text-[#f4446d] hover:bg-[#282d3f] transition"
-          >
-            Enable Global Edit Mode
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   const obj = selectedObj || textObjects[0] || ({} as Partial<TextObject>);
 
   return (
     <div className="space-y-3.5 text-xs text-slate-200">
-      <div className="flex items-center justify-between pb-2 border-b border-[#282d3f]">
-        <div className="flex items-center gap-2">
-          <h3 className="font-semibold text-sm text-slate-100">Typography</h3>
+      {/* ======================================================== */}
+      {/* 0. PERMANENT TOP ACTION BAR: ALWAYS VISIBLE             */}
+      {/* ======================================================== */}
+      <div className="flex items-center gap-2">
+        <button
+          onClick={handleAddNewEmptyTextBox}
+          className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg bg-[#f4446d] hover:bg-[#e0355e] text-white text-xs font-semibold shadow-md shadow-[rgba(244,68,109,0.3)] transition cursor-pointer"
+        >
+          <Plus className="w-3.5 h-3.5" />
+          Add Text Box
+        </button>
+        {selectedObj && (
           <button
-            onClick={handleAddNewEmptyTextBox}
-            title="Create an empty text box without OCR source"
-            className="px-2 py-0.5 rounded-md bg-[#f4446d]/15 hover:bg-[#f4446d]/25 border border-[#f4446d]/40 text-[#f4446d] text-[11px] font-medium transition flex items-center gap-1"
+            onClick={() => studioStore.setState({ selectedTextId: null, editingTextId: null })}
+            title="Deselect text box"
+            className="py-2 px-2.5 rounded-lg border border-[#282d3f] bg-[#090a0f] text-slate-400 hover:text-white hover:bg-[#1c1f2e] text-xs font-medium transition cursor-pointer"
           >
-            <Plus className="w-3 h-3" />
-            Add Box
+            Deselect
+          </button>
+        )}
+      </div>
+
+      {!selectedObj && !globalEditMode ? (
+        <div className="p-4 text-center text-xs text-slate-400 space-y-2.5 rounded-xl border border-[#262a3b] bg-[#090a0f]/50">
+          <p className="font-medium text-slate-300">No text bubble selected</p>
+          <p className="text-[11px] text-slate-500 leading-relaxed">
+            Click any bubble on the canvas to edit its dialogue and style, or enable <strong>Global Edit Mode</strong> to style all bubbles at once.
+          </p>
+          <button
+            onClick={() => studioStore.setState({ globalEditMode: true })}
+            className="w-full py-1.5 px-3 rounded-lg border border-[#282d3f] bg-[#1c1f2e] text-[#f4446d] hover:bg-[#282d3f] transition font-medium"
+          >
+            Enable Global Edit Mode
           </button>
         </div>
-        <label className="flex items-center gap-1.5 text-[11px] text-[#f4446d] font-medium cursor-pointer">
-          <input
-            type="checkbox"
-            checked={globalEditMode}
-            onChange={(e) => studioStore.setState({ globalEditMode: e.target.checked })}
-            className="rounded border-[#282d3f] bg-[#090a0f] text-[#f4446d] focus:ring-0 accent-[#f4446d]"
-          />
-          All Bubbles
-        </label>
-      </div>
+      ) : (
+        <>
+          <div className="flex items-center justify-between pb-2 border-b border-[#282d3f]">
+            <h3 className="font-semibold text-sm text-slate-100">Typography</h3>
+            <label className="flex items-center gap-1.5 text-[11px] text-[#f4446d] font-medium cursor-pointer">
+              <input
+                type="checkbox"
+                checked={globalEditMode}
+                onChange={(e) => studioStore.setState({ globalEditMode: e.target.checked })}
+                className="rounded border-[#282d3f] bg-[#090a0f] text-[#f4446d] focus:ring-0 accent-[#f4446d]"
+              />
+              All Bubbles
+            </label>
+          </div>
 
       {/* ======================================================== */}
       {/* 1. ORIGINAL OCR SOURCE TEXT SECTION                      */}
@@ -655,6 +656,8 @@ export const TypographySettings: React.FC = () => {
           </div>
         )}
       </div>
+        </>
+      )}
     </div>
   );
 };

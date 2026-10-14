@@ -282,11 +282,11 @@ describe('Studio State Management', () => {
       color: '#000000',
     };
 
-    studioStore.setState({ textObjects: [emptyBox], selectedTextId: emptyBox.id, editingTextId: emptyBox.id });
+    studioStore.setState({ textObjects: [emptyBox], selectedTextId: emptyBox.id, editingTextId: null });
 
     expect(studioStore.getState().textObjects[0].originalText).toBeUndefined();
     expect(studioStore.getState().textObjects[0].text).toBe('Manual Dialogue');
-    expect(studioStore.getState().editingTextId).toBe('b-empty-1');
+    expect(studioStore.getState().editingTextId).toBeNull(); // Starts transparent directly on canvas
 
     // Verify it acts like a normal text box with style updates
     const styled = studioStore.getState().textObjects.map((t) =>
@@ -297,5 +297,9 @@ describe('Studio State Management', () => {
     expect(studioStore.getState().textObjects[0].fontSize).toBe(24);
     expect(studioStore.getState().textObjects[0].bold).toBe(true);
     expect(studioStore.getState().textObjects[0].originalText).toBeUndefined();
+
+    // Verify deselecting
+    studioStore.setState({ selectedTextId: null });
+    expect(studioStore.getState().selectedTextId).toBeNull();
   });
 });

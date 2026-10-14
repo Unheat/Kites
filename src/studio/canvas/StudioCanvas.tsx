@@ -9,6 +9,7 @@ import {
   Edit3,
   Check,
   Languages,
+  Plus,
 } from 'lucide-react';
 import { studioStore, useStudioStore } from '../state/studioStore';
 import { studioUndoStack } from '../state/undoStack';
@@ -397,7 +398,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
         };
         const prev = [...textObjects];
         const next = [...textObjects, newObj];
-        studioStore.setState({ textObjects: next, selectedTextId: id, editingTextId: id });
+        studioStore.setState({ textObjects: next, selectedTextId: id, editingTextId: null });
         studioUndoStack.push({
           id: `create-bubble-${Date.now()}`,
           timestamp: Date.now(),
@@ -810,6 +811,36 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
     studioStore.setState({ editingTextId: null });
   };
 
+  const handleAddNewEmptyTextBox = () => {
+    const id = `bubble-${Date.now()}`;
+    const selected = textObjects.find((t) => t.id === selectedTextId);
+    const newObj: TextObject = {
+      id,
+      x: selected ? Math.round(selected.x + 30) : Math.round(imageWidth / 2 - 70),
+      y: selected ? Math.round(selected.y + 30) : Math.round(imageHeight / 2 - 25),
+      width: 140,
+      height: 50,
+      text: 'New Dialogue',
+      originalText: undefined,
+      fontSize: 18,
+      fontFamily: 'WildWords, CCWildWords, sans-serif',
+      color: '#000000',
+      strokeColor: '#ffffff',
+      strokeWidth: 2,
+      align: 'center',
+      isVertical: false,
+    };
+    const prev = [...textObjects];
+    const next = [...textObjects, newObj];
+    studioStore.setState({ textObjects: next, selectedTextId: id, editingTextId: null });
+    studioUndoStack.push({
+      id: `add-empty-box-${Date.now()}`,
+      timestamp: Date.now(),
+      description: 'Add Empty Text Box',
+      textObjects: { before: prev, after: next },
+    });
+  };
+
   // Compute screen coordinates for floating action pill
   const selectedObj = textObjects.find((t) => t.id === selectedTextId);
   const editingObj = textObjects.find((t) => t.id === editingTextId);
@@ -914,15 +945,18 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
                 color: editingObj.color || '#000000',
                 textAlign: editingObj.align || 'center',
                 lineHeight: editingObj.lineSpacing || 1.2,
-                backgroundColor: 'rgba(255, 255, 255, 0.94)',
-                border: '2px solid #f4446d',
-                borderRadius: '6px',
-                padding: '4px',
+                backgroundColor: 'transparent',
+                border: '1.5px dashed #f4446d',
+                borderRadius: '4px',
+                padding: '2px',
                 outline: 'none',
                 resize: 'none',
-                boxShadow: '0 8px 30px rgba(0,0,0,0.6)',
                 boxSizing: 'border-box',
                 overflow: 'hidden',
+                caretColor: '#f4446d',
+                textShadow: editingObj.strokeColor
+                  ? `-1px -1px 0 ${editingObj.strokeColor}, 1px -1px 0 ${editingObj.strokeColor}, -1px 1px 0 ${editingObj.strokeColor}, 1px 1px 0 ${editingObj.strokeColor}`
+                  : undefined,
               }}
               autoFocus
             />
@@ -981,6 +1015,13 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
               className="p-1.5 rounded-lg hover:bg-[#1c1f2e] text-[#f4446d] hover:text-[#e0355e] transition"
             >
               <Edit3 className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={handleAddNewEmptyTextBox}
+              title="Add New Text Box"
+              className="p-1.5 rounded-lg hover:bg-[#1c1f2e] text-slate-300 hover:text-white transition"
+            >
+              <Plus className="w-3.5 h-3.5" />
             </button>
             <button
               onClick={handleCopyStyle}
