@@ -110,7 +110,7 @@ Hover over any comic panel on Twitter/X, Pixiv, or manga sites. An unobtrusive f
 
 Read entire manga or webtoon chapters in one distraction-free view with automatic batch detection, continuous vertical webtoon mode, and multi-page translation:
 
-[![Kites Chapter Reader](./README_images/UI-feature/chapter-reader.jpg)](./README_images/UI-feature/chapter-reader.jpg)
+[![Kites Chapter Reader](./README_images/UI-feature/chapter-reader.jpg)](./README_images/UI-feature/chapter-reader.png)
 
 - **Fast Scan:** Automatically auto-scrolls and queues all lazy-loaded manga panels across chapter pages.
 - **Flexible Reader Modes:** Seamlessly switch between Webtoon continuous vertical strips, Single page, and Double spread layouts.
@@ -122,7 +122,7 @@ Read entire manga or webtoon chapters in one distraction-free view with automati
 
 Need to polish a scanlation or adjust phrasing? Open the full-screen **Kites Studio** straight from the extension.
 
-[![Kites Studio](./README_images/UI-feature/kite_studio_editing.jpg)](./README_images/UI-feature/kite_studio_editing.jpg)
+[![Kites Studio](./README_images/UI-feature/kite_studio_editing.jpg)](./README_images/UI-feature/studio-editor.png)
 
 - **Interactive Canvas:** Drag and resize speech bubbles with 8-point handles.
 - **Side-by-Side Verification:** Compare original, cleaned, and typeset views with one click.
