@@ -108,6 +108,15 @@ export class BrushEngine {
   }
 
   /**
+   * Retrieves the dab/mask canvas containing the stroked path.
+   *
+   * @returns Mask canvas or null if uninitialized.
+   */
+  public getDabCanvas(): HTMLCanvasElement | null {
+    return this.dabCanvas;
+  }
+
+  /**
    * Returns whether a stroke is currently in progress.
    *
    * @returns True if drawing, false otherwise.

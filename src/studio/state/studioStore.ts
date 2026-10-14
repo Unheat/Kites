@@ -225,6 +225,30 @@ class StudioStore {
     this.setState({ zoom: clamped });
   };
 
+  private storageWriteQueue: Promise<void> = Promise.resolve();
+
+  /**
+   * Persists an engine selection update sequentially to chrome.storage.local,
+   * avoiding write races and preserving storage ordering invariants.
+   *
+   * @param updates - Partial PopupState updates to persist.
+   */
+  private persistGlobalEngine(updates: Record<string, unknown>): void {
+    if (typeof chrome === 'undefined' || !chrome.storage?.local) return;
+    this.storageWriteQueue = this.storageWriteQueue
+      .catch(() => undefined)
+      .then(async () => {
+        const data = await chrome.storage.local.get(STORAGE_KEYS.POPUP_STATE);
+        const current = (data[STORAGE_KEYS.POPUP_STATE] as Record<string, unknown>) || {};
+        await chrome.storage.local.set({
+          [STORAGE_KEYS.POPUP_STATE]: { ...current, ...updates },
+        });
+      })
+      .catch((err) => {
+        console.error('[StudioStore] Failed to persist engine selection:', err);
+      });
+  }
+
   /**
    * Updates an engine selection, optionally persisting to chrome.storage.local (popupState) if syncWithGlobal is enabled.
    */
@@ -235,33 +259,18 @@ class StudioStore {
     const { syncWithGlobal } = this.state;
     if (category === 'inpaint') {
       this.setState({ selectedInpaintEngineId: engineId });
-      if (syncWithGlobal && typeof chrome !== 'undefined' && chrome.storage?.local) {
-        chrome.storage.local.get(STORAGE_KEYS.POPUP_STATE, (data) => {
-          const current = data[STORAGE_KEYS.POPUP_STATE] || {};
-          chrome.storage.local.set({
-            [STORAGE_KEYS.POPUP_STATE]: { ...current, activeInpaintId: engineId },
-          });
-        });
+      if (syncWithGlobal) {
+        this.persistGlobalEngine({ activeInpaintId: engineId });
       }
     } else if (category === 'ocr') {
       this.setState({ selectedOcrEngineId: engineId });
-      if (syncWithGlobal && typeof chrome !== 'undefined' && chrome.storage?.local) {
-        chrome.storage.local.get(STORAGE_KEYS.POPUP_STATE, (data) => {
-          const current = data[STORAGE_KEYS.POPUP_STATE] || {};
-          chrome.storage.local.set({
-            [STORAGE_KEYS.POPUP_STATE]: { ...current, activeOcrId: engineId },
-          });
-        });
+      if (syncWithGlobal) {
+        this.persistGlobalEngine({ activeOcrId: engineId });
       }
     } else if (category === 'translation') {
       this.setState({ selectedTranslationEngineId: engineId });
-      if (syncWithGlobal && typeof chrome !== 'undefined' && chrome.storage?.local) {
-        chrome.storage.local.get(STORAGE_KEYS.POPUP_STATE, (data) => {
-          const current = data[STORAGE_KEYS.POPUP_STATE] || {};
-          chrome.storage.local.set({
-            [STORAGE_KEYS.POPUP_STATE]: { ...current, activeEngineId: engineId },
-          });
-        });
+      if (syncWithGlobal) {
+        this.persistGlobalEngine({ activeEngineId: engineId });
       }
     }
   };

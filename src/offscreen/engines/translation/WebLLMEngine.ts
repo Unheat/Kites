@@ -186,10 +186,16 @@ export class WebLLMEngine extends BaseLlmTranslationEngine {
       }
     }, dynamicDeadlineMs);
 
+    const handleAbort = () => {
+      if (this.engine) void this.engine.interruptGenerate();
+    };
+
     if (signal) {
-      signal.addEventListener('abort', () => {
+      if (signal.aborted) {
         if (this.engine) void this.engine.interruptGenerate();
-      });
+      } else {
+        signal.addEventListener('abort', handleAbort, { once: true });
+      }
     }
 
     const chunkStart = import.meta.env.DEV ? performance.now() : 0;
@@ -221,6 +227,10 @@ export class WebLLMEngine extends BaseLlmTranslationEngine {
       clearTimeout(runawayTimer);
       console.error('[WebLLMEngine] Completion request failed:', err);
       throw err;
+    } finally {
+      if (signal) {
+        signal.removeEventListener('abort', handleAbort);
+      }
     }
   }
 

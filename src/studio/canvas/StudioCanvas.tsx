@@ -184,6 +184,73 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
     redrawOverlay();
   }, [redrawOverlay]);
 
+  // Interactive dialogue box actions (reading live store to prevent stale closures)
+  const handleDuplicateSelectedText = useCallback(() => {
+    const liveTexts = studioStore.getState().textObjects;
+    const selected = liveTexts.find((t) => t.id === selectedTextId);
+    if (!selected) return;
+    const cloned: TextObject = {
+      ...selected,
+      id: `bubble-${Date.now()}`,
+      x: selected.x + 20,
+      y: selected.y + 20,
+    };
+    const prev = [...liveTexts];
+    const next = [...liveTexts, cloned];
+    studioStore.setState({ textObjects: next, selectedTextId: cloned.id });
+    studioUndoStack.push({
+      id: `duplicate-${Date.now()}`,
+      timestamp: Date.now(),
+      description: 'Duplicate Text Box',
+      textObjects: { before: prev, after: next },
+    });
+  }, [selectedTextId]);
+
+  const handleDeleteSelectedText = useCallback(() => {
+    if (!selectedTextId) return;
+    const liveTexts = studioStore.getState().textObjects;
+    const prev = [...liveTexts];
+    const next = liveTexts.filter((t) => t.id !== selectedTextId);
+    studioStore.setState({ textObjects: next, selectedTextId: null });
+    studioUndoStack.push({
+      id: `delete-${Date.now()}`,
+      timestamp: Date.now(),
+      description: 'Delete Text Box',
+      textObjects: { before: prev, after: next },
+    });
+  }, [selectedTextId]);
+
+  const handleRasterizeText = useCallback(() => {
+    const liveTexts = studioStore.getState().textObjects;
+    const selected = liveTexts.find((t) => t.id === selectedTextId);
+    const bgCanvas = bgCanvasRef.current;
+    const bgCtx = bgCanvas?.getContext('2d', { willReadFrequently: true });
+    if (!selected || !bgCanvas || !bgCtx) return;
+
+    const bbox: BoundingBox = {
+      x: selected.x,
+      y: selected.y,
+      width: selected.width,
+      height: selected.height,
+    };
+    const prePatch = BrushEngine.captureBoundingPatch(bgCtx, bbox);
+
+    TextRenderer.renderText(bgCtx, selected);
+    const postPatch = BrushEngine.captureBoundingPatch(bgCtx, bbox);
+
+    const prevTexts = [...liveTexts];
+    const nextTexts = liveTexts.filter((t) => t.id !== selected.id);
+
+    studioStore.setState({ textObjects: nextTexts, selectedTextId: null });
+    studioUndoStack.push({
+      id: `rasterize-${Date.now()}`,
+      timestamp: Date.now(),
+      description: 'Rasterize Text to Background',
+      rasterPatch: { before: prePatch, after: postPatch },
+      textObjects: { before: prevTexts, after: nextTexts },
+    });
+  }, [selectedTextId]);
+
   // Spacebar pan gesture listener
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -224,7 +291,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [selectedTextId, editingTextId]);
+  }, [selectedTextId, editingTextId, handleDeleteSelectedText, handleDuplicateSelectedText]);
 
   // Mouse wheel listener: natural scrolling vs cursor-centered zoom
   const handleWheel = (e: React.WheelEvent) => {
@@ -605,11 +672,16 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       const patchCtx = patchCanvas.getContext('2d');
       patchCtx?.drawImage(bgCanvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
 
+      const dabCanvas = brushEngineRef.current.getDabCanvas();
       const maskCanvas = document.createElement('canvas');
       maskCanvas.width = cropW;
       maskCanvas.height = cropH;
       const maskCtx = maskCanvas.getContext('2d');
-      maskCtx?.fillRect(0, 0, cropW, cropH);
+      if (maskCtx && dabCanvas) {
+        maskCtx.drawImage(dabCanvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+      } else {
+        maskCtx?.fillRect(0, 0, cropW, cropH);
+      }
 
       const preInpaintPatch = BrushEngine.captureBoundingPatch(bgCtx, paddedBbox);
       redrawOverlay();
@@ -768,69 +840,6 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
         return;
       }
     }
-  };
-
-  const handleDuplicateSelectedText = () => {
-    const selected = textObjects.find((t) => t.id === selectedTextId);
-    if (!selected) return;
-    const cloned: TextObject = {
-      ...selected,
-      id: `bubble-${Date.now()}`,
-      x: selected.x + 20,
-      y: selected.y + 20,
-    };
-    const prev = [...textObjects];
-    const next = [...textObjects, cloned];
-    studioStore.setState({ textObjects: next, selectedTextId: cloned.id });
-    studioUndoStack.push({
-      id: `duplicate-${Date.now()}`,
-      timestamp: Date.now(),
-      description: 'Duplicate Text Box',
-      textObjects: { before: prev, after: next },
-    });
-  };
-
-  const handleDeleteSelectedText = () => {
-    if (!selectedTextId) return;
-    const prev = [...textObjects];
-    const next = textObjects.filter((t) => t.id !== selectedTextId);
-    studioStore.setState({ textObjects: next, selectedTextId: null });
-    studioUndoStack.push({
-      id: `delete-${Date.now()}`,
-      timestamp: Date.now(),
-      description: 'Delete Text Box',
-      textObjects: { before: prev, after: next },
-    });
-  };
-
-  const handleRasterizeText = () => {
-    const selected = textObjects.find((t) => t.id === selectedTextId);
-    const bgCanvas = bgCanvasRef.current;
-    const bgCtx = bgCanvas?.getContext('2d', { willReadFrequently: true });
-    if (!selected || !bgCanvas || !bgCtx) return;
-
-    const bbox: BoundingBox = {
-      x: selected.x,
-      y: selected.y,
-      width: selected.width,
-      height: selected.height,
-    };
-    const prePatch = BrushEngine.captureBoundingPatch(bgCtx, bbox);
-
-    TextRenderer.renderText(bgCtx, selected);
-    const postPatch = BrushEngine.captureBoundingPatch(bgCtx, bbox);
-
-    const prevTexts = [...textObjects];
-    const nextTexts = textObjects.filter((t) => t.id !== selected.id);
-
-    studioStore.setState({ textObjects: nextTexts, selectedTextId: null });
-    studioUndoStack.push({
-      id: `rasterize-${Date.now()}`,
-      timestamp: Date.now(),
-      description: 'Rasterize Text to Background',
-      rasterPatch: { before: prePatch, after: postPatch },
-      textObjects: { before: prevTexts, after: nextTexts },
-    });
   };
 
   // Focus inline textarea and place caret at end when inline editing mode activates

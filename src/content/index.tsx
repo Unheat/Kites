@@ -1741,7 +1741,7 @@ function GlobalOverlay() {
       document.removeEventListener('keydown', onKeydown);
       chrome.runtime.onMessage.removeListener(onCommand);
     };
-  }, [isEnabled, isSnipping, crops]);
+  }, [isEnabled, isSnipping, crops, refreshChapterPages]);
 
   // Load user settings and react to popup updates.
   useEffect(() => {
