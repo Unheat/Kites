@@ -385,6 +385,8 @@ export interface RenderedBlockInfo {
   textColor: string;
   /** Stroke color actually used. */
   strokeColor: string;
+  /** Destination quad points ([tl, tr, br, bl]) used during rendering. */
+  dstPoints?: Point2D[];
 }
 
 /** Page dimensions used to derive the Cotrans font-size minimum. */
@@ -685,7 +687,16 @@ function renderTextBlocksDefault(
         ? Math.max(18, Math.round(pageDialogueBaseline * 1.25))
         : undefined;
       const info = renderRegionDefault(ctx, plan.region, plan.dstPoints, plan.targetFontSize, baselineCap, fontFamily);
-      if (info) results[plan.index] = { fontSize: info.fontSize, lineCount: info.lineCount, lines: info.lines, textColor: plan.region.textColor, strokeColor: plan.region.strokeColor };
+      if (info) {
+        results[plan.index] = {
+          fontSize: info.fontSize,
+          lineCount: info.lineCount,
+          lines: info.lines,
+          textColor: plan.region.textColor,
+          strokeColor: plan.region.strokeColor,
+          dstPoints: plan.dstPoints,
+        };
+      }
     } catch (e) {
       console.error('[canvasTypesetting] Default renderer failed for block', plan.index, e);
     }

@@ -679,37 +679,6 @@ function dist(a: Point2D, b: Point2D): number {
 }
 
 /**
- * Draws `boxCanvas` (its source rect [0,0,boxW,boxH]) onto the destination quad `dst`
- * ([tl, tr, br, bl]) and alpha-composites it over whatever is already on `ctx`.
- *
- * Cotrans's `render` (rendering/__init__.py) does this with `cv2.findHomography` +
- * `cv2.warpPerspective`. We use a plain canvas affine transform instead, which is EXACT here
- * rather than an approximation: `dst` always originates from TextBlock.min_rect /
- * unrotated_min_rect (utils/textblock.py), which builds an axis-aligned bbox, optionally
- * scales it uniformly about its own center, then rigidly rotates it. That construction can
- * only ever produce a rotated rectangle -- never a skewed quad with converging edges -- and
- * for a rotated-rectangle destination a homography reduces to exactly this affine matrix.
- *
- * A homography would only be needed for a true perspective quad, which this pipeline cannot
- * produce. Doing it this way also keeps opencv-js out of the bundle entirely: its WASM
- * bootstrap evaluates JS from strings, which Manifest V3's CSP
- * (`script-src 'self' 'wasm-unsafe-eval'`) permanently forbids -- 'wasm-unsafe-eval' allows
- * WebAssembly compilation only, and Chrome rejects a manifest asking for 'unsafe-eval'.
- */
-function warpBoxOntoQuad(ctx: any, boxCanvas: AnyCanvas, boxW: number, boxH: number, dst: Point2D[]): void {
-  const [tl, tr, , bl] = dst;
-
-  const a = (tr.x - tl.x) / boxW;
-  const b = (tr.y - tl.y) / boxW;
-  const c = (bl.x - tl.x) / boxH;
-  const d = (bl.y - tl.y) / boxH;
-  ctx.save();
-  ctx.setTransform(a, b, c, d, tl.x, tl.y);
-  ctx.drawImage(boxCanvas as any, 0, 0);
-  ctx.restore();
-}
-
-/**
  * Measures exactly the sanitized text, font, inset, and ceiling used by the default renderer.
  * This is a layout measurement, not proof of raster ink containment.
  *
@@ -769,9 +738,12 @@ export function defaultLayoutFits(
 }
 
 /**
- * 1:1 port of Cotrans `render` (rendering/__init__.py, horizontal branch): renders the translation
- * into a text box sized to the destination quad, pads it to the quad's aspect ratio, and affine-warps
- * it onto the page over the clean background.
+ * Cotrans DEFAULT region renderer (the renderer cotrans.touhou.ai uses):
+ * Fits font size, wraps text lines, and renders directly via native 2D canvas vector
+ * primitives (strokeText + fillText) with rigid 1:1 affine transformation onto the quad.
+ *
+ * Direct vector rendering avoids intermediate raster bitmap allocations and eliminates
+ * the blurry bilinear interpolation artifacts caused by drawImage scaling.
  *
  * @param ctx - Target page context (clean inpainted page already drawn).
  * @param region - Region metadata.
@@ -795,7 +767,6 @@ export function renderRegionDefault(
   const normH = dist({ x: (tl.x + bl.x) / 2, y: (tl.y + bl.y) / 2 }, { x: (tr.x + br.x) / 2, y: (tr.y + br.y) / 2 });
   const normV = dist({ x: (tl.x + tr.x) / 2, y: (tl.y + tr.y) / 2 }, { x: (bl.x + br.x) / 2, y: (bl.y + br.y) / 2 });
   if (normH < 1 || normV < 1) return null;
-  const rOrig = normH / normV;
 
   const fg = region.textColor || '#000000';
   const bg = region.strokeColor && region.strokeColor !== 'transparent' ? region.strokeColor : null;
@@ -804,34 +775,60 @@ export function renderRegionDefault(
   // Rendering those same lines prevents Cotrans's independent syllable pass from
   // turning English dialogue into narrow barcode columns.
   const fitted = measureDefaultLayout(ctx, region.translation, normH, normV, fontSize, maxFontSizeCap, fontFamily);
-  const temp = putTextLines(ctx, fitted.size, fitted.lines, region.alignment, fg, bg, fontFamily);
-  if (!temp) return null;
+  if (!fitted || fitted.lines.length === 0) return null;
 
-  // Extend the text box to the destination aspect ratio (Cotrans render horizontal branch).
-  let boxCanvas = temp.canvas;
-  let boxW = temp.width;
-  let boxH = temp.height;
-  const rTemp = boxW / boxH;
-  if (rTemp > rOrig) {
-    const hExt = rOrig > 0 ? Math.floor((boxW / rOrig - boxH) / 2) : 0;
-    if (hExt > 0) {
-      const extended = makeCanvas(ctx, boxW, boxH + hExt * 2);
-      extended.getContext('2d').drawImage(boxCanvas as any, 0, hExt); // rows centered
-      boxCanvas = extended;
-      boxH = boxH + hExt * 2;
-    }
-  } else {
-    const wExt = Math.floor((boxH * rOrig - boxW) / 2);
-    if (wExt > 0) {
-      const extended = makeCanvas(ctx, boxW + wExt * 2, boxH);
-      extended.getContext('2d').drawImage(boxCanvas as any, wExt, 0); // centered (Cotrans)
-      boxCanvas = extended;
-      boxW = boxW + wExt * 2;
-    }
+  const drawableLines = fitted.lines.filter((line) => line.trim());
+  if (drawableLines.length === 0) return null;
+
+  const drawFont = fontSpec(fitted.size, fontFamily, drawableLines.join(''));
+  ctx.save();
+  ctx.font = drawFont;
+  const widths = drawableLines.map((line) => ctx.measureText(line).width);
+  const maxLineWidth = Math.max(...widths);
+
+  const bgSize = bg ? Math.max(Math.trunc(fitted.size * STROKE_WIDTH_RATIO), 1) : 0;
+  const strokeWidth = bg ? Math.max(1, bgSize * 2) : 0;
+  const spacingY = Math.trunc(fitted.size * LINE_SPACING_RATIO);
+  const lineStep = fitted.size + spacingY;
+  const totalBlockHeight = fitted.size * drawableLines.length + spacingY * (drawableLines.length - 1);
+
+  // Position block centered vertically within normV
+  const startY = (normV - totalBlockHeight) / 2;
+
+  // Rigid affine transform: unit vector along top edge, unit vector along left edge.
+  // Scale factors are exactly 1.0, preserving razor-sharp vector anti-aliasing without bitmap resampling.
+  const a = (tr.x - tl.x) / normH;
+  const b = (tr.y - tl.y) / normH;
+  const c = (bl.x - tl.x) / normV;
+  const d = (bl.y - tl.y) / normV;
+
+  ctx.setTransform(a, b, c, d, tl.x, tl.y);
+
+  ctx.font = drawFont;
+  ctx.textBaseline = 'top';
+  ctx.textAlign = 'left';
+  ctx.fillStyle = fg;
+  ctx.lineJoin = 'round';
+  if (bg) {
+    ctx.strokeStyle = bg;
+    ctx.lineWidth = strokeWidth;
   }
 
-  // Warp the text box onto the destination quad and alpha-composite over the page.
-  warpBoxOntoQuad(ctx, boxCanvas, boxW, boxH, [tl, tr, br, bl]);
+  for (let i = 0; i < drawableLines.length; i++) {
+    let lineX = (normH - maxLineWidth) / 2;
+    if (region.alignment === 'center') {
+      lineX += (maxLineWidth - widths[i]) / 2;
+    } else if (region.alignment === 'right') {
+      lineX += maxLineWidth - widths[i];
+    }
+    const lineY = startY + i * lineStep;
+    if (bg) {
+      ctx.strokeText(drawableLines[i], lineX, lineY);
+    }
+    ctx.fillText(drawableLines[i], lineX, lineY);
+  }
+
+  ctx.restore();
 
   return { fontSize: fitted.size, lineCount: fitted.lines.length, lines: fitted.lines };
 }

@@ -67,19 +67,10 @@ function captureDefaultRender(
   fontFamily = 'sans-serif'
 ) {
   const ctx = createCanvas(500, 500).getContext('2d');
-  const transforms = vi.spyOn(ctx, 'setTransform');
-  const draws = vi.spyOn(ctx, 'drawImage');
   const results = renderTextBlocksBatch(ctx as unknown as OffscreenCanvasRenderingContext2D, blocks, 'en', bounds, fontFamily);
-  const quads = transforms.mock.calls.map((call, i) => {
-    const [a, b, c, d, x, y] = call as unknown as number[];
-    const canvas = draws.mock.calls[i][0] as unknown as { width: number; height: number };
-    return [
-      { x, y },
-      { x: x + a * canvas.width, y: y + b * canvas.width },
-      { x: x + a * canvas.width + c * canvas.height, y: y + b * canvas.width + d * canvas.height },
-      { x: x + c * canvas.height, y: y + d * canvas.height },
-    ];
-  });
+  const quads = results
+    .map((r) => r?.dstPoints)
+    .filter((q): q is Point2D[] => q !== undefined);
   return { results, quads };
 }
 
