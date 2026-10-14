@@ -29,7 +29,6 @@
     "@ai-sdk/google": "^3.0.122",
     "@ai-sdk/openai": "^3.0.112",
     "@mlc-ai/web-llm": "^0.2.86",
-    "@paddleocr/paddleocr-js": "^0.4.2",
     "ai": "^6.0.280",
     "clipper-lib": "^6.4.2",
     "dexie": "^4.4.4",
@@ -38,8 +37,6 @@
     "lucide-react": "^1.24.0",
     "minisearch": "^7.2.0",
     "onnxruntime-web": "^1.30.0",
-    "paddleocr": "^1.2.0",
-    "paddleocr-js": "^0.4.2",
     "ppu-paddle-ocr": "^6.1.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"
