@@ -75,16 +75,18 @@ export default function GlossaryPanel({
           <span className="font-medium text-sm">Translation Glossary</span>
         </div>
         <div className="flex items-center gap-2">
-          <label className="relative inline-flex items-center cursor-pointer">
-            <input
-              type="checkbox"
-              aria-label="Enable translation glossary"
-              checked={glossaryEnabled}
-              onChange={(e) => updateState({ glossaryEnabled: e.target.checked })}
-              className="absolute inset-0 z-10 w-full h-full opacity-0 cursor-pointer peer"
-            />
-            <div className="w-8 h-4 bg-[var(--color-dust)] peer-focus-visible:ring-2 peer-focus-visible:ring-[var(--color-editorial)] rounded-full peer peer-checked:bg-[var(--color-editorial)] transition-colors after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:after:translate-x-full" />
-          </label>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={glossaryEnabled}
+            aria-label="Enable translation glossary"
+            onClick={() => updateState({ glossaryEnabled: !glossaryEnabled })}
+            className="kites-switch kites-switch-sm"
+            data-state={glossaryEnabled ? 'checked' : 'unchecked'}
+          >
+            <span className="sr-only">Enable translation glossary</span>
+            <span className="kites-switch-thumb" />
+          </button>
           <button
             aria-label="Close translation glossary"
             onClick={onClose}

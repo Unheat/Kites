@@ -42,16 +42,16 @@ describe('GlossaryPanel', () => {
     expect(container.textContent).toContain('Do not add sensitive data');
 
     // Toggle switch test
-    const checkbox = container.querySelector('input[type="checkbox"]') as HTMLInputElement;
-    expect(checkbox.checked).toBe(true);
+    const switchBtn = container.querySelector('button[role="switch"]') as HTMLButtonElement;
+    expect(switchBtn.getAttribute('data-state')).toBe('checked');
 
     await act(async () => {
-      checkbox.click();
+      switchBtn.click();
     });
     expect(updateState).toHaveBeenCalledWith({ glossaryEnabled: false });
 
     // Close button test
-    const closeBtn = container.querySelector('button') as HTMLButtonElement;
+    const closeBtn = container.querySelector('button[aria-label="Close translation glossary"]') as HTMLButtonElement;
     await act(async () => {
       closeBtn.click();
     });
