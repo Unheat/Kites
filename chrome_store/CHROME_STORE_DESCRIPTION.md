@@ -9,63 +9,63 @@ Kites is the local-first manga translator built specifically for comic readers. 
 Whether you are reading raw chapters on manga sites, scrolling long webtoons, or browsing artists on X (Twitter) and Pixiv, Kites translates everything seamlessly in place.
 
 
-WHY KITES IS DIFFERENT
+Why Kites Is Different
 
 Most translator extensions treat manga like standard text: they slap clunky popups over the art, blur the drawings, lock you behind $10/month paywalls, or enforce daily page quotas.
 
 Kites runs state-of-the-art vision and language models directly inside your browser:
 
-• 100% FREE & UNLIMITED
+• 100% Free & Unlimited
 No tokens, no daily limits, no paywalls. Read 500 chapters a day without ever hitting a pay gate.
 
-• 100% PRIVATE ON-DEVICE AI
+• 100% Private On-Device AI
 Your images never touch a third-party server. All OCR detection and background cleaning happen locally on your GPU.
 
-• SEAMLESS IN-PANEL LETTERING
+• Seamless In-Panel Lettering
 No floating white boxes. Text replaces the original dialogue naturally with balanced comic fonts and contrast-aware colors.
 
 
-KEY CAPABILITIES
+Key Capabilities
 
-• DISTRACTION-FREE CHAPTER READER
+• Distraction-Free Chapter Reader
 Read entire manga or webtoon chapters in one full-screen view. Seamlessly switch between continuous vertical webtoon strips, single-page, and double-page spread layouts.
 
-• AUTO FAST-SCAN FOR LAZY-LOADED SITES
+• Auto Fast-Scan for Lazy-Loaded Sites
 No more scrolling manually to trigger lazy-loaded images. Kites auto-scans down the chapter, discovering and queueing all panels in seconds.
 
-• 1-CLICK CHAPTER ZIP EXPORT
+• 1-Click Chapter ZIP Export
 Download complete translated chapters as clean, ordered, numbered image archives. Take your favorite manga anywhere for offline reading on your phone, tablet, or ereader.
 
-• KITES STUDIO & DIRECT INLINE EDITING
+• Kites Studio & Direct Inline Editing
 Need to polish a line or fix a typo? Double-click any speech bubble to edit dialogue directly on the canvas with live font reflow. Use the localized AI inpaint brush to cleanly erase artwork defects, character strokes, or untranslated sound effects.
 
-• SMART SPEECH BALLOON FIT
+• Smart Speech Balloon Fit
 Vertical Japanese and Chinese text creates narrow columns that ruin English font size in ordinary tools. Kites uses Heuristic whitespace expansion and YOLO vision AI to expand text into the full bubble chamber, eliminating tiny, unreadable fonts.
 
-• ARTWORK PRESERVATION INPAINTING
+• Artwork Preservation Inpainting
 Cleanly removes foreign text along the actual character strokes. Screentones, hatching, complex line art, and colored backgrounds remain intact.
 
-• EXTREME WEBTOON STRIP SUPPORT
+• Extreme Webtoon Strip Support
 Translates stitched long-strip manhwa taller than 14,000 pixels with automatic in-memory tiling at full resolution.
 
-• IN-PAGE HOVER & AUTO-TRANSLATE
+• In-Page Hover & Auto-Translate
 Translate panels effortlessly as you read. Use the unobtrusive floating hover badge, keep persistent controls visible, or turn on Auto-Translate to translate new panels as you scroll.
 
-• CUSTOM TRANSLATION GLOSSARY
+• Custom Translation Glossary
 Lock character names, attack moves, and honorifics so your translations stay consistent across whole series.
 
-• CUTTING-EDGE ON-DEVICE AI
+• Cutting-Edge On-Device AI
 Powered by WebLLM with next-generation multilingual models including Qwen 3.5, Gemma 3, and Llama 3.2 for natural, fluent comic dialogue. Connect your own private API keys (OpenAI, Claude, Gemini, DeepSeek) whenever you prefer.
 
 
-SUPPORTED LANGUAGES
+Supported Languages
 
-Source Languages: Japanese, Chinese (Simplified & Traditional), Korean, and English.
+Automatic Source Detection: Detects and translates Japanese, Chinese (Simplified & Traditional), Korean, English, and dozens more.
 
-Target Languages: English, Vietnamese, Spanish, French, German, Indonesian, Portuguese, Italian, Russian, and dozens more.
+50+ Target Languages: English, Vietnamese, Spanish, French, German, Indonesian, Portuguese, Italian, Russian, Arabic, Japanese, Korean, Chinese, Thai, Tagalog/Filipino, Polish, Turkish, Hindi, Dutch, Swedish, Czech, Romanian, Ukrainian, and many more.
 
 
-HOW TO USE
+How to Use
 
 1. Click "Add to Chrome" above.
 2. Open any comic, manga, or art page (Twitter/X, Pixiv, MangaDex, Reddit, raw reader sites).
@@ -73,7 +73,7 @@ HOW TO USE
 4. Enjoy reading raw manga instantly in your native language.
 
 
-PRIVACY FIRST
+Privacy First
 
 • No account required to read.
 • Zero telemetry, zero tracking scripts, zero ads.
