@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { handleReadingCommand, handleReadingKeydown, matchesReadingToggle, type ReadingShortcutActions } from './readingShortcuts';
+import {
+  handleReadingCommand,
+  handleReadingKeydown,
+  matchesActionModifier,
+  matchesReadingToggle,
+  type ReadingShortcutActions,
+} from './readingShortcuts';
 
 /**
  * Builds live-state action spies for a hovered translated image.
@@ -14,6 +20,7 @@ function createActions(overrides: Partial<ReadingShortcutActions<string>> = {}):
     toggleOriginal: vi.fn(),
     translate: vi.fn(),
     startAreaSelection: vi.fn(),
+    openChapterReader: vi.fn(),
     ...overrides,
   };
 }
@@ -152,6 +159,99 @@ describe('reading key dispatch', () => {
     enabled = false;
     expect(handleReadingKeydown(new KeyboardEvent('keydown', { key: 'f' }), actions)).toBe(false);
     expect(actions.toggleOriginal).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('action shortcut modifier matching', () => {
+  it.each([
+    { altKey: true, shiftKey: true },
+    { ctrlKey: true, shiftKey: true },
+  ])('accepts valid modifier combos %j', (flags) => {
+    const event = new KeyboardEvent('keydown', { ...flags, code: 'KeyZ' });
+    expect(matchesActionModifier(event)).toBe(true);
+  });
+
+  it.each([
+    { altKey: true },
+    { ctrlKey: true },
+    { shiftKey: true },
+    { metaKey: true, shiftKey: true },
+    { metaKey: true, altKey: true, shiftKey: true },
+    { repeat: true, altKey: true, shiftKey: true },
+    { isComposing: true, altKey: true, shiftKey: true },
+  ])('rejects invalid or conflicting combos %j', (flags) => {
+    const event = new KeyboardEvent('keydown', { ...flags, code: 'KeyZ' });
+    expect(matchesActionModifier(event)).toBe(false);
+  });
+
+  it('rejects action modifiers inside editable inputs', () => {
+    const input = document.createElement('input');
+    document.body.appendChild(input);
+    let matched = true;
+    input.addEventListener('keydown', (event) => {
+      matched = matchesActionModifier(event as KeyboardEvent);
+    });
+    input.dispatchEvent(new KeyboardEvent('keydown', { altKey: true, shiftKey: true, code: 'KeyZ', bubbles: true }));
+    expect(matched).toBe(false);
+  });
+});
+
+describe('action keydown dispatch', () => {
+  it.each([
+    { altKey: true, shiftKey: true },
+    { ctrlKey: true, shiftKey: true },
+  ])('dispatches translation on KeyZ with %j', (modifiers) => {
+    const actions = createActions();
+    const event = new KeyboardEvent('keydown', { ...modifiers, code: 'KeyZ', key: 'Z', cancelable: true });
+    expect(handleReadingKeydown(event, actions)).toBe(true);
+    expect(actions.translate).toHaveBeenCalledExactlyOnceWith('page.png');
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it('handles macOS Option+Shift+Z typographic glyph substitution', () => {
+    const actions = createActions();
+    // On macOS, Option+Shift+Z outputs '¸' as event.key, but event.code remains 'KeyZ'
+    const event = new KeyboardEvent('keydown', { altKey: true, shiftKey: true, code: 'KeyZ', key: '¸', cancelable: true });
+    expect(handleReadingKeydown(event, actions)).toBe(true);
+    expect(actions.translate).toHaveBeenCalledExactlyOnceWith('page.png');
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it('dispatches startAreaSelection on KeyX', () => {
+    const actions = createActions();
+    const event = new KeyboardEvent('keydown', { altKey: true, shiftKey: true, code: 'KeyX', key: 'X', cancelable: true });
+    expect(handleReadingKeydown(event, actions)).toBe(true);
+    expect(actions.startAreaSelection).toHaveBeenCalledOnce();
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it('dispatches openChapterReader on KeyM', () => {
+    const actions = createActions();
+    const event = new KeyboardEvent('keydown', { ctrlKey: true, shiftKey: true, code: 'KeyM', key: 'M', cancelable: true });
+    expect(handleReadingKeydown(event, actions)).toBe(true);
+    expect(actions.openChapterReader).toHaveBeenCalledOnce();
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it('ignores KeyZ when no image is hovered', () => {
+    const actions = createActions({ getContext: () => ({ enabled: true, busy: false, target: null }) });
+    const event = new KeyboardEvent('keydown', { altKey: true, shiftKey: true, code: 'KeyZ', cancelable: true });
+    expect(handleReadingKeydown(event, actions)).toBe(false);
+    expect(actions.translate).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  it('ignores action shortcuts when disabled or busy', () => {
+    for (const context of [
+      { enabled: false, busy: false, target: 'page.png' },
+      { enabled: true, busy: true, target: 'page.png' },
+    ]) {
+      const actions = createActions({ getContext: () => context });
+      const event = new KeyboardEvent('keydown', { altKey: true, shiftKey: true, code: 'KeyX', cancelable: true });
+      expect(handleReadingKeydown(event, actions)).toBe(false);
+      expect(actions.startAreaSelection).not.toHaveBeenCalled();
+      expect(event.defaultPrevented).toBe(false);
+    }
   });
 });
 

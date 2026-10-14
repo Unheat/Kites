@@ -23,7 +23,7 @@ const EDITABLE_TAGS = new Set(['INPUT', 'TEXTAREA', 'SELECT']);
  * @param target - A node from the keyboard event's composed path.
  * @returns Whether typing at this node must remain owned by the page.
  */
-function isEditableTarget(target: EventTarget | null): boolean {
+export function isEditableTarget(target: EventTarget | null): boolean {
   let node = target instanceof Node ? target : null;
   while (node) {
     if (node instanceof Element) {
@@ -51,18 +51,69 @@ export function matchesReadingToggle(event: KeyboardEvent): boolean {
 }
 
 /**
- * Toggles only a ready, hovered, translated image using the existing display callback.
+ * Matches action shortcut modifiers: Alt+Shift or Ctrl+Shift (excluding Meta/Command to avoid OS/browser conflicts).
+ * Guarded against editable elements, IME composition, key repetition, and canceled events.
+ * @param event - Page keydown event.
+ * @returns Whether the event carries valid action modifiers outside editable inputs.
+ */
+export function matchesActionModifier(event: KeyboardEvent): boolean {
+  const hasModifier = (event.altKey || event.ctrlKey) && event.shiftKey && !event.metaKey;
+  return hasModifier &&
+    !event.repeat &&
+    !event.defaultPrevented &&
+    !event.isComposing &&
+    ![event.target, ...event.composedPath()].some(isEditableTarget);
+}
+
+/**
+ * Handles in-page keyboard shortcuts:
+ * - Unmodified 'F': toggles original/translated view for the hovered translated image.
+ * - Ctrl/Alt + Shift + Z: translates the hovered image.
+ * - Ctrl/Alt + Shift + X: starts screen crop area selection.
+ * - Ctrl/Alt + Shift + M: opens distraction-free chapter reader.
+ *
  * @param event - Page keydown event; untouched when no action is possible.
- * @param actions - Live state and existing content translation/display callbacks.
- * @returns Whether the event performed an image toggle.
+ * @param actions - Live state and content action callbacks.
+ * @returns Whether the event matched and executed an action.
  */
 export function handleReadingKeydown<T>(event: KeyboardEvent, actions: ReadingShortcutActions<T>): boolean {
-  if (!matchesReadingToggle(event)) return false;
-  const { enabled, busy, target } = actions.getContext();
-  if (!enabled || busy || target === null || !actions.hasTranslation(target)) return false;
-  actions.toggleOriginal(target);
-  event.preventDefault();
-  return true;
+  if (matchesReadingToggle(event)) {
+    const { enabled, busy, target } = actions.getContext();
+    if (!enabled || busy || target === null || !actions.hasTranslation(target)) return false;
+    actions.toggleOriginal(target);
+    event.preventDefault();
+    return true;
+  }
+
+  if (matchesActionModifier(event)) {
+    const { enabled, busy, target } = actions.getContext();
+    if (!enabled || busy) return false;
+
+    // Translate hovered image (KeyZ)
+    if (event.code === 'KeyZ' || event.key.toLowerCase() === 'z') {
+      if (target === null) return false;
+      actions.translate(target);
+      event.preventDefault();
+      return true;
+    }
+
+    // Screen crop selection (KeyX)
+    if (event.code === 'KeyX' || event.key.toLowerCase() === 'x') {
+      actions.startAreaSelection();
+      event.preventDefault();
+      return true;
+    }
+
+    // Open chapter reader (KeyM)
+    if (event.code === 'KeyM' || event.key.toLowerCase() === 'm') {
+      if (!actions.openChapterReader) return false;
+      actions.openChapterReader();
+      event.preventDefault();
+      return true;
+    }
+  }
+
+  return false;
 }
 
 /**

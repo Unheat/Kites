@@ -8,23 +8,27 @@ export interface EngineOption {
   tag: string;
   isModel?: boolean;
   sizeEstimate?: string;
-  hardware?: 'WebGPU' | 'CPU' | 'Algorithmic';
 }
 
 export const INPAINT_ENGINE_OPTIONS: EngineOption[] = [
-  { id: 'simple', name: 'Simple Fill', tag: 'Fast Color', hardware: 'Algorithmic' },
-  { id: 'telea', name: 'Telea Diffusion', tag: 'Fast Diffusion', hardware: 'Algorithmic' },
-  { id: 'lama-manga', name: 'LaMa Manga', tag: 'Neural Dynamic', isModel: true, sizeEstimate: '~50 MB', hardware: 'WebGPU' },
-  { id: 'aotgan', name: 'AOT-GAN', tag: 'Neural High-Detail', isModel: true, sizeEstimate: '~60 MB', hardware: 'WebGPU' },
-  { id: 'none', name: 'None (Bypass)', tag: 'Raw Canvas', hardware: 'Algorithmic' },
+  { id: 'simple', name: 'Simple Fill', tag: 'Fast Color' },
+  { id: 'telea', name: 'Telea Diffusion', tag: 'Fast Diffusion' },
+  { id: 'lama-manga', name: 'LaMa Manga', tag: 'Neural Dynamic', isModel: true, sizeEstimate: '~50 MB' },
+  { id: 'aotgan', name: 'AOT-GAN', tag: 'Neural High-Detail', isModel: true, sizeEstimate: '~60 MB' },
+  { id: 'none', name: 'None (Bypass)', tag: 'Raw Canvas' },
 ];
 
 export const OCR_ENGINE_OPTIONS: EngineOption[] = [
-  { id: 'v6-small', name: 'PaddleOCR v6 Small (Default)', tag: 'Recommended', isModel: true, sizeEstimate: '~4 MB', hardware: 'WebGPU' },
-  { id: 'v6-medium', name: 'PaddleOCR v6 Medium', tag: 'Higher Accuracy', isModel: true, sizeEstimate: '~8 MB', hardware: 'WebGPU' },
-  { id: 'v6-tiny', name: 'PaddleOCR v6 Tiny', tag: 'Ultra Fast', isModel: true, sizeEstimate: '~2 MB', hardware: 'WebGPU' },
-  { id: 'v5-mobile', name: 'PaddleOCR v5 Mobile', tag: 'Legacy v5', isModel: true, sizeEstimate: '~4 MB', hardware: 'WebGPU' },
-  { id: 'v5-server', name: 'PaddleOCR v5 Server', tag: 'Server Grade', isModel: true, sizeEstimate: '~20 MB', hardware: 'WebGPU' },
+  { id: 'v6-small', name: 'PaddleOCR v6 Small (Default)', tag: 'Recommended', isModel: true, sizeEstimate: '~4 MB' },
+  { id: 'v6-medium', name: 'PaddleOCR v6 Medium', tag: 'Higher Accuracy', isModel: true, sizeEstimate: '~8 MB' },
+  { id: 'v6-tiny', name: 'PaddleOCR v6 Tiny', tag: 'Ultra Fast', isModel: true, sizeEstimate: '~2 MB' },
+  { id: 'v5-mobile', name: 'PaddleOCR v5 Mobile', tag: 'Legacy v5', isModel: true, sizeEstimate: '~4 MB' },
+  { id: 'v5-server', name: 'PaddleOCR v5 Server', tag: 'Server Grade', isModel: true, sizeEstimate: '~20 MB' },
+  { id: 'v5-en-mobile', name: 'PaddleOCR v5 English Mobile', tag: 'English Tuned', isModel: true, sizeEstimate: '~4 MB' },
+  { id: 'v4-mobile', name: 'PaddleOCR v4 Mobile', tag: 'Legacy v4', isModel: true, sizeEstimate: '~4 MB' },
+  { id: 'v4-server', name: 'PaddleOCR v4 Server', tag: 'v4 Server', isModel: true, sizeEstimate: '~20 MB' },
+  { id: 'v3-mobile', name: 'PaddleOCR v3 Mobile', tag: 'Legacy v3', isModel: true, sizeEstimate: '~4 MB' },
+  { id: 'v3-japanese-mobile', name: 'PaddleOCR v3 Japanese Mobile', tag: 'Japanese Tuned', isModel: true, sizeEstimate: '~4 MB' },
 ];
 
 interface StudioEngineSelectorProps {
@@ -162,20 +166,24 @@ export const StudioEngineSelector: React.FC<StudioEngineSelectorProps> = ({ cate
         <button
           type="button"
           onClick={() => setIsOpen(!isOpen)}
-          className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-[#090a0f] border border-[#282d3f] hover:border-[#3b4259] text-xs text-slate-200 transition cursor-pointer"
+          className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-[#090a0f] border border-[#282d3f] hover:border-[#3b4259] text-xs text-slate-200 transition cursor-pointer text-left"
         >
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="font-medium text-slate-100 truncate">{activeOption.name}</span>
-            <span className="text-[10px] px-1.5 py-0.2 rounded bg-[#1c2030] text-slate-400 border border-[#2c334d]">
-              {activeOption.tag}
+          <div className="flex flex-col min-w-0 flex-1 pr-2">
+            <span className="font-medium text-slate-100 text-xs truncate" title={activeOption.name}>
+              {activeOption.name}
             </span>
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#1c2030] text-slate-400 border border-[#2c334d]">
+                {activeOption.tag}
+              </span>
+            </div>
           </div>
-          <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+          <ChevronDown className={`w-3.5 h-3.5 text-slate-400 shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
         </button>
 
         {/* Dropdown Menu */}
         {isOpen && (
-          <div className="absolute top-full left-0 right-0 mt-1 z-50 rounded-xl bg-[#12141c] border border-[#282d3f] shadow-2xl p-1.5 space-y-1 max-h-64 overflow-y-auto">
+          <div className="absolute top-full left-0 right-0 mt-1 z-50 rounded-xl bg-[#12141c] border border-[#282d3f] shadow-2xl p-1.5 space-y-1.5 max-h-72 overflow-y-auto">
             {options.map((opt) => {
               const isSelected = opt.id === currentEngineId;
               const isDownloaded = !opt.isModel || downloadedIds.includes(opt.id);
@@ -190,7 +198,7 @@ export const StudioEngineSelector: React.FC<StudioEngineSelectorProps> = ({ cate
                       selectEngine(opt.id);
                     }
                   }}
-                  className={`p-2 rounded-lg transition flex flex-col gap-1 ${
+                  className={`p-2 rounded-lg transition flex flex-col gap-1.5 ${
                     isSelected
                       ? 'bg-[#f4446d]/15 border border-[#f4446d]/40 text-slate-100'
                       : isDownloaded
@@ -198,22 +206,28 @@ export const StudioEngineSelector: React.FC<StudioEngineSelectorProps> = ({ cate
                       : 'bg-[#0e1017] opacity-85 text-slate-400'
                   }`}
                 >
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 min-w-0">
-                      {isSelected ? (
-                        <Check className="w-3.5 h-3.5 text-[#f4446d] shrink-0" />
-                      ) : (
-                        <div className="w-3.5 h-3.5 shrink-0" />
-                      )}
-                      <span className="font-medium text-xs truncate">{opt.name}</span>
-                    </div>
+                  {/* Row 1: Check icon + Model Name */}
+                  <div className="flex items-center gap-2 min-w-0 w-full">
+                    {isSelected ? (
+                      <Check className="w-3.5 h-3.5 text-[#f4446d] shrink-0" />
+                    ) : (
+                      <div className="w-3.5 h-3.5 shrink-0" />
+                    )}
+                    <span className="font-medium text-xs text-slate-100 truncate flex-1" title={opt.name}>
+                      {opt.name}
+                    </span>
+                  </div>
 
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#1a1d29] text-slate-400 border border-[#282d3f]">
+                  {/* Row 2: Tag on left, Download / Status on right */}
+                  <div className="flex items-center justify-between gap-2 pl-5.5 min-w-0">
+                    <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#161822] text-slate-400 border border-[#262a3a] whitespace-nowrap">
                         {opt.tag}
                       </span>
+                    </div>
 
-                      {!isDownloaded && opt.isModel && (
+                    <div className="flex items-center shrink-0">
+                      {!isDownloaded && opt.isModel ? (
                         <button
                           type="button"
                           disabled={Boolean(isDownloading)}
@@ -223,13 +237,15 @@ export const StudioEngineSelector: React.FC<StudioEngineSelectorProps> = ({ cate
                           <Download className="w-2.5 h-2.5" />
                           <span>{isDownloading ? 'Downloading...' : opt.sizeEstimate || 'Get'}</span>
                         </button>
-                      )}
+                      ) : opt.isModel ? (
+                        <span className="text-[10px] text-emerald-400 font-mono font-medium">Ready</span>
+                      ) : null}
                     </div>
                   </div>
 
                   {/* Live Download Progress Bar */}
                   {isDownloading && (
-                    <div className="mt-1 space-y-0.5">
+                    <div className="mt-0.5 pl-5.5 space-y-0.5">
                       <div className="flex justify-between text-[10px] text-slate-400 font-mono">
                         <span>{downloadInfo.status || 'Downloading weights...'}</span>
                         <span>{Math.round(downloadInfo.progress * 100)}%</span>
