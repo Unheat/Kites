@@ -152,6 +152,30 @@ To fill irregularly shaped comic speech balloons without overflowing, Kites runs
 
 ---
 
+## ✍️ Direct Inline Dialogue Editing & Live AI Inpaint Brush
+
+Studio V2 provides direct on-canvas dialogue editing and interactive inpainting:
+
+### 1. Direct In-Place Text Editing
+- Double-clicking a text box or clicking the pen icon mounts an inline `<textarea>` placed at the exact bounding box location:
+  $$X_{\text{box}} = \text{obj}.x \times \text{zoom}, \quad Y_{\text{box}} = \text{obj}.y \times \text{zoom}$$
+- **Zero Ghosting:** While `editingTextId` is active, the overlay canvas explicitly skips rendering that text object, preventing double-rendered text shadows.
+- **Subpixel Vertical Centering:** Dynamic vertical padding aligns the textarea text with the canvas font baseline:
+  $$\text{Padding}_{\text{vert}} = \max\left(0, \left\lfloor \frac{\text{BoxHeight} - \text{ContentHeight}}{2} \right\rfloor \right)$$
+- **CJK Vertical Mode:** When text contains CJK glyphs and `isVertical` is true, applies `writingMode: 'vertical-rl'`.
+
+### 2. Localized AI Brush Inpainting
+- When brushing over artwork defects or untranslated SFX in Inpaint mode:
+  1. `BrushEngine` records the user's stroke raster into `dabCanvas`.
+  2. `StudioCanvas` renders the exact stroke path into `maskCanvas` with relative crop offsets.
+  3. Offscreen RPC decodes the mask patch and runs `extractMaskPolygons()` using connected-component analysis, extracting tight 4-point bounding polygons for each drawn stroke blob.
+  4. The inpaint manager erases strictly within the stroke contours, preserving unstroked context across the rest of the patch.
+
+### 3. Reactive Store Invariants for Hotkeys
+- Canvas hotkeys (`Delete`, `Backspace`, `Ctrl+D`) read live state from `studioStore.getState().textObjects` rather than stale component closures, preventing accidental reverts of intervening dialogue edits.
+
+---
+
 ## 📤 High-Resolution Lossless Export
 
 Kites Studio renders directly onto a hidden full-resolution `OffscreenCanvas`:

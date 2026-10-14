@@ -214,7 +214,10 @@ Because adding a completely new inpainting model architecture requires specific 
   - *V2 Algorithmic Pipeline*: Upgraded `OcrManager` with Cotrans-aligned majority direction voting (`majorityDirection`), orphan punctuation recovery, Furigana Kana filtering, duplicate vertical column deduping, and Kruskal MST region splitting.
   - *Hybrid Typesetting*: Implementation of 1:1 Cotrans DEFAULT affine-warp renderer (`cotransDefaultRenderer.ts`) and XianScan-style hybrid typeset layout engine (`typesetLayout.ts`) with morphological hyphenation, balanced diamond line envelope wrapping, 4-pass binary search fitting, and speech bubble decollision (`decollideBoxes`). [Completed]
   - *Inpainting Contract (Locked)*: Engines receive polygons only and synthesize their own masks; DBNet raw-mask forwarding is a rejected design (tried and stripped twice — see the LOCKED DECISION warning in section F). Simple tier pinned to v1 logic; quality tiers own all algorithmic erasure work. [Completed]
-- **Phase 6 (Future Improvements):** 
+- **Phase 6 (Speech Bubble AI & Multi-Modal Detection):** Speech bubble detection with dual AI tiers (YOLO Box & YOLO Smart Mask) with morphological tail severing, subchamber partitioning, and conservative heuristics. [Completed]
+- **Phase 7 (Distraction-Free Chapter Reader, Batch Queueing, and Studio V2):** Distraction-free full-screen chapter reader modal (`ChapterReaderModal.tsx`) with vertical continuous webtoon scroll, single/double page spreads, chapter ZIP export (`chapterZip.ts`), batch queueing scanner panel, and direct inline dialogue editing on Studio Canvas. [Completed]
+- **Phase 8 (Showcase Landing & Codebase Quality Hardening):** Torii-style hardware-accelerated CSS `clip-path` comparison slider with dual-image asynchronous preloading, authentic rose palette `#ff2a6d`, Chrome Web Store promotional slides, and comprehensive codebase hardening (studio hotkey stale closure elimination, localized inpaint mask polygon extraction, decoupled background job completion). [Completed]
+- **Phase 9 (Future Improvements):** 
   - *OCR Migration*: Migrate from PaddleOCR DBNet to `ComicTextDetector` (YOLOv5 ONNX ~90MB) on WebGPU to generate non-spiky, tight bounding boxes and allow direct 1:1 typesetting without heuristic expansion.
 ## 3. Important References & Tool Links
 
