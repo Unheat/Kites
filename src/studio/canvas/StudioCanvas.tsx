@@ -178,7 +178,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
         CanvasFurniture.drawSelectionFurniture(ctx, selectedObj, appearance.selectedBoxBorderColor);
       }
     }
-  }, [imageWidth, imageHeight, textObjects, imageLayers, selectedTextId, selectedImageLayerId, appearance, hideBoxes]);
+  }, [imageWidth, imageHeight, textObjects, imageLayers, selectedTextId, editingTextId, selectedImageLayerId, appearance, hideBoxes]);
 
   useEffect(() => {
     redrawOverlay();
@@ -363,12 +363,17 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
           lastClickRef.current.id === clickedObj.id && now - lastClickRef.current.time < 400;
         lastClickRef.current = { time: now, id: clickedObj.id };
 
-        const isAlreadySelected = selectedTextId === clickedObj.id;
-        studioStore.setState({ selectedTextId: clickedObj.id });
+        // If clicking another object while editing, dismiss previous edit
+        if (editingTextId && editingTextId !== clickedObj.id) {
+          studioStore.setState({ editingTextId: null, selectedTextId: clickedObj.id });
+        } else {
+          studioStore.setState({ selectedTextId: clickedObj.id });
+        }
 
-        // If clicking into an already selected text box (or double-clicking), activate inline text editing
-        if (isDoubleClick || isAlreadySelected) {
+        // Double-click directly activates inline text editing
+        if (isDoubleClick) {
           studioStore.setState({ editingTextId: clickedObj.id });
+          setActiveHandle(null);
           return;
         }
 
@@ -747,6 +752,24 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
     });
   };
 
+  /**
+   * Double-click handler to directly activate inline text editing on hit-tested dialogue box.
+   */
+  const handleDoubleClick = (e: React.MouseEvent) => {
+    if (activeTool !== 'select' && activeTool !== 'text') return;
+    const pt = getPointerImageCoords(e as unknown as React.PointerEvent);
+    for (let i = textObjects.length - 1; i >= 0; i--) {
+      if (CanvasFurniture.hitTestBody(pt, textObjects[i])) {
+        studioStore.setState({
+          selectedTextId: textObjects[i].id,
+          editingTextId: textObjects[i].id,
+        });
+        setActiveHandle(null);
+        return;
+      }
+    }
+  };
+
   const handleDuplicateSelectedText = () => {
     const selected = textObjects.find((t) => t.id === selectedTextId);
     if (!selected) return;
@@ -810,11 +833,13 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
     });
   };
 
-  // Focus inline textarea when inline editing mode activates
+  // Focus inline textarea and place caret at end when inline editing mode activates
   useEffect(() => {
     if (editingTextId && inlineTextareaRef.current) {
-      inlineTextareaRef.current.focus();
-      inlineTextareaRef.current.select();
+      const textarea = inlineTextareaRef.current;
+      textarea.focus();
+      const len = textarea.value.length;
+      textarea.setSelectionRange(len, len);
     }
   }, [editingTextId]);
 
@@ -952,6 +977,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
           onPointerCancel={handlePointerUp}
+          onDoubleClick={handleDoubleClick}
           style={{
             width: `${imageWidth * zoom}px`,
             height: `${imageHeight * zoom}px`,
@@ -961,59 +987,97 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
         />
 
         {/* Layer 4: Direct In-Place Text Editor Overlay */}
-        {editingTextId && editingObj && (
-          <div
-            style={{
-              position: 'absolute',
-              left: `${editingObj.x * zoom}px`,
-              top: `${editingObj.y * zoom}px`,
-              width: `${Math.max(40, editingObj.width * zoom)}px`,
-              height: `${Math.max(28, editingObj.height * zoom)}px`,
-              transform: editingObj.rotation ? `rotate(${editingObj.rotation}deg)` : undefined,
-              transformOrigin: 'center center',
-              zIndex: 35,
-            }}
-            onPointerDown={(e) => e.stopPropagation()}
-            onPointerMove={(e) => e.stopPropagation()}
-            onPointerUp={(e) => e.stopPropagation()}
-          >
-            <textarea
-              ref={inlineTextareaRef}
-              value={editingObj.text}
-              onChange={(e) => handleInlineTextChange(e.target.value)}
-              onBlur={handleFinishInlineEdit}
-              onKeyDown={(e) => {
-                if (e.key === 'Escape') {
-                  handleFinishInlineEdit();
-                }
-                e.stopPropagation();
-              }}
+        {editingTextId && editingObj && (() => {
+          const scaledFontSize = editingObj.fontSize * zoom;
+          const lineSpacing = editingObj.lineSpacing ?? 1.2;
+          const scaledLineHeight = scaledFontSize * lineSpacing;
+          const lineCount = Math.max(
+            1,
+            editingObj.lines && editingObj.lines.length > 0
+              ? editingObj.lines.length
+              : editingObj.text.split('\n').length
+          );
+          const contentHeight = lineCount * scaledLineHeight;
+          const totalBoxHeight = editingObj.height * zoom;
+          const verticalPadding = Math.max(0, Math.floor((totalBoxHeight - contentHeight) / 2));
+          const horizontalPadding = Math.round(4 * zoom);
+          const strokeWidthScaled = editingObj.strokeWidth
+            ? Math.max(1, Math.round(editingObj.strokeWidth * zoom))
+            : 0;
+
+          // Check single-column vertical CJK layout
+          const hasCjk = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/.test(editingObj.text);
+          const isVerticalMode = Boolean(editingObj.isVertical && hasCjk);
+
+          return (
+            <div
               style={{
-                width: '100%',
-                height: '100%',
-                fontSize: `${Math.max(10, editingObj.fontSize * zoom)}px`,
-                fontFamily: editingObj.fontFamily || 'sans-serif',
-                fontWeight: editingObj.bold ? 'bold' : 'normal',
-                fontStyle: editingObj.italic ? 'italic' : 'normal',
-                color: editingObj.color || '#000000',
-                textAlign: editingObj.align || 'center',
-                lineHeight: editingObj.lineSpacing || 1.2,
-                backgroundColor: 'transparent',
-                border: 'none',
-                outline: 'none',
-                resize: 'none',
-                padding: '0px',
-                boxSizing: 'border-box',
-                overflow: 'hidden',
-                caretColor: '#f4446d',
-                textShadow: editingObj.strokeColor
-                  ? `-1px -1px 0 ${editingObj.strokeColor}, 1px -1px 0 ${editingObj.strokeColor}, -1px 1px 0 ${editingObj.strokeColor}, 1px 1px 0 ${editingObj.strokeColor}`
+                position: 'absolute',
+                left: `${editingObj.x * zoom}px`,
+                top: `${editingObj.y * zoom}px`,
+                width: `${editingObj.width * zoom}px`,
+                height: `${editingObj.height * zoom}px`,
+                transform: editingObj.rotation ? `rotate(${editingObj.rotation}deg)` : undefined,
+                transformOrigin: 'center center',
+                zIndex: 35,
+                backgroundColor:
+                  editingObj.backgroundFill && editingObj.backgroundFill !== 'transparent'
+                    ? editingObj.backgroundFill
+                    : 'transparent',
+                borderRadius: editingObj.backgroundBorderRadius
+                  ? `${editingObj.backgroundBorderRadius * zoom}px`
                   : undefined,
+                boxSizing: 'border-box',
               }}
-              autoFocus
-            />
-          </div>
-        )}
+              onPointerDown={(e) => e.stopPropagation()}
+              onPointerMove={(e) => e.stopPropagation()}
+              onPointerUp={(e) => e.stopPropagation()}
+            >
+              <textarea
+                ref={inlineTextareaRef}
+                value={editingObj.text}
+                onChange={(e) => handleInlineTextChange(e.target.value)}
+                onBlur={handleFinishInlineEdit}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    handleFinishInlineEdit();
+                  } else if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                    handleFinishInlineEdit();
+                  }
+                  e.stopPropagation();
+                }}
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  paddingTop: isVerticalMode ? `${horizontalPadding}px` : `${verticalPadding}px`,
+                  paddingBottom: isVerticalMode ? `${horizontalPadding}px` : `${verticalPadding}px`,
+                  paddingLeft: `${horizontalPadding}px`,
+                  paddingRight: `${horizontalPadding}px`,
+                  fontSize: `${scaledFontSize}px`,
+                  fontFamily: editingObj.fontFamily || 'sans-serif',
+                  fontWeight: editingObj.bold ? 'bold' : 'normal',
+                  fontStyle: editingObj.italic ? 'italic' : 'normal',
+                  color: editingObj.color || '#000000',
+                  textAlign: editingObj.align || 'center',
+                  lineHeight: lineSpacing,
+                  writingMode: isVerticalMode ? 'vertical-rl' : undefined,
+                  backgroundColor: 'transparent',
+                  border: 'none',
+                  outline: 'none',
+                  resize: 'none',
+                  boxSizing: 'border-box',
+                  overflow: 'hidden',
+                  caretColor: '#f4446d',
+                  textShadow:
+                    editingObj.strokeColor && strokeWidthScaled > 0
+                      ? `-${strokeWidthScaled}px -${strokeWidthScaled}px 0 ${editingObj.strokeColor}, ${strokeWidthScaled}px -${strokeWidthScaled}px 0 ${editingObj.strokeColor}, -${strokeWidthScaled}px ${strokeWidthScaled}px 0 ${editingObj.strokeColor}, ${strokeWidthScaled}px ${strokeWidthScaled}px 0 ${editingObj.strokeColor}`
+                      : undefined,
+                }}
+                autoFocus
+              />
+            </div>
+          );
+        })()}
       </div>
 
       {/* Floating Action Pill Toolbar */}
@@ -1062,7 +1126,13 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
             className="fixed z-40 flex items-center gap-0.5 p-1 rounded-xl border border-[#282d3f] bg-[#12141c]/95 backdrop-blur-md shadow-2xl text-slate-200"
           >
             <button
-              onClick={() => studioStore.setState({ editingTextId: selectedObj.id })}
+              onClick={() => {
+                if (editingTextId === selectedObj.id) {
+                  handleFinishInlineEdit();
+                } else {
+                  studioStore.setState({ editingTextId: selectedObj.id });
+                }
+              }}
               title="Edit Dialogue (Double-click bubble or Enter)"
               className="p-1.5 rounded-lg hover:bg-[#1c1f2e] text-[#f4446d] hover:text-[#e0355e] transition"
             >

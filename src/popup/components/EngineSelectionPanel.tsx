@@ -857,35 +857,36 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                       const isUninstalled = opt.isModel && !isNeuralDownloaded;
                       const isActive = activeBubbleMode === opt.id && !isUninstalled;
                       return (
-                        <div
+                        <button
+                          type="button"
                           key={opt.id}
-                          className={`w-full flex items-center justify-between p-2 rounded-sm transition-colors ${
+                          aria-disabled={isUninstalled}
+                          onClick={() => {
+                            if (isUninstalled) return;
+                            updateState({ bubbleMode: opt.id });
+                            setIsOpenBubbleMode(false);
+                          }}
+                          className={`w-full flex items-center justify-between p-2 rounded-sm transition-colors text-left bg-transparent border-none ${
                             isActive
-                              ? 'bg-[var(--color-vellum)] text-[var(--color-editorial)] font-semibold'
+                              ? 'bg-[var(--color-vellum)] text-[var(--color-editorial)] font-semibold cursor-pointer'
                               : isUninstalled
-                                ? 'text-[var(--color-dust)] opacity-50'
-                                : 'hover:bg-[var(--color-vellum)]'
+                                ? 'text-[var(--color-dust)] opacity-50 cursor-not-allowed'
+                                : 'hover:bg-[var(--color-vellum)] cursor-pointer'
                           }`}
                         >
                           <div className="min-w-0 flex-1 flex items-center gap-1.5">
-                            <button
-                              type="button"
-                              disabled={isUninstalled}
-                              onClick={() => {
-                                if (isUninstalled) return;
-                                updateState({ bubbleMode: opt.id });
-                                setIsOpenBubbleMode(false);
-                              }}
-                              className="min-w-0 flex items-center text-left bg-transparent border-none p-0 cursor-pointer disabled:cursor-not-allowed"
-                            >
-                              <span className="truncate pr-1 text-sm">{opt.name}</span>
-                            </button>
+                            <span className="truncate pr-1 text-sm">{opt.name}</span>
                             {opt.tooltip && (
-                              <HelpTooltip
-                                size="sm"
-                                width={220}
-                                content={opt.tooltip}
-                              />
+                              <span
+                                onClick={(e) => e.stopPropagation()}
+                                className="inline-flex items-center"
+                              >
+                                <HelpTooltip
+                                  size="sm"
+                                  width={220}
+                                  content={opt.tooltip}
+                                />
+                              </span>
                             )}
                           </div>
                           <div className="flex-shrink-0 ml-2">
@@ -904,7 +905,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                               </div>
                             ) : null}
                           </div>
-                        </div>
+                        </button>
                       );
                     })}
                   </div>
