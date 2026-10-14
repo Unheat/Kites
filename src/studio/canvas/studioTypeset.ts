@@ -1,4 +1,4 @@
-import { fitFontSizeWithLines } from '../../offscreen/utils/typesetLayout';
+import { measureDefaultLayout } from '../../offscreen/utils/cotransDefaultRenderer';
 
 let sharedMeasureCanvas: HTMLCanvasElement | null = null;
 let sharedMeasureCtx: CanvasRenderingContext2D | null = null;
@@ -17,12 +17,13 @@ export function getTypesetMeasureContext(): CanvasRenderingContext2D | null {
 /** Inset ratio applied to bounding box for bubble interior padding (5%). */
 export const BOX_INSET_RATIO = 0.05;
 
-/** Maximum allowable font size in pixels during interactive resizing. */
-export const MAX_FONT_SIZE_CEILING = 72;
+/** Maximum allowable font size in pixels during interactive resizing, matching pipeline ceiling. */
+export const MAX_FONT_SIZE_CEILING = 48;
 
 /**
  * Fits font size and wraps text into balanced diamond line envelopes using Kites's
- * algorithmic typesetting engine for immediate visual feedback during box resize or text edits.
+ * exact pipeline typesetting engine (including punctuation sanitation, symbol compaction,
+ * syllable hyphenation, and diamond envelopes).
  *
  * @param text - Dialogue text string to typeset.
  * @param fontFamily - CSS font family stack.
@@ -43,15 +44,14 @@ export function recalculateBlockTypeset(
     return { fontSize: fallbackSize, lines: text ? [text] : [] };
   }
 
-  const fitted = fitFontSizeWithLines(
+  const fitted = measureDefaultLayout(
     ctx,
     text,
-    fontFamily || 'sans-serif',
     width,
     height,
     fallbackSize,
-    Math.max(fallbackSize, MAX_FONT_SIZE_CEILING),
-    BOX_INSET_RATIO
+    MAX_FONT_SIZE_CEILING,
+    fontFamily || 'sans-serif'
   );
 
   return {

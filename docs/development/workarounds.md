@@ -125,4 +125,36 @@ This document preserves the complete technical background, rationale, and implem
 * **Never condition `db.translationJobs.update(jobId, { status: 'completed' })` on `tabId`:**
   `tabId` is optional across the background translation pipeline (`queueTranslation`, batch queueing, Studio operations). If the tab ID is missing or the tab closes while the pipeline is in flight, translation nevertheless succeeds and writes its baked image. Coupling the database status update to `&& tabId` leaves successful jobs permanently stuck in status `'processing'` until the 2-minute stale-job timeout forces an error. Mark database status `'completed'` unconditionally on pipeline success, and guard only the UI message dispatch with `if (tabId)`.
 
+---
+
+## 9. WebGPU Performance Flags & Invariant Boundaries
+
+**Affected Files:** [`src/offscreen/utils/hardware.ts`](file:///Users/dangtruongan/study/Kites/src/offscreen/utils/hardware.ts), [`src/offscreen/engines/ocr/PaddleOcrEngine.ts`](file:///Users/dangtruongan/study/Kites/src/offscreen/engines/ocr/PaddleOcrEngine.ts), [`src/offscreen/engines/inpaint/LamaBaseInpaintEngine.ts`](file:///Users/dangtruongan/study/Kites/src/offscreen/engines/inpaint/LamaBaseInpaintEngine.ts), [`src/offscreen/engines/bubble/NeuralBubbleDetector.ts`](file:///Users/dangtruongan/study/Kites/src/offscreen/engines/bubble/NeuralBubbleDetector.ts)  
+**Related Devlog:** [`041_phase41_webgpu_performance_audit_and_optimization_invariants.md`](file:///Users/dangtruongan/study/Kites/docs/dev-history/devlog/041_phase41_webgpu_performance_audit_and_optimization_invariants.md)
+
+* **Do not add `requiredLimits` to vision models:**
+  WebGPU's default 128 MB storage buffer and 256 MB buffer limits easily accommodate Kites' sliced vision patches (text strips ~3 MB, LaMa 64px buckets ~1–8 MB, YOLO 640×640 ~5 MB). Unclamping limits gives zero speed gain. WebLLM automatically requests adapter limits internally in TVM.
+* **Do not expect `subgroups` to accelerate vision models:**
+  `onnxruntime-web` (JSEP) has no subgroup kernels for spatial 2D convolutions (`Conv2d`). Subgroups are active and automated in WebLLM (`sg32`), but provide 0% gain for PaddleOCR and LaMa.
+* **Never force `preferredLayout: 'NHWC'` on NCHW vision models:**
+  Forcing NHWC inserts dynamic Transpose operators or risks operator resolver crashes (e.g. `com.ms.internal.nhwc:Conv:1`). Standard NCHW runs natively with identical latency.
+* **Preserve FP32 for OCR and Inpaint; reserve `shader-f16` for YOLO:**
+  FP16 degrades CJK character recognition (overflows softmax across 6,000+ tokens) and introduces FFT color banding in LaMa FFC. YOLO bubble detection is the sole candidate for FP16 (<0.2% mAP drop, 50% model size reduction).
+
+---
+
+## 10. Native Node.js CPU vs. Browser WebGPU/WASM Precision Drift (FP64 vs. FP32)
+
+**Affected Files:** [`src/offscreen/engines/ocr/extractPolygons.ts`](file:///Users/dangtruongan/study/Kites/src/offscreen/engines/ocr/extractPolygons.ts)  
+**Related Research:** [`docs/dev-history/PaddleOCR ONNX Precision Discrepancy.docx`](file:///Users/dangtruongan/study/Kites/docs/dev-history/PaddleOCR%20ONNX%20Precision%20Discrepancy.docx)
+
+* **Why identical models and images produce different bounding boxes in Node vs. Chrome:**
+  Native C++ (`onnxruntime-node`) compiles to direct CPU machine instructions, performing internal Fused Multiply-Add (FMA) accumulations in 64-bit floating point registers (FP64 / Double). Chrome browser (`onnxruntime-web` WebGPU JSEP / WASM SIMD128) is strictly constrained to 32-bit float registers (FP32). Because floating-point addition is non-associative and intermediate sums truncate to 32 bits, a systematic numerical drift of **~0.004** occurs on output probability maps.
+* **Why a 0.004 drift broke DBNet text detection:**
+  DBNet's differentiable binarization uses an amplified sigmoid scaling factor $k = 50$: $\hat{B}_{i,j} = \frac{1}{1 + e^{-50(P_{i,j} - T_{i,j})}}$. The steep slope concentrates boundary pixels tightly around the decision boundary. A candidate box scoring `0.602` in Node scored `0.598` in Chrome, causing boundary pixels to drop below threshold `0.6`. Dropping boundary pixels collapsed contour area $A$ in Vatti polygon clipping ($D' = \frac{A(1 - r^2)}{L}$), causing valid text boxes to vanish in the browser.
+* **The Invariant Fix (Algorithmic Hysteresis):**
+  Never attempt to force FP64 emulation in the browser. Instead, use an algorithmic hysteresis buffer: `src/offscreen/engines/ocr/extractPolygons.ts` sets `BOX_THRESHOLD = 0.5` (lowered from default `0.6`). This 10% safety buffer absorbs the 0.004 browser precision drift with zero lost text blocks.
+
+
+
 
