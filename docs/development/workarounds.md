@@ -78,3 +78,16 @@ This document preserves the complete technical background, rationale, and implem
   Neural inpainters must always draw polygon masks with at least `lineWidth = 4` stroke expansion (`lineJoin = 'round'`, `lineCap = 'round'`) and keep `UNCLIP_RATIO = 1.8` in `CustomPaddleDetector.ts`. Drawing raw polygons without stroke leaves anti-aliased character boundaries and kanji radical tips untouched as dirty "crumbs" around text.
 * **Zero-Resizing 1:1 Scale Invariant:**
   When cropping and inpainting patches, never squish large bounding boxes down to 512×512 and upscale them back with bilinear interpolation. Doing so produces gray blur boxes and blocky mosaic artifacts. Maintain 1:1 pixel coordinates between crop and paste.
+
+---
+
+## 5. PaddleOCR WebGPU Kernel Resolver & Model Format (`.ort` vs `.onnx`)
+
+**Affected Files:** [`src/offscreen/engines/ocr/PaddleOcrEngine.ts`](file:///Users/dangtruongan/study/Kites/src/offscreen/engines/ocr/PaddleOcrEngine.ts)  
+**Related Devlog:** [`webgpu_ocr_onnx_forum_report.md`](file:///Users/dangtruongan/study/Kites/docs/dev-history/devlog/webgpu_ocr_onnx_forum_report.md)
+
+* **Always rewrite default `ppu-paddle-ocr` `.ort` URLs to `.onnx` (`toOnnxModelUrls`):**
+  `ppu-paddle-ocr` defaults to pre-compiled `.ort` (ORT-format) binaries. In `onnxruntime-web` >= 1.27.0, WebGPU execution fails during session initialization with `ResolveKernelTypeStr Failed to find op_id: com.ms.internal.nhwc:Conv:1` because `.ort` bakes in fixed CPU kernel resolvers lacking NHWC operators injected by the WebGPU JSEP compiler.
+* **Avoid silent single-threaded WASM CPU fallback:**
+  When WebGPU session creation fails on `.ort`, the engine silently falls back to browser WASM CPU (single-threaded). On real manga pages (`image6.jpg` with `v6-medium`), recognition latency jumps from 4,177ms on GPU to 218,995ms on WASM (~52x slowdown). Serving un-baked `.onnx` models allows WebGPU JSEP to compile the graph natively.
+

@@ -67,4 +67,50 @@ describe('SettingsView', () => {
     });
     container.remove();
   });
+
+  it('renders Manual Selection Method regardless of isAuto and handles mode changes', async () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const updateState = vi.fn();
+
+    // Verify it renders even when isAuto is true
+    const state: PopupState = {
+      ...DEFAULT_POPUP_STATE,
+      isAuto: true,
+      manualMode: 'hover',
+    };
+
+    await act(async () => {
+      root.render(<SettingsView state={state} updateState={updateState} />);
+    });
+
+    const manualMethodHeader = Array.from(container.querySelectorAll('span')).find(
+      (span) => span.textContent === 'Manual Selection Method'
+    );
+    expect(manualMethodHeader).toBeDefined();
+
+    // Find the Hover and Persistent buttons
+    const buttons = Array.from(container.querySelectorAll('button'));
+    const hoverBtn = buttons.find((btn) => btn.textContent?.trim() === 'Hover');
+    const persistentBtn = buttons.find((btn) => btn.textContent?.trim() === 'Persistent');
+
+    expect(hoverBtn).toBeDefined();
+    expect(persistentBtn).toBeDefined();
+
+    // Hover button should have active styles (bg-[var(--color-paper)])
+    expect(hoverBtn?.className).toContain('bg-[var(--color-paper)]');
+
+    // Clicking Persistent triggers updateState
+    await act(async () => {
+      persistentBtn?.click();
+    });
+
+    expect(updateState).toHaveBeenCalledWith({ manualMode: 'persistent' });
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
 });

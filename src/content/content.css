@@ -26,7 +26,7 @@
   position: relative;
   z-index: 999999;
   border: none;
-  background-color: #ff2d75;
+  background-color: #f4446d;
   color: #ffffff;
   border-radius: 50%;
   display: flex;
@@ -38,7 +38,7 @@
   min-height: 32px;
   cursor: pointer;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
-  transition: background-color 0.2s ease, opacity 0.2s ease;
+  transition: background-color 0.2s ease, opacity 0.2s ease, transform 0.15s ease;
   flex-shrink: 0;
   pointer-events: auto;
 }
@@ -46,7 +46,55 @@
 #kites-translate-btn:hover,
 [data-kites-translate-button]:hover,
 .kites-translate-btn:hover {
-  background-color: #e02065;
+  background-color: #e0335c;
+  transform: scale(1.05);
+}
+
+.kites-finished-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  animation: kites-fade-in 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.kites-action-btn {
+  border: 1px solid #262a3b;
+  background-color: #12141c;
+  color: #ffffff;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  min-height: 28px;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+  transition: all 0.15s ease;
+  padding: 0;
+}
+
+.kites-action-btn:hover {
+  background-color: #1a1d29;
+  border-color: #f4446d;
+  color: #f4446d;
+  transform: scale(1.08);
+}
+
+.kites-action-btn:active {
+  transform: scale(0.95);
+}
+
+@keyframes kites-fade-in {
+  from {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 .kites-anim-spin {
@@ -291,4 +339,353 @@
   .kites-crop-toolbar-btn {
     transition: none;
   }
+}
+
+/* ==========================================================================
+   Chapter Reader Fullscreen Modal & Floating Controls
+   ========================================================================== */
+
+.kites-reader-modal {
+  position: fixed !important;
+  inset: 0 !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  z-index: 1000000 !important;
+  background-color: rgba(10, 10, 10, 0.98) !important;
+  color: #ffffff !important;
+  display: flex !important;
+  flex-direction: column !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
+  overflow: hidden !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  box-sizing: border-box !important;
+}
+
+.kites-reader-header {
+  height: 48px !important;
+  min-height: 48px !important;
+  background-color: rgba(18, 18, 18, 0.95) !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12) !important;
+  padding: 0 16px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  font-size: 12px !important;
+  flex-shrink: 0 !important;
+  z-index: 1000001 !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+.kites-reader-header-left,
+.kites-reader-header-center,
+.kites-reader-header-right {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+}
+
+.kites-reader-header-left {
+  min-width: 0 !important;
+}
+
+.kites-reader-title {
+  font-weight: 600 !important;
+  color: #ffffff !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  max-width: 240px !important;
+  display: inline-block !important;
+}
+
+.kites-reader-page-counter {
+  font-size: 11px !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+  color: rgba(255, 255, 255, 0.5) !important;
+  white-space: nowrap !important;
+}
+
+.kites-reader-mode-group {
+  display: flex !important;
+  align-items: center !important;
+  gap: 2px !important;
+  background-color: rgba(255, 255, 255, 0.06) !important;
+  padding: 2px !important;
+  border-radius: 8px !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+}
+
+.kites-reader-btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 5px !important;
+  padding: 4px 8px !important;
+  border-radius: 6px !important;
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  border: 1px solid transparent !important;
+  background-color: transparent !important;
+  color: rgba(255, 255, 255, 0.7) !important;
+  cursor: pointer !important;
+  transition: all 0.15s ease !important;
+  line-height: 1 !important;
+  outline: none !important;
+  text-decoration: none !important;
+}
+
+.kites-reader-btn:hover {
+  background-color: rgba(255, 255, 255, 0.12) !important;
+  color: #ffffff !important;
+}
+
+.kites-reader-btn.active {
+  background-color: rgba(255, 255, 255, 0.22) !important;
+  color: #ffffff !important;
+  font-weight: 600 !important;
+}
+
+.kites-reader-btn-primary {
+  background-color: #f4446d !important;
+  color: #ffffff !important;
+  border: 1px solid #f4446d !important;
+  font-weight: 600 !important;
+}
+
+.kites-reader-btn-primary:hover {
+  background-color: #e0335c !important;
+  border-color: #e0335c !important;
+}
+
+.kites-reader-kbd {
+  display: inline-block !important;
+  padding: 2px 4px !important;
+  border-radius: 4px !important;
+  font-size: 10px !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+  background-color: rgba(255, 255, 255, 0.15) !important;
+  color: rgba(255, 255, 255, 0.8) !important;
+  line-height: 1 !important;
+}
+
+.kites-reader-viewport {
+  flex: 1 1 0% !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  position: relative !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  background-color: #050505 !important;
+  width: 100% !important;
+  height: calc(100vh - 48px) !important;
+  scroll-behavior: smooth !important;
+}
+
+/* Webtoon Continuous Vertical Stream */
+.kites-reader-webtoon-container {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  width: 100% !important;
+  margin: 0 auto !important;
+  padding: 0 !important;
+}
+
+.kites-reader-webtoon-container.width-md {
+  max-width: 768px !important;
+}
+
+.kites-reader-webtoon-container.width-lg {
+  max-width: 1024px !important;
+}
+
+.kites-reader-webtoon-container.width-full {
+  max-width: 100% !important;
+}
+
+.kites-reader-page-item {
+  width: 100% !important;
+  background-color: #000000 !important;
+  line-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  position: relative !important;
+}
+
+.kites-reader-page-img {
+  width: 100% !important;
+  height: auto !important;
+  display: block !important;
+  user-select: none !important;
+  pointer-events: auto !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: none !important;
+}
+
+.kites-reader-page-badge {
+  position: absolute !important;
+  right: 12px !important;
+  bottom: 12px !important;
+  background-color: rgba(0, 0, 0, 0.75) !important;
+  backdrop-filter: blur(4px) !important;
+  -webkit-backdrop-filter: blur(4px) !important;
+  color: rgba(255, 255, 255, 0.75) !important;
+  font-size: 10px !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+  padding: 2px 8px !important;
+  border-radius: 4px !important;
+  pointer-events: none !important;
+  transition: opacity 0.2s ease !important;
+}
+
+/* Single & Double Page Views */
+.kites-reader-panel-container {
+  flex: 1 1 0% !important;
+  width: 100% !important;
+  height: 100% !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  position: relative !important;
+  padding: 16px !important;
+  box-sizing: border-box !important;
+}
+
+.kites-reader-single-img {
+  max-width: 100% !important;
+  max-height: calc(100vh - 80px) !important;
+  object-fit: contain !important;
+  display: block !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6) !important;
+}
+
+.kites-reader-double-container {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 4px !important;
+  max-width: 100% !important;
+  max-height: calc(100vh - 80px) !important;
+}
+
+.kites-reader-double-img {
+  max-width: calc(50vw - 24px) !important;
+  max-height: calc(100vh - 80px) !important;
+  object-fit: contain !important;
+  display: block !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6) !important;
+}
+
+.kites-reader-nav-prev,
+.kites-reader-nav-next {
+  position: absolute !important;
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+  width: 48px !important;
+  height: 80px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  background-color: rgba(255, 255, 255, 0.08) !important;
+  color: #ffffff !important;
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+  border-radius: 8px !important;
+  cursor: pointer !important;
+  transition: all 0.2s ease !important;
+  z-index: 1000002 !important;
+}
+
+.kites-reader-nav-prev {
+  left: 16px !important;
+}
+
+.kites-reader-nav-next {
+  right: 16px !important;
+}
+
+.kites-reader-nav-prev:hover,
+.kites-reader-nav-next:hover {
+  background-color: rgba(255, 255, 255, 0.2) !important;
+}
+
+.kites-reader-nav-prev:disabled,
+.kites-reader-nav-next:disabled {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* Floating Launch Pill */
+.kites-reader-pill {
+  position: fixed !important;
+  bottom: 20px !important;
+  right: 20px !important;
+  z-index: 999998 !important;
+  display: flex !important;
+  align-items: center !important;
+  background-color: rgba(18, 18, 18, 0.92) !important;
+  color: #ffffff !important;
+  font-size: 12px !important;
+  border-radius: 9999px !important;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5) !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  backdrop-filter: blur(8px) !important;
+  -webkit-backdrop-filter: blur(8px) !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  transition: opacity 0.2s ease, transform 0.2s ease !important;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
+  box-sizing: border-box !important;
+}
+
+.kites-reader-pill-btn {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  padding: 6px 14px !important;
+  background: transparent !important;
+  border: none !important;
+  color: #ffffff !important;
+  cursor: pointer !important;
+  font-weight: 500 !important;
+  font-size: 12px !important;
+}
+
+.kites-reader-pill-btn:hover {
+  color: #f4446d !important;
+}
+
+.kites-reader-pill-count {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+  font-size: 10px !important;
+  font-weight: 700 !important;
+  background-color: rgba(255, 255, 255, 0.2) !important;
+  padding: 1px 6px !important;
+  border-radius: 9999px !important;
+}
+
+.kites-reader-pill-close {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 6px 10px 6px 4px !important;
+  background: transparent !important;
+  border: none !important;
+  color: rgba(255, 255, 255, 0.4) !important;
+  cursor: pointer !important;
+}
+
+.kites-reader-pill-close:hover {
+  color: #ffffff !important;
 }

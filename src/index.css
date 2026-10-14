@@ -82,24 +82,22 @@ html.kites-extension-page, body.kites-extension-page {
   margin: 0;
   padding: 0;
   overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-dust) var(--color-paper);
 }
 
 /* Custom Scrollbar */
-.kites-extension-page::-webkit-scrollbar,
-.custom-scrollbar::-webkit-scrollbar {
-  width: 6px;
+::-webkit-scrollbar {
+  width: 5px;
 }
-.kites-extension-page::-webkit-scrollbar-track,
-.custom-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
+::-webkit-scrollbar-track {
+  background: var(--color-paper);
 }
-.kites-extension-page::-webkit-scrollbar-thumb,
-.custom-scrollbar::-webkit-scrollbar-thumb {
+::-webkit-scrollbar-thumb {
   background: var(--color-dust);
   border-radius: 10px;
 }
-.kites-extension-page::-webkit-scrollbar-thumb:hover,
-.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+::-webkit-scrollbar-thumb:hover {
   background: var(--color-editorial);
 }
 

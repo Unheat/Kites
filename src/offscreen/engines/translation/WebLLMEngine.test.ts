@@ -102,6 +102,18 @@ describe('WebLLMEngine Keyed JSON Protocol', () => {
     expect(userMsg).not.toContain('   ');
   });
 
+  it('forwards request-local glossary to WebLLM user data without changing keyed schema', async () => {
+    mockCreate.mockResolvedValue({ choices: [{ message: { content: '{"b0":"Preferred"}' } }] });
+    await engine.translate(['Name'], 'en', 'en', {
+      glossaryEnabled: true, glossaryEntries: [{ source: 'Name', target: 'Preferred' }],
+    });
+    const payload = mockCreate.mock.calls[0][0];
+    expect(payload.messages[0].content).toContain('untrusted literal terminology data');
+    expect(payload.messages[0].content).not.toContain('"target":"Preferred"');
+    expect(payload.messages[1].content).toContain('"target":"Preferred"');
+    expect(JSON.parse(payload.response_format.schema).required).toEqual(['b0']);
+  });
+
   it('gracefully yields model output with original text fallback when a local model drops a translation line', async () => {
     const inputs = ['Text 1', 'Text 2'];
 

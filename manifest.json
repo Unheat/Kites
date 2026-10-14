@@ -20,6 +20,29 @@
       "128": "icons/icon128.png"
     }
   },
+  "commands": {
+    "translate-hovered-image": {
+      "suggested_key": {
+        "default": "Alt+Shift+Z",
+        "mac": "MacCtrl+Shift+Z"
+      },
+      "description": "Translate the image under the pointer"
+    },
+    "start-screen-crop": {
+      "suggested_key": {
+        "default": "Alt+Shift+X",
+        "mac": "MacCtrl+Shift+X"
+      },
+      "description": "Select a screen area to translate"
+    },
+    "open-chapter-reader": {
+      "suggested_key": {
+        "default": "Alt+Shift+M",
+        "mac": "MacCtrl+Shift+M"
+      },
+      "description": "Open distraction-free chapter reader"
+    }
+  },
   "permissions": [
     "activeTab",
     "storage",

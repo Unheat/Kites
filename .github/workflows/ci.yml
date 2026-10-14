@@ -21,7 +21,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20' # Use LTS version
+          node-version-file: '.nvmrc'
           cache: 'npm'       # Speeds up subsequent runs by caching dependencies
 
       # Install dependencies (npm ci is preferred in CI environments over npm install)

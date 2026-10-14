@@ -1,4 +1,5 @@
-import type { ITranslationEngine } from '../engines/translation/BaseEngine';
+import type { ITranslationEngine, TranslationOptions } from '../engines/translation/BaseEngine';
+import { getEnabledGlossary } from '../../shared/glossary';
 import { WebLLMEngine } from '../engines/translation/WebLLMEngine';
 import { GoogleTranslateEngine } from '../engines/translation/GoogleTranslateEngine';
 import { CustomApiEngine } from '../engines/translation/CustomApiEngine';
@@ -60,7 +61,8 @@ export class TranslationManager {
    * @param sourceLang - Source language, defaulting to automatic detection.
    * @param targetLang - Target language, defaulting to English.
    * @param onInitialization - Optional WebLLM cold-initialization lifecycle callback.
-   * @param providedPopupState - Optional state already read by the pipeline to avoid duplicate IPC.
+   * @param providedPopupState - Optional state already read by pipeline/Studio to avoid duplicate IPC;
+   * terminology is detached and frozen before engine initialization or fallback awaits.
    * @returns Translated strings from the first successful engine.
    */
   async processTranslation(
@@ -82,6 +84,11 @@ export class TranslationManager {
       throw new Error('No popup state found. Cannot determine which translation engine to use.');
     }
 
+    // Freeze request terminology before engine initialization or fallback awaits. No engine cache state.
+    const glossaryEntries = getEnabledGlossary(popupState);
+    const options: TranslationOptions | undefined = glossaryEntries.length > 0
+      ? Object.freeze({ glossaryEnabled: true, glossaryEntries })
+      : undefined;
     const primaryEngineId = popupState.activeEngineId;
     const fallbackChain: string[] = popupState.fallbackChain || [];
     let engineSequence = [primaryEngineId, ...fallbackChain].filter(Boolean);
@@ -100,7 +107,7 @@ export class TranslationManager {
         const loadMs = import.meta.env.DEV ? performance.now() - loadStart : 0;
 
         const inferStart = import.meta.env.DEV ? performance.now() : 0;
-        const results = await lease.engine.translate(texts, sourceLang, targetLang);
+        const results = await lease.engine.translate(texts, sourceLang, targetLang, options);
         if (import.meta.env.DEV) {
           const inferMs = performance.now() - inferStart;
           console.log(

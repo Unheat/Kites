@@ -1,6 +1,8 @@
-import type { ModelInitializationMessage, ModelInitializationPhase, ProcessJobMessage } from '../shared/types';
+import type { ModelInitializationMessage, ModelInitializationPhase, ProcessJobMessage, StudioInpaintPayload, StudioOcrPayload } from '../shared/types';
+import type { Point2D } from './engines/inpaint/BaseInpaintEngine';
 import { pipelineOrchestrator } from './services/PipelineOrchestrator';
 import { translationManager } from './services/TranslationManager';
+import { runStudioOcr, type StudioOcrResponse } from './services/StudioOcr';
 import { CustomApiEngine } from './engines/translation/CustomApiEngine';
 import { inpaintRegistry } from './engines/inpaint/inpaintRegistry';
 import { ocrRegistry, resolveOcrTier } from './engines/ocr/ocrRegistry';
@@ -104,6 +106,20 @@ chrome.runtime.onMessage.addListener((message: ProcessJobMessage | any, _sender:
   if (message.type === 'VALIDATE_CUSTOM_API' && message.payload?.config) {
     handleValidateCustomApi(message.payload.config)
       .then(() => sendResponse({ status: 'success' }))
+      .catch((err) => sendResponse({ status: 'error', error: err instanceof Error ? err.message : String(err) }));
+    return true;
+  }
+
+  if (message.type === 'STUDIO_INPAINT' && message.payload) {
+    handleStudioInpaint(message.payload)
+      .then((res) => sendResponse({ status: 'success', ...res }))
+      .catch((err) => sendResponse({ status: 'error', error: err instanceof Error ? err.message : String(err) }));
+    return true;
+  }
+
+  if (message.type === 'STUDIO_OCR' && message.payload) {
+    handleStudioOcr(message.payload)
+      .then((res) => sendResponse({ status: 'success', ...res }))
       .catch((err) => sendResponse({ status: 'error', error: err instanceof Error ? err.message : String(err) }));
     return true;
   }
@@ -514,4 +530,66 @@ if (typeof caches !== 'undefined') {
     .catch((err) => {
       console.warn('[Offscreen] Error checking default OCR cache status on startup:', err);
     });
+}
+
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+/**
+ * Executes high-speed localized inpainting for Studio V2 edit brush.
+ */
+async function handleStudioInpaint(payload: StudioInpaintPayload): Promise<{ inpaintedPatchBase64: string }> {
+  const imageRes = await fetch(payload.imagePatchBase64);
+  const imageBuf = await imageRes.arrayBuffer();
+
+  const popupState = await new Promise<any>((resolve) => {
+    chrome.runtime.sendMessage({ type: 'GET_POPUP_STATE' }, (res) => resolve(res || {}));
+  });
+  const inpaintTier = payload.engineId || popupState.activeInpaintId || 'lama-manga';
+
+  const patchPoly: Point2D[] = [
+    { x: 0, y: 0 },
+    { x: payload.width, y: 0 },
+    { x: payload.width, y: payload.height },
+    { x: 0, y: payload.height },
+  ];
+
+  const cleanedBuffer = await pipelineOrchestrator.getInpaintManager().eraseText(imageBuf, [patchPoly], inpaintTier);
+  const cleanedBlob = new Blob([cleanedBuffer], { type: 'image/png' });
+  const cleanedBase64 = await blobToBase64(cleanedBlob);
+
+  return { inpaintedPatchBase64: cleanedBase64 };
+}
+
+/**
+ * Executes localized re-OCR, optional background inpainting, and translation for Studio V2.
+ * @param payload - Original crop, edited background, page offsets, and optional steps.
+ * @returns Page-space text objects and cleaned or unchanged patch; failures reach the RPC caller.
+ */
+async function handleStudioOcr(payload: StudioOcrPayload): Promise<StudioOcrResponse> {
+  return runStudioOcr(payload, {
+    getPopupState: () => new Promise((resolve, reject) => {
+      chrome.runtime.sendMessage({
+        type: 'GET_POPUP_STATE', target: 'background', source: 'offscreen', request: true,
+      }, (response) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message || 'Failed to load Studio OCR settings.'));
+        } else if (!response || response.status === 'error') {
+          reject(new Error(response?.error || 'Studio OCR settings are unavailable.'));
+        } else {
+          resolve(response);
+        }
+      });
+    }),
+    getOcrManager: () => pipelineOrchestrator.getOcrManager(),
+    getInpaintManager: () => pipelineOrchestrator.getInpaintManager(),
+    translationManager,
+    blobToBase64,
+  });
 }

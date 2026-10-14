@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TranslationManager } from './TranslationManager';
+import { DEFAULT_POPUP_STATE } from '../../shared/types';
+import type { TranslationOptions } from '../engines/translation/BaseEngine';
 
 type Deferred<T> = {
   promise: Promise<T>;
@@ -20,7 +22,7 @@ const mocks = vi.hoisted(() => ({
   instantiatedIds: [] as string[],
   destroyedIds: [] as string[],
   initProgressCallbacks: [] as Array<unknown>,
-  translateArguments: [] as Array<[string[], string, string]>,
+  translateArguments: [] as Array<[string[], string, string, unknown?]>,
 }));
 
 const mockChromeSendMessage = vi.spyOn(chrome.runtime, 'sendMessage');
@@ -56,8 +58,12 @@ function createMockEngine(id: string) {
       await mocks.initGates.get(id);
       if (mocks.failInitIds.delete(id)) throw new Error(`Init failed: ${id}`);
     }),
-    translate: vi.fn(async (texts: string[], sourceLang: string, targetLang: string) => {
-      mocks.translateArguments.push([texts, sourceLang, targetLang]);
+    translate: vi.fn(async (texts: string[], sourceLang: string, targetLang: string, options?: unknown) => {
+      const callArgs: [string[], string, string, unknown?] = [texts, sourceLang, targetLang];
+      if (options !== undefined) {
+        callArgs.push(options);
+      }
+      mocks.translateArguments.push(callArgs);
       mocks.translateStartedSignals.get(id)?.();
       await mocks.translateGates.get(id);
       if (mocks.failAllTranslate) throw new Error('Fatal API Error');
@@ -113,7 +119,7 @@ vi.mock('../engines/translation/WebLLMEngine', () => ({
       this.mock = createMockEngine(id);
     }
     init = (progressCallback?: unknown) => this.mock.init(progressCallback);
-    translate = (texts: string[], sourceLang: string, targetLang: string) => this.mock.translate(texts, sourceLang, targetLang);
+    translate = (texts: string[], sourceLang: string, targetLang: string, options?: TranslationOptions) => this.mock.translate(texts, sourceLang, targetLang, options);
     destroy = () => this.mock.destroy();
   },
 }));
@@ -164,10 +170,11 @@ describe('TranslationManager Waterfall Logic', () => {
 
   it('uses provided popup state without sending redundant state IPC', async () => {
     const popupState = {
+      ...DEFAULT_POPUP_STATE,
       activeEngineId: 'gg-translate',
       fallbackChain: [],
       customApis: [],
-    } as any;
+    };
 
     await expect(manager.processTranslation(['Hello'], 'auto', 'English', undefined, popupState))
       .resolves.toEqual(['Mock translated text']);
@@ -214,6 +221,97 @@ describe('TranslationManager Waterfall Logic', () => {
 
     await expect(manager.processTranslation(['Hello'])).resolves.toEqual(['Mock translated from fallback']);
     expect(mocks.instantiatedIds).toEqual(['cloudflare-translate', 'custom-api']);
+  });
+
+  it('forwards enabled glossary options to the active engine translate call', async () => {
+    const popupState = {
+      ...DEFAULT_POPUP_STATE,
+      activeEngineId: 'gg-translate',
+      fallbackChain: [],
+      customApis: [],
+      glossaryEnabled: true,
+      glossaryEntries: [{ source: '魔法', target: 'Magic' }],
+    };
+
+    await manager.processTranslation(['テスト'], 'ja', 'en', undefined, popupState);
+    expect(mocks.translateArguments).toHaveLength(1);
+    const [, , , passedOptions] = mocks.translateArguments[0];
+    expect(passedOptions).toEqual({
+      glossaryEnabled: true,
+      glossaryEntries: [{ source: '魔法', target: 'Magic' }],
+    });
+  });
+
+  it.each(['gg-translate', 'cloudflare-translate', 'SmolLM2-135M-Instruct-q0f16-MLC', 'api-1'])(
+    'forwards request glossary to %s', async (activeEngineId) => {
+      await manager.processTranslation(['Name'], 'ja', 'en', undefined, {
+        ...DEFAULT_POPUP_STATE, activeEngineId, fallbackChain: [],
+        customApis: [{ id: 'api-1', provider: 'openai', modelName: 'test', apiKey: 'key' }],
+        glossaryEnabled: true, glossaryEntries: [{ source: 'Name', target: 'Preferred' }],
+      });
+      expect(mocks.translateArguments[0][3]).toEqual({
+        glossaryEnabled: true, glossaryEntries: [{ source: 'Name', target: 'Preferred' }],
+      });
+    },
+  );
+
+  it('keeps one deeply immutable snapshot across initialization and fallback awaits', async () => {
+    const gate = createDeferred<void>();
+    const started = createDeferred<void>();
+    mocks.initGates.set('cloudflare-translate', gate.promise);
+    mocks.initStartedSignals.set('cloudflare-translate', () => started.resolve(undefined));
+    mocks.failFirstTranslate = true;
+    const state = {
+      ...DEFAULT_POPUP_STATE, activeEngineId: 'cloudflare-translate', fallbackChain: ['gg-translate'],
+      glossaryEnabled: true, glossaryEntries: [{ source: 'Name', target: 'Original' }],
+    };
+    const request = manager.processTranslation(['Name'], 'ja', 'en', undefined, state);
+    await started.promise;
+    state.glossaryEntries[0].target = 'Edited';
+    gate.resolve(undefined);
+    await request;
+    const options = mocks.translateArguments[0][3] as TranslationOptions;
+    expect(options.glossaryEntries).toEqual([{ source: 'Name', target: 'Original' }]);
+    expect(mocks.translateArguments[1][3]).toBe(options);
+    expect(Object.isFrozen(options)).toBe(true);
+    expect(Object.isFrozen(options.glossaryEntries)).toBe(true);
+    expect(Object.isFrozen(options.glossaryEntries?.[0])).toBe(true);
+    expect(Reflect.set(options.glossaryEntries![0], 'target', 'Changed')).toBe(false);
+  });
+
+  it('isolates concurrent glossary snapshots on a reused engine and clears disabled requests', async () => {
+    const gate = createDeferred<void>();
+    mocks.translateGates.set('gg-translate', gate.promise);
+    const state = { ...DEFAULT_POPUP_STATE, activeEngineId: 'gg-translate', fallbackChain: [], glossaryEnabled: true };
+    const first = manager.processTranslation(['First'], 'ja', 'en', undefined, {
+      ...state, glossaryEntries: [{ source: 'Name', target: 'First' }],
+    });
+    const second = manager.processTranslation(['Second'], 'ja', 'en', undefined, {
+      ...state, glossaryEntries: [{ source: 'Name', target: 'Second' }],
+    });
+    await vi.waitFor(() => expect(mocks.translateArguments).toHaveLength(2));
+    expect((mocks.translateArguments[0][3] as TranslationOptions).glossaryEntries?.[0].target).toBe('First');
+    expect((mocks.translateArguments[1][3] as TranslationOptions).glossaryEntries?.[0].target).toBe('Second');
+    gate.resolve(undefined);
+    await Promise.all([first, second]);
+    await manager.processTranslation(['Third'], 'ja', 'en', undefined, { ...state, glossaryEnabled: false });
+    expect(mocks.translateArguments[2][3]).toBeUndefined();
+    expect(mocks.instantiatedIds).toEqual(['gg-translate']);
+  });
+
+  it('does not forward glossary options when glossary is disabled in popupState', async () => {
+    const popupState = {
+      ...DEFAULT_POPUP_STATE,
+      activeEngineId: 'gg-translate',
+      fallbackChain: [],
+      customApis: [],
+      glossaryEnabled: false,
+      glossaryEntries: [{ source: '魔法', target: 'Magic' }],
+    };
+
+    await manager.processTranslation(['テスト'], 'ja', 'en', undefined, popupState);
+    expect(mocks.translateArguments).toHaveLength(1);
+    expect(mocks.translateArguments[0]).toEqual([['テスト'], 'ja', 'en']);
   });
 
   it.each([
