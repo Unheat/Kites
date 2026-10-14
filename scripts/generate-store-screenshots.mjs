@@ -122,6 +122,32 @@ const slides = [
             color: #ffffff;
             border: 1px solid rgba(255, 255, 255, 0.25);
           }
+          .artist-tag {
+            position: absolute;
+            bottom: -11px;
+            right: 18px;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            background: rgba(15, 23, 42, 0.95);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: #94a3b8;
+            padding: 3px 10px;
+            border-radius: 9999px;
+            font-size: 11px;
+            font-weight: 500;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(8px);
+          }
+          .artist-tag svg {
+            width: 10px;
+            height: 10px;
+            fill: #cbd5e1;
+          }
+          .artist-tag span {
+            color: #cbd5e1;
+            font-weight: 600;
+          }
           .card img {
             height: 560px;
             width: auto;
@@ -167,6 +193,12 @@ const slides = [
           <div class="card">
             <div class="card-tag tag-orig">ORIGINAL RAW SCAN</div>
             <img src="${demo2Input}" />
+            <div class="artist-tag">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+              </svg>
+              <span>@09ra_19ra</span>
+            </div>
           </div>
           <div class="arrow-box">
             <div class="arrow-circle">➔</div>
@@ -922,6 +954,19 @@ async function run() {
     args: ['--no-sandbox', '--disable-setuid-sandbox']
   });
 
+  const uploadDir = path.resolve(outDir, 'upload_to_chromestore');
+  if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true });
+  }
+
+  const fileMap = {
+    '1_translate_english.jpg': '1_before_after_translation.jpg',
+    '2_translate_vietnamese.jpg': '2_chapter_reader_fast_scan.jpg',
+    'inplace_hover_translate.jpg': '3_hover_in_place_reading.jpg',
+    '4_extension_ui_settings.jpg': '4_popup_and_engine_presets.jpg',
+    '3_kites_studio.jpg': '5_kites_studio_canvas_editor.jpg',
+  };
+
   for (const slide of slides) {
     const page = await browser.newPage();
     await page.setViewport({ width: 1280, height: 800, deviceScaleFactor: 1 });
@@ -933,6 +978,13 @@ async function run() {
       quality: 95
     });
     console.log(`Generated: ${targetFile}`);
+
+    if (fileMap[slide.name]) {
+      const uploadTarget = path.join(uploadDir, fileMap[slide.name]);
+      fs.copyFileSync(targetFile, uploadTarget);
+      console.log(`Synced to store upload: ${uploadTarget}`);
+    }
+
     await page.close();
   }
 
