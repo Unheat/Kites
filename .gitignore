@@ -25,6 +25,7 @@ dist-ssr
 *.sw?
 
 .agents
+.codebase-memory/
 
 !docs/fullplan.md
 docs/editor_port_full_plan.md
