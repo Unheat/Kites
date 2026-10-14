@@ -125,4 +125,21 @@ This document preserves the complete technical background, rationale, and implem
 * **Never condition `db.translationJobs.update(jobId, { status: 'completed' })` on `tabId`:**
   `tabId` is optional across the background translation pipeline (`queueTranslation`, batch queueing, Studio operations). If the tab ID is missing or the tab closes while the pipeline is in flight, translation nevertheless succeeds and writes its baked image. Coupling the database status update to `&& tabId` leaves successful jobs permanently stuck in status `'processing'` until the 2-minute stale-job timeout forces an error. Mark database status `'completed'` unconditionally on pipeline success, and guard only the UI message dispatch with `if (tabId)`.
 
+---
+
+## 9. WebGPU Performance Flags & Invariant Boundaries
+
+**Affected Files:** [`src/offscreen/utils/hardware.ts`](file:///Users/dangtruongan/study/Kites/src/offscreen/utils/hardware.ts), [`src/offscreen/engines/ocr/PaddleOcrEngine.ts`](file:///Users/dangtruongan/study/Kites/src/offscreen/engines/ocr/PaddleOcrEngine.ts), [`src/offscreen/engines/inpaint/LamaBaseInpaintEngine.ts`](file:///Users/dangtruongan/study/Kites/src/offscreen/engines/inpaint/LamaBaseInpaintEngine.ts), [`src/offscreen/engines/bubble/NeuralBubbleDetector.ts`](file:///Users/dangtruongan/study/Kites/src/offscreen/engines/bubble/NeuralBubbleDetector.ts)  
+**Related Devlog:** [`041_phase41_webgpu_performance_audit_and_optimization_invariants.md`](file:///Users/dangtruongan/study/Kites/docs/dev-history/devlog/041_phase41_webgpu_performance_audit_and_optimization_invariants.md)
+
+* **Do not add `requiredLimits` to vision models:**
+  WebGPU's default 128 MB storage buffer and 256 MB buffer limits easily accommodate Kites' sliced vision patches (text strips ~3 MB, LaMa 64px buckets ~1–8 MB, YOLO 640×640 ~5 MB). Unclamping limits gives zero speed gain. WebLLM automatically requests adapter limits internally in TVM.
+* **Do not expect `subgroups` to accelerate vision models:**
+  `onnxruntime-web` (JSEP) has no subgroup kernels for spatial 2D convolutions (`Conv2d`). Subgroups are active and automated in WebLLM (`sg32`), but provide 0% gain for PaddleOCR and LaMa.
+* **Never force `preferredLayout: 'NHWC'` on NCHW vision models:**
+  Forcing NHWC inserts dynamic Transpose operators or risks operator resolver crashes (e.g. `com.ms.internal.nhwc:Conv:1`). Standard NCHW runs natively with identical latency.
+* **Preserve FP32 for OCR and Inpaint; reserve `shader-f16` for YOLO:**
+  FP16 degrades CJK character recognition (overflows softmax across 6,000+ tokens) and introduces FFT color banding in LaMa FFC. YOLO bubble detection is the sole candidate for FP16 (<0.2% mAP drop, 50% model size reduction).
+
+
 
