@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { studioStore, useStudioStore } from '../state/studioStore';
 import { studioUndoStack } from '../state/undoStack';
+import { recalculateBlockTypeset } from '../canvas/studioTypeset';
 import type { TextObject } from '../types';
 
 export const TypographySettings: React.FC = () => {
@@ -83,13 +84,27 @@ export const TypographySettings: React.FC = () => {
     });
   };
 
-  // Dialogue text editing handlers
+  // Dialogue text editing handlers with dynamic typeset & line reflow
   const handleTextChange = (newText: string) => {
     if (!initialTextObjectsRef.current) {
       initialTextObjectsRef.current = [...textObjects];
     }
+    const typeset = recalculateBlockTypeset(
+      newText,
+      obj.fontFamily || 'sans-serif',
+      obj.width || 140,
+      obj.height || 50,
+      obj.fontSize || 16
+    );
     const next = textObjects.map((t) =>
-      t.id === obj.id ? { ...t, text: newText, lines: undefined } : t
+      t.id === obj.id
+        ? {
+            ...t,
+            text: newText,
+            fontSize: typeset.fontSize,
+            lines: typeset.lines,
+          }
+        : t
     );
     studioStore.setState({ textObjects: next });
   };

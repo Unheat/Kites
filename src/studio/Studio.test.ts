@@ -302,4 +302,86 @@ describe('Studio State Management', () => {
     studioStore.setState({ selectedTextId: null });
     expect(studioStore.getState().selectedTextId).toBeNull();
   });
+
+  it('dynamically reflows lines and fits font size when box geometry is resized', async () => {
+    const { recalculateBlockTypeset } = await import('./canvas/studioTypeset');
+    const text = 'Tôi không thể tin, nhưng C&C là một tổ chức, không thể được coi là một kẻ tự do.';
+    const initialBox: TextObject = {
+      id: 'b-reflow-1',
+      x: 50,
+      y: 50,
+      width: 100,
+      height: 300,
+      text,
+      fontSize: 16,
+      fontFamily: 'WildWords',
+      color: '#000',
+    };
+
+    const initialTypeset = recalculateBlockTypeset(text, 'WildWords', 100, 300, 16);
+    initialBox.fontSize = initialTypeset.fontSize;
+    initialBox.lines = initialTypeset.lines;
+    studioStore.setState({ textObjects: [initialBox], selectedTextId: initialBox.id });
+
+    // Initial tall box has many lines
+    expect(studioStore.getState().textObjects[0].lines!.length).toBeGreaterThanOrEqual(6);
+
+    // Now simulate user resizing box wider to 350x120
+    const newW = 350;
+    const newH = 120;
+    const resizedTypeset = recalculateBlockTypeset(text, 'WildWords', newW, newH, initialBox.fontSize);
+    const updatedBox: TextObject = {
+      ...initialBox,
+      width: newW,
+      height: newH,
+      fontSize: resizedTypeset.fontSize,
+      lines: resizedTypeset.lines,
+    };
+    studioStore.setState({ textObjects: [updatedBox] });
+
+    // Wide box reflows into fewer lines
+    expect(studioStore.getState().textObjects[0].lines!.length).toBeLessThan(initialTypeset.lines.length);
+    expect(studioStore.getState().textObjects[0].lines!.length).toBeLessThanOrEqual(4);
+    expect(studioStore.getState().textObjects[0].width).toBe(350);
+  });
+
+  it('keeps on-canvas and sidebar dialogue text in sync and auto-typesets both', async () => {
+    const { recalculateBlockTypeset } = await import('./canvas/studioTypeset');
+    const box: TextObject = {
+      id: 'b-sync-1',
+      x: 100,
+      y: 100,
+      width: 200,
+      height: 100,
+      text: 'Original Text',
+      fontSize: 16,
+      fontFamily: 'WildWords',
+      color: '#000',
+    };
+    studioStore.setState({ textObjects: [box], selectedTextId: box.id, editingTextId: box.id });
+
+    // Typing via inline canvas editor
+    const canvasTyped = 'Updated via Canvas Click';
+    const canvasTypeset = recalculateBlockTypeset(canvasTyped, box.fontFamily, box.width, box.height, box.fontSize);
+    studioStore.setState({
+      textObjects: studioStore.getState().textObjects.map((t) =>
+        t.id === box.id ? { ...t, text: canvasTyped, fontSize: canvasTypeset.fontSize, lines: canvasTypeset.lines } : t
+      ),
+    });
+
+    expect(studioStore.getState().textObjects[0].text).toBe('Updated via Canvas Click');
+    expect(studioStore.getState().textObjects[0].lines).toEqual(canvasTypeset.lines);
+
+    // Typing via sidebar
+    const sidebarTyped = 'Updated via Sidebar Textarea';
+    const sidebarTypeset = recalculateBlockTypeset(sidebarTyped, box.fontFamily, box.width, box.height, box.fontSize);
+    studioStore.setState({
+      textObjects: studioStore.getState().textObjects.map((t) =>
+        t.id === box.id ? { ...t, text: sidebarTyped, fontSize: sidebarTypeset.fontSize, lines: sidebarTypeset.lines } : t
+      ),
+    });
+
+    expect(studioStore.getState().textObjects[0].text).toBe('Updated via Sidebar Textarea');
+    expect(studioStore.getState().textObjects[0].lines).toEqual(sidebarTypeset.lines);
+  });
 });

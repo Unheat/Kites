@@ -33,6 +33,7 @@ export interface BoundingBox {
 }
 
 export type TransformHandle =
+  | 'move'
   | 'nw'
   | 'n'
   | 'ne'

@@ -25,6 +25,8 @@ import { CanvasFurniture } from './CanvasFurniture';
 import { WarpMesh } from './WarpMesh';
 import { createStudioOcrCrops } from './studioOcrCrop';
 import { requestStudioInpaint, requestStudioOcr } from '../bridge/offscreenStudioBridge';
+import { computeNewBounds, type ActiveDragState, type DragHandle } from '../../App';
+import { recalculateBlockTypeset } from './studioTypeset';
 import type {
   BoundingBox,
   Point,
@@ -169,14 +171,14 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       }
     }
 
-    // 3. Render transform furniture if not in hideBoxes mode and not actively typing inline
+    // 3. Render transform furniture if not in hideBoxes mode
     if (!hideBoxes) {
       const selectedObj = textObjects.find((t) => t.id === selectedTextId);
-      if (selectedObj && selectedObj.id !== editingTextId) {
+      if (selectedObj) {
         CanvasFurniture.drawSelectionFurniture(ctx, selectedObj, appearance.selectedBoxBorderColor);
       }
     }
-  }, [imageWidth, imageHeight, textObjects, imageLayers, selectedTextId, selectedImageLayerId, editingTextId, appearance, hideBoxes]);
+  }, [imageWidth, imageHeight, textObjects, imageLayers, selectedTextId, selectedImageLayerId, appearance, hideBoxes]);
 
   useEffect(() => {
     redrawOverlay();
@@ -358,17 +360,19 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       if (clickedObj) {
         const now = Date.now();
         const isDoubleClick =
-          lastClickRef.current.id === clickedObj.id && now - lastClickRef.current.time < 350;
+          lastClickRef.current.id === clickedObj.id && now - lastClickRef.current.time < 400;
         lastClickRef.current = { time: now, id: clickedObj.id };
 
+        const isAlreadySelected = selectedTextId === clickedObj.id;
         studioStore.setState({ selectedTextId: clickedObj.id });
 
-        if (isDoubleClick) {
+        // If clicking into an already selected text box (or double-clicking), activate inline text editing
+        if (isDoubleClick || isAlreadySelected) {
           studioStore.setState({ editingTextId: clickedObj.id });
           return;
         }
 
-        setActiveHandle('nw');
+        setActiveHandle('move');
         setInitialTransformState({ ...clickedObj });
         return;
       }
@@ -497,21 +501,45 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
 
       let updated = { ...initialTransformState };
 
-      if (activeHandle === 'nw' && !initialTransformState.rotation) {
-        updated.x = Math.round(initialTransformState.x + deltaX);
-        updated.y = Math.round(initialTransformState.y + deltaY);
-      } else if (activeHandle === 'rot') {
+      if (activeHandle === 'rot') {
         const centerX = initialTransformState.x + initialTransformState.width / 2;
         const centerY = initialTransformState.y + initialTransformState.height / 2;
         const angleRad = Math.atan2(pt.y - centerY, pt.x - centerX);
         updated.rotation = Math.round((angleRad * 180) / Math.PI + 90);
-      } else if (activeHandle === 'se') {
-        updated.width = Math.max(30, Math.round(initialTransformState.width + deltaX));
-        updated.height = Math.max(20, Math.round(initialTransformState.height + deltaY));
-      } else if (activeHandle === 'e') {
-        updated.width = Math.max(30, Math.round(initialTransformState.width + deltaX));
-      } else if (activeHandle === 's') {
-        updated.height = Math.max(20, Math.round(initialTransformState.height + deltaY));
+      } else {
+        const dragState: ActiveDragState = {
+          blockId: 0,
+          handle: activeHandle as DragHandle,
+          startX: dragStartPoint.x,
+          startY: dragStartPoint.y,
+          origX: initialTransformState.x,
+          origY: initialTransformState.y,
+          origW: initialTransformState.width,
+          origH: initialTransformState.height,
+          origFontSize: initialTransformState.fontSize,
+          origLines: initialTransformState.lines || [],
+          translatedText: initialTransformState.text,
+          fontFamily: initialTransformState.fontFamily,
+        };
+
+        const newBounds = computeNewBounds(dragState, deltaX, deltaY, imageWidth, imageHeight);
+        updated.x = Math.round(newBounds.x);
+        updated.y = Math.round(newBounds.y);
+
+        if (activeHandle !== 'move') {
+          // Box size/aspect ratio changed — automatically reflow lines and fit font size!
+          const typeset = recalculateBlockTypeset(
+            updated.text,
+            updated.fontFamily,
+            newBounds.w,
+            newBounds.h,
+            initialTransformState.fontSize
+          );
+          updated.width = Math.round(newBounds.w);
+          updated.height = Math.round(newBounds.h);
+          updated.fontSize = typeset.fontSize;
+          updated.lines = typeset.lines;
+        }
       }
 
       studioStore.setState({
@@ -672,14 +700,15 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
 
     // Transform Text Box Undo state
     if (initialTransformState && selectedTextId) {
-      const current = textObjects.find((t) => t.id === selectedTextId);
+      const currentList = studioStore.getState().textObjects;
+      const current = currentList.find((t) => t.id === selectedTextId);
       if (current && JSON.stringify(current) !== JSON.stringify(initialTransformState)) {
-        const prev = textObjects.map((t) => (t.id === initialTransformState.id ? initialTransformState : t));
+        const prev = currentList.map((t) => (t.id === initialTransformState.id ? initialTransformState : t));
         studioUndoStack.push({
           id: `transform-${Date.now()}`,
           timestamp: Date.now(),
-          description: 'Transform Text Box',
-          textObjects: { before: prev, after: textObjects },
+          description: activeHandle === 'move' ? 'Move Text Box' : 'Resize & Reflow Text Box',
+          textObjects: { before: prev, after: currentList },
         });
       }
       setInitialTransformState(null);
@@ -794,8 +823,23 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
     if (!inlineInitialTextRef.current) {
       inlineInitialTextRef.current = [...textObjects];
     }
+    const currentObj = textObjects.find((t) => t.id === editingTextId);
+    const typeset = recalculateBlockTypeset(
+      newText,
+      currentObj?.fontFamily || 'sans-serif',
+      currentObj?.width || 140,
+      currentObj?.height || 50,
+      currentObj?.fontSize || 16
+    );
     const next = textObjects.map((t) =>
-      t.id === editingTextId ? { ...t, text: newText, lines: undefined } : t
+      t.id === editingTextId
+        ? {
+            ...t,
+            text: newText,
+            fontSize: typeset.fontSize,
+            lines: typeset.lines,
+          }
+        : t
     );
     studioStore.setState({ textObjects: next });
   };
@@ -949,15 +993,16 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
                 height: '100%',
                 fontSize: `${Math.max(10, editingObj.fontSize * zoom)}px`,
                 fontFamily: editingObj.fontFamily || 'sans-serif',
+                fontWeight: editingObj.bold ? 'bold' : 'normal',
+                fontStyle: editingObj.italic ? 'italic' : 'normal',
                 color: editingObj.color || '#000000',
                 textAlign: editingObj.align || 'center',
                 lineHeight: editingObj.lineSpacing || 1.2,
                 backgroundColor: 'transparent',
-                border: '1.5px dashed #f4446d',
-                borderRadius: '4px',
-                padding: '2px',
+                border: 'none',
                 outline: 'none',
                 resize: 'none',
+                padding: '0px',
                 boxSizing: 'border-box',
                 overflow: 'hidden',
                 caretColor: '#f4446d',
