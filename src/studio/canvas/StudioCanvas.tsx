@@ -1044,7 +1044,11 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
             >
               <textarea
                 ref={inlineTextareaRef}
-                value={editingObj.text}
+                value={
+                  (!editingObj.text.includes('\n') && editingObj.lines && editingObj.lines.length > 1)
+                    ? editingObj.lines.join('\n')
+                    : editingObj.text
+                }
                 onChange={(e) => handleInlineTextChange(e.target.value)}
                 onBlur={handleFinishInlineEdit}
                 onKeyDown={(e) => {

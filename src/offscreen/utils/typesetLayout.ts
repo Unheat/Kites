@@ -606,13 +606,18 @@ export function fitFontSizeWithLines(
 
   // Pass 3: Vertical-fill hyphenation for tall boxes (aspect ratio >= 1.5)
   if (aspectRatio >= TALL_FILL_MIN_ASPECT) {
-    for (let mid = effectiveCap; mid >= MIN_FONT_SIZE; mid--) {
+    let p3Lo = MIN_FONT_SIZE;
+    let p3Hi = effectiveCap;
+    while (p3Lo <= p3Hi) {
+      const mid = Math.floor((p3Lo + p3Hi) / 2);
       ctx.font = fontSpec(mid, fontFamily, text, customCjk);
       const lines = wrapText(ctx, text, maxW);
       const allLinesFitW = lines.every((l) => ctx.measureText(l).width <= maxW + 0.5);
       if (allLinesFitW && lines.length * mid * LINE_HEIGHT <= maxH) {
         consider(mid, lines);
-        break;
+        p3Lo = mid + 1;
+      } else {
+        p3Hi = mid - 1;
       }
     }
   }

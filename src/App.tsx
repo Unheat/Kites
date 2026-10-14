@@ -202,13 +202,18 @@ export default function App() {
   // Map Dexie TextBlocks to Studio TextObjects
   const studioTextObjects: TextObject[] = textBlocks.map((b) => {
     const isCjk = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/.test(b.translatedText);
+    const textHasNewlines = (b.translatedText || '').includes('\n');
+    const formattedText = (!textHasNewlines && b.lines && b.lines.length > 1)
+      ? b.lines.join('\n')
+      : b.translatedText;
+
     return {
       id: String(b.id || `tb-${b.posX}-${b.posY}`),
       x: b.posX,
       y: b.posY,
       width: b.width,
       height: b.height,
-      text: b.translatedText,
+      text: formattedText,
       lines: b.lines,
       originalText: b.originalText,
       fontSize: b.fontSize || 16,
@@ -291,6 +296,7 @@ export default function App() {
           color: obj.color,
           strokeColor: obj.strokeColor,
           direction: obj.isVertical ? 'v' : 'h',
+          lines: obj.lines,
         }));
         await db.textBlocks.bulkAdd(newBlocks);
       });
