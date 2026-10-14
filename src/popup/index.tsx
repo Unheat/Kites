@@ -263,7 +263,32 @@ function PopupApp() {
       <div className={`flex-1 flex flex-col transition-opacity duration-300 ${(!state.isExtensionEnabled || isCurrentDomainDisabled) ? 'opacity-40 pointer-events-none grayscale' : ''}`}>
         <div className="flex-1 flex flex-col px-3.5 pb-3.5">
           {activeTab === 'home' ? (
-            <EngineDropdown state={state} updateState={updateState} />
+            <div className="flex flex-col gap-3">
+              <EngineDropdown state={state} updateState={updateState} />
+
+              <div className="flex flex-col gap-2 pt-2 border-t border-[var(--color-dust)] border-opacity-30">
+                <ReaderLaunchControl />
+                <PageExportControl />
+                <button
+                  onClick={async () => {
+                    try {
+                      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+                      if (tab?.id) {
+                        await chrome.tabs.sendMessage(tab.id, { type: 'START_AREA_SELECTION' });
+                        window.close();
+                      }
+                    } catch (err) {
+                      console.warn('[Popup] Failed to start area selection on active tab:', err);
+                    }
+                  }}
+                  className="w-full py-2 bg-[var(--color-vellum)] text-[var(--color-ink)] border border-[var(--color-dust)] border-opacity-30 font-semibold rounded hover:border-[var(--color-editorial)] hover:text-[var(--color-editorial)] transition-colors flex items-center justify-center gap-2 cursor-pointer text-sm"
+                  title="Drag a rectangle across any on-screen manga panel, canvas, or video to translate it"
+                >
+                  <Crop size={16} />
+                  Crop & Translate Area
+                </button>
+              </div>
+            </div>
           ) : activeTab === 'batch' ? (
             <BatchScanPanel
               onOpenReader={async () => {
@@ -288,29 +313,8 @@ function PopupApp() {
           )}
         </div>
 
-        {/* Footer Action */}
+        {/* Footer Action: ONLY Open Edit Studio lives through all panels */}
         <div className="px-3.5 pb-3.5 flex flex-col gap-2">
-          <ReaderLaunchControl />
-          <PageExportControl />
-          <button
-            onClick={async () => {
-              try {
-                const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-                if (tab?.id) {
-                  await chrome.tabs.sendMessage(tab.id, { type: 'START_AREA_SELECTION' });
-                  window.close();
-                }
-              } catch (err) {
-                console.warn('[Popup] Failed to start area selection on active tab:', err);
-              }
-            }}
-            className="w-full py-2 bg-[var(--color-vellum)] text-[var(--color-ink)] border border-[var(--color-dust)] border-opacity-30 font-semibold rounded hover:border-[var(--color-editorial)] hover:text-[var(--color-editorial)] transition-colors flex items-center justify-center gap-2 cursor-pointer text-sm"
-            title="Drag a rectangle across any on-screen manga panel, canvas, or video to translate it"
-          >
-            <Crop size={16} />
-            Crop & Translate Area
-          </button>
-
           <button 
             onClick={() => {
               chrome.tabs.create({ url: chrome.runtime.getURL('index.html') });
