@@ -58,7 +58,7 @@ export default function ReadingShortcutsHelp() {
   const shortcuts = useMemo(() => getPlatformShortcuts(), []);
 
   return (
-    <div className="pt-2 border-t border-[var(--color-dust)] border-opacity-30">
+    <div>
       <button
         type="button"
         aria-expanded={open}
