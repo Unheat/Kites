@@ -290,24 +290,7 @@ function PopupApp() {
               </div>
             </div>
           ) : activeTab === 'batch' ? (
-            <BatchScanPanel
-              onOpenReader={async () => {
-                try {
-                  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-                  if (tab?.id) {
-                    await chrome.tabs.sendMessage(tab.id, {
-                      type: 'OPEN_CHAPTER_READER',
-                      target: 'content',
-                      source: 'popup',
-                      request: true,
-                    }, { frameId: 0 });
-                    window.close();
-                  }
-                } catch (err) {
-                  console.warn('[Popup] Failed to open chapter reader from batch panel:', err);
-                }
-              }}
-            />
+            <BatchScanPanel />
           ) : (
             <SettingsView state={state} updateState={updateState} />
           )}

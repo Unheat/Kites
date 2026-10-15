@@ -12,10 +12,6 @@ import {
 } from 'lucide-react';
 import type { ScannedPageImage } from '../../content/scanner';
 
-interface BatchScanPanelProps {
-  onOpenReader?: () => void;
-}
-
 interface QueueJobStatus {
   srcUrl: string;
   status: 'queued' | 'downloading' | 'processing' | 'completed' | 'error';
@@ -26,10 +22,9 @@ interface QueueJobStatus {
  * Discovers comic strip images on the active reading tab, displays a scrollable
  * thumbnail gallery, and lets users select and queue pages for translation.
  *
- * @param props - Component props containing optional reader callback.
  * @returns The rendered batch scanner panel.
  */
-export default function BatchScanPanel({ onOpenReader }: BatchScanPanelProps) {
+export default function BatchScanPanel() {
   const [pages, setPages] = useState<ScannedPageImage[]>([]);
   const [selectedUrls, setSelectedUrls] = useState<Set<string>>(new Set());
   const [isScanning, setIsScanning] = useState(false);
@@ -241,7 +236,6 @@ export default function BatchScanPanel({ onOpenReader }: BatchScanPanelProps) {
   const totalPages = pages.length;
   const selectedCount = selectedUrls.size;
   const allSelected = totalPages > 0 && selectedCount === totalPages;
-  const translatedCount = pages.filter((p) => p.isTranslated).length;
 
   return (
     <div className="flex flex-col gap-2.5 text-xs">
@@ -427,16 +421,6 @@ export default function BatchScanPanel({ onOpenReader }: BatchScanPanelProps) {
               : 'Select Pages to Translate'}
           </span>
         </button>
-
-        {translatedCount >= 1 && onOpenReader && (
-          <button
-            onClick={onOpenReader}
-            className="w-full py-1.5 bg-[var(--color-vellum)] text-[var(--color-ink)] border border-[var(--color-dust)] border-opacity-30 font-semibold rounded hover:border-[var(--color-editorial)] hover:text-[var(--color-editorial)] transition-colors flex items-center justify-center gap-1.5 text-xs cursor-pointer"
-          >
-            <BookOpen size={13} className="text-[var(--color-editorial)]" />
-            <span>Open in Chapter Reader ({translatedCount})</span>
-          </button>
-        )}
       </div>
     </div>
   );
