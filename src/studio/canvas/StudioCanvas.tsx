@@ -749,8 +749,25 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       if (activeHandle === 'rot') {
         const centerX = initialTransformState.x + initialTransformState.width / 2;
         const centerY = initialTransformState.y + initialTransformState.height / 2;
-        const angleRad = Math.atan2(pt.y - centerY, pt.x - centerX);
-        updated.rotation = Math.round((angleRad * 180) / Math.PI + 90);
+        const initialMouseAngle = Math.atan2(dragStartPoint.y - centerY, dragStartPoint.x - centerX);
+        const currentMouseAngle = Math.atan2(pt.y - centerY, pt.x - centerX);
+        const deltaAngleDeg = ((currentMouseAngle - initialMouseAngle) * 180) / Math.PI;
+
+        let deg = Math.round((initialTransformState.rotation || 0) + deltaAngleDeg);
+        deg = ((((deg % 360) + 540) % 360) - 180);
+
+        if (e.shiftKey) {
+          // Snap to 15-degree increments with Shift
+          deg = Math.round(deg / 15) * 15;
+          if (deg === 180 || deg === -180) deg = 180;
+        } else {
+          // Snap to cardinal angles if within 5 degrees
+          if (Math.abs(deg) <= 5) deg = 0;
+          else if (Math.abs(deg - 90) <= 5) deg = 90;
+          else if (Math.abs(deg + 90) <= 5) deg = -90;
+          else if (Math.abs(Math.abs(deg) - 180) <= 5) deg = 180;
+        }
+        updated.rotation = deg;
       } else if (activeHandle === 'font-size') {
         // Direct font-size scaling along diagonal
         const rad = ((initialTransformState.rotation || 0) * Math.PI) / 180;
@@ -1134,27 +1151,41 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
     });
   };
 
-  // Compute screen coordinates for floating action pill
+  // Compute screen coordinates for floating action pill (accounting for rotation)
   const selectedObj = textObjects.find((t) => t.id === selectedTextId);
   const editingObj = textObjects.find((t) => t.id === editingTextId);
-  const pillPos = selectedObj && overlayCanvasRef.current
-    ? imageToClient(
-        selectedObj.x + selectedObj.width / 2,
-        selectedObj.y,
-        overlayCanvasRef.current.getBoundingClientRect(),
-        imageWidth,
-        imageHeight
-      )
-    : null;
-  const pillBottomPos = selectedObj && overlayCanvasRef.current
-    ? imageToClient(
-        selectedObj.x + selectedObj.width / 2,
-        selectedObj.y + selectedObj.height,
-        overlayCanvasRef.current.getBoundingClientRect(),
-        imageWidth,
-        imageHeight
-      )
-    : null;
+
+  let pillPos: Point | null = null;
+  let pillBottomPos: Point | null = null;
+
+  if (selectedObj && overlayCanvasRef.current) {
+    const cx = selectedObj.x + selectedObj.width / 2;
+    const cy = selectedObj.y + selectedObj.height / 2;
+    const w = selectedObj.width;
+    const h = selectedObj.height;
+    const rad = ((selectedObj.rotation || 0) * Math.PI) / 180;
+
+    // 4 corners + rotation nub in local space relative to center
+    const localPts = [
+      { x: -w / 2, y: -h / 2 },
+      { x: w / 2, y: -h / 2 },
+      { x: w / 2, y: h / 2 },
+      { x: -w / 2, y: h / 2 },
+      { x: 0, y: -h / 2 - 28 }, // rotation handle nub
+    ];
+
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (const pt of localPts) {
+      const worldY = cy + pt.x * Math.sin(rad) + pt.y * Math.cos(rad);
+      if (worldY < minY) minY = worldY;
+      if (worldY > maxY) maxY = worldY;
+    }
+
+    const rect = overlayCanvasRef.current.getBoundingClientRect();
+    pillPos = imageToClient(cx, minY, rect, imageWidth, imageHeight);
+    pillBottomPos = imageToClient(cx, maxY, rect, imageWidth, imageHeight);
+  }
 
   return (
     <div

@@ -411,7 +411,10 @@ export class PipelineOrchestrator {
           color: renderColors?.textColor ?? '#000000',
           strokeColor: popupState?.renderFontStrokeDisabled ? 'transparent' : (renderColors?.strokeColor ?? '#FFFFFF'),
           direction: dir,
-          lines: renderInfoByOcrIndex.get(i)?.lines
+          lines: renderInfoByOcrIndex.get(i)?.lines,
+          angle: (ocrResult.angles && ocrResult.angles[i] !== undefined)
+            ? Math.round(ocrResult.angles[i])
+            : undefined,
         };
       });
 

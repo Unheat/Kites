@@ -9,6 +9,7 @@ import {
   Copy,
   Check,
   RotateCcw,
+  RotateCw,
   Edit3,
   Languages,
   Type,
@@ -764,6 +765,69 @@ export const TypographySettings: React.FC = () => {
           onChange={(e) => updateSelected({ isVertical: e.target.checked })}
           className="rounded border-[#282d3f] bg-[#12141c] text-[#f4446d] focus:ring-0 accent-[#f4446d]"
         />
+      </div>
+
+      {/* Rotation & Angle */}
+      <div className="space-y-1.5 p-2 rounded-lg bg-[#090a0f] border border-[#282d3f]">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1.5 text-slate-300 font-medium">
+            <RotateCw className="w-3.5 h-3.5 text-[#f4446d]" />
+            <span>Rotation Angle</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="font-mono text-slate-200">{obj.rotation || 0}°</span>
+            {obj.rotation !== undefined && obj.rotation !== 0 && (
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => updateSelected({ rotation: 0 })}
+                title="Reset angle to 0° (flat)"
+                className="px-1.5 py-0.5 rounded text-[10px] bg-[#1c1f2e] text-slate-400 hover:text-white transition"
+              >
+                Reset
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            type="range"
+            min="-180"
+            max="180"
+            step="1"
+            value={obj.rotation || 0}
+            onChange={(e) => updateSelected({ rotation: Number(e.target.value) })}
+            className="flex-1 accent-[#f4446d]"
+          />
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                let deg = (obj.rotation || 0) - 90;
+                deg = ((((deg % 360) + 540) % 360) - 180);
+                updateSelected({ rotation: deg });
+              }}
+              title="Rotate -90°"
+              className="px-1.5 py-0.5 rounded bg-[#1c1f2e] border border-[#282d3f] text-slate-300 hover:text-white text-[10px] font-mono transition"
+            >
+              -90°
+            </button>
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                let deg = (obj.rotation || 0) + 90;
+                deg = ((((deg % 360) + 540) % 360) - 180);
+                updateSelected({ rotation: deg });
+              }}
+              title="Rotate +90°"
+              className="px-1.5 py-0.5 rounded bg-[#1c1f2e] border border-[#282d3f] text-slate-300 hover:text-white text-[10px] font-mono transition"
+            >
+              +90°
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* Text Color & Gradient */}

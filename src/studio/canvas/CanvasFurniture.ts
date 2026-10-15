@@ -50,8 +50,32 @@ export class CanvasFurniture {
     ctx.lineTo(obj.width / 2, -ROTATION_HANDLE_OFFSET);
     ctx.stroke();
 
-    // 3. Draw rotation handle nub (circle)
-    this.drawHandleNub(ctx, obj.width / 2, -ROTATION_HANDLE_OFFSET, effectiveColor, true);
+    // 3. Draw rotation handle nub (circle with curved rotation arrow badge)
+    this.drawHandleNub(ctx, obj.width / 2, -ROTATION_HANDLE_OFFSET, '#f4446d', true, '⟳');
+
+    // If rotated, show small angle tag above rotation nub
+    if (obj.rotation) {
+      ctx.save();
+      ctx.font = 'bold 9px monospace';
+      const angleText = `${Math.round(obj.rotation)}°`;
+      const textMetrics = ctx.measureText(angleText);
+      const tagW = textMetrics.width + 8;
+      const tagH = 14;
+      const tagX = obj.width / 2 - tagW / 2;
+      const tagY = -ROTATION_HANDLE_OFFSET - 18;
+      ctx.fillStyle = '#12141c';
+      ctx.strokeStyle = effectiveColor;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(tagX, tagY, tagW, tagH, 3);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#f4446d';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(angleText, obj.width / 2, tagY + tagH / 2);
+      ctx.restore();
+    }
 
     const midX = obj.width / 2;
     const midY = obj.height / 2;
@@ -187,7 +211,7 @@ export class CanvasFurniture {
 
       if (label) {
         ctx.fillStyle = color;
-        ctx.font = 'bold 8px sans-serif';
+        ctx.font = label === '⟳' ? 'bold 9px sans-serif' : 'bold 8px sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(label, x, y);

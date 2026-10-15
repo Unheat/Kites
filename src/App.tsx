@@ -226,6 +226,7 @@ export default function App() {
       strokeWidth: 2,
       isVertical: b.direction === 'v' && isCjk,
       isSkipped: b.isSkipped ?? false,
+      rotation: b.angle ?? 0,
     };
   });
 
@@ -304,6 +305,7 @@ export default function App() {
           direction: obj.isVertical ? 'v' : 'h',
           lines: obj.lines,
           isSkipped: obj.isSkipped,
+          angle: obj.rotation ?? 0,
         }));
         await db.textBlocks.bulkAdd(newBlocks);
       });

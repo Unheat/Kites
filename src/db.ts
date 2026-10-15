@@ -68,6 +68,8 @@ export interface TextBlock {
   italic?: boolean;
   align?: 'left' | 'center' | 'right';
   isSkipped?: boolean;
+  /** Text block rotation angle in degrees (mean line angle, e.g. -180 to 180). */
+  angle?: number;
 }
 
 const db = new Dexie('KitesDatabase') as Dexie & {
