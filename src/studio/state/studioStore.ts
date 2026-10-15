@@ -114,7 +114,7 @@ const initialAppearance: EditorAppearanceSettings = {
 };
 
 const initialState: StudioState = {
-  activeTool: 'select',
+  activeTool: 'text',
   zoom: 1.0,
   pan: { x: 0, y: 0 },
   isSpacePanning: false,

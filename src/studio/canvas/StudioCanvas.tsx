@@ -395,11 +395,25 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
     // Inpaint / OCR Mask Brush
     if (activeTool === 'inpaint' || activeTool === 'ocr') {
       const brushSize = activeTool === 'inpaint' ? inpaintSettings.size : ocrSettings.size;
+      const brushShape = activeTool === 'inpaint' ? inpaintSettings.shape : ocrSettings.shape;
       brushEngineRef.current.beginStroke(pt, {
-        shape: activeTool === 'inpaint' ? inpaintSettings.shape : ocrSettings.shape,
+        shape: brushShape,
         size: brushSize,
         feather: 0,
       });
+
+      const overlay = overlayCanvasRef.current;
+      const ctx = overlay?.getContext('2d');
+      if (ctx) {
+        ctx.fillStyle = activeTool === 'inpaint' ? 'rgba(239, 68, 68, 0.4)' : 'rgba(244, 63, 94, 0.4)';
+        if (brushShape === 'square') {
+          ctx.fillRect(pt.x - brushSize / 2, pt.y - brushSize / 2, brushSize, brushSize);
+        } else {
+          ctx.beginPath();
+          ctx.arc(pt.x, pt.y, brushSize / 2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
       return;
     }
 
@@ -452,6 +466,13 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       // Clicked outside text objects
       if (editingTextId) {
         studioStore.setState({ editingTextId: null });
+      }
+
+      // If a text bubble is currently selected, clicking empty space deselects it
+      if (selectedTextId) {
+        studioStore.setState({ selectedTextId: null });
+        setActiveHandle(null);
+        return;
       }
 
       if (activeTool === 'text') {
@@ -549,8 +570,9 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
     // Inpaint / OCR Brush Drag (draws preview mask on overlay)
     if (activeTool === 'inpaint' || activeTool === 'ocr') {
       const brushSize = activeTool === 'inpaint' ? inpaintSettings.size : ocrSettings.size;
+      const brushShape = activeTool === 'inpaint' ? inpaintSettings.shape : ocrSettings.shape;
       brushEngineRef.current.extendStroke(pt, {
-        shape: activeTool === 'inpaint' ? inpaintSettings.shape : ocrSettings.shape,
+        shape: brushShape,
         size: brushSize,
         feather: 0,
       });
@@ -559,9 +581,13 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       const ctx = overlay?.getContext('2d');
       if (ctx) {
         ctx.fillStyle = activeTool === 'inpaint' ? 'rgba(239, 68, 68, 0.4)' : 'rgba(244, 63, 94, 0.4)';
-        ctx.beginPath();
-        ctx.arc(pt.x, pt.y, brushSize / 2, 0, Math.PI * 2);
-        ctx.fill();
+        if (brushShape === 'square') {
+          ctx.fillRect(pt.x - brushSize / 2, pt.y - brushSize / 2, brushSize, brushSize);
+        } else {
+          ctx.beginPath();
+          ctx.arc(pt.x, pt.y, brushSize / 2, 0, Math.PI * 2);
+          ctx.fill();
+        }
       }
       return;
     }
@@ -694,7 +720,22 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
           paddedBbox,
           selectedInpaintEngineId
         );
-        bgCtx.drawImage(inpaintedImg, cropX, cropY, cropW, cropH);
+
+        // Option B (Torii-parity): Composite inpainted result through the user's stroke mask.
+        // Only pixels directly underneath the circle or square brush strokes are updated on bgCtx,
+        // leaving the surrounding context pixels untouched.
+        const blendCanvas = document.createElement('canvas');
+        blendCanvas.width = cropW;
+        blendCanvas.height = cropH;
+        const blendCtx = blendCanvas.getContext('2d');
+        if (blendCtx) {
+          blendCtx.drawImage(inpaintedImg, 0, 0, cropW, cropH);
+          blendCtx.globalCompositeOperation = 'destination-in';
+          blendCtx.drawImage(maskCanvas, 0, 0);
+          bgCtx.drawImage(blendCanvas, cropX, cropY);
+        } else {
+          bgCtx.drawImage(inpaintedImg, cropX, cropY, cropW, cropH);
+        }
         const postInpaintPatch = BrushEngine.captureBoundingPatch(bgCtx, paddedBbox);
 
         studioUndoStack.push({
