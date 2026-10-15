@@ -12,9 +12,15 @@ import {
   Plus,
   Bold,
   Italic,
+  Download,
 } from 'lucide-react';
 import { studioStore, useStudioStore } from '../state/studioStore';
 import { studioUndoStack } from '../state/undoStack';
+import {
+  renderFullCompositeCanvas,
+  downloadCanvasAsFile,
+  copyCanvasToClipboard,
+} from './compositeExport';
 import {
   clientToImage,
   imageToClient,
@@ -87,6 +93,13 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
   const [initialTransformState, setInitialTransformState] = useState<TextObject | null>(null);
   const [canvasCursor, setCanvasCursor] = useState<string>('default');
   const [inlineSelection, setInlineSelection] = useState<{ start: number; end: number } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    imageX: number;
+    imageY: number;
+    targetObj: TextObject | null;
+  } | null>(null);
 
   const imageWidth = originalImage?.naturalWidth || cleanedImage?.naturalWidth || 800;
   const imageHeight = originalImage?.naturalHeight || cleanedImage?.naturalHeight || 1200;
@@ -447,6 +460,116 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
     };
   }, [selectedTextId, editingTextId, handleDeleteSelectedText, handleDuplicateSelectedText, handleCopyStyle, handlePasteStyle, handleToggleBold, handleToggleItalic]);
 
+  // Global click & escape listener to close custom context menu
+  useEffect(() => {
+    const handleGlobalClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('[data-studio-context-menu]')) {
+        setContextMenu(null);
+      }
+    };
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setContextMenu(null);
+    };
+    window.addEventListener('click', handleGlobalClick);
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => {
+      window.removeEventListener('click', handleGlobalClick);
+      window.removeEventListener('keydown', handleGlobalKeyDown);
+    };
+  }, []);
+
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const pt = getPointerImageCoords(e);
+    const liveTexts = studioStore.getState().textObjects;
+    let clicked: TextObject | null = null;
+    for (let i = liveTexts.length - 1; i >= 0; i--) {
+      if (CanvasFurniture.hitTestBody(pt, liveTexts[i])) {
+        clicked = liveTexts[i];
+        break;
+      }
+    }
+
+    if (clicked) {
+      studioStore.setState({ selectedTextId: clicked.id });
+    }
+
+    setContextMenu({
+      x: e.clientX,
+      y: e.clientY,
+      imageX: pt.x,
+      imageY: pt.y,
+      targetObj: clicked,
+    });
+  };
+
+  const handleContextDownload = async (format: 'png' | 'jpeg' = 'png') => {
+    const bgCanvas = bgCanvasRef.current;
+    const compositeCanvas = renderFullCompositeCanvas(
+      imageWidth,
+      imageHeight,
+      bgCanvas,
+      originalImage,
+      viewMode,
+      imageLayers,
+      textObjects
+    );
+    await downloadCanvasAsFile(compositeCanvas, `kites-translated.${format === 'jpeg' ? 'jpg' : 'png'}`, format);
+    setContextMenu(null);
+  };
+
+  const handleContextCopyImage = async () => {
+    const bgCanvas = bgCanvasRef.current;
+    const compositeCanvas = renderFullCompositeCanvas(
+      imageWidth,
+      imageHeight,
+      bgCanvas,
+      originalImage,
+      viewMode,
+      imageLayers,
+      textObjects
+    );
+    const ok = await copyCanvasToClipboard(compositeCanvas);
+    setContextMenu(null);
+    if (ok) {
+      setOcrFeedback('Full image copied to clipboard!');
+      setTimeout(() => setOcrFeedback(null), 2500);
+    }
+  };
+
+  const handleContextAddBoxHere = () => {
+    if (!contextMenu) return;
+    const id = `bubble-${Date.now()}`;
+    const newObj: TextObject = {
+      id,
+      x: Math.round(contextMenu.imageX - 70),
+      y: Math.round(contextMenu.imageY - 25),
+      width: 140,
+      height: 50,
+      text: 'New Dialogue',
+      fontSize: 18,
+      fontFamily: 'WildWords, CCWildWords, sans-serif',
+      color: '#000000',
+      strokeColor: '#ffffff',
+      strokeWidth: 2,
+      align: 'center',
+      isVertical: false,
+    };
+    const prev = [...textObjects];
+    const next = [...textObjects, newObj];
+    studioStore.setState({ textObjects: next, selectedTextId: id, editingTextId: id });
+    studioUndoStack.push({
+      id: `add-box-${Date.now()}`,
+      timestamp: Date.now(),
+      description: 'Add Text Box',
+      textObjects: { before: prev, after: next },
+    });
+    setContextMenu(null);
+  };
+
   // Mouse wheel listener: natural scrolling vs cursor-centered zoom
   const handleWheel = (e: React.WheelEvent) => {
     const container = containerRef.current;
@@ -476,7 +599,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
     }
   };
 
-  const getPointerImageCoords = (e: React.PointerEvent): Point => {
+  const getPointerImageCoords = (e: { clientX: number; clientY: number }): Point => {
     const overlay = overlayCanvasRef.current;
     if (!overlay) return { x: 0, y: 0 };
     return clientToImage(
@@ -1207,6 +1330,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
         {/* Pristine original image canvas (visible when viewMode is 'original') */}
         <canvas
           ref={originalCanvasRef}
+          onContextMenu={handleContextMenu}
           style={{
             width: `${imageWidth * zoom}px`,
             height: `${imageHeight * zoom}px`,
@@ -1218,6 +1342,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
         {/* Working background raster canvas (cleaned/painted artwork; visible in 'inpainted' and 'translated' modes) */}
         <canvas
           ref={bgCanvasRef}
+          onContextMenu={handleContextMenu}
           data-studio-working-background="true"
           id="studio-working-background"
           style={{
@@ -1236,6 +1361,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
           onPointerUp={handlePointerUp}
           onPointerCancel={handlePointerUp}
           onDoubleClick={handleDoubleClick}
+          onContextMenu={handleContextMenu}
           style={{
             width: `${imageWidth * zoom}px`,
             height: `${imageHeight * zoom}px`,
@@ -1542,6 +1668,108 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
         <div className="fixed top-16 right-6 z-50 flex items-center gap-2 px-3 py-1.5 rounded-xl border border-[#f4446d]/40 bg-[#12141c]/90 backdrop-blur-md text-xs text-[#f4446d] shadow-xl">
           <Sparkles className="w-4 h-4 animate-spin text-[#f4446d]" />
           <span>Local WebGPU Inference...</span>
+        </div>
+      )}
+
+      {/* Custom Full-Composite Canvas Context Menu (Prevents transparent overlay right-click save bug) */}
+      {contextMenu && (
+        <div
+          data-studio-context-menu="true"
+          style={{
+            left: `${Math.min(contextMenu.x, window.innerWidth - 220)}px`,
+            top: `${Math.min(contextMenu.y, window.innerHeight - 260)}px`,
+          }}
+          className="fixed z-50 w-52 rounded-xl border border-[#282d3f] bg-[#12141c]/95 backdrop-blur-md p-1.5 shadow-2xl text-xs text-slate-200 select-none animate-in fade-in duration-100"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="px-2 py-1 text-[10px] uppercase font-bold text-slate-500 tracking-wider">
+            Image Export
+          </div>
+          <button
+            type="button"
+            onClick={() => handleContextDownload('png')}
+            className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-[#1c1f2e] hover:text-white transition cursor-pointer text-left"
+          >
+            <Download className="w-3.5 h-3.5 text-[#f4446d]" />
+            <span>Save Image As (PNG)</span>
+          </button>
+          <button
+            type="button"
+            onClick={handleContextCopyImage}
+            className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-[#1c1f2e] hover:text-white transition cursor-pointer text-left"
+          >
+            <Copy className="w-3.5 h-3.5 text-indigo-400" />
+            <span>Copy Full Image</span>
+          </button>
+
+          <div className="my-1 border-t border-[#262a3b]" />
+
+          {contextMenu.targetObj ? (
+            <>
+              <div className="px-2 py-1 text-[10px] uppercase font-bold text-slate-500 tracking-wider">
+                Dialogue Bubble
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText(contextMenu.targetObj!.text);
+                  setOcrFeedback('Copied dialogue text');
+                  setTimeout(() => setOcrFeedback(null), 2000);
+                  setContextMenu(null);
+                }}
+                className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-[#1c1f2e] hover:text-white transition cursor-pointer text-left"
+              >
+                <Copy className="w-3.5 h-3.5 text-slate-400" />
+                <span>Copy Dialogue Text</span>
+              </button>
+              {contextMenu.targetObj.originalText && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(contextMenu.targetObj!.originalText!);
+                    setOcrFeedback('Copied original OCR text');
+                    setTimeout(() => setOcrFeedback(null), 2000);
+                    setContextMenu(null);
+                  }}
+                  className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-[#1c1f2e] hover:text-white transition cursor-pointer text-left"
+                >
+                  <Languages className="w-3.5 h-3.5 text-[#f4446d]" />
+                  <span>Copy Original OCR</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  handleDuplicateSelectedText();
+                  setContextMenu(null);
+                }}
+                className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-[#1c1f2e] hover:text-white transition cursor-pointer text-left"
+              >
+                <CopyPlus className="w-3.5 h-3.5 text-slate-400" />
+                <span>Duplicate Bubble</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  handleDeleteSelectedText();
+                  setContextMenu(null);
+                }}
+                className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-[#f4446d]/15 text-[#f4446d] hover:text-[#e0355e] transition cursor-pointer text-left"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Delete Bubble</span>
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={handleContextAddBoxHere}
+              className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-[#1c1f2e] hover:text-white transition cursor-pointer text-left"
+            >
+              <Plus className="w-3.5 h-3.5 text-[#f4446d]" />
+              <span>Add Text Box Here</span>
+            </button>
+          )}
         </div>
       )}
     </div>

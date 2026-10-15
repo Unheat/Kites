@@ -22,11 +22,19 @@ import {
   RotateCcw,
   Loader,
   Info,
+  Download,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { db } from '../db';
 import { studioStore, useStudioStore } from './state/studioStore';
 import { studioUndoStack } from './state/undoStack';
 import { requestStudioOcr } from './bridge/offscreenStudioBridge';
+import {
+  renderFullCompositeCanvas,
+  downloadCanvasAsFile,
+  copyCanvasToClipboard,
+} from './canvas/compositeExport';
 import {
   calculateFitWidth,
   calculateFitHeight,
@@ -46,8 +54,6 @@ import { ExportTranscriptModal } from './modals/ExportTranscriptModal';
 import { ShortcutsModal } from './modals/ShortcutsModal';
 import { FontManagerModal } from './modals/FontManagerModal';
 import { AppearanceSettingsModal } from './modals/AppearanceSettingsModal';
-import { TextRenderer } from './canvas/TextRenderer';
-import { WarpMesh } from './canvas/WarpMesh';
 import type { BoundedDirtyRectPatch, ImageLayer, StudioTool, TextObject } from './types';
 
 export interface StudioProps {
@@ -95,6 +101,8 @@ export const Studio: React.FC<StudioProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const [isRetranslating, setIsRetranslating] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [exportDropdownOpen, setExportDropdownOpen] = useState(false);
+  const [copiedImageToast, setCopiedImageToast] = useState(false);
 
   const imageWidth = originalImage?.naturalWidth || cleanedImage?.naturalWidth || 800;
   const imageHeight = originalImage?.naturalHeight || cleanedImage?.naturalHeight || 1200;
@@ -230,54 +238,73 @@ export const Studio: React.FC<StudioProps> = ({
     }
   };
 
+  const getCleanBaseFilename = (): string => {
+    let name = jobTitle || 'manga-page';
+    name = name.replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9_\-]/g, '_');
+    return name.slice(0, 40) || 'manga-page';
+  };
+
+  const handleExportImage = async (format: 'png' | 'jpeg' = 'png') => {
+    const bgCanvas = getWorkingCanvas();
+    const compositeCanvas = renderFullCompositeCanvas(
+      imageWidth,
+      imageHeight,
+      bgCanvas,
+      originalImage,
+      viewMode,
+      imageLayers,
+      textObjects
+    );
+    const filename = `kites-${getCleanBaseFilename()}-translated.${format === 'jpeg' ? 'jpg' : 'png'}`;
+    await downloadCanvasAsFile(compositeCanvas, filename, format);
+    setToastMessage(`Exported ${format.toUpperCase()} image successfully!`);
+    setTimeout(() => setToastMessage(null), 3000);
+  };
+
+  const handleCopyCompositeToClipboard = async () => {
+    const bgCanvas = getWorkingCanvas();
+    const compositeCanvas = renderFullCompositeCanvas(
+      imageWidth,
+      imageHeight,
+      bgCanvas,
+      originalImage,
+      viewMode,
+      imageLayers,
+      textObjects
+    );
+    const success = await copyCanvasToClipboard(compositeCanvas);
+    if (success) {
+      setToastMessage('Full image copied to clipboard!');
+      setCopiedImageToast(true);
+      setTimeout(() => setCopiedImageToast(false), 2000);
+    } else {
+      setToastMessage('Could not copy image to clipboard');
+    }
+    setTimeout(() => setToastMessage(null), 3000);
+  };
+
   const handleSaveImage = async () => {
     if (!onSave) return;
     setIsSaving(true);
     try {
       const bgCanvas = getWorkingCanvas();
-      const exportCanvas = document.createElement('canvas');
-      exportCanvas.width = imageWidth;
-      exportCanvas.height = imageHeight;
-      const ctx = exportCanvas.getContext('2d');
-      if (ctx) {
-        if (bgCanvas) ctx.drawImage(bgCanvas, 0, 0);
-
-        for (const layer of imageLayers) {
-          if (layer.isVisible === false || !layer.imageBitmap) continue;
-          ctx.save();
-          ctx.translate(layer.x + layer.width / 2, layer.y + layer.height / 2);
-          if (layer.rotation) ctx.rotate((layer.rotation * Math.PI) / 180);
-          if (layer.flipH || layer.flipV) ctx.scale(layer.flipH ? -1 : 1, layer.flipV ? -1 : 1);
-          ctx.globalAlpha = layer.opacity;
-          ctx.drawImage(layer.imageBitmap, -layer.width / 2, -layer.height / 2, layer.width, layer.height);
-          ctx.restore();
-        }
-
-        for (const obj of textObjects) {
-          if (obj.isVisible === false) continue;
-          if (obj.warpPreset && obj.warpPreset !== 'none' && obj.quadPoints) {
-            const tempCanvas = document.createElement('canvas');
-            tempCanvas.width = obj.width;
-            tempCanvas.height = obj.height;
-            const tempCtx = tempCanvas.getContext('2d');
-            if (tempCtx) {
-              TextRenderer.renderText(tempCtx, { ...obj, x: 0, y: 0, rotation: 0 });
-              ctx.save();
-              ctx.translate(obj.x, obj.y);
-              WarpMesh.renderWarpedMesh(ctx, tempCanvas, obj.quadPoints);
-              ctx.restore();
-            }
-          } else {
-            TextRenderer.renderText(ctx, obj);
-          }
-        }
-      }
+      const exportCanvas = renderFullCompositeCanvas(
+        imageWidth,
+        imageHeight,
+        bgCanvas,
+        originalImage,
+        viewMode,
+        imageLayers,
+        textObjects
+      );
 
       exportCanvas.toBlob(async (blob) => {
         if (blob) {
           await onSave(blob, textObjects);
         }
         setIsSaving(false);
+        setToastMessage('Saved changes to library!');
+        setTimeout(() => setToastMessage(null), 3000);
       }, 'image/png');
     } catch (err) {
       console.error('[Studio] Save failed:', err);
@@ -538,11 +565,19 @@ export const Studio: React.FC<StudioProps> = ({
               <Search className="w-3.5 h-3.5" /> Find & Replace
             </button>
             <button
+              onClick={() => handleExportImage('png')}
+              title="Download full translated page image (PNG)"
+              className="flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-lg bg-[#f4446d] hover:bg-[#e0355e] text-white text-xs font-semibold shadow-md shadow-[rgba(244,68,109,0.35)] transition cursor-pointer"
+            >
+              <Download className="w-3.5 h-3.5" /> Export Image
+            </button>
+            <button
               onClick={handleSaveImage}
               disabled={isSaving}
-              className="flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-lg bg-[#f4446d] hover:bg-[#e0355e] text-white text-xs font-semibold shadow-md shadow-[rgba(244,68,109,0.35)] transition disabled:opacity-50"
+              title="Save changes to Kites library"
+              className="flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-lg border border-[#262a3b] bg-[#090a0f] text-xs font-medium text-slate-300 hover:bg-[#1c1f2e] transition disabled:opacity-50 cursor-pointer"
             >
-              <Save className="w-3.5 h-3.5" /> {isSaving ? 'Saving...' : 'Save Image'}
+              <Save className="w-3.5 h-3.5 text-indigo-400" /> {isSaving ? 'Saving...' : 'Save to DB'}
             </button>
             <button
               onClick={handleRetranslatePage}
@@ -694,10 +729,60 @@ export const Studio: React.FC<StudioProps> = ({
               <button
                 onClick={() => studioStore.setClampedZoom(zoom * 1.15)}
                 title="Zoom In"
-                className="p-1 rounded-md text-slate-400 hover:text-white hover:bg-[#1c1f2e] transition"
+                className="p-1 rounded-md text-slate-400 hover:text-white hover:bg-[#1c1f2e] transition cursor-pointer"
               >
                 <ZoomIn className="w-3.5 h-3.5" />
               </button>
+            </div>
+
+            {/* Export Image Dropdown */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setExportDropdownOpen((prev) => !prev)}
+                className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-[#f4446d] hover:bg-[#e0355e] text-white text-xs font-semibold shadow-xs transition cursor-pointer"
+                title="Export or download image"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Export</span>
+                <ChevronDown className="w-3 h-3 text-white/80" />
+              </button>
+
+              {exportDropdownOpen && (
+                <div
+                  className="absolute top-full mt-1.5 right-0 w-44 rounded-xl border border-[#262a3b] bg-[#12141c]/95 backdrop-blur-md p-1.5 shadow-2xl text-xs z-50 space-y-0.5"
+                  onClick={() => setExportDropdownOpen(false)}
+                >
+                  <button
+                    type="button"
+                    onClick={() => handleExportImage('png')}
+                    className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-[#1c1f2e] text-slate-200 text-left transition cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5 text-[#f4446d]" />
+                    <span>Download PNG</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleExportImage('jpeg')}
+                    className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-[#1c1f2e] text-slate-200 text-left transition cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Download JPEG</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCopyCompositeToClipboard}
+                    className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-[#1c1f2e] text-slate-200 text-left transition cursor-pointer"
+                  >
+                    {copiedImageToast ? (
+                      <Check className="w-3.5 h-3.5 text-emerald-400" />
+                    ) : (
+                      <Copy className="w-3.5 h-3.5 text-indigo-400" />
+                    )}
+                    <span>Copy Full Image</span>
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>
