@@ -545,10 +545,16 @@ async function handleStudioInpaint(payload: StudioInpaintPayload): Promise<{ inp
   const imageRes = await fetch(payload.imagePatchBase64);
   const imageBuf = await imageRes.arrayBuffer();
 
-  const popupState = await new Promise<any>((resolve) => {
-    chrome.runtime.sendMessage({ type: 'GET_POPUP_STATE' }, (res) => resolve(res || {}));
-  });
-  const inpaintTier = payload.engineId || popupState.activeInpaintId || 'lama-manga';
+  let inpaintTier: string = payload.engineId || '';
+  if (!inpaintTier) {
+    const popupState = await new Promise<any>((resolve) => {
+      chrome.runtime.sendMessage(
+        { type: 'GET_POPUP_STATE', target: 'background', source: 'offscreen', request: true },
+        (res) => resolve(res || {})
+      );
+    });
+    inpaintTier = popupState.activeInpaintId || 'lama-manga';
+  }
 
   let maskPolygons: Point2D[][] = [];
   if (payload.maskPatchBase64) {
@@ -579,7 +585,7 @@ async function handleStudioInpaint(payload: StudioInpaintPayload): Promise<{ inp
     ]];
   }
 
-  const cleanedBuffer = await pipelineOrchestrator.getInpaintManager().eraseText(imageBuf, maskPolygons, inpaintTier);
+  const cleanedBuffer = await pipelineOrchestrator.getInpaintManager().eraseText(imageBuf, maskPolygons, inpaintTier as any);
   const cleanedBlob = new Blob([cleanedBuffer], { type: 'image/png' });
   const cleanedBase64 = await blobToBase64(cleanedBlob);
 

@@ -686,13 +686,23 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       const bbox = brushEngineRef.current.endStroke(0);
       if (bbox.width <= 5 || bbox.height <= 5) return;
 
-      const pad = 12;
-      const cropX = Math.max(0, bbox.x - pad);
-      const cropY = Math.max(0, bbox.y - pad);
-      const cropW = Math.min(imageWidth - cropX, bbox.width + pad * 2);
-      const cropH = Math.min(imageHeight - cropY, bbox.height + pad * 2);
+      // 1. Immediately redraw overlay so the user-drawn live red brush preview is cleared
+      // and not accidentally baked into the inpaint source crop.
+      redrawOverlay();
+
+      // 2. Ensure sufficient surrounding context for inpainting models (minimum 128px patch)
+      const minContextSize = 128;
+      const targetW = Math.max(minContextSize, bbox.width + 48);
+      const targetH = Math.max(minContextSize, bbox.height + 48);
+      const centerX = bbox.x + bbox.width / 2;
+      const centerY = bbox.y + bbox.height / 2;
+      const cropX = Math.max(0, Math.min(imageWidth - targetW, Math.floor(centerX - targetW / 2)));
+      const cropY = Math.max(0, Math.min(imageHeight - targetH, Math.floor(centerY - targetH / 2)));
+      const cropW = Math.min(imageWidth - cropX, targetW);
+      const cropH = Math.min(imageHeight - cropY, targetH);
       const paddedBbox: BoundingBox = { x: cropX, y: cropY, width: cropW, height: cropH };
 
+      // 3. Extract source crop AFTER overlay is cleanly redrawn
       const patchCanvas = StudioSourceSampler.extractCrop(
         inpaintSettings.source,
         paddedBbox,
@@ -717,7 +727,6 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       }
 
       const preInpaintPatch = BrushEngine.captureBoundingPatch(bgCtx, paddedBbox);
-      redrawOverlay();
 
       setIsAiProcessing(true);
       try {

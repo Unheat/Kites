@@ -43,7 +43,9 @@
 - Made `overlayCanvasRef` permanently active (`display: 'block'`) across all view modes so that pointer listeners and red brush preview overlays (`rgba(244, 68, 109, 0.45)`) function seamlessly on top of both Original and Inpainted BG layers.
 - In `redrawOverlay`, cleared the canvas when `viewMode !== 'translated'` to ensure text objects and stickers remain hidden in non-translated modes.
 - Replaced `isShowingOriginal` early return in `handlePointerDown` with `ToolViewModePolicy.isToolAllowed(activeTool, viewMode)`.
-- In `handlePointerUp` for `inpaint`, extracted crop using `StudioSourceSampler.extractCrop(inpaintSettings.source, ...)` and dab mask from `brushEngine`.
+- In `handlePointerUp` for `inpaint`, immediately cleared overlay via `redrawOverlay()` before sampling `StudioSourceSampler.extractCrop` to prevent baking live red brush circles into the inpaint input patch.
+- Provided minimum 128px bounding box context padding around the inpaint brush stroke so neural inpaint models receive adequate background artwork context on all 4 sides.
+- In `TeleaInpaintEngine.ts`, used `OffscreenCanvas` when available and added `canvas.toDataURL()` fallback to `canvasToArrayBuffer` to eliminate headless offscreen compositor deadlocks.
 - Restricted Layer 4 in-place text editor and floating action pill toolbar to `viewMode === 'translated'`.
 
 #### E. UI Controls (`src/studio/Studio.tsx`, `src/studio/tools/InpaintSettings.tsx`)

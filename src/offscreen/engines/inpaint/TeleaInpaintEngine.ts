@@ -40,13 +40,15 @@ export class TeleaInpaintEngine implements IInpaintEngine {
    * @returns A promise resolving to the inpainted image as an ArrayBuffer.
    */
   async inpaint(imageBuffer: ArrayBuffer, maskPolygons: Point2D[][], _strokeMaskCanvas?: any): Promise<ArrayBuffer> {
-    // 1. Prepare canvases
+    // 1. Prepare canvases (prefer OffscreenCanvas to prevent headless compositor delays)
     const rawCanvas = await this.platform.canvas.prepareCanvas(imageBuffer);
     const width = rawCanvas.width;
     const height = rawCanvas.height;
 
     // Copy to CPU-backed canvas
-    const sourceCanvas = this.platform.createCanvas(width, height);
+    const sourceCanvas = typeof OffscreenCanvas !== 'undefined'
+      ? new OffscreenCanvas(width, height)
+      : this.platform.createCanvas(width, height);
     const ctx = sourceCanvas.getContext('2d', { willReadFrequently: true });
     ctx.drawImage(rawCanvas, 0, 0);
 
@@ -55,7 +57,9 @@ export class TeleaInpaintEngine implements IInpaintEngine {
     }
 
     // 2. Generate an inflated solid mask canvas (on a fresh CPU canvas directly)
-    const maskCanvas = this.platform.createCanvas(width, height);
+    const maskCanvas = typeof OffscreenCanvas !== 'undefined'
+      ? new OffscreenCanvas(width, height)
+      : this.platform.createCanvas(width, height);
     const maskCtx = maskCanvas.getContext('2d', { willReadFrequently: true });
     maskCtx.fillStyle = '#000000';
     maskCtx.fillRect(0, 0, width, height);
@@ -234,6 +238,13 @@ export class TeleaInpaintEngine implements IInpaintEngine {
       if (typeof canvas.convertToBlob === 'function') {
         const blob = await canvas.convertToBlob({ type: 'image/png' });
         return await blob.arrayBuffer();
+      } else if (typeof canvas.toDataURL === 'function') {
+        // WORKAROUND: In Chromium offscreen documents, HTMLCanvasElement.toBlob() relies on
+        // the asynchronous compositor frame loop which may not pump in unattached background frames.
+        // canvas.toDataURL() + fetch() is synchronous and never stalls.
+        const dataUrl = canvas.toDataURL('image/png');
+        const res = await fetch(dataUrl);
+        return await res.arrayBuffer();
       } else {
         return new Promise((resolve, reject) => {
           canvas.toBlob((blob: Blob | null) => {
