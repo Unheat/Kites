@@ -132,6 +132,7 @@ export interface StudioState {
   editingTextId: string | null;
   clipboardStyle: Partial<TextObject> | null;
   globalEditMode: boolean;
+  inlineSelection: { textId: string; start: number; end: number } | null;
   originalImage: HTMLImageElement | null;
 
   imageLayers: ImageLayer[];
@@ -212,6 +213,7 @@ const initialState: StudioState = {
   editingTextId: null,
   clipboardStyle: null,
   globalEditMode: false,
+  inlineSelection: null,
   originalImage: null,
 
   imageLayers: [],

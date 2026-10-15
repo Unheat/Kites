@@ -19,13 +19,24 @@ import {
 import { studioStore, useStudioStore, extractTypographyStyle } from '../state/studioStore';
 import { studioUndoStack } from '../state/undoStack';
 import { recalculateBlockTypeset } from '../canvas/studioTypeset';
-import type { TextObject } from '../types';
+import type { TextObject, CharStyleOverride } from '../types';
+
+const SELECTION_ELIGIBLE_KEYS: (keyof CharStyleOverride)[] = [
+  'bold',
+  'italic',
+  'fontFamily',
+  'fontSize',
+  'color',
+  'strokeColor',
+  'strokeWidth',
+];
 
 export const TypographySettings: React.FC = () => {
   const textObjects = useStudioStore((s) => s.textObjects);
   const selectedTextId = useStudioStore((s) => s.selectedTextId);
   const globalEditMode = useStudioStore((s) => s.globalEditMode);
   const originalImage = useStudioStore((s) => s.originalImage);
+  const inlineSelection = useStudioStore((s) => s.inlineSelection);
 
   const selectedObj = textObjects.find((t) => t.id === selectedTextId);
 
@@ -37,6 +48,28 @@ export const TypographySettings: React.FC = () => {
 
   const cropCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const initialTextObjectsRef = useRef<TextObject[] | null>(null);
+
+  const isSelectionActive = Boolean(
+    !globalEditMode &&
+    selectedObj &&
+    inlineSelection &&
+    inlineSelection.textId === selectedObj.id &&
+    inlineSelection.start !== inlineSelection.end
+  );
+
+  const selStart = inlineSelection ? Math.min(inlineSelection.start, inlineSelection.end) : 0;
+  const selEnd = inlineSelection ? Math.max(inlineSelection.start, inlineSelection.end) : 0;
+  const currentSelOverride = (isSelectionActive && selectedObj?.charStyles)
+    ? selectedObj.charStyles[selStart]
+    : null;
+
+  const effectiveBold = currentSelOverride?.bold !== undefined ? currentSelOverride.bold : Boolean(selectedObj?.bold);
+  const effectiveItalic = currentSelOverride?.italic !== undefined ? currentSelOverride.italic : Boolean(selectedObj?.italic);
+  const effectiveFontFamily = currentSelOverride?.fontFamily || selectedObj?.fontFamily || 'WildWords, CCWildWords, sans-serif';
+  const effectiveFontSize = currentSelOverride?.fontSize || selectedObj?.fontSize || 16;
+  const effectiveColor = currentSelOverride?.color || selectedObj?.color || '#000000';
+  const effectiveStrokeColor = currentSelOverride?.strokeColor || selectedObj?.strokeColor || '#ffffff';
+  const effectiveStrokeWidth = currentSelOverride?.strokeWidth !== undefined ? currentSelOverride.strokeWidth : (selectedObj?.strokeWidth || 0);
 
   const handleCopyStyle = () => {
     if (!selectedObj) return;
@@ -104,7 +137,77 @@ export const TypographySettings: React.FC = () => {
     if (globalEditMode) {
       next = textObjects.map((obj) => ({ ...obj, ...partial }));
     } else if (selectedObj) {
-      next = textObjects.map((obj) => (obj.id === selectedObj.id ? { ...obj, ...partial } : obj));
+      const liveSelection = studioStore.getState().inlineSelection;
+      const hasActiveSel =
+        liveSelection &&
+        liveSelection.textId === selectedObj.id &&
+        liveSelection.start !== liveSelection.end;
+
+      const hasSelectionEligibleProp = Object.keys(partial).some((k) =>
+        SELECTION_ELIGIBLE_KEYS.includes(k as keyof CharStyleOverride)
+      );
+
+      if (hasActiveSel && hasSelectionEligibleProp) {
+        const start = Math.min(liveSelection.start, liveSelection.end);
+        const end = Math.max(liveSelection.start, liveSelection.end);
+        const textLen = selectedObj.text.length;
+        const charStyles: (CharStyleOverride | null)[] = selectedObj.charStyles
+          ? [...selectedObj.charStyles]
+          : new Array(textLen).fill(null);
+        while (charStyles.length < textLen) charStyles.push(null);
+
+        for (let i = start; i < end && i < textLen; i++) {
+          const existing: CharStyleOverride = charStyles[i] ? { ...charStyles[i] } : {};
+          for (const key of SELECTION_ELIGIBLE_KEYS) {
+            if (key in partial) {
+              const val = (partial as any)[key];
+              if (val === (selectedObj as any)[key]) {
+                delete (existing as any)[key];
+              } else {
+                (existing as any)[key] = val;
+              }
+            }
+          }
+          charStyles[i] = Object.keys(existing).length > 0 ? existing : null;
+        }
+
+        const nonSelectionPartial: Partial<TextObject> = {};
+        for (const key of Object.keys(partial) as (keyof TextObject)[]) {
+          if (!SELECTION_ELIGIBLE_KEYS.includes(key as any)) {
+            (nonSelectionPartial as any)[key] = partial[key];
+          }
+        }
+
+        const updated: TextObject = {
+          ...selectedObj,
+          ...nonSelectionPartial,
+          charStyles: charStyles.some(Boolean) ? charStyles : undefined,
+        };
+        next = textObjects.map((obj) => (obj.id === selectedObj.id ? updated : obj));
+      } else {
+        // Object-wide update: if changing a property box-wide, clear overrides for that property in charStyles
+        let updatedCharStyles = selectedObj.charStyles ? [...selectedObj.charStyles] : undefined;
+        if (updatedCharStyles && updatedCharStyles.some(Boolean)) {
+          updatedCharStyles = updatedCharStyles.map((s) => {
+            if (!s) return null;
+            const copy = { ...s };
+            for (const key of SELECTION_ELIGIBLE_KEYS) {
+              if (key in partial) {
+                delete (copy as any)[key];
+              }
+            }
+            return Object.keys(copy).length > 0 ? copy : null;
+          });
+          if (!updatedCharStyles.some(Boolean)) updatedCharStyles = undefined;
+        }
+
+        const updated: TextObject = {
+          ...selectedObj,
+          ...partial,
+          charStyles: updatedCharStyles,
+        };
+        next = textObjects.map((obj) => (obj.id === selectedObj.id ? updated : obj));
+      }
     } else {
       return;
     }
@@ -113,7 +216,7 @@ export const TypographySettings: React.FC = () => {
     studioUndoStack.push({
       id: `text-edit-${Date.now()}`,
       timestamp: Date.now(),
-      description: 'Update Typography',
+      description: isSelectionActive ? 'Format Selected Text' : 'Update Typography',
       textObjects: { before: prev, after: next },
     });
   };
@@ -248,7 +351,7 @@ export const TypographySettings: React.FC = () => {
   const obj = selectedObj || textObjects[0] || ({} as Partial<TextObject>);
 
   return (
-    <div className="space-y-3.5 text-xs text-slate-200">
+    <div className="space-y-3.5 text-xs text-slate-200" data-studio-sidebar="true">
       {/* ======================================================== */}
       {/* 0. PERMANENT TOP ACTION BAR: ALWAYS VISIBLE             */}
       {/* ======================================================== */}
@@ -262,7 +365,7 @@ export const TypographySettings: React.FC = () => {
         </button>
         {selectedObj && (
           <button
-            onClick={() => studioStore.setState({ selectedTextId: null, editingTextId: null })}
+            onClick={() => studioStore.setState({ selectedTextId: null, editingTextId: null, inlineSelection: null })}
             title="Deselect text box"
             className="py-2 px-2.5 rounded-lg border border-[#282d3f] bg-[#090a0f] text-slate-400 hover:text-white hover:bg-[#1c1f2e] text-xs font-medium transition cursor-pointer"
           >
@@ -454,10 +557,56 @@ export const TypographySettings: React.FC = () => {
           value={obj.text ?? ''}
           onChange={(e) => handleTextChange(e.target.value)}
           onBlur={handleTextBlur}
+          onSelect={(e) => {
+            const el = e.target as HTMLTextAreaElement;
+            studioStore.setState({
+              inlineSelection: {
+                textId: obj.id,
+                start: el.selectionStart,
+                end: el.selectionEnd,
+              },
+            });
+          }}
+          onKeyUp={(e) => {
+            const el = e.target as HTMLTextAreaElement;
+            studioStore.setState({
+              inlineSelection: {
+                textId: obj.id,
+                start: el.selectionStart,
+                end: el.selectionEnd,
+              },
+            });
+          }}
+          onMouseUp={(e) => {
+            const el = e.target as HTMLTextAreaElement;
+            studioStore.setState({
+              inlineSelection: {
+                textId: obj.id,
+                start: el.selectionStart,
+                end: el.selectionEnd,
+              },
+            });
+          }}
           placeholder="Type translation dialogue here..."
           rows={3}
           className="w-full rounded-lg border border-[#262a3b] bg-[#12141c] p-2.5 text-xs text-slate-100 placeholder:text-slate-600 focus:border-[#f4446d] focus:outline-hidden transition resize-y min-h-[64px] max-h-48 leading-relaxed font-sans"
         />
+
+        {isSelectionActive && (
+          <div className="flex items-center justify-between text-[11px] text-[#f4446d] bg-[#f4446d]/10 px-2.5 py-1.5 rounded-lg border border-[#f4446d]/20 animate-in fade-in duration-150">
+            <span className="truncate max-w-[210px] font-medium">
+              Formatting selection: "{obj.text?.slice(selStart, selEnd)}"
+            </span>
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => studioStore.setState({ inlineSelection: null })}
+              className="text-[10px] text-slate-400 hover:text-white shrink-0 ml-1 underline cursor-pointer"
+            >
+              Deselect
+            </button>
+          </div>
+        )}
 
         <div className="flex items-center justify-between text-[10px] text-slate-500 pt-0.5">
           <span>
@@ -475,7 +624,7 @@ export const TypographySettings: React.FC = () => {
       <div>
         <label className="block text-slate-400 font-medium mb-1">Font Family</label>
         <select
-          value={obj.fontFamily || 'WildWords'}
+          value={effectiveFontFamily}
           onChange={(e) => updateSelected({ fontFamily: e.target.value })}
           className="w-full rounded-lg border border-[#282d3f] bg-[#090a0f] px-2.5 py-1.5 text-xs text-slate-200 focus:outline-hidden"
         >
@@ -493,13 +642,13 @@ export const TypographySettings: React.FC = () => {
         <div>
           <div className="flex justify-between text-slate-400 mb-1">
             <span>Size</span>
-            <span className="font-mono text-slate-200">{obj.fontSize || 16}px</span>
+            <span className="font-mono text-slate-200">{effectiveFontSize}px</span>
           </div>
           <input
             type="range"
             min="8"
             max="120"
-            value={obj.fontSize || 16}
+            value={effectiveFontSize}
             onChange={(e) => updateSelected({ fontSize: Number(e.target.value) })}
             className="w-full accent-[#f4446d]"
           />
@@ -524,9 +673,11 @@ export const TypographySettings: React.FC = () => {
       {/* Formatting & Alignment */}
       <div className="flex items-center gap-1.5">
         <button
-          onClick={() => updateSelected({ bold: !obj.bold })}
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => updateSelected({ bold: !effectiveBold })}
           className={`p-2 rounded-lg border transition ${
-            obj.bold
+            effectiveBold
               ? 'border-[#f4446d] bg-[#f4446d]/15 text-[#f4446d]'
               : 'border-[#282d3f] bg-[#090a0f] text-slate-400'
           }`}
@@ -535,9 +686,11 @@ export const TypographySettings: React.FC = () => {
           <Bold className="w-3.5 h-3.5" />
         </button>
         <button
-          onClick={() => updateSelected({ italic: !obj.italic })}
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => updateSelected({ italic: !effectiveItalic })}
           className={`p-2 rounded-lg border transition ${
-            obj.italic
+            effectiveItalic
               ? 'border-[#f4446d] bg-[#f4446d]/15 text-[#f4446d]'
               : 'border-[#282d3f] bg-[#090a0f] text-slate-400'
           }`}
@@ -546,6 +699,8 @@ export const TypographySettings: React.FC = () => {
           <Italic className="w-3.5 h-3.5" />
         </button>
         <button
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
           onClick={() => updateSelected({ uppercase: !obj.uppercase, lowercase: false })}
           className={`p-2 rounded-lg border transition ${
             obj.uppercase
@@ -557,6 +712,8 @@ export const TypographySettings: React.FC = () => {
           <CaseUpper className="w-3.5 h-3.5" />
         </button>
         <button
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
           onClick={() => updateSelected({ align: 'left' })}
           className={`p-2 rounded-lg border transition ${
             obj.align === 'left'
@@ -568,6 +725,8 @@ export const TypographySettings: React.FC = () => {
           <AlignLeft className="w-3.5 h-3.5" />
         </button>
         <button
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
           onClick={() => updateSelected({ align: 'center' })}
           className={`p-2 rounded-lg border transition ${
             obj.align === 'center' || !obj.align
@@ -579,6 +738,8 @@ export const TypographySettings: React.FC = () => {
           <AlignCenter className="w-3.5 h-3.5" />
         </button>
         <button
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
           onClick={() => updateSelected({ align: 'right' })}
           className={`p-2 rounded-lg border transition ${
             obj.align === 'right'
@@ -622,7 +783,7 @@ export const TypographySettings: React.FC = () => {
         <div className="flex items-center gap-2">
           <input
             type="color"
-            value={obj.color || '#000000'}
+            value={effectiveColor}
             onChange={(e) => updateSelected({ color: e.target.value })}
             className="w-7 h-7 rounded border border-[#282d3f] bg-transparent cursor-pointer"
           />
@@ -636,7 +797,7 @@ export const TypographySettings: React.FC = () => {
           )}
           <input
             type="text"
-            value={obj.color || '#000000'}
+            value={effectiveColor}
             onChange={(e) => updateSelected({ color: e.target.value })}
             className="flex-1 rounded-lg border border-[#282d3f] bg-[#090a0f] px-2 py-1 font-mono text-slate-200"
           />
@@ -647,12 +808,12 @@ export const TypographySettings: React.FC = () => {
       <div className="space-y-2 pt-2 border-t border-[#282d3f]">
         <div className="flex justify-between text-slate-400">
           <span className="font-medium">Outline Stroke</span>
-          <span className="font-mono text-slate-200">{obj.strokeWidth || 0}px</span>
+          <span className="font-mono text-slate-200">{effectiveStrokeWidth}px</span>
         </div>
         <div className="flex items-center gap-2">
           <input
             type="color"
-            value={obj.strokeColor || '#ffffff'}
+            value={effectiveStrokeColor}
             onChange={(e) => updateSelected({ strokeColor: e.target.value })}
             className="w-7 h-7 rounded border border-[#282d3f] bg-transparent cursor-pointer"
           />
@@ -660,7 +821,7 @@ export const TypographySettings: React.FC = () => {
             type="range"
             min="0"
             max="20"
-            value={obj.strokeWidth || 0}
+            value={effectiveStrokeWidth}
             onChange={(e) => updateSelected({ strokeWidth: Number(e.target.value) })}
             className="flex-1 accent-[#f4446d]"
           />

@@ -620,48 +620,20 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
 
       // Clicked outside text objects
       if (editingTextId) {
-        studioStore.setState({ editingTextId: null });
+        studioStore.setState({ editingTextId: null, inlineSelection: null });
+        setInlineSelection(null);
       }
 
       // If a text bubble is currently selected, clicking empty space deselects it
       if (selectedTextId) {
-        studioStore.setState({ selectedTextId: null });
+        studioStore.setState({ selectedTextId: null, inlineSelection: null });
+        setInlineSelection(null);
         setActiveHandle(null);
         return;
       }
 
-      if (activeTool === 'text') {
-        const id = `bubble-${Date.now()}`;
-        const newObj: TextObject = {
-          id,
-          x: Math.round(pt.x - 70),
-          y: Math.round(pt.y - 25),
-          width: 140,
-          height: 50,
-          text: 'New Dialogue',
-          originalText: undefined,
-          fontSize: 18,
-          fontFamily: 'WildWords, CCWildWords, sans-serif',
-          color: '#000000',
-          strokeColor: '#ffffff',
-          strokeWidth: 2,
-          align: 'center',
-          isVertical: false,
-        };
-        const prev = [...textObjects];
-        const next = [...textObjects, newObj];
-        studioStore.setState({ textObjects: next, selectedTextId: id, editingTextId: null });
-        studioUndoStack.push({
-          id: `create-bubble-${Date.now()}`,
-          timestamp: Date.now(),
-          description: 'Create Empty Text Box',
-          textObjects: { before: prev, after: next },
-        });
-        return;
-      }
-
-      studioStore.setState({ selectedTextId: null });
       setActiveHandle(null);
+      return;
     }
   };
 
@@ -694,7 +666,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
             return;
           }
         }
-        setCanvasCursor(activeTool === 'text' ? 'text' : 'default');
+        setCanvasCursor('default');
       }
       return;
     }
@@ -1108,7 +1080,13 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
     studioStore.setState({ textObjects: next });
   };
 
-  const handleFinishInlineEdit = () => {
+  const handleFinishInlineEdit = (e?: React.FocusEvent) => {
+    if (e?.relatedTarget) {
+      const target = e.relatedTarget as HTMLElement;
+      if (target.closest('[data-studio-sidebar]') || target.closest('[data-studio-toolbar]')) {
+        return;
+      }
+    }
     setInlineSelection(null);
     if (inlineInitialTextRef.current) {
       const prev = inlineInitialTextRef.current;
@@ -1163,6 +1141,15 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
     ? imageToClient(
         selectedObj.x + selectedObj.width / 2,
         selectedObj.y,
+        overlayCanvasRef.current.getBoundingClientRect(),
+        imageWidth,
+        imageHeight
+      )
+    : null;
+  const pillBottomPos = selectedObj && overlayCanvasRef.current
+    ? imageToClient(
+        selectedObj.x + selectedObj.width / 2,
+        selectedObj.y + selectedObj.height,
         overlayCanvasRef.current.getBoundingClientRect(),
         imageWidth,
         imageHeight
@@ -1290,7 +1277,27 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
                 }}
                 onSelect={(e) => {
                   const el = e.target as HTMLTextAreaElement;
-                  setInlineSelection({ start: el.selectionStart, end: el.selectionEnd });
+                  const sel = { start: el.selectionStart, end: el.selectionEnd };
+                  setInlineSelection(sel);
+                  studioStore.setState({
+                    inlineSelection: { textId: editingObj.id, start: el.selectionStart, end: el.selectionEnd },
+                  });
+                }}
+                onKeyUp={(e) => {
+                  const el = e.target as HTMLTextAreaElement;
+                  const sel = { start: el.selectionStart, end: el.selectionEnd };
+                  setInlineSelection(sel);
+                  studioStore.setState({
+                    inlineSelection: { textId: editingObj.id, start: el.selectionStart, end: el.selectionEnd },
+                  });
+                }}
+                onMouseUp={(e) => {
+                  const el = e.target as HTMLTextAreaElement;
+                  const sel = { start: el.selectionStart, end: el.selectionEnd };
+                  setInlineSelection(sel);
+                  studioStore.setState({
+                    inlineSelection: { textId: editingObj.id, start: el.selectionStart, end: el.selectionEnd },
+                  });
                 }}
                 style={{
                   width: '100%',
@@ -1323,128 +1330,172 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       </div>
 
       {/* Floating Action Pill Toolbar */}
-      {pillPos && selectedObj && viewMode === 'translated' && !isSpacePanning && !hideBoxes && (
-        <>
-          {/* Floating Original Text Bar (Mapped from selected bubble) */}
-          {selectedObj.originalText && (
+      {pillPos && selectedObj && viewMode === 'translated' && !isSpacePanning && !hideBoxes && (() => {
+        const clearanceAbove = Math.max(48, Math.round((24 + 8) * zoom) + 16);
+        const calculatedTop = pillPos.y - clearanceAbove - 36;
+        const placeAbove = calculatedTop >= (selectedObj.originalText ? 80 : 36);
+
+        const toolbarY = placeAbove
+          ? calculatedTop
+          : (pillBottomPos?.y ?? (pillPos.y + selectedObj.height * zoom)) + 16;
+        const ocrBarY = placeAbove
+          ? calculatedTop - 38
+          : toolbarY + 44;
+
+        const isSelActive = Boolean(
+          inlineSelection &&
+          inlineSelection.start !== inlineSelection.end
+        );
+        const activeSelStart = inlineSelection ? Math.min(inlineSelection.start, inlineSelection.end) : 0;
+        const selOverride = isSelActive && selectedObj.charStyles ? selectedObj.charStyles[activeSelStart] : null;
+        const isBoldActive = selOverride?.bold !== undefined ? selOverride.bold : Boolean(selectedObj.bold);
+        const isItalicActive = selOverride?.italic !== undefined ? selOverride.italic : Boolean(selectedObj.italic);
+
+        return (
+          <>
+            {/* Floating Original Text Bar (Mapped from selected bubble) */}
+            {selectedObj.originalText && (
+              <div
+                data-studio-toolbar="true"
+                style={{
+                  left: `${pillPos.x}px`,
+                  top: `${ocrBarY}px`,
+                  transform: 'translateX(-50%)',
+                }}
+                className="fixed z-40 flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-[#282d3f] bg-[#12141c]/95 backdrop-blur-md shadow-2xl text-slate-200 max-w-sm pointer-events-auto"
+              >
+                <span className="text-[10px] uppercase font-bold text-[#f4446d] tracking-wider shrink-0 flex items-center gap-1">
+                  <Languages className="w-3 h-3" />
+                  OCR:
+                </span>
+                <span
+                  className="text-xs text-slate-300 truncate max-w-[200px] font-sans"
+                  title={selectedObj.originalText}
+                >
+                  {selectedObj.originalText}
+                </span>
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => {
+                    navigator.clipboard.writeText(selectedObj.originalText!);
+                    setCopiedOrigPill(true);
+                    setTimeout(() => setCopiedOrigPill(false), 1500);
+                  }}
+                  title="Copy original OCR text"
+                  className="p-1 rounded text-slate-400 hover:text-white hover:bg-[#1c1f2e] transition shrink-0 cursor-pointer"
+                >
+                  {copiedOrigPill ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                </button>
+              </div>
+            )}
+
             <div
+              data-studio-toolbar="true"
               style={{
                 left: `${pillPos.x}px`,
-                top: `${pillPos.y - 82}px`,
+                top: `${toolbarY}px`,
                 transform: 'translateX(-50%)',
               }}
-              className="fixed z-40 flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-[#282d3f] bg-[#12141c]/95 backdrop-blur-md shadow-2xl text-slate-200 max-w-sm pointer-events-auto"
+              className="fixed z-40 flex items-center gap-0.5 p-1 rounded-xl border border-[#282d3f] bg-[#12141c]/95 backdrop-blur-md shadow-2xl text-slate-200"
             >
-              <span className="text-[10px] uppercase font-bold text-[#f4446d] tracking-wider shrink-0 flex items-center gap-1">
-                <Languages className="w-3 h-3" />
-                OCR:
-              </span>
-              <span
-                className="text-xs text-slate-300 truncate max-w-[200px] font-sans"
-                title={selectedObj.originalText}
-              >
-                {selectedObj.originalText}
-              </span>
               <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
                 onClick={() => {
-                  navigator.clipboard.writeText(selectedObj.originalText!);
-                  setCopiedOrigPill(true);
-                  setTimeout(() => setCopiedOrigPill(false), 1500);
+                  if (editingTextId === selectedObj.id) {
+                    handleFinishInlineEdit();
+                  } else {
+                    studioStore.setState({ editingTextId: selectedObj.id });
+                  }
                 }}
-                title="Copy original OCR text"
-                className="p-1 rounded text-slate-400 hover:text-white hover:bg-[#1c1f2e] transition shrink-0"
+                title="Edit Dialogue (Double-click bubble or Enter)"
+                className="p-1.5 rounded-lg hover:bg-[#1c1f2e] text-[#f4446d] hover:text-[#e0355e] transition cursor-pointer"
               >
-                {copiedOrigPill ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                <Edit3 className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={handleToggleBold}
+                title={isSelActive ? "Bold Selected Text (Ctrl+B)" : "Toggle Box Bold (Ctrl+B)"}
+                className={`p-1.5 rounded-lg transition cursor-pointer ${
+                  isBoldActive ? 'bg-[#f4446d]/20 text-[#f4446d]' : 'text-slate-300 hover:text-white hover:bg-[#1c1f2e]'
+                }`}
+              >
+                <Bold className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={handleToggleItalic}
+                title={isSelActive ? "Italic Selected Text (Ctrl+I)" : "Toggle Box Italic (Ctrl+I)"}
+                className={`p-1.5 rounded-lg transition cursor-pointer ${
+                  isItalicActive ? 'bg-[#f4446d]/20 text-[#f4446d]' : 'text-slate-300 hover:text-white hover:bg-[#1c1f2e]'
+                }`}
+              >
+                <Italic className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={handleAddNewEmptyTextBox}
+                title="Add New Text Box"
+                className="p-1.5 rounded-lg hover:bg-[#1c1f2e] text-slate-300 hover:text-white transition cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={handleCopyStyle}
+                title="Copy Typography Style"
+                className="p-1.5 rounded-lg hover:bg-[#1c1f2e] text-slate-300 hover:text-white transition cursor-pointer"
+              >
+                <Copy className="w-3.5 h-3.5" />
+              </button>
+              {clipboardStyle && (
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={handlePasteStyle}
+                  title="Paste Typography Style"
+                  className="p-1.5 rounded-lg hover:bg-[#1c1f2e] text-[#f4446d] hover:text-[#e0355e] transition cursor-pointer"
+                >
+                  <ClipboardPaste className="w-3.5 h-3.5" />
+                </button>
+              )}
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={handleDuplicateSelectedText}
+                title="Duplicate Bubble (Ctrl+D)"
+                className="p-1.5 rounded-lg hover:bg-[#1c1f2e] text-slate-300 hover:text-white transition cursor-pointer"
+              >
+                <CopyPlus className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={handleRasterizeText}
+                title="Rasterize to Background Canvas"
+                className="p-1.5 rounded-lg hover:bg-[#1c1f2e] text-slate-300 hover:text-white transition cursor-pointer"
+              >
+                <Layers className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={handleDeleteSelectedText}
+                title="Delete Bubble (Delete)"
+                className="p-1.5 rounded-lg hover:bg-[#f4446d]/15 text-[#f4446d] hover:text-[#e0355e] transition cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
               </button>
             </div>
-          )}
-
-          <div
-            style={{
-              left: `${pillPos.x}px`,
-              top: `${pillPos.y - 44}px`,
-              transform: 'translateX(-50%)',
-            }}
-            className="fixed z-40 flex items-center gap-0.5 p-1 rounded-xl border border-[#282d3f] bg-[#12141c]/95 backdrop-blur-md shadow-2xl text-slate-200"
-          >
-            <button
-              onClick={() => {
-                if (editingTextId === selectedObj.id) {
-                  handleFinishInlineEdit();
-                } else {
-                  studioStore.setState({ editingTextId: selectedObj.id });
-                }
-              }}
-              title="Edit Dialogue (Double-click bubble or Enter)"
-              className="p-1.5 rounded-lg hover:bg-[#1c1f2e] text-[#f4446d] hover:text-[#e0355e] transition"
-            >
-              <Edit3 className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={handleToggleBold}
-              title={inlineSelection && inlineSelection.start !== inlineSelection.end ? "Bold Selected Text (Ctrl+B)" : "Toggle Box Bold (Ctrl+B)"}
-              className={`p-1.5 rounded-lg transition ${
-                selectedObj.bold ? 'bg-[#f4446d]/20 text-[#f4446d]' : 'text-slate-300 hover:text-white hover:bg-[#1c1f2e]'
-              }`}
-            >
-              <Bold className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={handleToggleItalic}
-              title={inlineSelection && inlineSelection.start !== inlineSelection.end ? "Italic Selected Text (Ctrl+I)" : "Toggle Box Italic (Ctrl+I)"}
-              className={`p-1.5 rounded-lg transition ${
-                selectedObj.italic ? 'bg-[#f4446d]/20 text-[#f4446d]' : 'text-slate-300 hover:text-white hover:bg-[#1c1f2e]'
-              }`}
-            >
-              <Italic className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={handleAddNewEmptyTextBox}
-              title="Add New Text Box"
-              className="p-1.5 rounded-lg hover:bg-[#1c1f2e] text-slate-300 hover:text-white transition"
-            >
-              <Plus className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={handleCopyStyle}
-              title="Copy Typography Style"
-              className="p-1.5 rounded-lg hover:bg-[#1c1f2e] text-slate-300 hover:text-white transition"
-            >
-              <Copy className="w-3.5 h-3.5" />
-            </button>
-            {clipboardStyle && (
-              <button
-                onClick={handlePasteStyle}
-                title="Paste Typography Style"
-                className="p-1.5 rounded-lg hover:bg-[#1c1f2e] text-[#f4446d] hover:text-[#e0355e] transition"
-              >
-                <ClipboardPaste className="w-3.5 h-3.5" />
-              </button>
-            )}
-            <button
-              onClick={handleDuplicateSelectedText}
-              title="Duplicate Bubble (Ctrl+D)"
-              className="p-1.5 rounded-lg hover:bg-[#1c1f2e] text-slate-300 hover:text-white transition"
-            >
-              <CopyPlus className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={handleRasterizeText}
-              title="Rasterize to Background Canvas"
-              className="p-1.5 rounded-lg hover:bg-[#1c1f2e] text-slate-300 hover:text-white transition"
-            >
-              <Layers className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={handleDeleteSelectedText}
-              title="Delete Bubble (Delete)"
-              className="p-1.5 rounded-lg hover:bg-[#f4446d]/15 text-[#f4446d] hover:text-[#e0355e] transition"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        </>
-      )}
+          </>
+        );
+      })()}
 
       {activeTool === 'ocr' && ocrFeedback && !isAiProcessing && (
         <div role="status" className="fixed bottom-6 right-6 z-50 max-w-sm rounded-xl border border-[#282d3f] bg-[#12141c] px-4 py-3 text-xs text-slate-200 shadow-xl">

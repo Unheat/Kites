@@ -58,27 +58,15 @@ export class CanvasFurniture {
     const right = obj.width;
     const bottom = obj.height;
 
-    // 4. Draw font-size scaling handle (top-right aux nub with 'A' badge)
-    ctx.beginPath();
-    ctx.strokeStyle = effectiveColor;
-    ctx.moveTo(right, 0);
-    ctx.lineTo(right + AUX_HANDLE_OFFSET, -AUX_HANDLE_OFFSET / 2);
-    ctx.stroke();
-    this.drawHandleNub(ctx, right + AUX_HANDLE_OFFSET, -AUX_HANDLE_OFFSET / 2, '#38bdf8', true, 'A');
+    // 4. Draw font-size scaling handle (top-right corner nub with 'A' badge)
+    this.drawHandleNub(ctx, right, 0, '#38bdf8', true, 'A');
 
-    // 5. Draw horizontal wrap handle (right midpoint aux nub with 'W' badge)
-    ctx.beginPath();
-    ctx.strokeStyle = effectiveColor;
-    ctx.moveTo(right, midY);
-    ctx.lineTo(right + AUX_HANDLE_OFFSET, midY);
-    ctx.stroke();
-    this.drawHandleNub(ctx, right + AUX_HANDLE_OFFSET, midY, '#a855f7', true, '↔');
+    // 5. Draw horizontal wrap handle (right midpoint nub with '↔' badge)
+    this.drawHandleNub(ctx, right, midY, '#a855f7', true, '↔');
 
-    // 6. Draw 8 standard bounding handles
+    // 6. Draw standard bounding handles
     this.drawHandleNub(ctx, 0, 0, effectiveColor);
     this.drawHandleNub(ctx, midX, 0, effectiveColor);
-    this.drawHandleNub(ctx, right, 0, effectiveColor);
-    this.drawHandleNub(ctx, right, midY, effectiveColor);
     this.drawHandleNub(ctx, right, bottom, effectiveColor);
     this.drawHandleNub(ctx, midX, bottom, effectiveColor);
     this.drawHandleNub(ctx, 0, bottom, effectiveColor);
@@ -133,21 +121,19 @@ export class CanvasFurniture {
     // Rotation handle
     if (this.dist(localX, localY, midX, -ROTATION_HANDLE_OFFSET) <= radius) return 'rot';
 
-    // Font-size handle (top-right aux)
-    if (this.dist(localX, localY, right + AUX_HANDLE_OFFSET, -AUX_HANDLE_OFFSET / 2) <= radius + 2) {
+    // Font-size handle (top-right corner nub)
+    if (this.dist(localX, localY, right, 0) <= radius) {
       return 'font-size';
     }
 
-    // Wrap handle (right midpoint aux)
-    if (this.dist(localX, localY, right + AUX_HANDLE_OFFSET, midY) <= radius + 2) {
+    // Wrap handle (right midpoint nub)
+    if (this.dist(localX, localY, right, midY) <= radius) {
       return 'wrap';
     }
 
-    // 8 edge & corner handles
+    // Bounding corner and edge handles
     if (this.dist(localX, localY, 0, 0) <= radius) return 'nw';
     if (this.dist(localX, localY, midX, 0) <= radius) return 'n';
-    if (this.dist(localX, localY, right, 0) <= radius) return 'ne';
-    if (this.dist(localX, localY, right, midY) <= radius) return 'e';
     if (this.dist(localX, localY, right, bottom) <= radius) return 'se';
     if (this.dist(localX, localY, midX, bottom) <= radius) return 's';
     if (this.dist(localX, localY, 0, bottom) <= radius) return 'sw';

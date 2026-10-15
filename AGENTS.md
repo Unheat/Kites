@@ -105,7 +105,7 @@ Complete technical documentation and rationale for all mitigations live in [`doc
 ## 10 before implement code:
 - check docs for /Users/dangtruongan/study/Kites/docs/development and /Users/dangtruongan/study/Kites/docs/dev-history to avoid making previous mistake, or making new mistake that can be avoided. also update/add dev-history, development, after you implement new feature, handle bugs,... etc
 ## 11 Subagent spawn for zcode
-- spawn "reaserch" model when searching internet or local references for tools, solutions, ...
+- spawn "reaserch" model when searching internet or local references in ~/scratches/reference for tools, solutions, ...
 -spawn "code-explore" model when plan to make change to code or analyze code.
 
 -avoid use defaule "explore" or "general-purpose" agent due to lack of tools access
