@@ -24,6 +24,8 @@ import { TextRenderer } from './TextRenderer';
 import { CanvasFurniture } from './CanvasFurniture';
 import { WarpMesh } from './WarpMesh';
 import { createStudioOcrCrops } from './studioOcrCrop';
+import { StudioSourceSampler } from './StudioSourceSampler';
+import { ToolViewModePolicy } from './tools/ToolViewModePolicy';
 import { requestStudioInpaint, requestStudioOcr } from '../bridge/offscreenStudioBridge';
 import { computeNewBounds, type ActiveDragState, type DragHandle } from '../../App';
 import { recalculateBlockTypeset } from './studioTypeset';
@@ -51,7 +53,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
 
   const activeTool = useStudioStore((s) => s.activeTool);
   const zoom = useStudioStore((s) => s.zoom);
-  const isShowingOriginal = useStudioStore((s) => s.isShowingOriginal ?? s.isCanvasFlipped);
+  const viewMode = useStudioStore((s) => s.viewMode ?? (s.isShowingOriginal ? 'original' : 'translated'));
   const hideBoxes = useStudioStore((s) => s.hideBoxes);
   const textObjects = useStudioStore((s) => s.textObjects);
   const selectedTextId = useStudioStore((s) => s.selectedTextId);
@@ -127,6 +129,11 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
 
     ctx.clearRect(0, 0, imageWidth, imageHeight);
 
+    // Only render stickers, text objects, and transform furniture in 'translated' presentation mode
+    if (viewMode !== 'translated') {
+      return;
+    }
+
     // 1. Render stickers / image layers
     for (const layer of imageLayers) {
       if (layer.isVisible === false) continue;
@@ -178,7 +185,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
         CanvasFurniture.drawSelectionFurniture(ctx, selectedObj, appearance.selectedBoxBorderColor);
       }
     }
-  }, [imageWidth, imageHeight, textObjects, imageLayers, selectedTextId, editingTextId, selectedImageLayerId, appearance, hideBoxes]);
+  }, [imageWidth, imageHeight, textObjects, imageLayers, selectedTextId, editingTextId, selectedImageLayerId, appearance, hideBoxes, viewMode]);
 
   useEffect(() => {
     redrawOverlay();
@@ -336,7 +343,8 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
 
   // Pointer Down
   const handlePointerDown = (e: React.PointerEvent) => {
-    if (e.button !== 0 || aiProcessingRef.current || isAiProcessing || isShowingOriginal) return;
+    if (e.button !== 0 || aiProcessingRef.current || isAiProcessing) return;
+    if (!ToolViewModePolicy.isToolAllowed(activeTool, viewMode)) return;
     e.currentTarget.setPointerCapture(e.pointerId);
     const pt = getPointerImageCoords(e);
     setIsPointerDown(true);
@@ -395,11 +403,25 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
     // Inpaint / OCR Mask Brush
     if (activeTool === 'inpaint' || activeTool === 'ocr') {
       const brushSize = activeTool === 'inpaint' ? inpaintSettings.size : ocrSettings.size;
+      const brushShape = activeTool === 'inpaint' ? inpaintSettings.shape : ocrSettings.shape;
       brushEngineRef.current.beginStroke(pt, {
-        shape: activeTool === 'inpaint' ? inpaintSettings.shape : ocrSettings.shape,
+        shape: brushShape,
         size: brushSize,
         feather: 0,
       });
+
+      const overlay = overlayCanvasRef.current;
+      const ctx = overlay?.getContext('2d');
+      if (ctx) {
+        ctx.fillStyle = activeTool === 'inpaint' ? 'rgba(239, 68, 68, 0.4)' : 'rgba(244, 63, 94, 0.4)';
+        if (brushShape === 'square') {
+          ctx.fillRect(pt.x - brushSize / 2, pt.y - brushSize / 2, brushSize, brushSize);
+        } else {
+          ctx.beginPath();
+          ctx.arc(pt.x, pt.y, brushSize / 2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
       return;
     }
 
@@ -549,8 +571,9 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
     // Inpaint / OCR Brush Drag (draws preview mask on overlay)
     if (activeTool === 'inpaint' || activeTool === 'ocr') {
       const brushSize = activeTool === 'inpaint' ? inpaintSettings.size : ocrSettings.size;
+      const brushShape = activeTool === 'inpaint' ? inpaintSettings.shape : ocrSettings.shape;
       brushEngineRef.current.extendStroke(pt, {
-        shape: activeTool === 'inpaint' ? inpaintSettings.shape : ocrSettings.shape,
+        shape: brushShape,
         size: brushSize,
         feather: 0,
       });
@@ -559,9 +582,13 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       const ctx = overlay?.getContext('2d');
       if (ctx) {
         ctx.fillStyle = activeTool === 'inpaint' ? 'rgba(239, 68, 68, 0.4)' : 'rgba(244, 63, 94, 0.4)';
-        ctx.beginPath();
-        ctx.arc(pt.x, pt.y, brushSize / 2, 0, Math.PI * 2);
-        ctx.fill();
+        if (brushShape === 'square') {
+          ctx.fillRect(pt.x - brushSize / 2, pt.y - brushSize / 2, brushSize, brushSize);
+        } else {
+          ctx.beginPath();
+          ctx.arc(pt.x, pt.y, brushSize / 2, 0, Math.PI * 2);
+          ctx.fill();
+        }
       }
       return;
     }
@@ -666,11 +693,17 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       const cropH = Math.min(imageHeight - cropY, bbox.height + pad * 2);
       const paddedBbox: BoundingBox = { x: cropX, y: cropY, width: cropW, height: cropH };
 
-      const patchCanvas = document.createElement('canvas');
-      patchCanvas.width = cropW;
-      patchCanvas.height = cropH;
-      const patchCtx = patchCanvas.getContext('2d');
-      patchCtx?.drawImage(bgCanvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+      const patchCanvas = StudioSourceSampler.extractCrop(
+        inpaintSettings.source,
+        paddedBbox,
+        {
+          originalImage,
+          backgroundCanvas: bgCanvas,
+          overlayCanvas: overlayCanvasRef.current,
+          textObjects,
+          isOverlayRendered: viewMode === 'translated',
+        }
+      );
 
       const dabCanvas = brushEngineRef.current.getDabCanvas();
       const maskCanvas = document.createElement('canvas');
@@ -729,7 +762,11 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
           bgCanvas,
           overlayCanvasRef.current,
           bbox,
-          ocrSettings.scanSource
+          ocrSettings.scanSource,
+          {
+            textObjects,
+            isOverlayRendered: viewMode === 'translated',
+          }
         );
         const paddedBbox = crops.bounds;
         const preOcrPatch = ocrSettings.inpaint
@@ -955,18 +992,18 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
         }}
         className="relative block shrink-0 m-auto select-none"
       >
-        {/* Pristine original image canvas (visible when isShowingOriginal is true) */}
+        {/* Pristine original image canvas (visible when viewMode is 'original') */}
         <canvas
           ref={originalCanvasRef}
           style={{
             width: `${imageWidth * zoom}px`,
             height: `${imageHeight * zoom}px`,
-            display: isShowingOriginal ? 'block' : 'none',
+            display: viewMode === 'original' ? 'block' : 'none',
           }}
           className="block absolute top-0 left-0 shadow-2xl rounded-sm"
         />
 
-        {/* Working background raster canvas (cleaned/painted artwork) */}
+        {/* Working background raster canvas (cleaned/painted artwork; visible in 'inpainted' and 'translated' modes) */}
         <canvas
           ref={bgCanvasRef}
           data-studio-working-background="true"
@@ -974,12 +1011,12 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
           style={{
             width: `${imageWidth * zoom}px`,
             height: `${imageHeight * zoom}px`,
-            display: isShowingOriginal ? 'none' : 'block',
+            display: viewMode !== 'original' ? 'block' : 'none',
           }}
           className="block absolute top-0 left-0 shadow-2xl rounded-sm"
         />
 
-        {/* Live overlay canvas for text, stickers, furniture */}
+        {/* Live overlay canvas for text, stickers, furniture, and brush feedback (always active for pointer events and brush previews) */}
         <canvas
           ref={overlayCanvasRef}
           onPointerDown={handlePointerDown}
@@ -990,13 +1027,13 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
           style={{
             width: `${imageWidth * zoom}px`,
             height: `${imageHeight * zoom}px`,
-            display: isShowingOriginal ? 'none' : 'block',
+            display: 'block',
           }}
           className="block absolute top-0 left-0 cursor-crosshair"
         />
 
         {/* Layer 4: Direct In-Place Text Editor Overlay */}
-        {editingTextId && editingObj && (() => {
+        {editingTextId && editingObj && viewMode === 'translated' && (() => {
           const scaledFontSize = editingObj.fontSize * zoom;
           const lineSpacing = editingObj.lineSpacing ?? 1.2;
           const scaledLineHeight = scaledFontSize * lineSpacing;
@@ -1094,7 +1131,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       </div>
 
       {/* Floating Action Pill Toolbar */}
-      {pillPos && selectedObj && !isShowingOriginal && !isSpacePanning && !hideBoxes && (
+      {pillPos && selectedObj && viewMode === 'translated' && !isSpacePanning && !hideBoxes && (
         <>
           {/* Floating Original Text Bar (Mapped from selected bubble) */}
           {selectedObj.originalText && (

@@ -5,8 +5,10 @@ import type {
   EditorAppearanceSettings,
   EraseRestoreSource,
   ImageLayer,
+  InpaintSource,
   PaintSourceMode,
   StudioTool,
+  StudioViewMode,
   TextObject,
 } from '../types';
 
@@ -42,6 +44,7 @@ export interface PaintSettingsState {
 }
 
 export interface InpaintSettingsState {
+  source: InpaintSource;
   shape: BrushShape;
   size: number;
 }
@@ -63,6 +66,7 @@ export interface StudioState {
   pan: { x: number; y: number };
   isSpacePanning: boolean;
   isAiProcessing: boolean;
+  viewMode: StudioViewMode;
   isShowingOriginal: boolean;
   isCanvasFlipped: boolean;
   hideBoxes: boolean;
@@ -119,6 +123,7 @@ const initialState: StudioState = {
   pan: { x: 0, y: 0 },
   isSpacePanning: false,
   isAiProcessing: false,
+  viewMode: 'translated',
   isShowingOriginal: false,
   isCanvasFlipped: false,
   hideBoxes: false,
@@ -150,6 +155,7 @@ const initialState: StudioState = {
     feather: 0,
   },
   inpaintSettings: {
+    source: 'original',
     shape: 'circle',
     size: 40,
   },
@@ -204,6 +210,7 @@ class StudioStore {
 
   /**
    * Updates studio state and notifies registered subscribers.
+   * Synchronizes viewMode with legacy isShowingOriginal and isCanvasFlipped flags.
    *
    * @param updater - Partial object or state transition callback.
    */
@@ -211,8 +218,42 @@ class StudioStore {
     updater: Partial<StudioState> | ((prev: StudioState) => Partial<StudioState>)
   ): void => {
     const nextPartial = typeof updater === 'function' ? updater(this.state) : updater;
-    this.state = { ...this.state, ...nextPartial };
+    const synchronized: Partial<StudioState> = { ...nextPartial };
+
+    if ('viewMode' in nextPartial && nextPartial.viewMode !== undefined) {
+      synchronized.isShowingOriginal = nextPartial.viewMode === 'original';
+      synchronized.isCanvasFlipped = nextPartial.viewMode === 'original';
+    } else if ('isShowingOriginal' in nextPartial && nextPartial.isShowingOriginal !== undefined) {
+      synchronized.viewMode = nextPartial.isShowingOriginal
+        ? 'original'
+        : this.state.viewMode === 'original'
+          ? 'translated'
+          : this.state.viewMode;
+      synchronized.isCanvasFlipped = nextPartial.isShowingOriginal;
+    } else if ('isCanvasFlipped' in nextPartial && nextPartial.isCanvasFlipped !== undefined) {
+      synchronized.viewMode = nextPartial.isCanvasFlipped
+        ? 'original'
+        : this.state.viewMode === 'original'
+          ? 'translated'
+          : this.state.viewMode;
+      synchronized.isShowingOriginal = nextPartial.isCanvasFlipped;
+    }
+
+    this.state = { ...this.state, ...synchronized };
     this.listeners.forEach((listener) => listener());
+  };
+
+  /**
+   * Sets current active canvas presentation mode.
+   *
+   * @param mode - Target view presentation mode ('original' | 'inpainted' | 'translated').
+   */
+  public setViewMode = (mode: StudioViewMode): void => {
+    this.setState({
+      viewMode: mode,
+      isShowingOriginal: mode === 'original',
+      isCanvasFlipped: mode === 'original',
+    });
   };
 
   /**
