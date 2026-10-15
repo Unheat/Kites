@@ -629,26 +629,33 @@ function TranslateButton({
   const [hasFailed, setHasFailed] = useState(false);
 
   const isElementTranslated = useCallback(() => {
-    const hasAttr = anchorElement.getAttribute('data-kites-translated') === 'true';
-    if (!hasAttr) return false;
-
-    const img = anchorElement instanceof HTMLImageElement ? anchorElement : anchorElement.querySelector('img');
-    if (img) {
-      const appliedSrc = img.getAttribute('data-kites-applied-src') || anchorElement.getAttribute('data-kites-applied-src');
-      const origSrc = img.getAttribute('data-kites-orig-src') || anchorElement.getAttribute('data-kites-orig-src');
-      const currentSrc = img.currentSrc || img.src || '';
-      const showingOriginal =
-        img.getAttribute('data-kites-show-original') === 'true' ||
-        anchorElement.getAttribute('data-kites-show-original') === 'true';
-
-      if (showingOriginal) {
-        return Boolean(origSrc && (currentSrc === origSrc || currentSrc.includes(origSrc)));
-      }
-      return Boolean(appliedSrc && currentSrc === appliedSrc);
+    // 1. Direct registry check (primary ground truth for current session)
+    const reg = translatedRegistry.get(srcUrl);
+    if (reg?.translatedUrl) {
+      return true;
     }
 
-    return true;
-  }, [anchorElement]);
+    // 2. DOM attribute check on anchorElement or inner img
+    if (anchorElement.getAttribute('data-kites-translated') === 'true') {
+      return true;
+    }
+
+    const img = anchorElement instanceof HTMLImageElement ? anchorElement : anchorElement.querySelector('img');
+    if (img && img.getAttribute('data-kites-translated') === 'true') {
+      return true;
+    }
+
+    // 3. MediaTarget resolution fallback
+    const target = resolveTargetMedia(srcUrl);
+    if (
+      target?.sourceElement?.getAttribute('data-kites-translated') === 'true' ||
+      target?.surfaceElement?.getAttribute('data-kites-translated') === 'true'
+    ) {
+      return true;
+    }
+
+    return false;
+  }, [anchorElement, srcUrl]);
 
   const [isTranslated, setIsTranslated] = useState(isElementTranslated);
   const [showOriginal, setShowOriginal] = useState(() => {
@@ -663,6 +670,28 @@ function TranslateButton({
     const attr = anchorElement.getAttribute('data-kites-job-id');
     return attr ? Number(attr) : null;
   });
+
+  const [isTooltipVisible, setIsTooltipVisible] = useState(false);
+  const tooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleMouseEnter = () => {
+    if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
+    tooltipTimerRef.current = setTimeout(() => {
+      setIsTooltipVisible(true);
+    }, 180);
+  };
+
+  const handleMouseLeave = () => {
+    if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
+    tooltipTimerRef.current = null;
+    setIsTooltipVisible(false);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
+    };
+  }, []);
 
   const activeTranslating = isTranslating || localTranslating;
 
@@ -967,13 +996,8 @@ function TranslateButton({
           pointerEvents: 'auto',
           transition: 'all 0.15s ease',
         }}
-        title={
-          hasFailed
-            ? TRANSLATION_FAILURE_LABEL
-            : isTranslated && !activeTranslating
-            ? 'Re-translate Image'
-            : 'Translate Image'
-        }
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
         aria-label={
           hasFailed
             ? TRANSLATION_FAILURE_LABEL
@@ -996,6 +1020,38 @@ function TranslateButton({
           />
         )}
       </button>
+
+      {/* Snappy 180ms Custom Tooltip */}
+      {isTooltipVisible && !activeTranslating && (
+        <div
+          className="kites-custom-tooltip"
+          role="tooltip"
+          style={{
+            position: 'absolute',
+            top: 'calc(100% + 6px)',
+            left: '16px',
+            transform: 'translateX(-50%)',
+            backgroundColor: '#181a20',
+            color: '#f1f5f9',
+            border: '1px solid #33384c',
+            borderRadius: '6px',
+            padding: '3px 8px',
+            fontSize: '11px',
+            fontWeight: 500,
+            whiteSpace: 'nowrap',
+            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.45)',
+            pointerEvents: 'none',
+            zIndex: 1000000,
+            animation: 'kites-fade-in 0.15s ease-out',
+          }}
+        >
+          {hasFailed
+            ? TRANSLATION_FAILURE_LABEL
+            : isTranslated && !activeTranslating
+            ? 'Re-translate Image'
+            : 'Translate Image'}
+        </div>
+      )}
 
       {isTranslated && !activeTranslating && (
         <div

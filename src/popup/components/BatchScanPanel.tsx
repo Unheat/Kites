@@ -436,7 +436,7 @@ export default function BatchScanPanel() {
         <button
           type="button"
           onClick={() => setActiveSource('page')}
-          className={`flex-1 py-1 px-2 rounded-md font-semibold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+          className={`flex-1 py-1 px-1.5 rounded-md font-semibold transition-all flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap text-[11px] ${
             activeSource === 'page'
               ? 'bg-[var(--color-vellum)] text-[var(--color-ink)] shadow-sm'
               : 'text-[var(--color-dust)] hover:text-[var(--color-ink)]'
@@ -452,14 +452,14 @@ export default function BatchScanPanel() {
             setActiveSource('history');
             void loadHistoryItems();
           }}
-          className={`flex-1 py-1 px-2 rounded-md font-semibold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+          className={`flex-1 py-1 px-1.5 rounded-md font-semibold transition-all flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap text-[11px] ${
             activeSource === 'history'
               ? 'bg-[var(--color-vellum)] text-[var(--color-ink)] shadow-sm'
               : 'text-[var(--color-dust)] hover:text-[var(--color-ink)]'
           }`}
         >
           <History size={13} className={activeSource === 'history' ? 'text-[var(--color-editorial)]' : ''} />
-          <span>Saved History</span>
+          <span>History</span>
           <span className="font-mono text-[10px] opacity-75 font-normal">({historyItems.length})</span>
         </button>
       </div>

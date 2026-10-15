@@ -1,4 +1,4 @@
-import { db, cleanupOldJobs, deleteJobs, type TranslationJob } from '../db';
+import { db, cleanupOldJobs, type TranslationJob } from '../db';
 import type { ProcessJobMessage, PopupState, PreloadActiveEngineMessage, BubbleDetectionMode, HistoryRetentionPeriod } from '../shared/types';
 import { DEFAULT_POPUP_STATE } from '../shared/types';
 import { CLOUDFLARE_QUOTA_DEFAULT_ENDPOINT, STORAGE_KEYS } from '../shared/constants';
@@ -753,16 +753,19 @@ const MAX_BATCH_QUEUE_CAPACITY = 100;
  * @returns {Promise<void>}
  */
 export async function queueTranslation(srcUrl: string, tabId?: number, isBatch = false) {
-  const existingJob = srcUrl ? await db.translationJobs.where('srcUrl').equals(srcUrl).first() : null;
-  const isStale = existingJob && (Date.now() - existingJob.timestamp > 5000);
+  // Guard against duplicate queueing if a job for this URL is currently in flight
+  const inFlightJob = srcUrl
+    ? await db.translationJobs
+        .where('srcUrl')
+        .equals(srcUrl)
+        .and((job) => ['queued', 'downloading', 'processing'].includes(job.status as string))
+        .first()
+    : null;
+  const isStale = inFlightJob && (Date.now() - inFlightJob.timestamp > 15000);
 
-  if (existingJob && !isStale && ['queued', 'downloading', 'processing'].includes(existingJob.status as string)) {
+  if (inFlightJob && !isStale) {
     console.log('[Background] URL already in active processing. Skipping duplicate:', srcUrl);
     return;
-  }
-
-  if (existingJob) {
-    await deleteJobs([existingJob.id!]);
   }
 
   // Queue capacity guard: allow up to configured max queue capacity, or MAX_BATCH_QUEUE_CAPACITY for batch panel
