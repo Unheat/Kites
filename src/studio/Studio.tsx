@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Undo2,
   Redo2,
@@ -103,6 +103,34 @@ export const Studio: React.FC<StudioProps> = ({
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [exportDropdownOpen, setExportDropdownOpen] = useState(false);
   const [copiedImageToast, setCopiedImageToast] = useState(false);
+
+  const exportDropdownRef = useRef<HTMLDivElement | null>(null);
+  const zoomDropdownRef = useRef<HTMLDivElement | null>(null);
+
+  // Close dropdowns on click outside or Escape key
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (exportDropdownRef.current && !exportDropdownRef.current.contains(target)) {
+        setExportDropdownOpen(false);
+      }
+      if (zoomDropdownRef.current && !zoomDropdownRef.current.contains(target)) {
+        setZoomDropdownOpen(false);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setExportDropdownOpen(false);
+        setZoomDropdownOpen(false);
+      }
+    };
+    window.addEventListener('mousedown', handleOutsideClick);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('mousedown', handleOutsideClick);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
 
   const imageWidth = originalImage?.naturalWidth || cleanedImage?.naturalWidth || 800;
   const imageHeight = originalImage?.naturalHeight || cleanedImage?.naturalHeight || 1200;
@@ -680,7 +708,7 @@ export const Studio: React.FC<StudioProps> = ({
                 <ZoomOut className="w-3.5 h-3.5" />
               </button>
 
-              <div className="relative">
+              <div ref={zoomDropdownRef} className="relative">
                 <button
                   onClick={() => setZoomDropdownOpen((prev) => !prev)}
                   className="flex items-center gap-1 px-2 py-0.5 rounded border border-[#262a3b] bg-[#090a0f] font-mono text-[11px] text-slate-200 hover:border-slate-500 transition"
@@ -729,7 +757,7 @@ export const Studio: React.FC<StudioProps> = ({
             </div>
 
             {/* Export Image Dropdown */}
-            <div className="relative">
+            <div ref={exportDropdownRef} className="relative">
               <button
                 type="button"
                 onClick={() => setExportDropdownOpen((prev) => !prev)}
