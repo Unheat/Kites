@@ -565,25 +565,18 @@ export const Studio: React.FC<StudioProps> = ({
               <Search className="w-3.5 h-3.5" /> Find & Replace
             </button>
             <button
-              onClick={() => handleExportImage('png')}
-              title="Download full translated page image (PNG)"
-              className="flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-lg bg-[#f4446d] hover:bg-[#e0355e] text-white text-xs font-semibold shadow-md shadow-[rgba(244,68,109,0.35)] transition cursor-pointer"
-            >
-              <Download className="w-3.5 h-3.5" /> Export Image
-            </button>
-            <button
               onClick={handleSaveImage}
               disabled={isSaving}
               title="Save changes to Kites library"
-              className="flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-lg border border-[#262a3b] bg-[#090a0f] text-xs font-medium text-slate-300 hover:bg-[#1c1f2e] transition disabled:opacity-50 cursor-pointer"
+              className="flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-lg bg-[#f4446d] hover:bg-[#e0355e] text-white text-xs font-semibold shadow-md shadow-[rgba(244,68,109,0.35)] transition disabled:opacity-50 cursor-pointer"
             >
-              <Save className="w-3.5 h-3.5 text-indigo-400" /> {isSaving ? 'Saving...' : 'Save to DB'}
+              <Save className="w-3.5 h-3.5" /> {isSaving ? 'Saving...' : 'Save to DB'}
             </button>
             <button
               onClick={handleRetranslatePage}
               disabled={isRetranslating || !originalImage}
               title="Re-run full OCR detection, inpainting, and translation on the original page"
-              className="flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-lg border border-[#262a3b] bg-[#090a0f] text-xs font-medium text-slate-300 hover:bg-[#1c1f2e] hover:text-[#f4446d] hover:border-[#f4446d]/40 disabled:opacity-30 disabled:pointer-events-none transition"
+              className="flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-lg border border-[#262a3b] bg-[#090a0f] text-xs font-medium text-slate-300 hover:bg-[#1c1f2e] hover:text-[#f4446d] hover:border-[#f4446d]/40 disabled:opacity-30 disabled:pointer-events-none transition cursor-pointer"
             >
               {isRetranslating ? (
                 <>
