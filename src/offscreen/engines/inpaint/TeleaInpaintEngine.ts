@@ -14,6 +14,7 @@
  */
 
 import type { IInpaintEngine, Point2D } from './BaseInpaintEngine';
+import { Binarizer } from './Binarizer';
 
 /** Pixel flag: clean known background or already inpainted pixel. */
 export const FLAG_KNOWN = 0;
@@ -215,31 +216,11 @@ export class TeleaInpaintEngine implements IInpaintEngine {
     const ctx = sourceCanvas.getContext('2d', { willReadFrequently: true });
     ctx.drawImage(rawCanvas, 0, 0);
 
-    // 2. Generate an inflated solid mask canvas (on a fresh CPU canvas directly)
-    const maskCanvas = typeof OffscreenCanvas !== 'undefined'
-      ? new OffscreenCanvas(width, height)
-      : this.platform.createCanvas(width, height);
+    // 2. Extract stroke-level text mask via Binarizer (Otsu thresholding).
+    // Telea FMM requires narrow text strokes (1-3px) rather than solid bounding polygons
+    // to preserve bubble interiors, line art, and background drawings.
+    const maskCanvas = Binarizer.extractStrokeMask(this.platform, sourceCanvas, maskPolygons);
     const maskCtx = maskCanvas.getContext('2d', { willReadFrequently: true });
-    maskCtx.fillStyle = '#000000';
-    maskCtx.fillRect(0, 0, width, height);
-
-    maskCtx.fillStyle = '#ffffff';
-    maskCtx.strokeStyle = 'white';
-    maskCtx.lineWidth = POLYGON_STROKE_WIDTH; // Ensure stroke covers anti-aliased fringes
-    maskCtx.lineJoin = 'round';
-    maskCtx.lineCap = 'round';
-
-    for (const poly of maskPolygons) {
-      if (!poly || poly.length === 0) continue;
-      maskCtx.beginPath();
-      maskCtx.moveTo(poly[0].x, poly[0].y);
-      for (let j = 1; j < poly.length; j++) {
-        maskCtx.lineTo(poly[j].x, poly[j].y);
-      }
-      maskCtx.closePath();
-      maskCtx.fill();
-      maskCtx.stroke(); // Inflates edges to swallow grey anti-aliasing
-    }
 
     // 3. Process each bounding box locally
     for (const poly of maskPolygons) {
@@ -420,7 +401,6 @@ export class TeleaInpaintEngine implements IInpaintEngine {
             pWidth,
             pHeight,
             width,
-            height,
             imgBytes,
             radius,
           );
@@ -434,7 +414,7 @@ export class TeleaInpaintEngine implements IInpaintEngine {
   }
 
   /**
-   * Inpaints a single pixel using weighted neighborhood color and first-order image gradients.
+   * Inpaints a single pixel using weighted neighborhood color without Taylor gradient overshoot.
    */
   private inpaintPoint(
     nx: number,
@@ -446,7 +426,6 @@ export class TeleaInpaintEngine implements IInpaintEngine {
     pWidth: number,
     pHeight: number,
     cropWidth: number,
-    cropHeight: number,
     imgBytes: Uint8ClampedArray,
     radius: number,
   ): void {
@@ -493,50 +472,11 @@ export class TeleaInpaintEngine implements IInpaintEngine {
         const imgY = qy - 1;
         const qImgBase = (imgY * cropWidth + imgX) * 4;
 
-        // Channel-wise first order Taylor estimate
-        for (let c = 0; c < 3; c++) {
-          let gradIx = 0;
-          const hasRight = imgX + 1 < cropWidth && flags[qy * pWidth + (qx + 1)] !== FLAG_INSIDE;
-          const hasLeft = imgX - 1 >= 0 && flags[qy * pWidth + (qx - 1)] !== FLAG_INSIDE;
-          if (hasRight && hasLeft) {
-            const rVal = imgBytes[(imgY * cropWidth + (imgX + 1)) * 4 + c];
-            const lVal = imgBytes[(imgY * cropWidth + (imgX - 1)) * 4 + c];
-            gradIx = (rVal - lVal) * 0.5;
-          } else if (hasRight) {
-            const rVal = imgBytes[(imgY * cropWidth + (imgX + 1)) * 4 + c];
-            const cVal = imgBytes[qImgBase + c];
-            gradIx = rVal - cVal;
-          } else if (hasLeft) {
-            const cVal = imgBytes[qImgBase + c];
-            const lVal = imgBytes[(imgY * cropWidth + (imgX - 1)) * 4 + c];
-            gradIx = cVal - lVal;
-          }
-
-          let gradIy = 0;
-          const hasDown = imgY + 1 < cropHeight && flags[(qy + 1) * pWidth + qx] !== FLAG_INSIDE;
-          const hasUp = imgY - 1 >= 0 && flags[(qy - 1) * pWidth + qx] !== FLAG_INSIDE;
-          if (hasDown && hasUp) {
-            const dVal = imgBytes[((imgY + 1) * cropWidth + imgX) * 4 + c];
-            const uVal = imgBytes[((imgY - 1) * cropWidth + imgX) * 4 + c];
-            gradIy = (dVal - uVal) * 0.5;
-          } else if (hasDown) {
-            const dVal = imgBytes[((imgY + 1) * cropWidth + imgX) * 4 + c];
-            const cVal = imgBytes[qImgBase + c];
-            gradIy = dVal - cVal;
-          } else if (hasUp) {
-            const cVal = imgBytes[qImgBase + c];
-            const uVal = imgBytes[((imgY - 1) * cropWidth + imgX) * 4 + c];
-            gradIy = cVal - uVal;
-          }
-
-          // Taylor expansion: I_q(p) = I(q) + gradI * (p - q)
-          const Iq = imgBytes[qImgBase + c] + gradIx * rx + gradIy * ry;
-
-          if (c === 0) sumR += w * Iq;
-          else if (c === 1) sumG += w * Iq;
-          else sumB += w * Iq;
-        }
-
+        // Telea 0th-order weighted average (matches Pyheal & antimatter15)
+        // Eliminates unconstrained Taylor gradient explosion and rainbow zebra fringing
+        sumR += w * imgBytes[qImgBase];
+        sumG += w * imgBytes[qImgBase + 1];
+        sumB += w * imgBytes[qImgBase + 2];
         sumW += w;
       }
     }

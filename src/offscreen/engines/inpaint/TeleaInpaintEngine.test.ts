@@ -1,3 +1,4 @@
+import { createCanvas } from 'canvas';
 import { describe, it, expect } from 'vitest';
 import {
   TeleaInpaintEngine,
@@ -7,6 +8,8 @@ import {
   FLAG_INSIDE,
   INF_DISTANCE,
 } from './TeleaInpaintEngine';
+import { Binarizer } from './Binarizer';
+import type { Point2D } from './BaseInpaintEngine';
 
 describe('TeleaInpaintEngine', () => {
   describe('MinHeap', () => {
@@ -199,12 +202,152 @@ describe('TeleaInpaintEngine', () => {
     });
   });
 
+  describe('Binarizer text stroke extraction', () => {
+    it('isolates dark text glyphs from light speech bubble paper', () => {
+      const width = 60;
+      const height = 60;
+      const canvas = createCanvas(width, height);
+      const ctx = canvas.getContext('2d');
+
+      // White speech bubble
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(0, 0, width, height);
+
+      // Black text line in center: x=25..35, y=25..35
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(25, 25, 10, 10);
+
+      const platform = {
+        createCanvas: (w: number, h: number) => createCanvas(w, h),
+      };
+
+      const poly: Point2D[] = [
+        { x: 10, y: 10 },
+        { x: 50, y: 10 },
+        { x: 50, y: 50 },
+        { x: 10, y: 50 },
+      ];
+
+      const maskCanvas = Binarizer.extractStrokeMask(platform, canvas, [poly]);
+      const maskCtx = maskCanvas.getContext('2d');
+      const maskData = maskCtx.getImageData(0, 0, width, height).data;
+
+      // Text center (30, 30) should be masked (white in mask)
+      const textIdx = (30 * width + 30) * 4;
+      expect(maskData[textIdx]).toBe(255);
+
+      // White paper inside the polygon (15, 15) should remain UNMASKED (black in mask)
+      const paperIdx = (15 * width + 15) * 4;
+      expect(maskData[paperIdx]).toBe(0);
+    });
+  });
+
   describe('inpaint with mock platform', () => {
     it('returns original imageBuffer if maskPolygons is empty', async () => {
       const engine = new TeleaInpaintEngine({});
       const dummyBuffer = new ArrayBuffer(8);
       const result = await engine.inpaint(dummyBuffer, []);
       expect(result).toBe(dummyBuffer);
+    });
+
+    it('erases text inside speech bubble seamlessly via Binarizer + Telea FMM', async () => {
+      const width = 80;
+      const height = 80;
+      const canvas = createCanvas(width, height);
+      const ctx = canvas.getContext('2d');
+
+      // White bubble background
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(0, 0, width, height);
+
+      // Black text glyph
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(35, 30, 10, 20);
+
+      let outputCanvas: any;
+      const platform = {
+        canvas: {
+          prepareCanvas: async () => canvas,
+        },
+        createCanvas: (w: number, h: number) => createCanvas(w, h),
+      };
+
+      const engine = new TeleaInpaintEngine(platform);
+      (engine as any).canvasToArrayBuffer = async (c: any) => {
+        outputCanvas = c;
+        return new ArrayBuffer(1);
+      };
+
+      const poly: Point2D[] = [
+        { x: 20, y: 20 },
+        { x: 60, y: 20 },
+        { x: 60, y: 60 },
+        { x: 20, y: 60 },
+      ];
+
+      await engine.inpaint(new ArrayBuffer(8), [poly]);
+
+      const outCtx = outputCanvas.getContext('2d');
+      const outData = outCtx.getImageData(0, 0, width, height).data;
+
+      // The black text should now be erased back to white (> 245 in R, G, B)
+      const textCenterIdx = (40 * width + 40) * 4;
+      expect(outData[textCenterIdx]).toBeGreaterThan(245);
+      expect(outData[textCenterIdx + 1]).toBeGreaterThan(245);
+      expect(outData[textCenterIdx + 2]).toBeGreaterThan(245);
+    });
+
+    it('erases text strokes on art while preserving line art outside strokes', async () => {
+      const width = 80;
+      const height = 80;
+      const canvas = createCanvas(width, height);
+      const ctx = canvas.getContext('2d');
+
+      // Light gray manga background
+      ctx.fillStyle = '#CCCCCC';
+      ctx.fillRect(0, 0, width, height);
+
+      // Black vertical panel border / line art at x=65 (outside polygon, but inside padding)
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(65, 10, 4, 60);
+
+      // Black text glyph at x=35..45, y=30..50
+      ctx.fillRect(35, 30, 10, 20);
+
+      let outputCanvas: any;
+      const platform = {
+        canvas: {
+          prepareCanvas: async () => canvas,
+        },
+        createCanvas: (w: number, h: number) => createCanvas(w, h),
+      };
+
+      const engine = new TeleaInpaintEngine(platform);
+      (engine as any).canvasToArrayBuffer = async (c: any) => {
+        outputCanvas = c;
+        return new ArrayBuffer(1);
+      };
+
+      // OCR polygon bounds the text closely (x: 30..50), while crop box with padding includes the border at x=65
+      const poly: Point2D[] = [
+        { x: 30, y: 25 },
+        { x: 50, y: 25 },
+        { x: 50, y: 55 },
+        { x: 30, y: 55 },
+      ];
+
+      await engine.inpaint(new ArrayBuffer(8), [poly]);
+
+      const outCtx = outputCanvas.getContext('2d');
+      const outData = outCtx.getImageData(0, 0, width, height).data;
+
+      // Text stroke at (40, 40) should be erased back to light gray background (~204)
+      const textIdx = (40 * width + 40) * 4;
+      expect(outData[textIdx]).toBeGreaterThan(180);
+
+      // Panel border line at (66, 40) should remain solid black (< 30)
+      const borderIdx = (40 * width + 66) * 4;
+      expect(outData[borderIdx]).toBeLessThan(30);
     });
   });
 });
