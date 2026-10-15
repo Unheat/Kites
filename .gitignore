@@ -38,7 +38,10 @@ worker/.dev.vars
 worker/.dev.vars*
 scripts/.env
 PaddleOCR/
-result/
+/result/
+src/test/result/
+README_images/result/archive/
+README_images/result/translated_files/
 
 models/
 model/
