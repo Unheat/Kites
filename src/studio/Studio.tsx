@@ -309,19 +309,19 @@ export const Studio: React.FC<StudioProps> = ({
           </div>
 
           {/* Tools Grid (7 tool buttons in 1 row) */}
-          <div className="grid grid-cols-8 gap-1 p-1 bg-[#090a0f] border border-[#262a3b] rounded-lg shrink-0">
+          <div className="grid grid-cols-7 gap-1 p-1 bg-[#090a0f] border border-[#262a3b] rounded-lg shrink-0">
             {TOOLS.map((t) => (
               <button
                 key={t.id}
                 onClick={() => studioStore.setState({ activeTool: t.id })}
                 title={`${t.label} (${t.shortcut})`}
-                className={`flex items-center justify-center py-2 px-1 rounded-md transition ${
+                className={`flex items-center justify-center aspect-square rounded-md transition ${
                   activeTool === t.id
                     ? 'bg-[#f4446d] text-white shadow-md shadow-[rgba(244,68,109,0.35)]'
                     : 'text-slate-400 hover:text-white hover:bg-[#1c1f2e]'
                 }`}
               >
-                <t.icon className="w-4 h-4" />
+                <t.icon className="w-[18px] h-[18px]" />
               </button>
             ))}
           </div>
