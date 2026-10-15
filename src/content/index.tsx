@@ -319,7 +319,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
   if (message.type === 'OPEN_CHAPTER_READER') {
-    document.dispatchEvent(new CustomEvent('kites-open-chapter-reader'));
+    document.dispatchEvent(
+      new CustomEvent('kites-open-chapter-reader', {
+        detail: message.payload,
+      })
+    );
     sendResponse({ status: 'success' });
     return;
   }
@@ -1449,8 +1453,13 @@ function GlobalOverlay() {
   }, []);
 
   useEffect(() => {
-    const handleOpenReader = () => {
-      refreshChapterPages();
+    const handleOpenReader = (event: Event) => {
+      const customEvent = event as CustomEvent<{ pages?: ChapterReaderPage[] } | undefined>;
+      if (customEvent.detail?.pages && Array.isArray(customEvent.detail.pages) && customEvent.detail.pages.length > 0) {
+        setChapterPages(customEvent.detail.pages);
+      } else {
+        refreshChapterPages();
+      }
       setIsReaderOpen(true);
     };
     document.addEventListener('kites-open-chapter-reader', handleOpenReader);
@@ -2174,7 +2183,10 @@ function GlobalOverlay() {
       {/* Full-Screen Distraction-Free Chapter Reader Modal */}
       <ChapterReaderModal
         isOpen={isReaderOpen}
-        onClose={() => setIsReaderOpen(false)}
+        onClose={() => {
+          setIsReaderOpen(false);
+          refreshChapterPages();
+        }}
         pages={chapterPages}
         title={document.title}
         onExportZip={() => void chapterExporter.exportChapter()}

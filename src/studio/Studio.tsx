@@ -19,9 +19,12 @@ import {
   ScanText,
   Maximize2,
   Image as ImageIcon,
+  RotateCcw,
+  Loader,
 } from 'lucide-react';
 import { studioStore, useStudioStore } from './state/studioStore';
 import { studioUndoStack } from './state/undoStack';
+import { requestStudioOcr } from './bridge/offscreenStudioBridge';
 import {
   calculateFitWidth,
   calculateFitHeight,
@@ -84,6 +87,8 @@ export const Studio: React.FC<StudioProps> = ({
   const [canRedo, setCanRedo] = useState(false);
   const [zoomDropdownOpen, setZoomDropdownOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isRetranslating, setIsRetranslating] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const imageWidth = originalImage?.naturalWidth || cleanedImage?.naturalWidth || 800;
   const imageHeight = originalImage?.naturalHeight || cleanedImage?.naturalHeight || 1200;
@@ -272,6 +277,84 @@ export const Studio: React.FC<StudioProps> = ({
     }
   };
 
+  const handleRetranslatePage = async () => {
+    if (!originalImage || isRetranslating) return;
+    setIsRetranslating(true);
+    setToastMessage('Retranslating page with full AI pipeline…');
+
+    try {
+      const bgCanvas = getWorkingCanvas();
+      const ctx = bgCanvas?.getContext('2d');
+      const prevImageData = ctx?.getImageData(0, 0, imageWidth, imageHeight);
+      const prevTextObjects = [...studioStore.getState().textObjects];
+
+      // Draw original image onto an offscreen canvas for OCR recognition
+      const patchCanvas = document.createElement('canvas');
+      patchCanvas.width = imageWidth;
+      patchCanvas.height = imageHeight;
+      const pCtx = patchCanvas.getContext('2d');
+      if (pCtx) {
+        pCtx.drawImage(originalImage, 0, 0, imageWidth, imageHeight);
+      }
+
+      const result = await requestStudioOcr(
+        patchCanvas,
+        { x: 0, y: 0, width: imageWidth, height: imageHeight },
+        { translate: true, inpaint: true }
+      );
+
+      if (ctx && result.inpaintedImage) {
+        ctx.drawImage(result.inpaintedImage, 0, 0, imageWidth, imageHeight);
+      }
+      const nextImageData = ctx?.getImageData(0, 0, imageWidth, imageHeight);
+
+      // Push to undo stack for seamless Ctrl+Z recovery
+      if (prevImageData && nextImageData) {
+        studioUndoStack.push({
+          id: `retranslate-${Date.now()}`,
+          timestamp: Date.now(),
+          description: 'Retranslate full page',
+          rasterPatch: {
+            before: {
+              x: 0,
+              y: 0,
+              width: imageWidth,
+              height: imageHeight,
+              patchImageData: prevImageData,
+            },
+            after: {
+              x: 0,
+              y: 0,
+              width: imageWidth,
+              height: imageHeight,
+              patchImageData: nextImageData,
+            },
+          },
+          textObjects: {
+            before: prevTextObjects,
+            after: result.textObjects,
+          },
+        });
+      }
+
+      // Update studio state
+      studioStore.setState({
+        textObjects: result.textObjects,
+      });
+
+      setToastMessage('Page retranslated · Press Ctrl+Z to undo');
+      setTimeout(() => {
+        setToastMessage((curr) => (curr?.includes('retranslated') ? null : curr));
+      }, 4500);
+    } catch (err: any) {
+      console.error('[Studio] Retranslate failed:', err);
+      setToastMessage(`Retranslate failed: ${err?.message || 'Pipeline error'}`);
+      setTimeout(() => setToastMessage(null), 4500);
+    } finally {
+      setIsRetranslating(false);
+    }
+  };
+
   return (
     <div className="flex flex-row gap-3 p-3 w-screen h-screen overflow-hidden bg-[#090a0f] text-slate-100 select-none">
       {/* ======================================================== */}
@@ -390,10 +473,26 @@ export const Studio: React.FC<StudioProps> = ({
             >
               <Save className="w-3.5 h-3.5" /> {isSaving ? 'Saving...' : 'Save Image'}
             </button>
+            <button
+              onClick={handleRetranslatePage}
+              disabled={isRetranslating || !originalImage}
+              title="Re-run full OCR detection, inpainting, and translation on the original page"
+              className="flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-lg border border-[#262a3b] bg-[#090a0f] text-xs font-medium text-slate-300 hover:bg-[#1c1f2e] hover:text-[#f4446d] hover:border-[#f4446d]/40 disabled:opacity-30 disabled:pointer-events-none transition"
+            >
+              {isRetranslating ? (
+                <>
+                  <Loader className="w-3.5 h-3.5 animate-spin text-[#f4446d]" /> Retranslating…
+                </>
+              ) : (
+                <>
+                  <RotateCcw className="w-3.5 h-3.5" /> Retranslate
+                </>
+              )}
+            </button>
             {onBack && (
               <button
                 onClick={onBack}
-                className="flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-lg border border-[#262a3b] bg-[#090a0f] text-xs font-medium text-slate-300 hover:bg-[#1c1f2e] transition"
+                className="col-span-2 flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-lg border border-[#262a3b] bg-[#090a0f] text-xs font-medium text-slate-300 hover:bg-[#1c1f2e] transition"
               >
                 Library
               </button>
@@ -555,6 +654,14 @@ export const Studio: React.FC<StudioProps> = ({
       )}
       {activeModal === 'appearance' && (
         <AppearanceSettingsModal onClose={() => studioStore.setState({ activeModal: null })} />
+      )}
+
+      {/* Floating Toast Feedback for Retranslate / Actions */}
+      {toastMessage && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 py-2 px-4 rounded-lg bg-[#141724] border border-[#f4446d]/40 shadow-xl shadow-black/60 text-xs font-medium text-slate-200 flex items-center gap-2 animate-fadeIn pointer-events-none">
+          <Sparkles className="w-4 h-4 text-[#f4446d] shrink-0" />
+          <span>{toastMessage}</span>
+        </div>
       )}
     </div>
   );
