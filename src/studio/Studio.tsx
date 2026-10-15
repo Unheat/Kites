@@ -73,7 +73,7 @@ export const Studio: React.FC<StudioProps> = ({
 }) => {
   const activeTool = useStudioStore((s) => s.activeTool);
   const zoom = useStudioStore((s) => s.zoom);
-  const isShowingOriginal = useStudioStore((s) => s.isShowingOriginal ?? s.isCanvasFlipped);
+  const viewMode = useStudioStore((s) => s.viewMode ?? (s.isShowingOriginal ? 'original' : 'translated'));
   const hideBoxes = useStudioStore((s) => s.hideBoxes);
   const activeModal = useStudioStore((s) => s.activeModal);
   const globalEditMode = useStudioStore((s) => s.globalEditMode);
@@ -409,31 +409,56 @@ export const Studio: React.FC<StudioProps> = ({
         {/* Canvas Top Bar */}
         <div className="w-full h-9 bg-[#141724] border-b border-[#262a3b] px-3 flex items-center justify-between text-xs text-slate-300 shrink-0 select-none z-30">
           <div className="flex items-center gap-2">
-            <button
-              onClick={() =>
-                studioStore.setState({
-                  isShowingOriginal: !isShowingOriginal,
-                  isCanvasFlipped: !isShowingOriginal,
-                })
-              }
-              title="Show Original untranslated image vs Translated image"
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-medium transition cursor-pointer ${
-                isShowingOriginal
-                  ? 'border-[#f4446d] bg-[#f4446d]/15 text-[#f4446d]'
-                  : 'border-[#262a3b] bg-[#090a0f] text-slate-300 hover:bg-[#1c1f2e]'
-              }`}
-            >
-              {isShowingOriginal ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-              <span>{isShowingOriginal ? 'Show Translated' : 'Show Original'}</span>
-            </button>
+            {/* 3-Way Presentation View Mode Segmented Control */}
+            <div className="flex items-center p-0.5 rounded-lg bg-[#090a0f] border border-[#262a3b]">
+              <button
+                type="button"
+                onClick={() => studioStore.setViewMode('original')}
+                title="Show pristine untouched raw artwork"
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium transition cursor-pointer ${
+                  viewMode === 'original'
+                    ? 'bg-[#f4446d] text-white shadow-xs'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-[#1c1f2e]/50'
+                }`}
+              >
+                <span>Original</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => studioStore.setViewMode('inpainted')}
+                title="Show cleaned background artwork without text"
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium transition cursor-pointer ${
+                  viewMode === 'inpainted'
+                    ? 'bg-[#f4446d] text-white shadow-xs'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-[#1c1f2e]/50'
+                }`}
+              >
+                <span>Inpainted BG</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => studioStore.setViewMode('translated')}
+                title="Show translated artwork with typography overlay"
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium transition cursor-pointer ${
+                  viewMode === 'translated'
+                    ? 'bg-[#f4446d] text-white shadow-xs'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-[#1c1f2e]/50'
+                }`}
+              >
+                <span>Translated</span>
+              </button>
+            </div>
 
             <button
               onClick={() => studioStore.setState({ hideBoxes: !hideBoxes })}
               title="Hide Boxes (Preview clean page without dashed outlines)"
+              disabled={viewMode !== 'translated'}
               className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-medium transition ${
-                hideBoxes
-                  ? 'border-[#f4446d] bg-[#f4446d]/15 text-[#f4446d]'
-                  : 'border-[#262a3b] bg-[#090a0f] text-slate-300 hover:bg-[#1c1f2e]'
+                viewMode !== 'translated'
+                  ? 'opacity-40 cursor-not-allowed border-[#262a3b] bg-[#090a0f] text-slate-500'
+                  : hideBoxes
+                  ? 'border-[#f4446d] bg-[#f4446d]/15 text-[#f4446d] cursor-pointer'
+                  : 'border-[#262a3b] bg-[#090a0f] text-slate-300 hover:bg-[#1c1f2e] cursor-pointer'
               }`}
             >
               {hideBoxes ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}

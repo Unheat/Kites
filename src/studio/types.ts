@@ -18,6 +18,10 @@ export type BrushShape = 'circle' | 'square';
 
 export type EraseRestoreSource = 'original' | 'inpainted';
 
+export type StudioViewMode = 'original' | 'inpainted' | 'translated';
+
+export type InpaintSource = 'background' | 'original';
+
 export type PaintSourceMode = 'color' | 'pattern' | 'blur' | 'transparency';
 
 export interface Point {

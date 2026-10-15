@@ -87,6 +87,42 @@ describe('Studio State Management', () => {
     expect(studioStore.getState().isShowingOriginal).toBe(false);
   });
 
+  it('manages 3-way viewMode transitions and synchronizes with legacy flags', () => {
+    studioStore.setViewMode('translated');
+    expect(studioStore.getState().viewMode).toBe('translated');
+    expect(studioStore.getState().isShowingOriginal).toBe(false);
+    expect(studioStore.getState().isCanvasFlipped).toBe(false);
+
+    studioStore.setViewMode('inpainted');
+    expect(studioStore.getState().viewMode).toBe('inpainted');
+    expect(studioStore.getState().isShowingOriginal).toBe(false);
+    expect(studioStore.getState().isCanvasFlipped).toBe(false);
+
+    studioStore.setViewMode('original');
+    expect(studioStore.getState().viewMode).toBe('original');
+    expect(studioStore.getState().isShowingOriginal).toBe(true);
+    expect(studioStore.getState().isCanvasFlipped).toBe(true);
+
+    // Setting legacy flag syncs back to viewMode
+    studioStore.setState({ isShowingOriginal: false });
+    expect(studioStore.getState().viewMode).toBe('translated');
+    expect(studioStore.getState().isShowingOriginal).toBe(false);
+  });
+
+  it('manages inpaint source configurations with background canvas as default', () => {
+    expect(studioStore.getState().inpaintSettings.source).toBe('background');
+
+    studioStore.setState((prev) => ({
+      inpaintSettings: { ...prev.inpaintSettings, source: 'original' },
+    }));
+    expect(studioStore.getState().inpaintSettings.source).toBe('original');
+
+    studioStore.setState((prev) => ({
+      inpaintSettings: { ...prev.inpaintSettings, source: 'background' },
+    }));
+    expect(studioStore.getState().inpaintSettings.source).toBe('background');
+  });
+
   it('manages engine tier selection and global sync toggle', () => {
     expect(studioStore.getState().syncWithGlobal).toBe(true);
     studioStore.setEngineSelection('inpaint', 'aotgan');

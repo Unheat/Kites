@@ -6,6 +6,7 @@ import { translationManager } from './services/TranslationManager';
 import { runStudioOcr, type StudioOcrResponse } from './services/StudioOcr';
 import { CustomApiEngine } from './engines/translation/CustomApiEngine';
 import { inpaintRegistry } from './engines/inpaint/inpaintRegistry';
+import { BUILTIN_INPAINT_IDS } from '../shared/inpaintTiers';
 import { ocrRegistry, resolveOcrTier } from './engines/ocr/ocrRegistry';
 import { bubbleRegistry } from './engines/bubble/bubbleRegistry';
 import { InpaintCacheManager } from './services/InpaintCacheManager';
@@ -422,7 +423,7 @@ async function handleStartDownload(modelId: string, category?: string) {
 async function handleCheckStatus(modelId: string): Promise<boolean> {
   modelId = modelId === 'aot' ? 'aotgan' : modelId;
   // Built-in inpaint and bubble algorithms require no downloaded model files
-  if (modelId === 'none' || modelId === 'simple' || modelId === 'telea' || modelId === 'heuristic' || modelId === 'off') {
+  if (BUILTIN_INPAINT_IDS.has(modelId) || modelId === 'heuristic' || modelId === 'off') {
     return true;
   }
 
@@ -545,10 +546,16 @@ async function handleStudioInpaint(payload: StudioInpaintPayload): Promise<{ inp
   const imageRes = await fetch(payload.imagePatchBase64);
   const imageBuf = await imageRes.arrayBuffer();
 
-  const popupState = await new Promise<any>((resolve) => {
-    chrome.runtime.sendMessage({ type: 'GET_POPUP_STATE' }, (res) => resolve(res || {}));
-  });
-  const inpaintTier = payload.engineId || popupState.activeInpaintId || 'lama-manga';
+  let inpaintTier: string = payload.engineId || '';
+  if (!inpaintTier) {
+    const popupState = await new Promise<any>((resolve) => {
+      chrome.runtime.sendMessage(
+        { type: 'GET_POPUP_STATE', target: 'background', source: 'offscreen', request: true },
+        (res) => resolve(res || {})
+      );
+    });
+    inpaintTier = popupState.activeInpaintId || 'lama-manga';
+  }
 
   let maskPolygons: Point2D[][] = [];
   if (payload.maskPatchBase64) {
@@ -579,7 +586,7 @@ async function handleStudioInpaint(payload: StudioInpaintPayload): Promise<{ inp
     ]];
   }
 
-  const cleanedBuffer = await pipelineOrchestrator.getInpaintManager().eraseText(imageBuf, maskPolygons, inpaintTier);
+  const cleanedBuffer = await pipelineOrchestrator.getInpaintManager().eraseText(imageBuf, maskPolygons, inpaintTier as any);
   const cleanedBlob = new Blob([cleanedBuffer], { type: 'image/png' });
   const cleanedBase64 = await blobToBase64(cleanedBlob);
 

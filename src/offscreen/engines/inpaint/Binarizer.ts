@@ -4,7 +4,15 @@ import type { Point2D } from './BaseInpaintEngine';
  * Extracts a refined text stroke mask for the given image canvas.
  * Implements a pure JS grayscale + Otsu thresholding + polygon clip masking pipeline.
  */
-const PADDING_RATIO = 0.1; // Dynamic padding ratio for Circular Dilation
+/**
+ * Minimum and maximum dilation radius in pixels for text stroke masks.
+ * Dynamic scaling aligns with Cotrans 2023 (~12% of estimated font size),
+ * clamped between 2px (to cover anti-aliasing) and 5px (to swallow artist white halo/fuchidori
+ * without merging adjacent text columns into solid blocks).
+ */
+const MIN_STROKE_DILATION_RADIUS = 2;
+const MAX_STROKE_DILATION_RADIUS = 5;
+const DILATION_FONT_RATIO = 0.12;
 export class Binarizer {
   /**
    * Generates a binary mask of the same width and height as the source image,
@@ -22,9 +30,16 @@ export class Binarizer {
   ): any {
     const width = sourceCanvas.width;
     const height = sourceCanvas.height;
+
+    const createCanvas = (w: number, h: number) => {
+      if (typeof OffscreenCanvas !== 'undefined') {
+        return new OffscreenCanvas(w, h);
+      }
+      return platform.createCanvas(w, h);
+    };
     
     // Create the global black mask canvas
-    const maskCanvas = platform.createCanvas(width, height);
+    const maskCanvas = createCanvas(width, height);
     const maskCtx = maskCanvas.getContext('2d', { willReadFrequently: true });
     maskCtx.fillStyle = '#000000';
     maskCtx.fillRect(0, 0, width, height);
@@ -116,16 +131,16 @@ export class Binarizer {
       }
 
       // 5. Build localized stroke image data
-      const tempCanvas = platform.createCanvas(w, h);
+      const tempCanvas = createCanvas(w, h);
       const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
       const tempImgData = tempCtx.createImageData(w, h);
       const tempImgBytes = tempImgData.data;
 
       for (let i = 0; i < w * h; i++) {
         const g = gray[i];
-        // If background is light (white speech bubble), text is dark (< Otsu threshold)
+        // If background is light (white speech bubble), text is dark (<= Otsu threshold)
         // If background is dark, text is light (>= Otsu threshold)
-        const isTextPixel = isBgLight ? (g < otsuThresh) : (g >= otsuThresh);
+        const isTextPixel = isBgLight ? (g <= otsuThresh) : (g >= otsuThresh);
         
         const idx = i * 4;
         if (isTextPixel) {
@@ -153,21 +168,22 @@ export class Binarizer {
       tempCtx.fill();
       tempCtx.globalCompositeOperation = 'source-over'; // restore
 
-      // 7. Dynamic Circular Dilation (mimicking OpenCV cv2.dilate with MORPH_ELLIPSE)
-      // Cotrans dynamically sets dilate_size based on text size: dilate_size = int(text_size * 0.3)
-      // Since padding is radius, padding = text_size * 0.15
-      const dynamicPadding = Math.max(Math.floor(Math.min(w, h) * PADDING_RATIO), 1);
-
-      const radiusSq = dynamicPadding * dynamicPadding;
-      for (let dy = -dynamicPadding; dy <= dynamicPadding; dy++) {
-        for (let dx = -dynamicPadding; dx <= dynamicPadding; dx++) {
+      // 7. Dynamic Circular Dilation (Cotrans-aligned: ~12% of line/font size, clamped 2px..5px)
+      const estimatedFontSize = Math.min(w, h);
+      const dynamicRadius = Math.max(
+        MIN_STROKE_DILATION_RADIUS,
+        Math.min(MAX_STROKE_DILATION_RADIUS, Math.round(estimatedFontSize * DILATION_FONT_RATIO))
+      );
+      const radiusSq = dynamicRadius * dynamicRadius;
+      for (let dy = -dynamicRadius; dy <= dynamicRadius; dy++) {
+        for (let dx = -dynamicRadius; dx <= dynamicRadius; dx++) {
           if (dx * dx + dy * dy <= radiusSq) {
-            maskCtx.drawImage(tempCtx.canvas || tempCanvas, x + dx, y + dy);
+            maskCtx.drawImage(tempCanvas, x + dx, y + dy);
           }
         }
       }
     }
 
-    return maskCtx.canvas || maskCanvas;
+    return maskCanvas;
   }
 }
