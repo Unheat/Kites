@@ -6,7 +6,7 @@ import type { TextObject } from './types';
 describe('Studio State Management', () => {
   beforeEach(() => {
     studioStore.setState({
-      activeTool: 'select',
+      activeTool: 'text',
       zoom: 1.0,
       pan: { x: 0, y: 0 },
       isCanvasFlipped: false,
@@ -383,5 +383,61 @@ describe('Studio State Management', () => {
 
     expect(studioStore.getState().textObjects[0].text).toBe('Updated via Sidebar Textarea');
     expect(studioStore.getState().textObjects[0].lines).toEqual(sidebarTypeset.lines);
+  });
+
+  it('defaults to text as primary tool and supports all 7 Studio tools', () => {
+    expect(studioStore.getState().activeTool).toBe('text');
+
+    const tools: Array<'text' | 'erase' | 'paint' | 'inpaint' | 'ocr' | 'warp' | 'image'> = [
+      'text',
+      'erase',
+      'paint',
+      'inpaint',
+      'ocr',
+      'warp',
+      'image',
+    ];
+
+    for (const tool of tools) {
+      studioStore.setState({ activeTool: tool });
+      expect(studioStore.getState().activeTool).toBe(tool);
+    }
+  });
+
+  it('masks inpainted patch using drawn brush stencil', () => {
+    // Verify stencil composition math: destination-in preserves only painted mask pixels
+    const width = 100;
+    const height = 100;
+
+    const maskCanvas = document.createElement('canvas');
+    maskCanvas.width = width;
+    maskCanvas.height = height;
+    const maskCtx = maskCanvas.getContext('2d')!;
+
+    // Draw a square brush dab from (10, 10) to (50, 50)
+    maskCtx.fillStyle = '#000000';
+    maskCtx.fillRect(10, 10, 40, 40);
+
+    const blendCanvas = document.createElement('canvas');
+    blendCanvas.width = width;
+    blendCanvas.height = height;
+    const blendCtx = blendCanvas.getContext('2d')!;
+
+    // Fill blend canvas with white inpainted image
+    blendCtx.fillStyle = 'rgba(255, 255, 255, 1)';
+    blendCtx.fillRect(0, 0, width, height);
+
+    // Apply destination-in stencil
+    blendCtx.globalCompositeOperation = 'destination-in';
+    blendCtx.drawImage(maskCanvas, 0, 0);
+
+    const result = blendCtx.getImageData(0, 0, width, height);
+    // Pixel inside brush dab (20, 20) must be opaque
+    const insideIdx = (20 * width + 20) * 4;
+    expect(result.data[insideIdx + 3]).toBeGreaterThan(0);
+
+    // Pixel outside brush dab (80, 80) must be transparent (untouched background)
+    const outsideIdx = (80 * width + 80) * 4;
+    expect(result.data[outsideIdx + 3]).toBe(0);
   });
 });

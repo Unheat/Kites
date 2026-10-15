@@ -9,14 +9,13 @@ const SHORTCUT_GROUPS = [
   {
     title: 'Tools',
     items: [
+      { key: 'T / V', desc: 'Text & Typography Tool' },
       { key: 'Ctrl + 1', desc: 'Erase / Restore Brush' },
       { key: 'Ctrl + 2', desc: 'Paint Brush (Color / Blur / Pattern)' },
       { key: 'Ctrl + 3', desc: 'Local AI Inpaint Brush' },
       { key: 'Ctrl + 4', desc: 'Local AI Re-OCR Area' },
-      { key: 'Ctrl + 5', desc: 'Text & Typography Tool' },
-      { key: 'Ctrl + 6', desc: 'Warp & Quad Perspective' },
-      { key: 'Ctrl + 7', desc: 'Sticker Image Layers' },
-      { key: 'V', desc: 'Selection & Transform Tool' },
+      { key: 'Ctrl + 5', desc: 'Warp & Quad Perspective' },
+      { key: 'Ctrl + 6', desc: 'Sticker Image Layers' },
     ],
   },
   {

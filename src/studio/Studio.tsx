@@ -19,7 +19,6 @@ import {
   ScanText,
   Maximize2,
   Image as ImageIcon,
-  MousePointer2,
 } from 'lucide-react';
 import { studioStore, useStudioStore } from './state/studioStore';
 import { studioUndoStack } from './state/undoStack';
@@ -55,14 +54,13 @@ export interface StudioProps {
 }
 
 const TOOLS: { id: StudioTool; label: string; icon: React.ComponentType<{ className?: string }>; shortcut: string }[] = [
-  { id: 'select', label: 'Select & Move', icon: MousePointer2, shortcut: 'V' },
+  { id: 'text', label: 'Text & Typography', icon: Type, shortcut: 'T' },
   { id: 'erase', label: 'Restore / Erase Brush', icon: Eraser, shortcut: 'Ctrl+1' },
   { id: 'paint', label: 'Freehand Paint Brush', icon: Brush, shortcut: 'Ctrl+2' },
   { id: 'inpaint', label: 'Local AI Inpaint', icon: Sparkles, shortcut: 'Ctrl+3' },
   { id: 'ocr', label: 'Manual Translate OCR', icon: ScanText, shortcut: 'Ctrl+4' },
-  { id: 'text', label: 'Text & Typography', icon: Type, shortcut: 'Ctrl+5' },
-  { id: 'warp', label: 'Warp & Perspective', icon: Maximize2, shortcut: 'Ctrl+6' },
-  { id: 'image', label: 'Stickers & Layers', icon: ImageIcon, shortcut: 'Ctrl+7' },
+  { id: 'warp', label: 'Warp & Perspective', icon: Maximize2, shortcut: 'Ctrl+5' },
+  { id: 'image', label: 'Stickers & Layers', icon: ImageIcon, shortcut: 'Ctrl+6' },
 ];
 
 export const Studio: React.FC<StudioProps> = ({
@@ -135,8 +133,8 @@ export const Studio: React.FC<StudioProps> = ({
       ) {
         e.preventDefault();
         handleRedo();
-      } else if (e.key.toLowerCase() === 'v') {
-        studioStore.setState({ activeTool: 'select' });
+      } else if (e.key.toLowerCase() === 'v' || e.key.toLowerCase() === 't') {
+        studioStore.setState({ activeTool: 'text' });
       } else if ((e.ctrlKey || e.metaKey) && e.key === '1') {
         e.preventDefault();
         studioStore.setState({ activeTool: 'erase' });
@@ -151,11 +149,8 @@ export const Studio: React.FC<StudioProps> = ({
         studioStore.setState({ activeTool: 'ocr' });
       } else if ((e.ctrlKey || e.metaKey) && e.key === '5') {
         e.preventDefault();
-        studioStore.setState({ activeTool: 'text' });
-      } else if ((e.ctrlKey || e.metaKey) && e.key === '6') {
-        e.preventDefault();
         studioStore.setState({ activeTool: 'warp' });
-      } else if ((e.ctrlKey || e.metaKey) && e.key === '7') {
+      } else if ((e.ctrlKey || e.metaKey) && e.key === '6') {
         e.preventDefault();
         studioStore.setState({ activeTool: 'image' });
       }
@@ -337,7 +332,7 @@ export const Studio: React.FC<StudioProps> = ({
             {activeTool === 'paint' && <PaintSettings />}
             {activeTool === 'inpaint' && <InpaintSettings />}
             {activeTool === 'ocr' && <OcrSettings />}
-            {(activeTool === 'text' || activeTool === 'select') && <TypographySettings />}
+            {(activeTool === 'text' || (activeTool as any) === 'select') && <TypographySettings />}
             {activeTool === 'warp' && <WarpSettings />}
             {activeTool === 'image' && <ImageLayerSettings />}
           </div>
