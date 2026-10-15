@@ -44,6 +44,12 @@ The developer of this project is a beginner learning full-stack, web extension, 
 *   **Mandatory Docstrings**: Each function must include a docstring detailing its general description/purpose, input parameters, and return value/outputs.
 *   **No Magic Numbers**: Extract magic numbers (like timeouts, minimum dimensions, or thresholds) into named constants at the top of the file with explanatory comments so they are easily adjustable in the future.
 *   **Centralized Storage Keys (No Magic Strings)**: All keys stored in or retrieved from `chrome.storage.local` MUST be registered in `src/shared/constants.ts` under `STORAGE_KEYS`. Never hardcode raw string keys (`'popupState'`, `'kites_oauth_auth_token'`, `'hardware_webgpu_supported'`, etc.) across background, popup, offscreen, or content scripts. Always import and use `STORAGE_KEYS` to maintain a single source of truth and prevent silent key mismatches.
+*   **Single Source of Truth & DRY Catalogs (Universal Principle)**: Never duplicate lists of options, feature tiers, strategies, or configuration variants across UI components and backend handlers. Every configurable or swappable capability across the entire codebase MUST define its canonical catalog in a shared module (`src/shared/`):
+    1. **Canonical Definition**: Define a single typed array/record as the single source of truth. Export an invariant type derived from it via `(typeof CATALOG)[number]['id']`.
+    2. **UI Consumption**: All UI components (dropdowns, selectors, settings panels) MUST derive their choices directly from the shared catalog. Never write duplicate hardcoded array literals in UI code.
+    3. **Backend Validation**: State validators, routing guards, and status checkers MUST derive their valid sets directly from the shared catalog.
+    4. **Exhaustive Matching**: Backend factories and strategy routers MUST use exhaustive type-checking so TypeScript alerts you at compile time if an option is added without a corresponding handler.
+    *Rule of thumb: Adding a new option anywhere in the app should only require adding it to its shared catalog and implementing its handler. All UIs, validators, and routers must update automatically.*
 
 ---
 

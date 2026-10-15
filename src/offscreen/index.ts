@@ -6,6 +6,7 @@ import { translationManager } from './services/TranslationManager';
 import { runStudioOcr, type StudioOcrResponse } from './services/StudioOcr';
 import { CustomApiEngine } from './engines/translation/CustomApiEngine';
 import { inpaintRegistry } from './engines/inpaint/inpaintRegistry';
+import { BUILTIN_INPAINT_IDS } from '../shared/inpaintTiers';
 import { ocrRegistry, resolveOcrTier } from './engines/ocr/ocrRegistry';
 import { bubbleRegistry } from './engines/bubble/bubbleRegistry';
 import { InpaintCacheManager } from './services/InpaintCacheManager';
@@ -422,7 +423,7 @@ async function handleStartDownload(modelId: string, category?: string) {
 async function handleCheckStatus(modelId: string): Promise<boolean> {
   modelId = modelId === 'aot' ? 'aotgan' : modelId;
   // Built-in inpaint and bubble algorithms require no downloaded model files
-  if (modelId === 'none' || modelId === 'simple' || modelId === 'telea' || modelId === 'heuristic' || modelId === 'off') {
+  if (BUILTIN_INPAINT_IDS.has(modelId) || modelId === 'heuristic' || modelId === 'off') {
     return true;
   }
 

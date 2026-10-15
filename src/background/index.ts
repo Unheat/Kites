@@ -4,7 +4,7 @@ import { DEFAULT_POPUP_STATE } from '../shared/types';
 import { CLOUDFLARE_QUOTA_DEFAULT_ENDPOINT, STORAGE_KEYS } from '../shared/constants';
 import modelsRegistryData from '../shared/models-registry.json';
 import { normalizeCustomApiConfig } from '../shared/customApi';
-import { inpaintRegistry } from '../offscreen/engines/inpaint/inpaintRegistry';
+import { SUPPORTED_INPAINT_IDS } from '../shared/inpaintTiers';
 import { resolveOcrTier } from '../offscreen/engines/ocr/ocrRegistry';
 import { normalizeRenderFontPresetId } from '../shared/renderFontPresets';
 import { normalizeGlossaryEntries } from '../shared/glossary';
@@ -96,8 +96,7 @@ export function normalizePopupState(popupState: Partial<PopupState> | undefined)
   const rawInpaintId = (completedState.activeInpaintId === 'lama-base' || completedState.activeInpaintId === 'lama-manga-fast')
     ? 'lama-manga'
     : (completedState.activeInpaintId === 'aot' ? 'aotgan' : completedState.activeInpaintId);
-  const supportedInpaintIds = new Set(['none', 'simple', 'telea', ...Object.keys(inpaintRegistry)]);
-  const activeInpaintId = supportedInpaintIds.has(rawInpaintId)
+  const activeInpaintId = SUPPORTED_INPAINT_IDS.has(rawInpaintId)
     ? rawInpaintId
     : DEFAULT_POPUP_STATE.activeInpaintId;
   const activeOcrId = resolveOcrTier(completedState.activeOcrId);

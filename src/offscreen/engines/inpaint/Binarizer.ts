@@ -5,10 +5,14 @@ import type { Point2D } from './BaseInpaintEngine';
  * Implements a pure JS grayscale + Otsu thresholding + polygon clip masking pipeline.
  */
 /**
- * Dilation radius in pixels for text stroke masks.
- * Tightly calibrated to 2px to swallow anti-aliased character fringe without bloating into solid blocks.
+ * Minimum and maximum dilation radius in pixels for text stroke masks.
+ * Dynamic scaling aligns with Cotrans 2023 (~12% of estimated font size),
+ * clamped between 2px (to cover anti-aliasing) and 5px (to swallow artist white halo/fuchidori
+ * without merging adjacent text columns into solid blocks).
  */
-const STROKE_DILATION_RADIUS = 2;
+const MIN_STROKE_DILATION_RADIUS = 2;
+const MAX_STROKE_DILATION_RADIUS = 5;
+const DILATION_FONT_RATIO = 0.12;
 export class Binarizer {
   /**
    * Generates a binary mask of the same width and height as the source image,
@@ -164,10 +168,15 @@ export class Binarizer {
       tempCtx.fill();
       tempCtx.globalCompositeOperation = 'source-over'; // restore
 
-      // 7. Circular Dilation (calibrated to 2px to swallow anti-aliased character edges)
-      const radiusSq = STROKE_DILATION_RADIUS * STROKE_DILATION_RADIUS;
-      for (let dy = -STROKE_DILATION_RADIUS; dy <= STROKE_DILATION_RADIUS; dy++) {
-        for (let dx = -STROKE_DILATION_RADIUS; dx <= STROKE_DILATION_RADIUS; dx++) {
+      // 7. Dynamic Circular Dilation (Cotrans-aligned: ~12% of line/font size, clamped 2px..5px)
+      const estimatedFontSize = Math.min(w, h);
+      const dynamicRadius = Math.max(
+        MIN_STROKE_DILATION_RADIUS,
+        Math.min(MAX_STROKE_DILATION_RADIUS, Math.round(estimatedFontSize * DILATION_FONT_RATIO))
+      );
+      const radiusSq = dynamicRadius * dynamicRadius;
+      for (let dy = -dynamicRadius; dy <= dynamicRadius; dy++) {
+        for (let dx = -dynamicRadius; dx <= dynamicRadius; dx++) {
           if (dx * dx + dy * dy <= radiusSq) {
             maskCtx.drawImage(tempCanvas, x + dx, y + dy);
           }

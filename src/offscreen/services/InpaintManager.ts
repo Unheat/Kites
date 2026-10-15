@@ -1,5 +1,6 @@
 import type { IInpaintEngine, Point2D } from '../engines/inpaint/BaseInpaintEngine';
 import { SimpleInpaintEngine } from '../engines/inpaint/SimpleInpaintEngine';
+import { StrokeFillInpaintEngine } from '../engines/inpaint/StrokeFillInpaintEngine';
 import { TeleaInpaintEngine } from '../engines/inpaint/TeleaInpaintEngine';
 import { AotInpaintEngine } from '../engines/inpaint/AotInpaintEngine';
 import { LamaMangaInpaintEngine } from '../engines/inpaint/LamaMangaInpaintEngine';
@@ -7,7 +8,7 @@ import { LamaBaseInpaintEngine } from '../engines/inpaint/LamaBaseInpaintEngine'
 import { NoneInpaintEngine } from '../engines/inpaint/NoneInpaintEngine';
 import type { InitializationLifecycleCallback } from './OcrManager';
 
-export type InpaintTier = 'simple' | 'telea' | 'aot' | 'aotgan' | 'lama-manga' | 'none';
+export type InpaintTier = 'simple' | 'stroke-fill' | 'telea' | 'aot' | 'aotgan' | 'lama-manga' | 'none';
 type CanonicalInpaintTier = Exclude<InpaintTier, 'aot'>;
 
 /**
@@ -151,6 +152,7 @@ export class InpaintManager {
     let engine: IInpaintEngine;
     switch (tier) {
       case 'simple': engine = new SimpleInpaintEngine(this.platform); break;
+      case 'stroke-fill': engine = new StrokeFillInpaintEngine(this.platform); break;
       case 'telea': engine = new TeleaInpaintEngine(this.platform); break;
       case 'aotgan': engine = new AotInpaintEngine(this.platform); break;
       case 'lama-manga': engine = new LamaMangaInpaintEngine(this.platform); break;

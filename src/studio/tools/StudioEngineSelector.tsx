@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ChevronDown, Check, Download, Globe, Lock } from 'lucide-react';
 import { studioStore, useStudioStore } from '../state/studioStore';
+import { INPAINT_TIER_CATALOG } from '../../shared/inpaintTiers';
 
 export interface EngineOption {
   id: string;
@@ -10,13 +11,7 @@ export interface EngineOption {
   sizeEstimate?: string;
 }
 
-export const INPAINT_ENGINE_OPTIONS: EngineOption[] = [
-  { id: 'simple', name: 'Simple Fill', tag: 'Fast Color' },
-  { id: 'telea', name: 'Telea Diffusion', tag: 'Fast Diffusion' },
-  { id: 'lama-manga', name: 'LaMa Manga', tag: 'Neural Dynamic', isModel: true, sizeEstimate: '~50 MB' },
-  { id: 'aotgan', name: 'AOT-GAN', tag: 'Neural High-Detail', isModel: true, sizeEstimate: '~60 MB' },
-  { id: 'none', name: 'None (Bypass)', tag: 'Raw Canvas' },
-];
+export const INPAINT_ENGINE_OPTIONS: EngineOption[] = INPAINT_TIER_CATALOG as EngineOption[];
 
 export const OCR_ENGINE_OPTIONS: EngineOption[] = [
   { id: 'v6-small', name: 'PaddleOCR v6 Small (Default)', tag: 'Recommended', isModel: true, sizeEstimate: '~4 MB' },

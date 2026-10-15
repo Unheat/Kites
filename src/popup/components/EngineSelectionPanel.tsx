@@ -6,6 +6,7 @@ import MiniSearch from 'minisearch';
 import { ModelRegistry } from '../services/ModelRegistry';
 import { isLlmGpuAvailable } from '../../shared/utils/hardwareUtils';
 import { RENDER_FONT_PRESETS, normalizeRenderFontPresetId } from '../../shared/renderFontPresets';
+import { INPAINT_TIER_CATALOG } from '../../shared/inpaintTiers';
 import HelpTooltip from './HelpTooltip';
 
 export interface BubbleModeOption {
@@ -206,13 +207,14 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
     return () => chrome.runtime.onMessage.removeListener(listener);
   }, []);
 
-  const [inpaintBaseEngines, setInpaintBaseEngines] = useState<Engine[]>([
-    { id: 'none', name: 'None', type: 'local', isDownloaded: true },
-    { id: 'simple', name: 'Simple Fill', type: 'local', isDownloaded: true },
-    { id: 'telea', name: 'Telea Diffusion', type: 'local', isDownloaded: true },
-    { id: 'aotgan', name: 'AOT-GAN', type: 'local', isDownloaded: false },
-    { id: 'lama-manga', name: 'LaMa Manga', type: 'local', isDownloaded: false },
-  ]);
+  const [inpaintBaseEngines, setInpaintBaseEngines] = useState<Engine[]>(() =>
+    INPAINT_TIER_CATALOG.map((tier) => ({
+      id: tier.id,
+      name: tier.name,
+      type: 'local' as const,
+      isDownloaded: Boolean(tier.isBuiltin),
+    })),
+  );
 
   const [ocrBaseEngines, setOcrBaseEngines] = useState<Engine[]>([
     { id: 'v6-small', name: 'PaddleOCR v6 Small (Default)', type: 'local', isDownloaded: false },

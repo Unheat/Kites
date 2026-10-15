@@ -4,13 +4,14 @@ import type { OcrResult } from '../engines/ocr/BaseOcrEngine';
 import type { OcrManager } from './OcrManager';
 import type { InpaintManager, InpaintTier } from './InpaintManager';
 import type { TranslationManager } from './TranslationManager';
+import { SUPPORTED_INPAINT_IDS } from '../../shared/inpaintTiers';
 
 // Preserve Studio's minimum editable text-handle dimensions.
 const MIN_TEXT_OBJECT_SIZE = 20;
 // Polygon-only inference contract requires at least a triangle.
 const MIN_POLYGON_POINTS = 3;
-// Include the public legacy AOT alias accepted by InpaintManager.
-const INPAINT_TIERS: readonly string[] = ['simple', 'telea', 'aot', 'aotgan', 'lama-manga', 'none'];
+// Include all supported inpaint tiers derived from canonical catalog
+const INPAINT_TIERS: readonly string[] = Array.from(SUPPORTED_INPAINT_IDS);
 
 export interface StudioOcrDependencies {
   getPopupState: () => Promise<PopupState>;
