@@ -11,12 +11,16 @@ export interface ReadingShortcutActions<T> {
   toggleOriginal: (target: T) => void;
   translate: (target: T) => void;
   startAreaSelection: () => void;
+  repeatLastScreenCrop?: () => void;
   openChapterReader?: () => void;
 }
 
 // F is deliberately the only page-level shortcut. Space must retain page scrolling.
 const TOGGLE_ORIGINAL_KEY = 'f';
 const EDITABLE_TAGS = new Set(['INPUT', 'TEXTAREA', 'SELECT']);
+
+let lastToggleDownTime = 0;
+let isHoldPeeking = false;
 
 /**
  * Detects form controls and editable ancestors, crossing shadow-root host boundaries.
@@ -80,6 +84,8 @@ export function handleReadingKeydown<T>(event: KeyboardEvent, actions: ReadingSh
   if (matchesReadingToggle(event)) {
     const { enabled, busy, target } = actions.getContext();
     if (!enabled || busy || target === null || !actions.hasTranslation(target)) return false;
+    lastToggleDownTime = Date.now();
+    isHoldPeeking = true;
     actions.toggleOriginal(target);
     event.preventDefault();
     return true;
@@ -89,10 +95,16 @@ export function handleReadingKeydown<T>(event: KeyboardEvent, actions: ReadingSh
     const { enabled, busy, target } = actions.getContext();
     if (!enabled || busy) return false;
 
-    // Translate hovered image (KeyZ)
+    // Translate hovered image or toggle view if already translated (KeyZ)
     if (event.code === 'KeyZ' || event.key.toLowerCase() === 'z') {
       if (target === null) return false;
-      actions.translate(target);
+      if (actions.hasTranslation(target)) {
+        lastToggleDownTime = Date.now();
+        isHoldPeeking = true;
+        actions.toggleOriginal(target);
+      } else {
+        actions.translate(target);
+      }
       event.preventDefault();
       return true;
     }
@@ -102,6 +114,15 @@ export function handleReadingKeydown<T>(event: KeyboardEvent, actions: ReadingSh
       actions.startAreaSelection();
       event.preventDefault();
       return true;
+    }
+
+    // Repeat last screen crop (KeyC)
+    if (event.code === 'KeyC' || event.key.toLowerCase() === 'c') {
+      if (actions.repeatLastScreenCrop) {
+        actions.repeatLastScreenCrop();
+        event.preventDefault();
+        return true;
+      }
     }
 
     // Open chapter reader (KeyM)
@@ -117,6 +138,31 @@ export function handleReadingKeydown<T>(event: KeyboardEvent, actions: ReadingSh
 }
 
 /**
+ * Handles keyup events to support "Hold-to-Peek" original image:
+ * If user held the toggle key (F or Alt+Shift+Z) for > 200ms, releasing it reverts to the translated view.
+ * If tapped (< 200ms), the toggle remains permanent.
+ */
+export function handleReadingKeyup<T>(event: KeyboardEvent, actions: ReadingShortcutActions<T>): boolean {
+  if (isHoldPeeking) {
+    const isF = event.key.toLowerCase() === TOGGLE_ORIGINAL_KEY;
+    const isZ = event.code === 'KeyZ' || event.key.toLowerCase() === 'z';
+    if (isF || isZ) {
+      isHoldPeeking = false;
+      const holdDuration = Date.now() - lastToggleDownTime;
+      if (holdDuration > 200) {
+        const { enabled, target } = actions.getContext();
+        if (enabled && target && actions.hasTranslation(target)) {
+          actions.toggleOriginal(target);
+          event.preventDefault();
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+/**
  * Dispatches extension commands through existing content actions, not a new pipeline.
  * @param message - Runtime message received by the content listener.
  * @param actions - Live state, target resolution, and existing action callbacks.
@@ -127,12 +173,20 @@ export function handleReadingCommand<T>(message: unknown, actions: ReadingShortc
   if (
     message.type !== 'TRANSLATE_HOVERED_IMAGE' &&
     message.type !== 'START_AREA_SELECTION' &&
+    message.type !== 'REPEAT_SCREEN_CROP' &&
     message.type !== 'OPEN_CHAPTER_READER'
   ) return false;
   const { enabled, busy, target } = actions.getContext();
   if (!enabled || busy) return true;
   if (message.type === 'START_AREA_SELECTION') actions.startAreaSelection();
+  else if (message.type === 'REPEAT_SCREEN_CROP') actions.repeatLastScreenCrop?.();
   else if (message.type === 'OPEN_CHAPTER_READER') actions.openChapterReader?.();
-  else if (target !== null) actions.translate(target);
+  else if (target !== null) {
+    if (actions.hasTranslation(target)) {
+      actions.toggleOriginal(target);
+    } else {
+      actions.translate(target);
+    }
+  }
   return true;
 }

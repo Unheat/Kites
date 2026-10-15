@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { Download, ChevronDown, Plus, Search, Check } from 'lucide-react';
+import { Download, ChevronDown, ChevronRight, Plus, Search, Check, Bold, Italic, AlignLeft, AlignCenter, AlignRight } from 'lucide-react';
 import type { PopupState, BubbleDetectionMode } from '../../shared/types';
 import AddApiForm from './AddApiForm';
 import MiniSearch from 'minisearch';
@@ -80,6 +80,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
   const [isOpenInpaint, setIsOpenInpaint] = useState(false);
   const [isOpenOcr, setIsOpenOcr] = useState(false);
   const [isOpenRenderFont, setIsOpenRenderFont] = useState(false);
+  const [isOpenFontOptions, setIsOpenFontOptions] = useState(false);
   const [isOpenBubbleMode, setIsOpenBubbleMode] = useState(false);
   const [isNeuralDownloaded, setIsNeuralDownloaded] = useState(false);
   const [showAddApi, setShowAddApi] = useState(false);
@@ -750,8 +751,12 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
 
       {/* Render Font Selector */}
       <div className="flex flex-col gap-1.5">
-        <div className="flex items-center gap-1.5 mb-1 relative">
+        <div className="flex items-center gap-1.5 mb-1">
           <h2 className="text-sm font-medium">Render Font</h2>
+          <HelpTooltip
+            size="sm"
+            content="Typography used when rendering translated text back onto comic speech bubbles and artwork."
+          />
         </div>
 
         <div className="relative flex flex-col">
@@ -795,6 +800,121 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                     </button>
                   );
                 })}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Advanced Text Rendering Options */}
+        <div className="flex flex-col mt-0.5">
+          <button
+            type="button"
+            onClick={() => setIsOpenFontOptions(!isOpenFontOptions)}
+            className="flex items-center gap-1.5 text-xs text-[var(--color-dust)] hover:text-[var(--color-ink)] transition-colors cursor-pointer py-1 self-start"
+          >
+            <ChevronRight
+              size={13}
+              className={`transition-transform duration-200 text-[var(--color-dust)] ${isOpenFontOptions ? 'rotate-90' : ''}`}
+            />
+            <span>Text Rendering Options</span>
+            {(state.renderFontBold || state.renderFontItalic || state.renderFontStrokeDisabled || (state.renderFontAlignment && state.renderFontAlignment !== 'auto') || (state.renderFontMinSize && state.renderFontMinSize !== 6)) && (
+              <span className="text-[10px] font-semibold px-1.5 py-0.2 rounded bg-[var(--color-vellum)] text-[var(--color-editorial)] border border-[var(--color-editorial)]/40 ml-1">
+                Custom
+              </span>
+            )}
+          </button>
+
+          {isOpenFontOptions && (
+            <div className="mt-1.5 p-3 rounded-md bg-[var(--color-vellum)]/60 border border-[var(--color-dust)]/50 space-y-3">
+              {/* Row 1: Style Pills (Bold, Italic, Disable Stroke) */}
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <button
+                  type="button"
+                  aria-label="Toggle Bold Font"
+                  title={state.renderFontBold ? 'Bold text enabled (Click to use regular)' : 'Bold text disabled (Click to enable bold)'}
+                  onClick={() => updateState({ renderFontBold: !state.renderFontBold })}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer border ${
+                    state.renderFontBold
+                      ? 'bg-[var(--color-paper)] border-[var(--color-editorial)] text-[var(--color-editorial)] shadow-xs'
+                      : 'bg-transparent border-[var(--color-dust)] text-[var(--color-dust)] hover:border-[var(--color-ink)] hover:text-[var(--color-ink)]'
+                  }`}
+                >
+                  <Bold size={13} className={state.renderFontBold ? 'stroke-[2.5]' : 'stroke-[2]'} />
+                  <span>Bold</span>
+                </button>
+
+                <button
+                  type="button"
+                  aria-label="Toggle Italic Font"
+                  title={state.renderFontItalic ? 'Italic text enabled' : 'Italic text disabled'}
+                  onClick={() => updateState({ renderFontItalic: !state.renderFontItalic })}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer border ${
+                    state.renderFontItalic
+                      ? 'bg-[var(--color-paper)] border-[var(--color-editorial)] text-[var(--color-editorial)] shadow-xs'
+                      : 'bg-transparent border-[var(--color-dust)] text-[var(--color-dust)] hover:border-[var(--color-ink)] hover:text-[var(--color-ink)]'
+                  }`}
+                >
+                  <Italic size={13} className={state.renderFontItalic ? 'stroke-[2.5]' : 'stroke-[2]'} />
+                  <span>Italic</span>
+                </button>
+
+                <button
+                  type="button"
+                  aria-label="Toggle Text Stroke"
+                  title={state.renderFontStrokeDisabled ? 'Outline stroke disabled' : 'Outline stroke enabled'}
+                  onClick={() => updateState({ renderFontStrokeDisabled: !state.renderFontStrokeDisabled })}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer border ${
+                    state.renderFontStrokeDisabled
+                      ? 'bg-[var(--color-paper)] border-[var(--color-editorial)] text-[var(--color-editorial)] shadow-xs'
+                      : 'bg-transparent border-[var(--color-dust)] text-[var(--color-dust)] hover:border-[var(--color-ink)] hover:text-[var(--color-ink)]'
+                  }`}
+                >
+                  <span>Disable Stroke</span>
+                </button>
+              </div>
+
+              {/* Row 2: Text Alignment (Auto | Left | Center | Right) */}
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-[var(--color-dust)] font-medium">Text Alignment</span>
+                <div className="flex items-center rounded-md border border-[var(--color-dust)] bg-[var(--color-paper)] p-0.5">
+                  {(['auto', 'left', 'center', 'right'] as const).map((align) => {
+                    const activeAlign = state.renderFontAlignment || 'auto';
+                    const isSelected = activeAlign === align;
+                    return (
+                      <button
+                        key={align}
+                        type="button"
+                        onClick={() => updateState({ renderFontAlignment: align })}
+                        className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors cursor-pointer ${
+                          isSelected
+                            ? 'bg-[var(--color-editorial)] text-white shadow-xs'
+                            : 'text-[var(--color-dust)] hover:text-[var(--color-ink)]'
+                        }`}
+                      >
+                        {align === 'auto' ? 'Auto' : align === 'left' ? <AlignLeft size={12} /> : align === 'center' ? <AlignCenter size={12} /> : <AlignRight size={12} />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Row 3: Minimum Font Size */}
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-xs text-[var(--color-dust)] font-medium shrink-0">Min Font Size</span>
+                <div className="flex items-center gap-2 flex-1 max-w-[170px]">
+                  <input
+                    type="range"
+                    min={4}
+                    max={20}
+                    step={1}
+                    value={state.renderFontMinSize ?? 6}
+                    onChange={(e) => updateState({ renderFontMinSize: Number(e.target.value) })}
+                    className="w-full accent-[var(--color-editorial)] cursor-pointer"
+                  />
+                  <span className="text-xs font-mono font-semibold px-1.5 py-0.5 rounded bg-[var(--color-paper)] border border-[var(--color-dust)] min-w-[34px] text-center">
+                    {state.renderFontMinSize ?? 6}px
+                  </span>
+                </div>
               </div>
             </div>
           )}

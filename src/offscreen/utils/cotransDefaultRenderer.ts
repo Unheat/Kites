@@ -698,7 +698,8 @@ export function measureDefaultLayout(
   height: number,
   fontSize: number,
   maxFontSizeCap?: number,
-  fontFamily: string = DEFAULT_RENDER_FONT_FAMILY
+  fontFamily: string = DEFAULT_RENDER_FONT_FAMILY,
+  isBold: boolean = false
 ): ReturnType<typeof fitFontSizeWithLines> {
   return fitFontSizeWithLines(
     ctx,
@@ -708,7 +709,9 @@ export function measureDefaultLayout(
     height,
     fontSize,
     Math.min(Math.max(fontSize, DEFAULT_FIT_MAX_FONT_SIZE), maxFontSizeCap ?? Number.POSITIVE_INFINITY),
-    DEFAULT_FIT_INSET
+    DEFAULT_FIT_INSET,
+    undefined,
+    isBold
   );
 }
 
@@ -722,6 +725,7 @@ export function measureDefaultLayout(
  * @param width - Actual destination width in pixels.
  * @param height - Actual destination height in pixels.
  * @param fontFamily - CSS font-family stack used for rendering.
+ * @param isBold - Whether to measure with bold font weight.
  * @returns Whether every returned line fits the renderer's layout budget.
  */
 export function defaultLayoutFits(
@@ -729,12 +733,13 @@ export function defaultLayoutFits(
   fitted: ReturnType<typeof fitFontSizeWithLines>,
   width: number,
   height: number,
-  fontFamily: string = DEFAULT_RENDER_FONT_FAMILY
+  fontFamily: string = DEFAULT_RENDER_FONT_FAMILY,
+  isBold: boolean = false
 ): boolean {
-  ctx.font = fontSpec(fitted.size, fontFamily, fitted.lines.join(''));
+  ctx.font = fontSpec(fitted.size, fontFamily, fitted.lines.join(''), undefined, isBold);
   return fitted.lines.length > 0
-    && fitted.lines.every(line => ctx.measureText(line).width <= width * (1 - 2 * DEFAULT_FIT_INSET))
-    && fitted.lines.length * fitted.size * DEFAULT_FIT_LINE_HEIGHT <= height * (1 - 2 * DEFAULT_FIT_INSET);
+    && fitted.lines.every(line => ctx.measureText(line).width <= width * (1 - 2 * DEFAULT_FIT_INSET) + 0.5)
+    && fitted.lines.length * fitted.size * DEFAULT_FIT_LINE_HEIGHT <= height * (1 - 2 * DEFAULT_FIT_INSET) + 0.5;
 }
 
 /**
@@ -751,6 +756,7 @@ export function defaultLayoutFits(
  * @param fontSize - Font size from resizeRegionToFontSize.
  * @param maxFontSizeCap - Optional ceiling on fitted font size.
  * @param fontFamily - CSS font-family stack to render and measure with.
+ * @param isBold - Whether to render text in bold weight.
  * @returns Render info, or null if nothing was drawn.
  */
 export function renderRegionDefault(
@@ -759,7 +765,8 @@ export function renderRegionDefault(
   dstPoints: Point2D[],
   fontSize: number,
   maxFontSizeCap?: number,
-  fontFamily: string = DEFAULT_RENDER_FONT_FAMILY
+  fontFamily: string = DEFAULT_RENDER_FONT_FAMILY,
+  isBold: boolean = false
 ): DefaultRenderResult | null {
   const [tl, tr, br, bl] = dstPoints;
   // Layout and aspect padding must use the resized destination dimensions. Using the
@@ -774,13 +781,13 @@ export function renderRegionDefault(
   // XianScan-style fit returns both the verified font size and exact wrapped lines.
   // Rendering those same lines prevents Cotrans's independent syllable pass from
   // turning English dialogue into narrow barcode columns.
-  const fitted = measureDefaultLayout(ctx, region.translation, normH, normV, fontSize, maxFontSizeCap, fontFamily);
+  const fitted = measureDefaultLayout(ctx, region.translation, normH, normV, fontSize, maxFontSizeCap, fontFamily, isBold);
   if (!fitted || fitted.lines.length === 0) return null;
 
   const drawableLines = fitted.lines.filter((line) => line.trim());
   if (drawableLines.length === 0) return null;
 
-  const drawFont = fontSpec(fitted.size, fontFamily, drawableLines.join(''));
+  const drawFont = fontSpec(fitted.size, fontFamily, drawableLines.join(''), undefined, isBold);
   ctx.save();
   ctx.font = drawFont;
   const widths = drawableLines.map((line) => ctx.measureText(line).width);

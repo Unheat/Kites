@@ -28,10 +28,21 @@ const SHORTCUT_GROUPS = [
     ],
   },
   {
+    title: 'Text Box Transforms & Lettering',
+    items: [
+      { key: 'Top Nub Drag', desc: 'Rotate dialogue box freely' },
+      { key: 'A Nub Drag', desc: 'Scale font size directly on canvas' },
+      { key: '↔ Nub Drag', desc: 'Wrap text lines with locked font size' },
+      { key: 'Corner Handles', desc: 'Resize box bounds and reflow text' },
+    ],
+  },
+  {
     title: 'Editing & Clipboard',
     items: [
       { key: 'Ctrl + Z', desc: 'Undo last stroke or text edit' },
       { key: 'Ctrl + Shift + Z', desc: 'Redo previously undone action' },
+      { key: 'Ctrl + Alt + C', desc: 'Copy typography style' },
+      { key: 'Ctrl + Alt + V', desc: 'Paste typography style' },
       { key: 'Delete / Backspace', desc: 'Remove selected text box or sticker' },
       { key: 'Ctrl + D', desc: 'Duplicate selected text box' },
       { key: 'Ctrl + B', desc: 'Toggle history drawer' },

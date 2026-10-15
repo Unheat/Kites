@@ -206,6 +206,11 @@ export interface PopupState {
   activeInpaintId: string;
   activeOcrId: string;
   renderFontPresetId: RenderFontPresetId;
+  renderFontBold: boolean;
+  renderFontItalic?: boolean;
+  renderFontStrokeDisabled?: boolean;
+  renderFontAlignment?: 'auto' | 'left' | 'center' | 'right';
+  renderFontMinSize?: number;
   bubbleMode: BubbleDetectionMode;
   historyRetention: HistoryRetentionPeriod;
   glossaryEnabled: boolean;
@@ -237,6 +242,11 @@ export const DEFAULT_POPUP_STATE: PopupState = {
   activeInpaintId: 'simple',
   activeOcrId: 'v6-small',
   renderFontPresetId: 'standard',
+  renderFontBold: false,
+  renderFontItalic: false,
+  renderFontStrokeDisabled: false,
+  renderFontAlignment: 'auto',
+  renderFontMinSize: 6,
   bubbleMode: 'off',
   historyRetention: '1week',
   glossaryEnabled: false,

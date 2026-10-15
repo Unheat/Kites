@@ -9,13 +9,15 @@ import { createChapterTranslationRegistry, createChapterExporter, type ChapterTr
 import ChapterReaderModal, { type ChapterReaderPage } from './ChapterReaderModal';
 import ChapterReaderFloatingPill from './ChapterReaderFloatingPill';
 import { scanChapterPages, fastScrollPreload } from './scanner';
-import { handleReadingKeydown, handleReadingCommand, type ReadingShortcutActions } from './readingShortcuts';
+import { handleReadingKeydown, handleReadingKeyup, handleReadingCommand, type ReadingShortcutActions } from './readingShortcuts';
 import {
   normalizeSelection,
   calculateCaptureSourceRect,
   computeCropBounds,
   cropCapturedDataUrl,
   waitForCleanFrames,
+  saveLastCropSelection,
+  loadLastCropSelection,
   type CropDragHandle,
 } from './captureArea';
 import {
@@ -319,7 +321,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
   if (message.type === 'OPEN_CHAPTER_READER') {
-    document.dispatchEvent(new CustomEvent('kites-open-chapter-reader'));
+    document.dispatchEvent(
+      new CustomEvent('kites-open-chapter-reader', {
+        detail: message.payload,
+      })
+    );
     sendResponse({ status: 'success' });
     return;
   }
@@ -625,26 +631,33 @@ function TranslateButton({
   const [hasFailed, setHasFailed] = useState(false);
 
   const isElementTranslated = useCallback(() => {
-    const hasAttr = anchorElement.getAttribute('data-kites-translated') === 'true';
-    if (!hasAttr) return false;
-
-    const img = anchorElement instanceof HTMLImageElement ? anchorElement : anchorElement.querySelector('img');
-    if (img) {
-      const appliedSrc = img.getAttribute('data-kites-applied-src') || anchorElement.getAttribute('data-kites-applied-src');
-      const origSrc = img.getAttribute('data-kites-orig-src') || anchorElement.getAttribute('data-kites-orig-src');
-      const currentSrc = img.currentSrc || img.src || '';
-      const showingOriginal =
-        img.getAttribute('data-kites-show-original') === 'true' ||
-        anchorElement.getAttribute('data-kites-show-original') === 'true';
-
-      if (showingOriginal) {
-        return Boolean(origSrc && (currentSrc === origSrc || currentSrc.includes(origSrc)));
-      }
-      return Boolean(appliedSrc && currentSrc === appliedSrc);
+    // 1. Direct registry check (primary ground truth for current session)
+    const reg = translatedRegistry.get(srcUrl);
+    if (reg?.translatedUrl) {
+      return true;
     }
 
-    return true;
-  }, [anchorElement]);
+    // 2. DOM attribute check on anchorElement or inner img
+    if (anchorElement.getAttribute('data-kites-translated') === 'true') {
+      return true;
+    }
+
+    const img = anchorElement instanceof HTMLImageElement ? anchorElement : anchorElement.querySelector('img');
+    if (img && img.getAttribute('data-kites-translated') === 'true') {
+      return true;
+    }
+
+    // 3. MediaTarget resolution fallback
+    const target = resolveTargetMedia(srcUrl);
+    if (
+      target?.sourceElement?.getAttribute('data-kites-translated') === 'true' ||
+      target?.surfaceElement?.getAttribute('data-kites-translated') === 'true'
+    ) {
+      return true;
+    }
+
+    return false;
+  }, [anchorElement, srcUrl]);
 
   const [isTranslated, setIsTranslated] = useState(isElementTranslated);
   const [showOriginal, setShowOriginal] = useState(() => {
@@ -659,6 +672,28 @@ function TranslateButton({
     const attr = anchorElement.getAttribute('data-kites-job-id');
     return attr ? Number(attr) : null;
   });
+
+  const [isTooltipVisible, setIsTooltipVisible] = useState(false);
+  const tooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleMouseEnter = () => {
+    if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
+    tooltipTimerRef.current = setTimeout(() => {
+      setIsTooltipVisible(true);
+    }, 180);
+  };
+
+  const handleMouseLeave = () => {
+    if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
+    tooltipTimerRef.current = null;
+    setIsTooltipVisible(false);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
+    };
+  }, []);
 
   const activeTranslating = isTranslating || localTranslating;
 
@@ -963,13 +998,8 @@ function TranslateButton({
           pointerEvents: 'auto',
           transition: 'all 0.15s ease',
         }}
-        title={
-          hasFailed
-            ? TRANSLATION_FAILURE_LABEL
-            : isTranslated && !activeTranslating
-            ? 'Re-translate Image'
-            : 'Translate Image'
-        }
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
         aria-label={
           hasFailed
             ? TRANSLATION_FAILURE_LABEL
@@ -992,6 +1022,38 @@ function TranslateButton({
           />
         )}
       </button>
+
+      {/* Snappy 180ms Custom Tooltip */}
+      {isTooltipVisible && !activeTranslating && (
+        <div
+          className="kites-custom-tooltip"
+          role="tooltip"
+          style={{
+            position: 'absolute',
+            top: 'calc(100% + 6px)',
+            left: '16px',
+            transform: 'translateX(-50%)',
+            backgroundColor: '#181a20',
+            color: '#f1f5f9',
+            border: '1px solid #33384c',
+            borderRadius: '6px',
+            padding: '3px 8px',
+            fontSize: '11px',
+            fontWeight: 500,
+            whiteSpace: 'nowrap',
+            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.45)',
+            pointerEvents: 'none',
+            zIndex: 1000000,
+            animation: 'kites-fade-in 0.15s ease-out',
+          }}
+        >
+          {hasFailed
+            ? TRANSLATION_FAILURE_LABEL
+            : isTranslated && !activeTranslating
+            ? 'Re-translate Image'
+            : 'Translate Image'}
+        </div>
+      )}
 
       {isTranslated && !activeTranslating && (
         <div
@@ -1449,8 +1511,13 @@ function GlobalOverlay() {
   }, []);
 
   useEffect(() => {
-    const handleOpenReader = () => {
-      refreshChapterPages();
+    const handleOpenReader = (event: Event) => {
+      const customEvent = event as CustomEvent<{ pages?: ChapterReaderPage[] } | undefined>;
+      if (customEvent.detail?.pages && Array.isArray(customEvent.detail.pages) && customEvent.detail.pages.length > 0) {
+        setChapterPages(customEvent.detail.pages);
+      } else {
+        refreshChapterPages();
+      }
       setIsReaderOpen(true);
     };
     document.addEventListener('kites-open-chapter-reader', handleOpenReader);
@@ -1598,6 +1665,7 @@ function GlobalOverlay() {
           : candidate));
         return;
       }
+      saveLastCropSelection(selection);
 
       setCrops((prev) => prev.map((candidate) => candidate.id === id
         ? { ...candidate, status: 'capturing', originalDataUrl: '', translatedDataUrl: undefined, jobId: undefined, error: undefined, showOriginal: false }
@@ -1673,6 +1741,28 @@ function GlobalOverlay() {
 
   useEffect(() => {
     if (!isEnabled) return;
+
+    const repeatLastScreenCrop = () => {
+      const last = loadLastCropSelection();
+      if (!last) return;
+      const newId = `crop_${Date.now()}`;
+      const newCrop: CropOverlayItem = {
+        id: newId,
+        sourceKey: `kites-capture:${newId}`,
+        left: Math.max(0, Math.min(window.innerWidth - last.width, last.left)),
+        top: Math.max(0, Math.min(window.innerHeight - last.height, last.top)),
+        width: last.width,
+        height: last.height,
+        status: 'draft',
+        originalDataUrl: '',
+        showOriginal: false,
+      };
+      setCrops((prev) => [...prev, newCrop]);
+      setTimeout(() => {
+        handleTranslateCrop(newId);
+      }, 50);
+    };
+
     const actions: ReadingShortcutActions<MediaTarget> = {
       getContext: () => {
         const cursor = lastCursorPositionRef.current;
@@ -1694,6 +1784,7 @@ function GlobalOverlay() {
         anchorName: getAnchorName(target.surfaceElement),
       }),
       startAreaSelection: () => setIsSnipping(true),
+      repeatLastScreenCrop,
       openChapterReader: () => {
         refreshChapterPages();
         setIsReaderOpen(true);
@@ -1723,6 +1814,9 @@ function GlobalOverlay() {
     const onKeydown = (event: KeyboardEvent): void => {
       handleReadingKeydown(event, actions);
     };
+    const onKeyup = (event: KeyboardEvent): void => {
+      handleReadingKeyup(event, actions);
+    };
     /**
      * Routes browser commands without retaining an asynchronous response channel.
      * @param message - Runtime command forwarded by background.
@@ -1734,11 +1828,13 @@ function GlobalOverlay() {
     document.addEventListener('mousemove', trackPointer, { passive: true });
     document.addEventListener('mouseout', clearPointer, { passive: true });
     document.addEventListener('keydown', onKeydown);
+    document.addEventListener('keyup', onKeyup);
     chrome.runtime.onMessage.addListener(onCommand);
     return () => {
       document.removeEventListener('mousemove', trackPointer);
       document.removeEventListener('mouseout', clearPointer);
       document.removeEventListener('keydown', onKeydown);
+      document.removeEventListener('keyup', onKeyup);
       chrome.runtime.onMessage.removeListener(onCommand);
     };
   }, [isEnabled, isSnipping, crops, refreshChapterPages]);
@@ -2174,7 +2270,10 @@ function GlobalOverlay() {
       {/* Full-Screen Distraction-Free Chapter Reader Modal */}
       <ChapterReaderModal
         isOpen={isReaderOpen}
-        onClose={() => setIsReaderOpen(false)}
+        onClose={() => {
+          setIsReaderOpen(false);
+          refreshChapterPages();
+        }}
         pages={chapterPages}
         title={document.title}
         onExportZip={() => void chapterExporter.exportChapter()}

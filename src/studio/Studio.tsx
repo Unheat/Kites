@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Undo2,
   Redo2,
@@ -19,9 +19,22 @@ import {
   ScanText,
   Maximize2,
   Image as ImageIcon,
+  RotateCcw,
+  Loader,
+  Info,
+  Download,
+  Copy,
+  Check,
 } from 'lucide-react';
+import { db } from '../db';
 import { studioStore, useStudioStore } from './state/studioStore';
 import { studioUndoStack } from './state/undoStack';
+import { requestStudioOcr } from './bridge/offscreenStudioBridge';
+import {
+  renderFullCompositeCanvas,
+  downloadCanvasAsFile,
+  copyCanvasToClipboard,
+} from './canvas/compositeExport';
 import {
   calculateFitWidth,
   calculateFitHeight,
@@ -35,16 +48,16 @@ import { OcrSettings } from './tools/OcrSettings';
 import { TypographySettings } from './tools/TypographySettings';
 import { WarpSettings } from './tools/WarpSettings';
 import { ImageLayerSettings } from './tools/ImageLayerSettings';
+import { PageInfoSettings } from './tools/PageInfoSettings';
 import { FindReplaceModal } from './modals/FindReplaceModal';
 import { ExportTranscriptModal } from './modals/ExportTranscriptModal';
 import { ShortcutsModal } from './modals/ShortcutsModal';
 import { FontManagerModal } from './modals/FontManagerModal';
 import { AppearanceSettingsModal } from './modals/AppearanceSettingsModal';
-import { TextRenderer } from './canvas/TextRenderer';
-import { WarpMesh } from './canvas/WarpMesh';
 import type { BoundedDirtyRectPatch, ImageLayer, StudioTool, TextObject } from './types';
 
 export interface StudioProps {
+  jobId?: number;
   originalImage: HTMLImageElement | null;
   cleanedImage: HTMLImageElement | null;
   initialTextObjects?: TextObject[];
@@ -64,6 +77,7 @@ const TOOLS: { id: StudioTool; label: string; icon: React.ComponentType<{ classN
 ];
 
 export const Studio: React.FC<StudioProps> = ({
+  jobId,
   originalImage,
   cleanedImage,
   initialTextObjects = [],
@@ -72,6 +86,7 @@ export const Studio: React.FC<StudioProps> = ({
   onBack,
 }) => {
   const activeTool = useStudioStore((s) => s.activeTool);
+  const isInfoPanelOpen = useStudioStore((s) => s.isInfoPanelOpen);
   const zoom = useStudioStore((s) => s.zoom);
   const viewMode = useStudioStore((s) => s.viewMode ?? (s.isShowingOriginal ? 'original' : 'translated'));
   const hideBoxes = useStudioStore((s) => s.hideBoxes);
@@ -84,6 +99,38 @@ export const Studio: React.FC<StudioProps> = ({
   const [canRedo, setCanRedo] = useState(false);
   const [zoomDropdownOpen, setZoomDropdownOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isRetranslating, setIsRetranslating] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [exportDropdownOpen, setExportDropdownOpen] = useState(false);
+  const [copiedImageToast, setCopiedImageToast] = useState(false);
+
+  const exportDropdownRef = useRef<HTMLDivElement | null>(null);
+  const zoomDropdownRef = useRef<HTMLDivElement | null>(null);
+
+  // Close dropdowns on click outside or Escape key
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (exportDropdownRef.current && !exportDropdownRef.current.contains(target)) {
+        setExportDropdownOpen(false);
+      }
+      if (zoomDropdownRef.current && !zoomDropdownRef.current.contains(target)) {
+        setZoomDropdownOpen(false);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setExportDropdownOpen(false);
+        setZoomDropdownOpen(false);
+      }
+    };
+    window.addEventListener('mousedown', handleOutsideClick);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('mousedown', handleOutsideClick);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
 
   const imageWidth = originalImage?.naturalWidth || cleanedImage?.naturalWidth || 800;
   const imageHeight = originalImage?.naturalHeight || cleanedImage?.naturalHeight || 1200;
@@ -134,25 +181,27 @@ export const Studio: React.FC<StudioProps> = ({
         e.preventDefault();
         handleRedo();
       } else if (e.key.toLowerCase() === 'v' || e.key.toLowerCase() === 't') {
-        studioStore.setState({ activeTool: 'text' });
+        studioStore.setState({ activeTool: 'text', isInfoPanelOpen: false });
+      } else if (e.key.toLowerCase() === 'i' && !e.ctrlKey && !e.metaKey) {
+        studioStore.setState((s) => ({ isInfoPanelOpen: !s.isInfoPanelOpen }));
       } else if ((e.ctrlKey || e.metaKey) && e.key === '1') {
         e.preventDefault();
-        studioStore.setState({ activeTool: 'erase' });
+        studioStore.setState({ activeTool: 'erase', isInfoPanelOpen: false });
       } else if ((e.ctrlKey || e.metaKey) && e.key === '2') {
         e.preventDefault();
-        studioStore.setState({ activeTool: 'paint' });
+        studioStore.setState({ activeTool: 'paint', isInfoPanelOpen: false });
       } else if ((e.ctrlKey || e.metaKey) && e.key === '3') {
         e.preventDefault();
-        studioStore.setState({ activeTool: 'inpaint' });
+        studioStore.setState({ activeTool: 'inpaint', isInfoPanelOpen: false });
       } else if ((e.ctrlKey || e.metaKey) && e.key === '4') {
         e.preventDefault();
-        studioStore.setState({ activeTool: 'ocr' });
+        studioStore.setState({ activeTool: 'ocr', isInfoPanelOpen: false });
       } else if ((e.ctrlKey || e.metaKey) && e.key === '5') {
         e.preventDefault();
-        studioStore.setState({ activeTool: 'warp' });
+        studioStore.setState({ activeTool: 'warp', isInfoPanelOpen: false });
       } else if ((e.ctrlKey || e.metaKey) && e.key === '6') {
         e.preventDefault();
-        studioStore.setState({ activeTool: 'image' });
+        studioStore.setState({ activeTool: 'image', isInfoPanelOpen: false });
       }
     };
 
@@ -217,58 +266,201 @@ export const Studio: React.FC<StudioProps> = ({
     }
   };
 
+  const getCleanBaseFilename = (): string => {
+    let name = jobTitle || 'manga-page';
+    name = name.replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9_\-]/g, '_');
+    return name.slice(0, 40) || 'manga-page';
+  };
+
+  const handleExportImage = async (format: 'png' | 'jpeg' = 'png') => {
+    const bgCanvas = getWorkingCanvas();
+    const compositeCanvas = renderFullCompositeCanvas(
+      imageWidth,
+      imageHeight,
+      bgCanvas,
+      originalImage,
+      viewMode,
+      imageLayers,
+      textObjects
+    );
+    const filename = `kites-${getCleanBaseFilename()}-translated.${format === 'jpeg' ? 'jpg' : 'png'}`;
+    await downloadCanvasAsFile(compositeCanvas, filename, format);
+    setToastMessage(`Exported ${format.toUpperCase()} image successfully!`);
+    setTimeout(() => setToastMessage(null), 3000);
+  };
+
+  const handleCopyCompositeToClipboard = async () => {
+    const bgCanvas = getWorkingCanvas();
+    const compositeCanvas = renderFullCompositeCanvas(
+      imageWidth,
+      imageHeight,
+      bgCanvas,
+      originalImage,
+      viewMode,
+      imageLayers,
+      textObjects
+    );
+    const success = await copyCanvasToClipboard(compositeCanvas);
+    if (success) {
+      setToastMessage('Full image copied to clipboard!');
+      setCopiedImageToast(true);
+      setTimeout(() => setCopiedImageToast(false), 2000);
+    } else {
+      setToastMessage('Could not copy image to clipboard');
+    }
+    setTimeout(() => setToastMessage(null), 3000);
+  };
+
   const handleSaveImage = async () => {
     if (!onSave) return;
     setIsSaving(true);
     try {
       const bgCanvas = getWorkingCanvas();
-      const exportCanvas = document.createElement('canvas');
-      exportCanvas.width = imageWidth;
-      exportCanvas.height = imageHeight;
-      const ctx = exportCanvas.getContext('2d');
-      if (ctx) {
-        if (bgCanvas) ctx.drawImage(bgCanvas, 0, 0);
-
-        for (const layer of imageLayers) {
-          if (layer.isVisible === false || !layer.imageBitmap) continue;
-          ctx.save();
-          ctx.translate(layer.x + layer.width / 2, layer.y + layer.height / 2);
-          if (layer.rotation) ctx.rotate((layer.rotation * Math.PI) / 180);
-          if (layer.flipH || layer.flipV) ctx.scale(layer.flipH ? -1 : 1, layer.flipV ? -1 : 1);
-          ctx.globalAlpha = layer.opacity;
-          ctx.drawImage(layer.imageBitmap, -layer.width / 2, -layer.height / 2, layer.width, layer.height);
-          ctx.restore();
-        }
-
-        for (const obj of textObjects) {
-          if (obj.isVisible === false) continue;
-          if (obj.warpPreset && obj.warpPreset !== 'none' && obj.quadPoints) {
-            const tempCanvas = document.createElement('canvas');
-            tempCanvas.width = obj.width;
-            tempCanvas.height = obj.height;
-            const tempCtx = tempCanvas.getContext('2d');
-            if (tempCtx) {
-              TextRenderer.renderText(tempCtx, { ...obj, x: 0, y: 0, rotation: 0 });
-              ctx.save();
-              ctx.translate(obj.x, obj.y);
-              WarpMesh.renderWarpedMesh(ctx, tempCanvas, obj.quadPoints);
-              ctx.restore();
-            }
-          } else {
-            TextRenderer.renderText(ctx, obj);
-          }
-        }
-      }
+      const exportCanvas = renderFullCompositeCanvas(
+        imageWidth,
+        imageHeight,
+        bgCanvas,
+        originalImage,
+        viewMode,
+        imageLayers,
+        textObjects
+      );
 
       exportCanvas.toBlob(async (blob) => {
         if (blob) {
           await onSave(blob, textObjects);
         }
         setIsSaving(false);
+        setToastMessage('Saved changes to library!');
+        setTimeout(() => setToastMessage(null), 3000);
       }, 'image/png');
     } catch (err) {
       console.error('[Studio] Save failed:', err);
       setIsSaving(false);
+    }
+  };
+
+  const handleRetranslatePage = async () => {
+    if (!originalImage || isRetranslating) return;
+    const retranslateStart = performance.now();
+    setIsRetranslating(true);
+    setToastMessage('Retranslating page with full AI pipeline…');
+
+    try {
+      const bgCanvas = getWorkingCanvas();
+      const ctx = bgCanvas?.getContext('2d');
+      const prevImageData = ctx?.getImageData(0, 0, imageWidth, imageHeight);
+      const prevTextObjects = [...studioStore.getState().textObjects];
+
+      // Draw original image onto an offscreen canvas for OCR recognition
+      const patchCanvas = document.createElement('canvas');
+      patchCanvas.width = imageWidth;
+      patchCanvas.height = imageHeight;
+      const pCtx = patchCanvas.getContext('2d');
+      if (pCtx) {
+        pCtx.drawImage(originalImage, 0, 0, imageWidth, imageHeight);
+      }
+
+      const result = await requestStudioOcr(
+        patchCanvas,
+        { x: 0, y: 0, width: imageWidth, height: imageHeight },
+        { translate: true, inpaint: true }
+      );
+
+      if (ctx && result.inpaintedImage) {
+        ctx.drawImage(result.inpaintedImage, 0, 0, imageWidth, imageHeight);
+      }
+      const nextImageData = ctx?.getImageData(0, 0, imageWidth, imageHeight);
+
+      // Push to undo stack for seamless Ctrl+Z recovery
+      if (prevImageData && nextImageData) {
+        studioUndoStack.push({
+          id: `retranslate-${Date.now()}`,
+          timestamp: Date.now(),
+          description: 'Retranslate full page',
+          rasterPatch: {
+            before: {
+              x: 0,
+              y: 0,
+              width: imageWidth,
+              height: imageHeight,
+              patchImageData: prevImageData,
+            },
+            after: {
+              x: 0,
+              y: 0,
+              width: imageWidth,
+              height: imageHeight,
+              patchImageData: nextImageData,
+            },
+          },
+          textObjects: {
+            before: prevTextObjects,
+            after: result.textObjects,
+          },
+        });
+      }
+
+      // Update studio state
+      studioStore.setState({
+        textObjects: result.textObjects,
+      });
+
+      // Synchronize retranslation metadata and updated text blocks directly into IndexedDB
+      if (jobId) {
+        try {
+          const retranslateDuration = Math.round(performance.now() - retranslateStart);
+          const currentOcrId = studioStore.getState().selectedOcrEngineId || 'v6-small';
+          const currentInpaintId = studioStore.getState().selectedInpaintEngineId || 'lama-manga';
+          const currentTranslationId = studioStore.getState().selectedTranslationEngineId || 'gg-translate';
+
+          await db.translationJobs.update(jobId, {
+            status: 'completed',
+            completedAt: Date.now(),
+            durationMs: retranslateDuration,
+            ocrEngineId: currentOcrId,
+            inpaintTier: currentInpaintId,
+            translationEngineId: currentTranslationId,
+          });
+
+          const imageRecord = await db.images.where({ jobId }).first();
+          if (imageRecord?.id) {
+            await db.textBlocks.where({ imageId: imageRecord.id }).delete();
+            const blocksToSave = result.textObjects.map((obj) => ({
+              imageId: imageRecord.id!,
+              originalText: obj.originalText || '',
+              translatedText: obj.text,
+              posX: obj.x,
+              posY: obj.y,
+              width: obj.width,
+              height: obj.height,
+              fontSize: obj.fontSize || 16,
+              fontFamily: obj.fontFamily || 'WildWords, CCWildWords, sans-serif',
+              bold: obj.bold,
+              italic: obj.italic,
+              align: obj.align,
+              color: obj.color || '#000000',
+              strokeColor: obj.strokeColor || '#ffffff',
+              direction: (obj.isVertical ? 'v' : 'h') as 'v' | 'h',
+              lines: obj.lines,
+            }));
+            await db.textBlocks.bulkAdd(blocksToSave);
+          }
+        } catch (dbErr) {
+          console.warn('[Studio] Failed to sync retranslate into IndexedDB:', dbErr);
+        }
+      }
+
+      setToastMessage('Page retranslated · Press Ctrl+Z to undo');
+      setTimeout(() => {
+        setToastMessage((curr) => (curr?.includes('retranslated') ? null : curr));
+      }, 4500);
+    } catch (err: any) {
+      console.error('[Studio] Retranslate failed:', err);
+      setToastMessage(`Retranslate failed: ${err?.message || 'Pipeline error'}`);
+      setTimeout(() => setToastMessage(null), 4500);
+    } finally {
+      setIsRetranslating(false);
     }
   };
 
@@ -284,6 +476,17 @@ export const Studio: React.FC<StudioProps> = ({
           <div className="flex items-center justify-between pb-2.5 mb-2.5 border-b border-[#262a3b]">
             <span className="text-[11px] uppercase font-bold text-slate-400 tracking-wider">Tools</span>
             <div className="flex items-center gap-1">
+              <button
+                onClick={() => studioStore.setState({ isInfoPanelOpen: !isInfoPanelOpen })}
+                title={isInfoPanelOpen ? 'Close Page & Translation Info' : 'Page & Translation Info (I)'}
+                className={`p-1 rounded-md transition cursor-pointer ${
+                  isInfoPanelOpen
+                    ? 'bg-[#f4446d] text-white shadow-md shadow-[rgba(244,68,109,0.35)]'
+                    : 'text-slate-400 hover:text-white hover:bg-[#1c1f2e]'
+                }`}
+              >
+                <Info className="w-4 h-4" />
+              </button>
               <button
                 onClick={() => studioStore.setState({ activeModal: 'fontManager' })}
                 title="Manage Custom Fonts"
@@ -313,10 +516,10 @@ export const Studio: React.FC<StudioProps> = ({
             {TOOLS.map((t) => (
               <button
                 key={t.id}
-                onClick={() => studioStore.setState({ activeTool: t.id })}
+                onClick={() => studioStore.setState({ activeTool: t.id, isInfoPanelOpen: false })}
                 title={`${t.label} (${t.shortcut})`}
                 className={`flex items-center justify-center aspect-square rounded-md transition ${
-                  activeTool === t.id
+                  activeTool === t.id && !isInfoPanelOpen
                     ? 'bg-[#f4446d] text-white shadow-md shadow-[rgba(244,68,109,0.35)]'
                     : 'text-slate-400 hover:text-white hover:bg-[#1c1f2e]'
                 }`}
@@ -326,15 +529,21 @@ export const Studio: React.FC<StudioProps> = ({
             ))}
           </div>
 
-          {/* Active Tool Settings: Scrollable directly underneath the tools in Card 1 */}
+          {/* Active Tool Settings or Page Info: Scrollable directly underneath the tools in Card 1 */}
           <div className="flex-1 overflow-y-auto mt-3 pr-1">
-            {activeTool === 'erase' && <EraseSettings />}
-            {activeTool === 'paint' && <PaintSettings />}
-            {activeTool === 'inpaint' && <InpaintSettings />}
-            {activeTool === 'ocr' && <OcrSettings />}
-            {(activeTool === 'text' || (activeTool as any) === 'select') && <TypographySettings />}
-            {activeTool === 'warp' && <WarpSettings />}
-            {activeTool === 'image' && <ImageLayerSettings />}
+            {isInfoPanelOpen ? (
+              <PageInfoSettings jobId={jobId} onBack={() => studioStore.setState({ isInfoPanelOpen: false })} />
+            ) : (
+              <>
+                {activeTool === 'erase' && <EraseSettings />}
+                {activeTool === 'paint' && <PaintSettings />}
+                {activeTool === 'inpaint' && <InpaintSettings />}
+                {activeTool === 'ocr' && <OcrSettings />}
+                {(activeTool === 'text' || (activeTool as any) === 'select') && <TypographySettings />}
+                {activeTool === 'warp' && <WarpSettings />}
+                {activeTool === 'image' && <ImageLayerSettings />}
+              </>
+            )}
           </div>
 
           {/* Bottom of Card 1: Global Editing Pill Toggle */}
@@ -386,14 +595,31 @@ export const Studio: React.FC<StudioProps> = ({
             <button
               onClick={handleSaveImage}
               disabled={isSaving}
-              className="flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-lg bg-[#f4446d] hover:bg-[#e0355e] text-white text-xs font-semibold shadow-md shadow-[rgba(244,68,109,0.35)] transition disabled:opacity-50"
+              title="Save changes to Kites library"
+              className="flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-lg bg-[#f4446d] hover:bg-[#e0355e] text-white text-xs font-semibold shadow-md shadow-[rgba(244,68,109,0.35)] transition disabled:opacity-50 cursor-pointer"
             >
-              <Save className="w-3.5 h-3.5" /> {isSaving ? 'Saving...' : 'Save Image'}
+              <Save className="w-3.5 h-3.5" /> {isSaving ? 'Saving...' : 'Save to DB'}
+            </button>
+            <button
+              onClick={handleRetranslatePage}
+              disabled={isRetranslating || !originalImage}
+              title="Re-run full OCR detection, inpainting, and translation on the original page"
+              className="flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-lg border border-[#262a3b] bg-[#090a0f] text-xs font-medium text-slate-300 hover:bg-[#1c1f2e] hover:text-[#f4446d] hover:border-[#f4446d]/40 disabled:opacity-30 disabled:pointer-events-none transition cursor-pointer"
+            >
+              {isRetranslating ? (
+                <>
+                  <Loader className="w-3.5 h-3.5 animate-spin text-[#f4446d]" /> Retranslating…
+                </>
+              ) : (
+                <>
+                  <RotateCcw className="w-3.5 h-3.5" /> Retranslate
+                </>
+              )}
             </button>
             {onBack && (
               <button
                 onClick={onBack}
-                className="flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-lg border border-[#262a3b] bg-[#090a0f] text-xs font-medium text-slate-300 hover:bg-[#1c1f2e] transition"
+                className="col-span-2 flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-lg border border-[#262a3b] bg-[#090a0f] text-xs font-medium text-slate-300 hover:bg-[#1c1f2e] transition"
               >
                 Library
               </button>
@@ -482,7 +708,7 @@ export const Studio: React.FC<StudioProps> = ({
                 <ZoomOut className="w-3.5 h-3.5" />
               </button>
 
-              <div className="relative">
+              <div ref={zoomDropdownRef} className="relative">
                 <button
                   onClick={() => setZoomDropdownOpen((prev) => !prev)}
                   className="flex items-center gap-1 px-2 py-0.5 rounded border border-[#262a3b] bg-[#090a0f] font-mono text-[11px] text-slate-200 hover:border-slate-500 transition"
@@ -524,10 +750,60 @@ export const Studio: React.FC<StudioProps> = ({
               <button
                 onClick={() => studioStore.setClampedZoom(zoom * 1.15)}
                 title="Zoom In"
-                className="p-1 rounded-md text-slate-400 hover:text-white hover:bg-[#1c1f2e] transition"
+                className="p-1 rounded-md text-slate-400 hover:text-white hover:bg-[#1c1f2e] transition cursor-pointer"
               >
                 <ZoomIn className="w-3.5 h-3.5" />
               </button>
+            </div>
+
+            {/* Export Image Dropdown */}
+            <div ref={exportDropdownRef} className="relative">
+              <button
+                type="button"
+                onClick={() => setExportDropdownOpen((prev) => !prev)}
+                className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-[#f4446d] hover:bg-[#e0355e] text-white text-xs font-semibold shadow-xs transition cursor-pointer"
+                title="Export or download image"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Export</span>
+                <ChevronDown className="w-3 h-3 text-white/80" />
+              </button>
+
+              {exportDropdownOpen && (
+                <div
+                  className="absolute top-full mt-1.5 right-0 w-44 rounded-xl border border-[#262a3b] bg-[#12141c]/95 backdrop-blur-md p-1.5 shadow-2xl text-xs z-50 space-y-0.5"
+                  onClick={() => setExportDropdownOpen(false)}
+                >
+                  <button
+                    type="button"
+                    onClick={() => handleExportImage('png')}
+                    className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-[#1c1f2e] text-slate-200 text-left transition cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5 text-[#f4446d]" />
+                    <span>Download PNG</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleExportImage('jpeg')}
+                    className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-[#1c1f2e] text-slate-200 text-left transition cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Download JPEG</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCopyCompositeToClipboard}
+                    className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-[#1c1f2e] text-slate-200 text-left transition cursor-pointer"
+                  >
+                    {copiedImageToast ? (
+                      <Check className="w-3.5 h-3.5 text-emerald-400" />
+                    ) : (
+                      <Copy className="w-3.5 h-3.5 text-indigo-400" />
+                    )}
+                    <span>Copy Full Image</span>
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -555,6 +831,14 @@ export const Studio: React.FC<StudioProps> = ({
       )}
       {activeModal === 'appearance' && (
         <AppearanceSettingsModal onClose={() => studioStore.setState({ activeModal: null })} />
+      )}
+
+      {/* Floating Toast Feedback for Retranslate / Actions */}
+      {toastMessage && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 py-2 px-4 rounded-lg bg-[#141724] border border-[#f4446d]/40 shadow-xl shadow-black/60 text-xs font-medium text-slate-200 flex items-center gap-2 animate-fadeIn pointer-events-none">
+          <Sparkles className="w-4 h-4 text-[#f4446d] shrink-0" />
+          <span>{toastMessage}</span>
+        </div>
       )}
     </div>
   );

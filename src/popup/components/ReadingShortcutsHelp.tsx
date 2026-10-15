@@ -26,13 +26,18 @@ export function getPlatformShortcuts(): ShortcutEntry[] {
   return [
     {
       keys: `${mod} + Z`,
-      label: 'Translate hovered image',
-      note: 'Hover a manga panel, press the shortcut to queue it.',
+      label: 'Translate or toggle original',
+      note: 'Translates hovered image, or toggles between original/translation if already translated.',
     },
     {
       keys: `${mod} + X`,
       label: 'Screen crop selection',
       note: 'Draw a rectangle on screen to capture and translate.',
+    },
+    {
+      keys: `${mod} + C`,
+      label: 'Repeat previous screen crop',
+      note: 'Instantly re-translates the exact same screen crop coordinates.',
     },
     {
       keys: `${mod} + M`,
@@ -41,8 +46,8 @@ export function getPlatformShortcuts(): ShortcutEntry[] {
     },
     {
       keys: 'F',
-      label: 'Toggle original / translated',
-      note: 'Only active when hovering a translated image. Ignored inside text fields.',
+      label: 'Toggle original / hold to peek',
+      note: 'Tap to switch views, or hold to temporarily peek at the original artwork.',
     },
   ];
 }

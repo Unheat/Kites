@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   handleReadingCommand,
   handleReadingKeydown,
+  handleReadingKeyup,
   matchesActionModifier,
   matchesReadingToggle,
   type ReadingShortcutActions,
@@ -16,10 +17,11 @@ import {
 function createActions(overrides: Partial<ReadingShortcutActions<string>> = {}): ReadingShortcutActions<string> {
   return {
     getContext: vi.fn(() => ({ enabled: true, busy: false, target: 'page.png' })),
-    hasTranslation: vi.fn(() => true),
+    hasTranslation: vi.fn(() => false),
     toggleOriginal: vi.fn(),
     translate: vi.fn(),
     startAreaSelection: vi.fn(),
+    repeatLastScreenCrop: vi.fn(),
     openChapterReader: vi.fn(),
     ...overrides,
   };
@@ -122,7 +124,7 @@ describe('reading toggle matching', () => {
 
 describe('reading key dispatch', () => {
   it('toggles a translated target once and consumes only that successful event', () => {
-    const actions = createActions();
+    const actions = createActions({ hasTranslation: () => true });
     const event = new KeyboardEvent('keydown', { key: 'f', cancelable: true });
     expect(handleReadingKeydown(event, actions)).toBe(true);
     expect(actions.toggleOriginal).toHaveBeenCalledExactlyOnceWith('page.png');
@@ -136,7 +138,7 @@ describe('reading key dispatch', () => {
     { enabled: true, busy: true, target: 'page.png' },
     { enabled: true, busy: false, target: null },
   ])('leaves event untouched for blocked state %j', (context) => {
-    const actions = createActions({ getContext: () => context });
+    const actions = createActions({ hasTranslation: () => true, getContext: () => context });
     const event = new KeyboardEvent('keydown', { key: 'f', cancelable: true });
     expect(handleReadingKeydown(event, actions)).toBe(false);
     expect(actions.toggleOriginal).not.toHaveBeenCalled();
@@ -154,7 +156,7 @@ describe('reading key dispatch', () => {
 
   it('reads current state on every invocation', () => {
     let enabled = true;
-    const actions = createActions({ getContext: () => ({ enabled, busy: false, target: 'page.png' }) });
+    const actions = createActions({ hasTranslation: () => true, getContext: () => ({ enabled, busy: false, target: 'page.png' }) });
     expect(handleReadingKeydown(new KeyboardEvent('keydown', { key: 'f' }), actions)).toBe(true);
     enabled = false;
     expect(handleReadingKeydown(new KeyboardEvent('keydown', { key: 'f' }), actions)).toBe(false);
@@ -217,6 +219,42 @@ describe('action keydown dispatch', () => {
     expect(event.defaultPrevented).toBe(true);
   });
 
+  it('toggles original view on KeyZ when target is already translated (dual-action)', () => {
+    const actions = createActions({ hasTranslation: () => true });
+    const event = new KeyboardEvent('keydown', { altKey: true, shiftKey: true, code: 'KeyZ', key: 'Z', cancelable: true });
+    expect(handleReadingKeydown(event, actions)).toBe(true);
+    expect(actions.toggleOriginal).toHaveBeenCalledExactlyOnceWith('page.png');
+    expect(actions.translate).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it('dispatches repeatLastScreenCrop on KeyC', () => {
+    const actions = createActions();
+    const event = new KeyboardEvent('keydown', { altKey: true, shiftKey: true, code: 'KeyC', key: 'C', cancelable: true });
+    expect(handleReadingKeydown(event, actions)).toBe(true);
+    expect(actions.repeatLastScreenCrop).toHaveBeenCalledOnce();
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it('handles hold-to-peek keyup reversion after prolonged hold', () => {
+    const actions = createActions({ hasTranslation: () => true });
+    // Simulate keydown
+    const downEvent = new KeyboardEvent('keydown', { key: 'f', cancelable: true });
+    handleReadingKeydown(downEvent, actions);
+    expect(actions.toggleOriginal).toHaveBeenCalledTimes(1);
+
+    // Fast-forward 300ms
+    vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 300);
+
+    // Simulate keyup
+    const upEvent = new KeyboardEvent('keyup', { key: 'f', cancelable: true });
+    expect(handleReadingKeyup(upEvent, actions)).toBe(true);
+    // Toggled back to restore translated view
+    expect(actions.toggleOriginal).toHaveBeenCalledTimes(2);
+
+    vi.restoreAllMocks();
+  });
+
   it('dispatches startAreaSelection on KeyX', () => {
     const actions = createActions();
     const event = new KeyboardEvent('keydown', { altKey: true, shiftKey: true, code: 'KeyX', key: 'X', cancelable: true });
@@ -261,6 +299,19 @@ describe('content reading command dispatch', () => {
     expect(handleReadingCommand({ type: 'TRANSLATE_HOVERED_IMAGE' }, actions)).toBe(true);
     expect(actions.translate).toHaveBeenCalledExactlyOnceWith('page.png');
     expect(actions.toggleOriginal).not.toHaveBeenCalled();
+  });
+
+  it('dispatches REPEAT_SCREEN_CROP command', () => {
+    const actions = createActions();
+    expect(handleReadingCommand({ type: 'REPEAT_SCREEN_CROP' }, actions)).toBe(true);
+    expect(actions.repeatLastScreenCrop).toHaveBeenCalledOnce();
+  });
+
+  it('toggles original on TRANSLATE_HOVERED_IMAGE when target already translated', () => {
+    const actions = createActions({ hasTranslation: () => true });
+    expect(handleReadingCommand({ type: 'TRANSLATE_HOVERED_IMAGE' }, actions)).toBe(true);
+    expect(actions.toggleOriginal).toHaveBeenCalledExactlyOnceWith('page.png');
+    expect(actions.translate).not.toHaveBeenCalled();
   });
 
   it('uses the existing START_AREA_SELECTION message, even without an image', () => {

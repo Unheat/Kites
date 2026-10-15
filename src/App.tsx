@@ -218,11 +218,15 @@ export default function App() {
       originalText: b.originalText,
       fontSize: b.fontSize || 16,
       fontFamily: b.fontFamily || 'WildWords, CCWildWords, sans-serif',
+      bold: b.bold ?? false,
+      italic: b.italic ?? false,
+      align: b.align || 'center',
       color: b.color || '#000000',
       strokeColor: b.strokeColor || '#ffffff',
       strokeWidth: 2,
-      align: 'center',
       isVertical: b.direction === 'v' && isCjk,
+      isSkipped: b.isSkipped ?? false,
+      rotation: b.angle ?? 0,
     };
   });
 
@@ -293,10 +297,15 @@ export default function App() {
           height: obj.height,
           fontSize: obj.fontSize,
           fontFamily: obj.fontFamily,
+          bold: obj.bold,
+          italic: obj.italic,
+          align: obj.align,
           color: obj.color,
           strokeColor: obj.strokeColor,
           direction: obj.isVertical ? 'v' : 'h',
           lines: obj.lines,
+          isSkipped: obj.isSkipped,
+          angle: obj.rotation ?? 0,
         }));
         await db.textBlocks.bulkAdd(newBlocks);
       });
@@ -376,6 +385,7 @@ export default function App() {
       <div className="flex-1 flex flex-col overflow-hidden relative">
         {originalImageEl || cleanedImageEl ? (
           <Studio
+            jobId={activeJobId ?? undefined}
             originalImage={originalImageEl}
             cleanedImage={cleanedImageEl}
             initialTextObjects={studioTextObjects}

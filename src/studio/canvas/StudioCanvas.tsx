@@ -10,9 +10,17 @@ import {
   Check,
   Languages,
   Plus,
+  Bold,
+  Italic,
+  Download,
 } from 'lucide-react';
 import { studioStore, useStudioStore } from '../state/studioStore';
 import { studioUndoStack } from '../state/undoStack';
+import {
+  renderFullCompositeCanvas,
+  downloadCanvasAsFile,
+  copyCanvasToClipboard,
+} from './compositeExport';
 import {
   clientToImage,
   imageToClient,
@@ -27,8 +35,9 @@ import { createStudioOcrCrops } from './studioOcrCrop';
 import { StudioSourceSampler } from './StudioSourceSampler';
 import { ToolViewModePolicy } from './tools/ToolViewModePolicy';
 import { requestStudioInpaint, requestStudioOcr } from '../bridge/offscreenStudioBridge';
-import { computeNewBounds, type ActiveDragState, type DragHandle } from '../../App';
+import { computeRotatedBounds, getHandleCursor } from './transformMath';
 import { recalculateBlockTypeset } from './studioTypeset';
+import { extractTypographyStyle } from '../state/studioStore';
 import type {
   BoundingBox,
   Point,
@@ -82,6 +91,15 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
   const [activeHandle, setActiveHandle] = useState<TransformHandle | null>(null);
   const [dragStartPoint, setDragStartPoint] = useState<Point | null>(null);
   const [initialTransformState, setInitialTransformState] = useState<TextObject | null>(null);
+  const [canvasCursor, setCanvasCursor] = useState<string>('default');
+  const [inlineSelection, setInlineSelection] = useState<{ start: number; end: number } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    imageX: number;
+    imageY: number;
+    targetObj: TextObject | null;
+  } | null>(null);
 
   const imageWidth = originalImage?.naturalWidth || cleanedImage?.naturalWidth || 800;
   const imageHeight = originalImage?.naturalHeight || cleanedImage?.naturalHeight || 1200;
@@ -159,7 +177,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
 
     // 2. Render Text Objects
     for (const obj of textObjects) {
-      if (obj.isVisible === false || obj.id === editingTextId) continue;
+      if (obj.isVisible === false) continue;
 
       if (obj.warpPreset && obj.warpPreset !== 'none' && obj.quadPoints) {
         const tempCanvas = document.createElement('canvas');
@@ -180,6 +198,26 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
 
     // 3. Render transform furniture if not in hideBoxes mode
     if (!hideBoxes) {
+      // Draw subtle dashed grey outline for unselected skipped dialogue boxes
+      for (const obj of textObjects) {
+        if (obj.isSkipped && obj.id !== selectedTextId) {
+          ctx.save();
+          ctx.translate(obj.x, obj.y);
+          if (obj.rotation) {
+            const cx = obj.width / 2;
+            const cy = obj.height / 2;
+            ctx.translate(cx, cy);
+            ctx.rotate((obj.rotation * Math.PI) / 180);
+            ctx.translate(-cx, -cy);
+          }
+          ctx.strokeStyle = '#94a3b8';
+          ctx.lineWidth = 1;
+          ctx.setLineDash([2, 3]);
+          ctx.strokeRect(0, 0, obj.width, obj.height);
+          ctx.restore();
+        }
+      }
+
       const selectedObj = textObjects.find((t) => t.id === selectedTextId);
       if (selectedObj) {
         CanvasFurniture.drawSelectionFurniture(ctx, selectedObj, appearance.selectedBoxBorderColor);
@@ -258,7 +296,113 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
     });
   }, [selectedTextId]);
 
-  // Spacebar pan gesture listener
+  const handleCopyStyle = useCallback(() => {
+    const liveTexts = studioStore.getState().textObjects;
+    const selected = liveTexts.find((t) => t.id === selectedTextId);
+    if (!selected) return;
+    const style = extractTypographyStyle(selected);
+    studioStore.setState({ clipboardStyle: style });
+  }, [selectedTextId]);
+
+  const handlePasteStyle = useCallback(() => {
+    const { clipboardStyle, textObjects: liveTexts } = studioStore.getState();
+    if (!clipboardStyle || !selectedTextId) return;
+    const target = liveTexts.find((t) => t.id === selectedTextId);
+    if (!target) return;
+    const prev = [...liveTexts];
+    const updated = { ...target, ...clipboardStyle };
+    const typeset = recalculateBlockTypeset(
+      updated.text,
+      updated.fontFamily,
+      updated.width,
+      updated.height,
+      updated.fontSize
+    );
+    updated.lines = typeset.lines;
+
+    const next = liveTexts.map((t) => (t.id === selectedTextId ? updated : t));
+    studioStore.setState({ textObjects: next });
+    studioUndoStack.push({
+      id: `paste-style-${Date.now()}`,
+      timestamp: Date.now(),
+      description: 'Paste Typography Style',
+      textObjects: { before: prev, after: next },
+    });
+  }, [selectedTextId]);
+
+  const handleToggleBold = useCallback(() => {
+    const liveTexts = studioStore.getState().textObjects;
+    const selected = liveTexts.find((t) => t.id === selectedTextId);
+    if (!selected) return;
+
+    if (inlineSelection && inlineSelection.start !== inlineSelection.end) {
+      const charStyles = [...(selected.charStyles || new Array(selected.text.length).fill(null))];
+      const currentStartBold = charStyles[inlineSelection.start]?.bold ?? selected.bold;
+      const nextBold = !currentStartBold;
+      for (let i = inlineSelection.start; i < inlineSelection.end; i++) {
+        charStyles[i] = { ...(charStyles[i] || {}), bold: nextBold };
+      }
+      const updated = { ...selected, charStyles };
+      const prev = [...liveTexts];
+      const next = liveTexts.map((t) => (t.id === selected.id ? updated : t));
+      studioStore.setState({ textObjects: next });
+      studioUndoStack.push({
+        id: `format-bold-${Date.now()}`,
+        timestamp: Date.now(),
+        description: 'Format Word Bold',
+        textObjects: { before: prev, after: next },
+      });
+    } else {
+      const updated = { ...selected, bold: !selected.bold };
+      const prev = [...liveTexts];
+      const next = liveTexts.map((t) => (t.id === selected.id ? updated : t));
+      studioStore.setState({ textObjects: next });
+      studioUndoStack.push({
+        id: `format-bold-${Date.now()}`,
+        timestamp: Date.now(),
+        description: 'Toggle Box Bold',
+        textObjects: { before: prev, after: next },
+      });
+    }
+  }, [selectedTextId, inlineSelection]);
+
+  const handleToggleItalic = useCallback(() => {
+    const liveTexts = studioStore.getState().textObjects;
+    const selected = liveTexts.find((t) => t.id === selectedTextId);
+    if (!selected) return;
+
+    if (inlineSelection && inlineSelection.start !== inlineSelection.end) {
+      const charStyles = [...(selected.charStyles || new Array(selected.text.length).fill(null))];
+      const currentStartItalic = charStyles[inlineSelection.start]?.italic ?? selected.italic;
+      const nextItalic = !currentStartItalic;
+      for (let i = inlineSelection.start; i < inlineSelection.end; i++) {
+        charStyles[i] = { ...(charStyles[i] || {}), italic: nextItalic };
+      }
+      const updated = { ...selected, charStyles };
+      const prev = [...liveTexts];
+      const next = liveTexts.map((t) => (t.id === selected.id ? updated : t));
+      studioStore.setState({ textObjects: next });
+      studioUndoStack.push({
+        id: `format-italic-${Date.now()}`,
+        timestamp: Date.now(),
+        description: 'Format Word Italic',
+        textObjects: { before: prev, after: next },
+      });
+    } else {
+      const updated = { ...selected, italic: !selected.italic };
+      const prev = [...liveTexts];
+      const next = liveTexts.map((t) => (t.id === selected.id ? updated : t));
+      studioStore.setState({ textObjects: next });
+      studioUndoStack.push({
+        id: `format-italic-${Date.now()}`,
+        timestamp: Date.now(),
+        description: 'Toggle Box Italic',
+        textObjects: { before: prev, after: next },
+      });
+    }
+  }, [selectedTextId, inlineSelection]);
+
+  // Spacebar pan gesture & keyboard shortcut listeners
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.code === 'Space' && !e.repeat) {
@@ -284,6 +428,22 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
         e.preventDefault();
         handleDuplicateSelectedText();
       }
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'b' && selectedTextId) {
+        e.preventDefault();
+        handleToggleBold();
+      }
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'i' && selectedTextId) {
+        e.preventDefault();
+        handleToggleItalic();
+      }
+      if ((e.ctrlKey || e.metaKey) && e.altKey && e.key.toLowerCase() === 'c' && selectedTextId) {
+        e.preventDefault();
+        handleCopyStyle();
+      }
+      if ((e.ctrlKey || e.metaKey) && e.altKey && e.key.toLowerCase() === 'v' && selectedTextId) {
+        e.preventDefault();
+        handlePasteStyle();
+      }
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
@@ -298,7 +458,117 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [selectedTextId, editingTextId, handleDeleteSelectedText, handleDuplicateSelectedText]);
+  }, [selectedTextId, editingTextId, handleDeleteSelectedText, handleDuplicateSelectedText, handleCopyStyle, handlePasteStyle, handleToggleBold, handleToggleItalic]);
+
+  // Global click & escape listener to close custom context menu
+  useEffect(() => {
+    const handleGlobalClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('[data-studio-context-menu]')) {
+        setContextMenu(null);
+      }
+    };
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setContextMenu(null);
+    };
+    window.addEventListener('click', handleGlobalClick);
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => {
+      window.removeEventListener('click', handleGlobalClick);
+      window.removeEventListener('keydown', handleGlobalKeyDown);
+    };
+  }, []);
+
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const pt = getPointerImageCoords(e);
+    const liveTexts = studioStore.getState().textObjects;
+    let clicked: TextObject | null = null;
+    for (let i = liveTexts.length - 1; i >= 0; i--) {
+      if (CanvasFurniture.hitTestBody(pt, liveTexts[i])) {
+        clicked = liveTexts[i];
+        break;
+      }
+    }
+
+    if (clicked) {
+      studioStore.setState({ selectedTextId: clicked.id });
+    }
+
+    setContextMenu({
+      x: e.clientX,
+      y: e.clientY,
+      imageX: pt.x,
+      imageY: pt.y,
+      targetObj: clicked,
+    });
+  };
+
+  const handleContextDownload = async (format: 'png' | 'jpeg' = 'png') => {
+    const bgCanvas = bgCanvasRef.current;
+    const compositeCanvas = renderFullCompositeCanvas(
+      imageWidth,
+      imageHeight,
+      bgCanvas,
+      originalImage,
+      viewMode,
+      imageLayers,
+      textObjects
+    );
+    await downloadCanvasAsFile(compositeCanvas, `kites-translated.${format === 'jpeg' ? 'jpg' : 'png'}`, format);
+    setContextMenu(null);
+  };
+
+  const handleContextCopyImage = async () => {
+    const bgCanvas = bgCanvasRef.current;
+    const compositeCanvas = renderFullCompositeCanvas(
+      imageWidth,
+      imageHeight,
+      bgCanvas,
+      originalImage,
+      viewMode,
+      imageLayers,
+      textObjects
+    );
+    const ok = await copyCanvasToClipboard(compositeCanvas);
+    setContextMenu(null);
+    if (ok) {
+      setOcrFeedback('Full image copied to clipboard!');
+      setTimeout(() => setOcrFeedback(null), 2500);
+    }
+  };
+
+  const handleContextAddBoxHere = () => {
+    if (!contextMenu) return;
+    const id = `bubble-${Date.now()}`;
+    const newObj: TextObject = {
+      id,
+      x: Math.round(contextMenu.imageX - 70),
+      y: Math.round(contextMenu.imageY - 25),
+      width: 140,
+      height: 50,
+      text: 'New Dialogue',
+      fontSize: 18,
+      fontFamily: 'WildWords, CCWildWords, sans-serif',
+      color: '#000000',
+      strokeColor: '#ffffff',
+      strokeWidth: 2,
+      align: 'center',
+      isVertical: false,
+    };
+    const prev = [...textObjects];
+    const next = [...textObjects, newObj];
+    studioStore.setState({ textObjects: next, selectedTextId: id, editingTextId: id });
+    studioUndoStack.push({
+      id: `add-box-${Date.now()}`,
+      timestamp: Date.now(),
+      description: 'Add Text Box',
+      textObjects: { before: prev, after: next },
+    });
+    setContextMenu(null);
+  };
 
   // Mouse wheel listener: natural scrolling vs cursor-centered zoom
   const handleWheel = (e: React.WheelEvent) => {
@@ -329,7 +599,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
     }
   };
 
-  const getPointerImageCoords = (e: React.PointerEvent): Point => {
+  const getPointerImageCoords = (e: { clientX: number; clientY: number }): Point => {
     const overlay = overlayCanvasRef.current;
     if (!overlay) return { x: 0, y: 0 };
     return clientToImage(
@@ -473,48 +743,20 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
 
       // Clicked outside text objects
       if (editingTextId) {
-        studioStore.setState({ editingTextId: null });
+        studioStore.setState({ editingTextId: null, inlineSelection: null });
+        setInlineSelection(null);
       }
 
       // If a text bubble is currently selected, clicking empty space deselects it
       if (selectedTextId) {
-        studioStore.setState({ selectedTextId: null });
+        studioStore.setState({ selectedTextId: null, inlineSelection: null });
+        setInlineSelection(null);
         setActiveHandle(null);
         return;
       }
 
-      if (activeTool === 'text') {
-        const id = `bubble-${Date.now()}`;
-        const newObj: TextObject = {
-          id,
-          x: Math.round(pt.x - 70),
-          y: Math.round(pt.y - 25),
-          width: 140,
-          height: 50,
-          text: 'New Dialogue',
-          originalText: undefined,
-          fontSize: 18,
-          fontFamily: 'WildWords, CCWildWords, sans-serif',
-          color: '#000000',
-          strokeColor: '#ffffff',
-          strokeWidth: 2,
-          align: 'center',
-          isVertical: false,
-        };
-        const prev = [...textObjects];
-        const next = [...textObjects, newObj];
-        studioStore.setState({ textObjects: next, selectedTextId: id, editingTextId: null });
-        studioUndoStack.push({
-          id: `create-bubble-${Date.now()}`,
-          timestamp: Date.now(),
-          description: 'Create Empty Text Box',
-          textObjects: { before: prev, after: next },
-        });
-        return;
-      }
-
-      studioStore.setState({ selectedTextId: null });
       setActiveHandle(null);
+      return;
     }
   };
 
@@ -530,7 +772,27 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       return;
     }
 
-    if (!isPointerDown) return;
+    if (!isPointerDown) {
+      if (activeTool === 'select' || activeTool === 'text') {
+        const liveTexts = studioStore.getState().textObjects;
+        const selectedObj = liveTexts.find((t) => t.id === selectedTextId);
+        if (selectedObj && !hideBoxes) {
+          const handle = CanvasFurniture.hitTestHandles(pt, selectedObj);
+          if (handle) {
+            setCanvasCursor(getHandleCursor(handle, selectedObj.rotation));
+            return;
+          }
+        }
+        for (let i = liveTexts.length - 1; i >= 0; i--) {
+          if (CanvasFurniture.hitTestBody(pt, liveTexts[i])) {
+            setCanvasCursor('move');
+            return;
+          }
+        }
+        setCanvasCursor('default');
+      }
+      return;
+    }
 
     const bgCanvas = bgCanvasRef.current;
     const bgCtx = bgCanvas?.getContext('2d', { willReadFrequently: true });
@@ -610,39 +872,72 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       if (activeHandle === 'rot') {
         const centerX = initialTransformState.x + initialTransformState.width / 2;
         const centerY = initialTransformState.y + initialTransformState.height / 2;
-        const angleRad = Math.atan2(pt.y - centerY, pt.x - centerX);
-        updated.rotation = Math.round((angleRad * 180) / Math.PI + 90);
-      } else {
-        const dragState: ActiveDragState = {
-          blockId: 0,
-          handle: activeHandle as DragHandle,
-          startX: dragStartPoint.x,
-          startY: dragStartPoint.y,
-          origX: initialTransformState.x,
-          origY: initialTransformState.y,
-          origW: initialTransformState.width,
-          origH: initialTransformState.height,
-          origFontSize: initialTransformState.fontSize,
-          origLines: initialTransformState.lines || [],
-          translatedText: initialTransformState.text,
-          fontFamily: initialTransformState.fontFamily,
-        };
+        const initialMouseAngle = Math.atan2(dragStartPoint.y - centerY, dragStartPoint.x - centerX);
+        const currentMouseAngle = Math.atan2(pt.y - centerY, pt.x - centerX);
+        const deltaAngleDeg = ((currentMouseAngle - initialMouseAngle) * 180) / Math.PI;
 
-        const newBounds = computeNewBounds(dragState, deltaX, deltaY, imageWidth, imageHeight);
-        updated.x = Math.round(newBounds.x);
-        updated.y = Math.round(newBounds.y);
+        let deg = Math.round((initialTransformState.rotation || 0) + deltaAngleDeg);
+        deg = ((((deg % 360) + 540) % 360) - 180);
+
+        if (e.shiftKey) {
+          // Snap to 15-degree increments with Shift
+          deg = Math.round(deg / 15) * 15;
+          if (deg === 180 || deg === -180) deg = 180;
+        } else {
+          // Snap to cardinal angles if within 5 degrees
+          if (Math.abs(deg) <= 5) deg = 0;
+          else if (Math.abs(deg - 90) <= 5) deg = 90;
+          else if (Math.abs(deg + 90) <= 5) deg = -90;
+          else if (Math.abs(Math.abs(deg) - 180) <= 5) deg = 180;
+        }
+        updated.rotation = deg;
+      } else if (activeHandle === 'font-size') {
+        // Direct font-size scaling along diagonal
+        const rad = ((initialTransformState.rotation || 0) * Math.PI) / 180;
+        const localDeltaX = deltaX * Math.cos(rad) + deltaY * Math.sin(rad);
+        const localDeltaY = -deltaX * Math.sin(rad) + deltaY * Math.cos(rad);
+        const scaleStep = Math.round((localDeltaX - localDeltaY) * 0.25);
+        const newFontSize = Math.max(6, Math.min(140, Math.round(initialTransformState.fontSize + scaleStep)));
+        updated.fontSize = newFontSize;
+        const typeset = recalculateBlockTypeset(
+          updated.text,
+          updated.fontFamily,
+          updated.width,
+          updated.height,
+          newFontSize
+        );
+        updated.lines = typeset.lines;
+      } else if (activeHandle === 'wrap') {
+        // Wrap handle adjusts width with LOCKED font size
+        const newBounds = computeRotatedBounds(initialTransformState, 'e', deltaX, deltaY);
+        updated.x = newBounds.x;
+        updated.y = newBounds.y;
+        updated.width = newBounds.width;
+        updated.height = newBounds.height;
+        const typeset = recalculateBlockTypeset(
+          updated.text,
+          updated.fontFamily,
+          newBounds.width,
+          newBounds.height,
+          initialTransformState.fontSize
+        );
+        updated.lines = typeset.lines;
+      } else {
+        const newBounds = computeRotatedBounds(initialTransformState, activeHandle, deltaX, deltaY);
+        updated.x = newBounds.x;
+        updated.y = newBounds.y;
+        updated.width = newBounds.width;
+        updated.height = newBounds.height;
 
         if (activeHandle !== 'move') {
           // Box size/aspect ratio changed — automatically reflow lines and fit font size!
           const typeset = recalculateBlockTypeset(
             updated.text,
             updated.fontFamily,
-            newBounds.w,
-            newBounds.h,
+            newBounds.width,
+            newBounds.height,
             initialTransformState.fontSize
           );
-          updated.width = Math.round(newBounds.w);
-          updated.height = Math.round(newBounds.h);
           updated.fontSize = typeset.fontSize;
           updated.lines = typeset.lines;
         }
@@ -849,47 +1144,26 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       const current = currentList.find((t) => t.id === selectedTextId);
       if (current && JSON.stringify(current) !== JSON.stringify(initialTransformState)) {
         const prev = currentList.map((t) => (t.id === initialTransformState.id ? initialTransformState : t));
+        const actionDesc =
+          activeHandle === 'move'
+            ? 'Move Text Box'
+            : activeHandle === 'rot'
+            ? 'Rotate Text Box'
+            : activeHandle === 'font-size'
+            ? 'Scale Font Size'
+            : activeHandle === 'wrap'
+            ? 'Wrap Text Lines'
+            : 'Resize & Reflow Text Box';
+
         studioUndoStack.push({
           id: `transform-${Date.now()}`,
           timestamp: Date.now(),
-          description: activeHandle === 'move' ? 'Move Text Box' : 'Resize & Reflow Text Box',
+          description: actionDesc,
           textObjects: { before: prev, after: currentList },
         });
       }
       setInitialTransformState(null);
     }
-  };
-
-  // Floating Action Pill Handlers
-  const handleCopyStyle = () => {
-    const selected = textObjects.find((t) => t.id === selectedTextId);
-    if (!selected) return;
-    studioStore.setState({
-      clipboardStyle: {
-        fontFamily: selected.fontFamily,
-        fontSize: selected.fontSize,
-        color: selected.color,
-        strokeColor: selected.strokeColor,
-        strokeWidth: selected.strokeWidth,
-        align: selected.align,
-        isVertical: selected.isVertical,
-        shadowDistance: selected.shadowDistance,
-        shadowAngle: selected.shadowAngle,
-      },
-    });
-  };
-
-  const handlePasteStyle = () => {
-    if (!clipboardStyle || !selectedTextId) return;
-    const prev = [...textObjects];
-    const next = textObjects.map((t) => (t.id === selectedTextId ? { ...t, ...clipboardStyle } : t));
-    studioStore.setState({ textObjects: next });
-    studioUndoStack.push({
-      id: `paste-style-${Date.now()}`,
-      timestamp: Date.now(),
-      description: 'Paste Typography Style',
-      textObjects: { before: prev, after: next },
-    });
   };
 
   /**
@@ -946,7 +1220,14 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
     studioStore.setState({ textObjects: next });
   };
 
-  const handleFinishInlineEdit = () => {
+  const handleFinishInlineEdit = (e?: React.FocusEvent) => {
+    if (e?.relatedTarget) {
+      const target = e.relatedTarget as HTMLElement;
+      if (target.closest('[data-studio-sidebar]') || target.closest('[data-studio-toolbar]')) {
+        return;
+      }
+    }
+    setInlineSelection(null);
     if (inlineInitialTextRef.current) {
       const prev = inlineInitialTextRef.current;
       const current = studioStore.getState().textObjects;
@@ -993,18 +1274,41 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
     });
   };
 
-  // Compute screen coordinates for floating action pill
+  // Compute screen coordinates for floating action pill (accounting for rotation)
   const selectedObj = textObjects.find((t) => t.id === selectedTextId);
   const editingObj = textObjects.find((t) => t.id === editingTextId);
-  const pillPos = selectedObj && overlayCanvasRef.current
-    ? imageToClient(
-        selectedObj.x + selectedObj.width / 2,
-        selectedObj.y,
-        overlayCanvasRef.current.getBoundingClientRect(),
-        imageWidth,
-        imageHeight
-      )
-    : null;
+
+  let pillPos: Point | null = null;
+  let pillBottomPos: Point | null = null;
+
+  if (selectedObj && overlayCanvasRef.current) {
+    const cx = selectedObj.x + selectedObj.width / 2;
+    const cy = selectedObj.y + selectedObj.height / 2;
+    const w = selectedObj.width;
+    const h = selectedObj.height;
+    const rad = ((selectedObj.rotation || 0) * Math.PI) / 180;
+
+    // 4 corners + rotation nub in local space relative to center
+    const localPts = [
+      { x: -w / 2, y: -h / 2 },
+      { x: w / 2, y: -h / 2 },
+      { x: w / 2, y: h / 2 },
+      { x: -w / 2, y: h / 2 },
+      { x: 0, y: -h / 2 - 28 }, // rotation handle nub
+    ];
+
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (const pt of localPts) {
+      const worldY = cy + pt.x * Math.sin(rad) + pt.y * Math.cos(rad);
+      if (worldY < minY) minY = worldY;
+      if (worldY > maxY) maxY = worldY;
+    }
+
+    const rect = overlayCanvasRef.current.getBoundingClientRect();
+    pillPos = imageToClient(cx, minY, rect, imageWidth, imageHeight);
+    pillBottomPos = imageToClient(cx, maxY, rect, imageWidth, imageHeight);
+  }
 
   return (
     <div
@@ -1026,6 +1330,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
         {/* Pristine original image canvas (visible when viewMode is 'original') */}
         <canvas
           ref={originalCanvasRef}
+          onContextMenu={handleContextMenu}
           style={{
             width: `${imageWidth * zoom}px`,
             height: `${imageHeight * zoom}px`,
@@ -1037,6 +1342,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
         {/* Working background raster canvas (cleaned/painted artwork; visible in 'inpainted' and 'translated' modes) */}
         <canvas
           ref={bgCanvasRef}
+          onContextMenu={handleContextMenu}
           data-studio-working-background="true"
           id="studio-working-background"
           style={{
@@ -1055,12 +1361,14 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
           onPointerUp={handlePointerUp}
           onPointerCancel={handlePointerUp}
           onDoubleClick={handleDoubleClick}
+          onContextMenu={handleContextMenu}
           style={{
             width: `${imageWidth * zoom}px`,
             height: `${imageHeight * zoom}px`,
             display: 'block',
+            cursor: isPointerDown && activeHandle === 'rot' ? 'grabbing' : canvasCursor,
           }}
-          className="block absolute top-0 left-0 cursor-crosshair"
+          className="block absolute top-0 left-0"
         />
 
         {/* Layer 4: Direct In-Place Text Editor Overlay */}
@@ -1078,9 +1386,6 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
           const totalBoxHeight = editingObj.height * zoom;
           const verticalPadding = Math.max(0, Math.floor((totalBoxHeight - contentHeight) / 2));
           const horizontalPadding = Math.round(4 * zoom);
-          const strokeWidthScaled = editingObj.strokeWidth
-            ? Math.max(1, Math.round(editingObj.strokeWidth * zoom))
-            : 0;
 
           // Check single-column vertical CJK layout
           const hasCjk = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/.test(editingObj.text);
@@ -1127,6 +1432,30 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
                   }
                   e.stopPropagation();
                 }}
+                onSelect={(e) => {
+                  const el = e.target as HTMLTextAreaElement;
+                  const sel = { start: el.selectionStart, end: el.selectionEnd };
+                  setInlineSelection(sel);
+                  studioStore.setState({
+                    inlineSelection: { textId: editingObj.id, start: el.selectionStart, end: el.selectionEnd },
+                  });
+                }}
+                onKeyUp={(e) => {
+                  const el = e.target as HTMLTextAreaElement;
+                  const sel = { start: el.selectionStart, end: el.selectionEnd };
+                  setInlineSelection(sel);
+                  studioStore.setState({
+                    inlineSelection: { textId: editingObj.id, start: el.selectionStart, end: el.selectionEnd },
+                  });
+                }}
+                onMouseUp={(e) => {
+                  const el = e.target as HTMLTextAreaElement;
+                  const sel = { start: el.selectionStart, end: el.selectionEnd };
+                  setInlineSelection(sel);
+                  studioStore.setState({
+                    inlineSelection: { textId: editingObj.id, start: el.selectionStart, end: el.selectionEnd },
+                  });
+                }}
                 style={{
                   width: '100%',
                   height: '100%',
@@ -1138,7 +1467,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
                   fontFamily: editingObj.fontFamily || 'sans-serif',
                   fontWeight: editingObj.bold ? 'bold' : 'normal',
                   fontStyle: editingObj.italic ? 'italic' : 'normal',
-                  color: editingObj.color || '#000000',
+                  color: 'transparent',
                   textAlign: editingObj.align || 'center',
                   lineHeight: lineSpacing,
                   writingMode: isVerticalMode ? 'vertical-rl' : undefined,
@@ -1149,10 +1478,6 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
                   boxSizing: 'border-box',
                   overflow: 'hidden',
                   caretColor: '#f4446d',
-                  textShadow:
-                    editingObj.strokeColor && strokeWidthScaled > 0
-                      ? `-${strokeWidthScaled}px -${strokeWidthScaled}px 0 ${editingObj.strokeColor}, ${strokeWidthScaled}px -${strokeWidthScaled}px 0 ${editingObj.strokeColor}, -${strokeWidthScaled}px ${strokeWidthScaled}px 0 ${editingObj.strokeColor}, ${strokeWidthScaled}px ${strokeWidthScaled}px 0 ${editingObj.strokeColor}`
-                      : undefined,
                 }}
                 autoFocus
               />
@@ -1162,110 +1487,172 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       </div>
 
       {/* Floating Action Pill Toolbar */}
-      {pillPos && selectedObj && viewMode === 'translated' && !isSpacePanning && !hideBoxes && (
-        <>
-          {/* Floating Original Text Bar (Mapped from selected bubble) */}
-          {selectedObj.originalText && (
+      {pillPos && selectedObj && viewMode === 'translated' && !isSpacePanning && !hideBoxes && (() => {
+        const clearanceAbove = Math.max(48, Math.round((24 + 8) * zoom) + 16);
+        const calculatedTop = pillPos.y - clearanceAbove - 36;
+        const placeAbove = calculatedTop >= (selectedObj.originalText ? 80 : 36);
+
+        const toolbarY = placeAbove
+          ? calculatedTop
+          : (pillBottomPos?.y ?? (pillPos.y + selectedObj.height * zoom)) + 16;
+        const ocrBarY = placeAbove
+          ? calculatedTop - 38
+          : toolbarY + 44;
+
+        const isSelActive = Boolean(
+          inlineSelection &&
+          inlineSelection.start !== inlineSelection.end
+        );
+        const activeSelStart = inlineSelection ? Math.min(inlineSelection.start, inlineSelection.end) : 0;
+        const selOverride = isSelActive && selectedObj.charStyles ? selectedObj.charStyles[activeSelStart] : null;
+        const isBoldActive = selOverride?.bold !== undefined ? selOverride.bold : Boolean(selectedObj.bold);
+        const isItalicActive = selOverride?.italic !== undefined ? selOverride.italic : Boolean(selectedObj.italic);
+
+        return (
+          <>
+            {/* Floating Original Text Bar (Mapped from selected bubble) */}
+            {selectedObj.originalText && (
+              <div
+                data-studio-toolbar="true"
+                style={{
+                  left: `${pillPos.x}px`,
+                  top: `${ocrBarY}px`,
+                  transform: 'translateX(-50%)',
+                }}
+                className="fixed z-40 flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-[#282d3f] bg-[#12141c]/95 backdrop-blur-md shadow-2xl text-slate-200 max-w-sm pointer-events-auto"
+              >
+                <span className="text-[10px] uppercase font-bold text-[#f4446d] tracking-wider shrink-0 flex items-center gap-1">
+                  <Languages className="w-3 h-3" />
+                  OCR:
+                </span>
+                <span
+                  className="text-xs text-slate-300 truncate max-w-[200px] font-sans"
+                  title={selectedObj.originalText}
+                >
+                  {selectedObj.originalText}
+                </span>
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => {
+                    navigator.clipboard.writeText(selectedObj.originalText!);
+                    setCopiedOrigPill(true);
+                    setTimeout(() => setCopiedOrigPill(false), 1500);
+                  }}
+                  title="Copy original OCR text"
+                  className="p-1 rounded text-slate-400 hover:text-white hover:bg-[#1c1f2e] transition shrink-0 cursor-pointer"
+                >
+                  {copiedOrigPill ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                </button>
+              </div>
+            )}
+
             <div
+              data-studio-toolbar="true"
               style={{
                 left: `${pillPos.x}px`,
-                top: `${pillPos.y - 82}px`,
+                top: `${toolbarY}px`,
                 transform: 'translateX(-50%)',
               }}
-              className="fixed z-40 flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-[#282d3f] bg-[#12141c]/95 backdrop-blur-md shadow-2xl text-slate-200 max-w-sm pointer-events-auto"
+              className="fixed z-40 flex items-center gap-0.5 p-1 rounded-xl border border-[#282d3f] bg-[#12141c]/95 backdrop-blur-md shadow-2xl text-slate-200"
             >
-              <span className="text-[10px] uppercase font-bold text-[#f4446d] tracking-wider shrink-0 flex items-center gap-1">
-                <Languages className="w-3 h-3" />
-                OCR:
-              </span>
-              <span
-                className="text-xs text-slate-300 truncate max-w-[200px] font-sans"
-                title={selectedObj.originalText}
-              >
-                {selectedObj.originalText}
-              </span>
               <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
                 onClick={() => {
-                  navigator.clipboard.writeText(selectedObj.originalText!);
-                  setCopiedOrigPill(true);
-                  setTimeout(() => setCopiedOrigPill(false), 1500);
+                  if (editingTextId === selectedObj.id) {
+                    handleFinishInlineEdit();
+                  } else {
+                    studioStore.setState({ editingTextId: selectedObj.id });
+                  }
                 }}
-                title="Copy original OCR text"
-                className="p-1 rounded text-slate-400 hover:text-white hover:bg-[#1c1f2e] transition shrink-0"
+                title="Edit Dialogue (Double-click bubble or Enter)"
+                className="p-1.5 rounded-lg hover:bg-[#1c1f2e] text-[#f4446d] hover:text-[#e0355e] transition cursor-pointer"
               >
-                {copiedOrigPill ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                <Edit3 className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={handleToggleBold}
+                title={isSelActive ? "Bold Selected Text (Ctrl+B)" : "Toggle Box Bold (Ctrl+B)"}
+                className={`p-1.5 rounded-lg transition cursor-pointer ${
+                  isBoldActive ? 'bg-[#f4446d]/20 text-[#f4446d]' : 'text-slate-300 hover:text-white hover:bg-[#1c1f2e]'
+                }`}
+              >
+                <Bold className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={handleToggleItalic}
+                title={isSelActive ? "Italic Selected Text (Ctrl+I)" : "Toggle Box Italic (Ctrl+I)"}
+                className={`p-1.5 rounded-lg transition cursor-pointer ${
+                  isItalicActive ? 'bg-[#f4446d]/20 text-[#f4446d]' : 'text-slate-300 hover:text-white hover:bg-[#1c1f2e]'
+                }`}
+              >
+                <Italic className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={handleAddNewEmptyTextBox}
+                title="Add New Text Box"
+                className="p-1.5 rounded-lg hover:bg-[#1c1f2e] text-slate-300 hover:text-white transition cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={handleCopyStyle}
+                title="Copy Typography Style"
+                className="p-1.5 rounded-lg hover:bg-[#1c1f2e] text-slate-300 hover:text-white transition cursor-pointer"
+              >
+                <Copy className="w-3.5 h-3.5" />
+              </button>
+              {clipboardStyle && (
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={handlePasteStyle}
+                  title="Paste Typography Style"
+                  className="p-1.5 rounded-lg hover:bg-[#1c1f2e] text-[#f4446d] hover:text-[#e0355e] transition cursor-pointer"
+                >
+                  <ClipboardPaste className="w-3.5 h-3.5" />
+                </button>
+              )}
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={handleDuplicateSelectedText}
+                title="Duplicate Bubble (Ctrl+D)"
+                className="p-1.5 rounded-lg hover:bg-[#1c1f2e] text-slate-300 hover:text-white transition cursor-pointer"
+              >
+                <CopyPlus className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={handleRasterizeText}
+                title="Rasterize to Background Canvas"
+                className="p-1.5 rounded-lg hover:bg-[#1c1f2e] text-slate-300 hover:text-white transition cursor-pointer"
+              >
+                <Layers className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={handleDeleteSelectedText}
+                title="Delete Bubble (Delete)"
+                className="p-1.5 rounded-lg hover:bg-[#f4446d]/15 text-[#f4446d] hover:text-[#e0355e] transition cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
               </button>
             </div>
-          )}
-
-          <div
-            style={{
-              left: `${pillPos.x}px`,
-              top: `${pillPos.y - 44}px`,
-              transform: 'translateX(-50%)',
-            }}
-            className="fixed z-40 flex items-center gap-0.5 p-1 rounded-xl border border-[#282d3f] bg-[#12141c]/95 backdrop-blur-md shadow-2xl text-slate-200"
-          >
-            <button
-              onClick={() => {
-                if (editingTextId === selectedObj.id) {
-                  handleFinishInlineEdit();
-                } else {
-                  studioStore.setState({ editingTextId: selectedObj.id });
-                }
-              }}
-              title="Edit Dialogue (Double-click bubble or Enter)"
-              className="p-1.5 rounded-lg hover:bg-[#1c1f2e] text-[#f4446d] hover:text-[#e0355e] transition"
-            >
-              <Edit3 className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={handleAddNewEmptyTextBox}
-              title="Add New Text Box"
-              className="p-1.5 rounded-lg hover:bg-[#1c1f2e] text-slate-300 hover:text-white transition"
-            >
-              <Plus className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={handleCopyStyle}
-              title="Copy Typography Style"
-              className="p-1.5 rounded-lg hover:bg-[#1c1f2e] text-slate-300 hover:text-white transition"
-            >
-              <Copy className="w-3.5 h-3.5" />
-            </button>
-            {clipboardStyle && (
-              <button
-                onClick={handlePasteStyle}
-                title="Paste Typography Style"
-                className="p-1.5 rounded-lg hover:bg-[#1c1f2e] text-[#f4446d] hover:text-[#e0355e] transition"
-              >
-                <ClipboardPaste className="w-3.5 h-3.5" />
-              </button>
-            )}
-            <button
-              onClick={handleDuplicateSelectedText}
-              title="Duplicate Bubble (Ctrl+D)"
-              className="p-1.5 rounded-lg hover:bg-[#1c1f2e] text-slate-300 hover:text-white transition"
-            >
-              <CopyPlus className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={handleRasterizeText}
-              title="Rasterize to Background Canvas"
-              className="p-1.5 rounded-lg hover:bg-[#1c1f2e] text-slate-300 hover:text-white transition"
-            >
-              <Layers className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={handleDeleteSelectedText}
-              title="Delete Bubble (Delete)"
-              className="p-1.5 rounded-lg hover:bg-[#f4446d]/15 text-[#f4446d] hover:text-[#e0355e] transition"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        </>
-      )}
+          </>
+        );
+      })()}
 
       {activeTool === 'ocr' && ocrFeedback && !isAiProcessing && (
         <div role="status" className="fixed bottom-6 right-6 z-50 max-w-sm rounded-xl border border-[#282d3f] bg-[#12141c] px-4 py-3 text-xs text-slate-200 shadow-xl">
@@ -1281,6 +1668,108 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
         <div className="fixed top-16 right-6 z-50 flex items-center gap-2 px-3 py-1.5 rounded-xl border border-[#f4446d]/40 bg-[#12141c]/90 backdrop-blur-md text-xs text-[#f4446d] shadow-xl">
           <Sparkles className="w-4 h-4 animate-spin text-[#f4446d]" />
           <span>Local WebGPU Inference...</span>
+        </div>
+      )}
+
+      {/* Custom Full-Composite Canvas Context Menu (Prevents transparent overlay right-click save bug) */}
+      {contextMenu && (
+        <div
+          data-studio-context-menu="true"
+          style={{
+            left: `${Math.min(contextMenu.x, window.innerWidth - 220)}px`,
+            top: `${Math.min(contextMenu.y, window.innerHeight - 260)}px`,
+          }}
+          className="fixed z-50 w-52 rounded-xl border border-[#282d3f] bg-[#12141c]/95 backdrop-blur-md p-1.5 shadow-2xl text-xs text-slate-200 select-none animate-in fade-in duration-100"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="px-2 py-1 text-[10px] uppercase font-bold text-slate-500 tracking-wider">
+            Image Export
+          </div>
+          <button
+            type="button"
+            onClick={() => handleContextDownload('png')}
+            className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-[#1c1f2e] hover:text-white transition cursor-pointer text-left"
+          >
+            <Download className="w-3.5 h-3.5 text-[#f4446d]" />
+            <span>Save Image As (PNG)</span>
+          </button>
+          <button
+            type="button"
+            onClick={handleContextCopyImage}
+            className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-[#1c1f2e] hover:text-white transition cursor-pointer text-left"
+          >
+            <Copy className="w-3.5 h-3.5 text-indigo-400" />
+            <span>Copy Full Image</span>
+          </button>
+
+          <div className="my-1 border-t border-[#262a3b]" />
+
+          {contextMenu.targetObj ? (
+            <>
+              <div className="px-2 py-1 text-[10px] uppercase font-bold text-slate-500 tracking-wider">
+                Dialogue Bubble
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText(contextMenu.targetObj!.text);
+                  setOcrFeedback('Copied dialogue text');
+                  setTimeout(() => setOcrFeedback(null), 2000);
+                  setContextMenu(null);
+                }}
+                className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-[#1c1f2e] hover:text-white transition cursor-pointer text-left"
+              >
+                <Copy className="w-3.5 h-3.5 text-slate-400" />
+                <span>Copy Dialogue Text</span>
+              </button>
+              {contextMenu.targetObj.originalText && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(contextMenu.targetObj!.originalText!);
+                    setOcrFeedback('Copied original OCR text');
+                    setTimeout(() => setOcrFeedback(null), 2000);
+                    setContextMenu(null);
+                  }}
+                  className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-[#1c1f2e] hover:text-white transition cursor-pointer text-left"
+                >
+                  <Languages className="w-3.5 h-3.5 text-[#f4446d]" />
+                  <span>Copy Original OCR</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  handleDuplicateSelectedText();
+                  setContextMenu(null);
+                }}
+                className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-[#1c1f2e] hover:text-white transition cursor-pointer text-left"
+              >
+                <CopyPlus className="w-3.5 h-3.5 text-slate-400" />
+                <span>Duplicate Bubble</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  handleDeleteSelectedText();
+                  setContextMenu(null);
+                }}
+                className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-[#f4446d]/15 text-[#f4446d] hover:text-[#e0355e] transition cursor-pointer text-left"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Delete Bubble</span>
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={handleContextAddBoxHere}
+              className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-[#1c1f2e] hover:text-white transition cursor-pointer text-left"
+            >
+              <Plus className="w-3.5 h-3.5 text-[#f4446d]" />
+              <span>Add Text Box Here</span>
+            </button>
+          )}
         </div>
       )}
     </div>

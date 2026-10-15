@@ -476,4 +476,53 @@ describe('Studio State Management', () => {
     const outsideIdx = (80 * width + 80) * 4;
     expect(result.data[outsideIdx + 3]).toBe(0);
   });
+
+  it('safely pushes full-page retranslate snapshot and restores via undo', () => {
+    const textInitial: TextObject = {
+      id: 't-init',
+      x: 20,
+      y: 20,
+      width: 120,
+      height: 50,
+      text: 'Manual user correction',
+      fontSize: 16,
+      fontFamily: 'Comic',
+      color: '#000',
+    };
+
+    const textRetranslated: TextObject = {
+      id: 't-retranslated',
+      x: 25,
+      y: 25,
+      width: 130,
+      height: 55,
+      text: 'Fresh AI retranslation',
+      fontSize: 16,
+      fontFamily: 'Comic',
+      color: '#000',
+    };
+
+    studioStore.setState({ textObjects: [textInitial] });
+
+    // Snapshot before and after full page retranslate
+    studioUndoStack.push({
+      id: 'retranslate-page',
+      timestamp: Date.now(),
+      description: 'Retranslate full page',
+      textObjects: {
+        before: [textInitial],
+        after: [textRetranslated],
+      },
+    });
+
+    studioStore.setState({ textObjects: [textRetranslated] });
+    expect(studioStore.getState().textObjects[0].text).toBe('Fresh AI retranslation');
+
+    // Undo restores manual user corrections
+    studioUndoStack.undo({
+      applyTextObjects: (objs) => studioStore.setState({ textObjects: objs }),
+    });
+
+    expect(studioStore.getState().textObjects[0].text).toBe('Manual user correction');
+  });
 });

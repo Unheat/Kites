@@ -21,6 +21,16 @@ export interface TranslationJob {
   mockTranslatedBlocks?: any[];
   folderId?: number; // Optional reference to a ProjectFolder
   tabId?: number; // Tracks which tab requested this job for the Pub/Sub response
+  ocrEngineId?: string;
+  inpaintTier?: string;
+  translationEngineId?: string;
+  bubbleMode?: string;
+  renderFontPresetId?: string;
+  renderFontBold?: boolean;
+  sourceLang?: string;
+  targetLang?: string;
+  completedAt?: number;
+  durationMs?: number;
 }
 
 export interface ProjectFolder {
@@ -54,6 +64,12 @@ export interface TextBlock {
   direction?: 'h' | 'v';
   /** Exact Canvas layout lines, persisted so Studio preview matches baked output. */
   lines?: string[];
+  bold?: boolean;
+  italic?: boolean;
+  align?: 'left' | 'center' | 'right';
+  isSkipped?: boolean;
+  /** Text block rotation angle in degrees (mean line angle, e.g. -180 to 180). */
+  angle?: number;
 }
 
 const db = new Dexie('KitesDatabase') as Dexie & {
@@ -169,3 +185,4 @@ export async function cleanupOldJobs(
 }
 
 export { db };
+export default db;

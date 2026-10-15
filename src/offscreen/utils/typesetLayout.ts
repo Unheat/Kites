@@ -32,18 +32,21 @@ export const CJK_FONT_STACK = '"Microsoft YaHei Bold", "Microsoft YaHei", "WenQu
  * @param fontFamily - Primary Latin font family stack.
  * @param sampleText - Optional text sample used to detect non-Latin/CJK characters.
  * @param customCjk - Optional custom CJK font stack override.
- * @returns Formatted CSS font string, e.g. 'bold 16px "Comic Sans MS", sans-serif'.
+ * @param isBold - Whether to render text in bold weight (defaults to false).
+ * @returns Formatted CSS font string, e.g. '16px "Comic Sans MS", sans-serif' or 'bold 16px "Comic Sans MS", sans-serif'.
  */
 export function fontSpec(
   size: number,
   fontFamily: string = DEFAULT_FONT_FAMILY,
   sampleText?: string,
-  customCjk?: string
+  customCjk?: string,
+  isBold: boolean = false
 ): string {
   const isCjk = sampleText ? CJK_REGEX.test(sampleText) : false;
   const cjkStack = customCjk || CJK_FONT_STACK;
   const family = isCjk ? `${cjkStack}, ${fontFamily}` : `${fontFamily}, ${cjkStack}`;
-  return `bold ${size}px ${family}`;
+  const weight = isBold ? 'bold ' : '';
+  return `${weight}${size}px ${family}`;
 }
 
 const BOX_INSET = 0.05;
@@ -488,7 +491,8 @@ export function fitFontSizeWithLines(
   startSize: number,
   maxSize?: number,
   boxInset?: number,
-  customCjk?: string
+  customCjk?: string,
+  isBold: boolean = false
 ): FitFontSizeLayout {
   const inset = boxInset ?? BOX_INSET;
   const maxW = Math.max(10, boxW * (1 - 2 * inset));
@@ -513,7 +517,7 @@ export function fitFontSizeWithLines(
   }
 
   let finalSize = MIN_FONT_SIZE;
-  ctx.font = fontSpec(MIN_FONT_SIZE, fontFamily, text, customCjk);
+  ctx.font = fontSpec(MIN_FONT_SIZE, fontFamily, text, customCjk, isBold);
   let finalLines: string[] = wrapText(ctx, text, maxW);
   const consider = (size: number, lines: string[]): void => {
     if (size > finalSize && lines.length > 0) {
@@ -531,7 +535,7 @@ export function fitFontSizeWithLines(
   while (lo <= hi) {
     const mid = Math.floor((lo + hi) / 2);
     if (mid === 0) break;
-    ctx.font = fontSpec(mid, fontFamily, text, customCjk);
+    ctx.font = fontSpec(mid, fontFamily, text, customCjk, isBold);
 
     const maxWordWidth = Math.max(
       0,
@@ -539,8 +543,8 @@ export function fitFontSizeWithLines(
         const punctMatch = w.match(/^(.*?)([.!?,:;~…"']+)?$/);
         const stem = punctMatch && punctMatch[1] ? punctMatch[1] : w;
         const trailingPunct = punctMatch?.[2] ?? '';
-        const stemW = ctx.measureText(stem).width;
-        if (stemW <= maxW) return stemW;
+        const wordW = ctx.measureText(w).width;
+        if (wordW <= maxW) return wordW;
         const points = findHyphenationPoints(stem);
         if (points.length > 0) {
           let segMax = 0;
@@ -590,7 +594,7 @@ export function fitFontSizeWithLines(
     while (floorLo <= floorHi) {
       const mid = Math.floor((floorLo + floorHi) / 2);
       if (mid === 0) break;
-      ctx.font = fontSpec(mid, fontFamily, text, customCjk);
+      ctx.font = fontSpec(mid, fontFamily, text, customCjk, isBold);
       const lines = reflowText(ctx, text, maxW);
       const lineH = mid * LINE_HEIGHT;
       const allFitW = lines.every((l) => ctx.measureText(l).width <= maxW + 0.5);
@@ -610,7 +614,7 @@ export function fitFontSizeWithLines(
     let p3Hi = effectiveCap;
     while (p3Lo <= p3Hi) {
       const mid = Math.floor((p3Lo + p3Hi) / 2);
-      ctx.font = fontSpec(mid, fontFamily, text, customCjk);
+      ctx.font = fontSpec(mid, fontFamily, text, customCjk, isBold);
       const lines = wrapText(ctx, text, maxW);
       const allLinesFitW = lines.every((l) => ctx.measureText(l).width <= maxW + 0.5);
       if (allLinesFitW && lines.length * mid * LINE_HEIGHT <= maxH) {
@@ -633,7 +637,7 @@ export function fitFontSizeWithLines(
   while (lo <= hi) {
     const mid = Math.floor((lo + hi) / 2);
     if (mid === 0) break;
-    ctx.font = fontSpec(mid, fontFamily, text, customCjk);
+    ctx.font = fontSpec(mid, fontFamily, text, customCjk, isBold);
     const lines = reflowText(ctx, text, maxW);
     const lineH = mid * LINE_HEIGHT;
     const allLinesFitW = lines.every((l) => ctx.measureText(l).width <= maxW + 0.5);

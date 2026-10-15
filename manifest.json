@@ -35,6 +35,13 @@
       },
       "description": "Select a screen area to translate"
     },
+    "repeat-screen-crop": {
+      "suggested_key": {
+        "default": "Alt+Shift+C",
+        "mac": "MacCtrl+Shift+C"
+      },
+      "description": "Repeat previous screen crop translation"
+    },
     "open-chapter-reader": {
       "suggested_key": {
         "default": "Alt+Shift+M",
@@ -48,7 +55,8 @@
     "storage",
     "contextMenus",
     "offscreen",
-    "identity"
+    "identity",
+    "declarativeNetRequestWithHostAccess"
   ],
   "oauth2": {
     "client_id": "13839997652-1pfe7h8arhiqlvh3dtn81tc5aibh8pnm.apps.googleusercontent.com",
@@ -66,6 +74,13 @@
     "type": "module"
   },
   "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["src/content/untaint.ts"],
+      "run_at": "document_start",
+      "world": "MAIN",
+      "all_frames": true
+    },
     {
       "matches": ["<all_urls>"],
       "js": ["src/content/index.tsx"],
