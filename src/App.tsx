@@ -225,6 +225,7 @@ export default function App() {
       strokeColor: b.strokeColor || '#ffffff',
       strokeWidth: 2,
       isVertical: b.direction === 'v' && isCjk,
+      isSkipped: b.isSkipped ?? false,
     };
   });
 
@@ -302,6 +303,7 @@ export default function App() {
           strokeColor: obj.strokeColor,
           direction: obj.isVertical ? 'v' : 'h',
           lines: obj.lines,
+          isSkipped: obj.isSkipped,
         }));
         await db.textBlocks.bulkAdd(newBlocks);
       });

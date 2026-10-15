@@ -47,10 +47,22 @@ export type TransformHandle =
   | 'sw'
   | 'w'
   | 'rot'
+  | 'font-size'
+  | 'wrap'
   | 'quad-tl'
   | 'quad-tr'
   | 'quad-br'
   | 'quad-bl';
+
+export interface CharStyleOverride {
+  bold?: boolean;
+  italic?: boolean;
+  fontSize?: number;
+  fontFamily?: string;
+  color?: string;
+  strokeColor?: string;
+  strokeWidth?: number;
+}
 
 export interface TextObject {
   id: string;
@@ -61,6 +73,7 @@ export interface TextObject {
   text: string;
   lines?: string[];
   originalText?: string;
+  charStyles?: (CharStyleOverride | null)[];
   fontSize: number;
   fontFamily: string;
   color: string;
@@ -95,6 +108,7 @@ export interface TextObject {
   quadPoints?: [Point, Point, Point, Point];
   isLocked?: boolean;
   isVisible?: boolean;
+  isSkipped?: boolean;
 }
 
 export interface ImageLayer {

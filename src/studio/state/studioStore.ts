@@ -59,6 +59,43 @@ export interface OcrSettingsState {
   inpaint: boolean;
 }
 
+/**
+ * Extracts a complete typography style snapshot from a TextObject for clipboard copying.
+ * Includes all font parameters, colors, gradients, stroke, drop shadows, casing, and spacing.
+ */
+export function extractTypographyStyle(obj: TextObject): Partial<TextObject> {
+  return {
+    fontFamily: obj.fontFamily,
+    fontSize: obj.fontSize,
+    color: obj.color,
+    color2: obj.color2,
+    isGradient: obj.isGradient,
+    gradientAngle: obj.gradientAngle,
+    strokeColor: obj.strokeColor,
+    strokeColor2: obj.strokeColor2,
+    isStrokeGradient: obj.isStrokeGradient,
+    strokeWidth: obj.strokeWidth,
+    strokeBlur: obj.strokeBlur,
+    shadowAngle: obj.shadowAngle,
+    shadowDistance: obj.shadowDistance,
+    shadowBlur: obj.shadowBlur,
+    shadowColor: obj.shadowColor,
+    isVertical: obj.isVertical,
+    direction: obj.direction,
+    align: obj.align,
+    bold: obj.bold,
+    italic: obj.italic,
+    uppercase: obj.uppercase,
+    lowercase: obj.lowercase,
+    letterSpacing: obj.letterSpacing,
+    lineSpacing: obj.lineSpacing,
+    backgroundFill: obj.backgroundFill,
+    backgroundPadding: obj.backgroundPadding,
+    backgroundBorderRadius: obj.backgroundBorderRadius,
+    opacity: obj.opacity,
+  };
+}
+
 export interface StudioState {
   // Navigation & Viewport
   activeTool: StudioTool;

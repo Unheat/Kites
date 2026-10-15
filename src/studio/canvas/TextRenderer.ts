@@ -145,18 +145,121 @@ export class TextRenderer {
     const lineHeight = obj.fontSize * (obj.lineSpacing ?? 1.2);
     const align = obj.align ?? 'center';
 
-    let startX = obj.width / 2;
-    if (align === 'left') startX = 4;
-    if (align === 'right') startX = obj.width - 4;
-    ctx.textAlign = align;
-
     const totalHeight = lines.length * lineHeight;
     let startY = (obj.height - totalHeight) / 2 + lineHeight / 2;
 
-    for (const line of lines) {
-      this.strokeAndFillText(ctx, line, startX, startY, obj);
-      startY += lineHeight;
+    const hasCharStyles = Array.isArray(obj.charStyles) && obj.charStyles.some(Boolean);
+
+    // Fast-path: uniform styling across all lines
+    if (!hasCharStyles) {
+      let startX = obj.width / 2;
+      if (align === 'left') startX = 4;
+      if (align === 'right') startX = obj.width - 4;
+      ctx.textAlign = align;
+
+      for (const line of lines) {
+        this.strokeAndFillText(ctx, line, startX, startY, obj);
+        startY += lineHeight;
+      }
+      return;
     }
+
+    // Rich styled runs path (per-word / character overrides)
+    let globalCharOffset = 0;
+    for (const line of lines) {
+      const runs = this.decomposeLineIntoStyledRuns(ctx, line, globalCharOffset, obj);
+      const totalLineWidth = runs.reduce((sum, r) => sum + r.width, 0);
+
+      let lineStartX = obj.width / 2 - totalLineWidth / 2;
+      if (align === 'left') lineStartX = 4;
+      if (align === 'right') lineStartX = obj.width - 4 - totalLineWidth;
+
+      // Pass 1: Render strokes across all runs
+      let curX = lineStartX;
+      ctx.textAlign = 'left';
+      for (const run of runs) {
+        ctx.font = `${run.style.italic ? 'italic ' : ''}${run.style.bold ? 'bold ' : ''}${run.style.fontSize}px ${run.style.fontFamily || 'sans-serif'}`;
+        this.strokeOnlyText(ctx, run.text, curX, startY, run.style);
+        curX += run.width;
+      }
+
+      // Pass 2: Render fills across all runs (fills never clipped by adjacent strokes)
+      curX = lineStartX;
+      for (const run of runs) {
+        ctx.font = `${run.style.italic ? 'italic ' : ''}${run.style.bold ? 'bold ' : ''}${run.style.fontSize}px ${run.style.fontFamily || 'sans-serif'}`;
+        this.fillOnlyText(ctx, run.text, curX, startY, run.style);
+        curX += run.width;
+      }
+
+      startY += lineHeight;
+      globalCharOffset += line.length + 1;
+    }
+  }
+
+  private static decomposeLineIntoStyledRuns(
+    ctx: CanvasRenderingContext2D,
+    line: string,
+    lineStartOffset: number,
+    baseObj: TextObject
+  ): { text: string; width: number; style: TextObject }[] {
+    if (!line) return [];
+
+    const runs: { text: string; width: number; style: TextObject }[] = [];
+    let currentRunText = '';
+    let currentRunStyle: TextObject | null = null;
+
+    const areStylesEqual = (a: TextObject, b: TextObject) =>
+      a.bold === b.bold &&
+      a.italic === b.italic &&
+      a.fontSize === b.fontSize &&
+      a.fontFamily === b.fontFamily &&
+      a.color === b.color &&
+      a.strokeColor === b.strokeColor &&
+      a.strokeWidth === b.strokeWidth;
+
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i];
+      const globalIdx = lineStartOffset + i;
+      const override = baseObj.charStyles?.[globalIdx];
+
+      const charStyle: TextObject = override
+        ? {
+            ...baseObj,
+            bold: override.bold ?? baseObj.bold,
+            italic: override.italic ?? baseObj.italic,
+            fontSize: override.fontSize ?? baseObj.fontSize,
+            fontFamily: override.fontFamily ?? baseObj.fontFamily,
+            color: override.color ?? baseObj.color,
+            strokeColor: override.strokeColor ?? baseObj.strokeColor,
+            strokeWidth: override.strokeWidth ?? baseObj.strokeWidth,
+          }
+        : baseObj;
+
+      if (!currentRunStyle || areStylesEqual(currentRunStyle, charStyle)) {
+        currentRunText += char;
+        currentRunStyle = charStyle;
+      } else {
+        ctx.font = `${currentRunStyle.italic ? 'italic ' : ''}${currentRunStyle.bold ? 'bold ' : ''}${currentRunStyle.fontSize}px ${currentRunStyle.fontFamily || 'sans-serif'}`;
+        runs.push({
+          text: currentRunText,
+          width: ctx.measureText(currentRunText).width,
+          style: currentRunStyle,
+        });
+        currentRunText = char;
+        currentRunStyle = charStyle;
+      }
+    }
+
+    if (currentRunText && currentRunStyle) {
+      ctx.font = `${currentRunStyle.italic ? 'italic ' : ''}${currentRunStyle.bold ? 'bold ' : ''}${currentRunStyle.fontSize}px ${currentRunStyle.fontFamily || 'sans-serif'}`;
+      runs.push({
+        text: currentRunText,
+        width: ctx.measureText(currentRunText).width,
+        style: currentRunStyle,
+      });
+    }
+
+    return runs;
   }
 
   private static renderVertical(
@@ -182,43 +285,47 @@ export class TextRenderer {
     }
   }
 
-  private static strokeAndFillText(
+  private static strokeOnlyText(
     ctx: CanvasRenderingContext2D,
     text: string,
     x: number,
     y: number,
     obj: TextObject
   ): void {
-    // 1. Drop shadow & outline stroke
-    if (obj.strokeWidth && obj.strokeWidth > 0) {
-      ctx.save();
-      ctx.lineWidth = obj.strokeWidth * 2;
-      ctx.lineJoin = 'round';
-      ctx.miterLimit = 2;
+    if (!obj.strokeWidth || obj.strokeWidth <= 0) return;
+    ctx.save();
+    ctx.lineWidth = obj.strokeWidth * 2;
+    ctx.lineJoin = 'round';
+    ctx.miterLimit = 2;
 
-      // Handle stroke drop shadow
-      if (obj.shadowDistance && obj.shadowDistance > 0) {
-        const rad = ((obj.shadowAngle ?? 45) * Math.PI) / 180;
-        ctx.shadowOffsetX = Math.cos(rad) * obj.shadowDistance;
-        ctx.shadowOffsetY = Math.sin(rad) * obj.shadowDistance;
-        ctx.shadowBlur = obj.shadowBlur ?? 2;
-        ctx.shadowColor = obj.shadowColor ?? 'rgba(0, 0, 0, 0.7)';
-      }
-
-      ctx.strokeStyle = this.getFillStyle(
-        ctx,
-        obj.strokeColor || '#000000',
-        obj.strokeColor2,
-        obj.isStrokeGradient,
-        obj.gradientAngle,
-        obj.width,
-        obj.height
-      );
-      ctx.strokeText(text, x, y);
-      ctx.restore();
+    if (obj.shadowDistance && obj.shadowDistance > 0) {
+      const rad = ((obj.shadowAngle ?? 45) * Math.PI) / 180;
+      ctx.shadowOffsetX = Math.cos(rad) * obj.shadowDistance;
+      ctx.shadowOffsetY = Math.sin(rad) * obj.shadowDistance;
+      ctx.shadowBlur = obj.shadowBlur ?? 2;
+      ctx.shadowColor = obj.shadowColor ?? 'rgba(0, 0, 0, 0.7)';
     }
 
-    // 2. Main text fill
+    ctx.strokeStyle = this.getFillStyle(
+      ctx,
+      obj.strokeColor || '#000000',
+      obj.strokeColor2,
+      obj.isStrokeGradient,
+      obj.gradientAngle,
+      obj.width,
+      obj.height
+    );
+    ctx.strokeText(text, x, y);
+    ctx.restore();
+  }
+
+  private static fillOnlyText(
+    ctx: CanvasRenderingContext2D,
+    text: string,
+    x: number,
+    y: number,
+    obj: TextObject
+  ): void {
     ctx.save();
     ctx.fillStyle = this.getFillStyle(
       ctx,
@@ -231,6 +338,17 @@ export class TextRenderer {
     );
     ctx.fillText(text, x, y);
     ctx.restore();
+  }
+
+  private static strokeAndFillText(
+    ctx: CanvasRenderingContext2D,
+    text: string,
+    x: number,
+    y: number,
+    obj: TextObject
+  ): void {
+    this.strokeOnlyText(ctx, text, x, y, obj);
+    this.fillOnlyText(ctx, text, x, y, obj);
   }
 
   private static getFillStyle(

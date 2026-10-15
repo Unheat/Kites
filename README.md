@@ -1,5 +1,7 @@
 <div align="center">
 
+[English](README.md) | [简体中文](README.zh-CN.md) | [Tiếng Việt](README.vi.md) | [日本語](README.ja.md)
+
 # 🪁 Kites
 
 ### Read Any Manga in Your Language. Directly in Your Browser.

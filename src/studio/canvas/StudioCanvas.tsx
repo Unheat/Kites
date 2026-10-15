@@ -10,6 +10,8 @@ import {
   Check,
   Languages,
   Plus,
+  Bold,
+  Italic,
 } from 'lucide-react';
 import { studioStore, useStudioStore } from '../state/studioStore';
 import { studioUndoStack } from '../state/undoStack';
@@ -27,8 +29,9 @@ import { createStudioOcrCrops } from './studioOcrCrop';
 import { StudioSourceSampler } from './StudioSourceSampler';
 import { ToolViewModePolicy } from './tools/ToolViewModePolicy';
 import { requestStudioInpaint, requestStudioOcr } from '../bridge/offscreenStudioBridge';
-import { computeNewBounds, type ActiveDragState, type DragHandle } from '../../App';
+import { computeRotatedBounds, getHandleCursor } from './transformMath';
 import { recalculateBlockTypeset } from './studioTypeset';
+import { extractTypographyStyle } from '../state/studioStore';
 import type {
   BoundingBox,
   Point,
@@ -82,6 +85,8 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
   const [activeHandle, setActiveHandle] = useState<TransformHandle | null>(null);
   const [dragStartPoint, setDragStartPoint] = useState<Point | null>(null);
   const [initialTransformState, setInitialTransformState] = useState<TextObject | null>(null);
+  const [canvasCursor, setCanvasCursor] = useState<string>('default');
+  const [inlineSelection, setInlineSelection] = useState<{ start: number; end: number } | null>(null);
 
   const imageWidth = originalImage?.naturalWidth || cleanedImage?.naturalWidth || 800;
   const imageHeight = originalImage?.naturalHeight || cleanedImage?.naturalHeight || 1200;
@@ -159,7 +164,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
 
     // 2. Render Text Objects
     for (const obj of textObjects) {
-      if (obj.isVisible === false || obj.id === editingTextId) continue;
+      if (obj.isVisible === false) continue;
 
       if (obj.warpPreset && obj.warpPreset !== 'none' && obj.quadPoints) {
         const tempCanvas = document.createElement('canvas');
@@ -180,6 +185,26 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
 
     // 3. Render transform furniture if not in hideBoxes mode
     if (!hideBoxes) {
+      // Draw subtle dashed grey outline for unselected skipped dialogue boxes
+      for (const obj of textObjects) {
+        if (obj.isSkipped && obj.id !== selectedTextId) {
+          ctx.save();
+          ctx.translate(obj.x, obj.y);
+          if (obj.rotation) {
+            const cx = obj.width / 2;
+            const cy = obj.height / 2;
+            ctx.translate(cx, cy);
+            ctx.rotate((obj.rotation * Math.PI) / 180);
+            ctx.translate(-cx, -cy);
+          }
+          ctx.strokeStyle = '#94a3b8';
+          ctx.lineWidth = 1;
+          ctx.setLineDash([2, 3]);
+          ctx.strokeRect(0, 0, obj.width, obj.height);
+          ctx.restore();
+        }
+      }
+
       const selectedObj = textObjects.find((t) => t.id === selectedTextId);
       if (selectedObj) {
         CanvasFurniture.drawSelectionFurniture(ctx, selectedObj, appearance.selectedBoxBorderColor);
@@ -258,7 +283,113 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
     });
   }, [selectedTextId]);
 
-  // Spacebar pan gesture listener
+  const handleCopyStyle = useCallback(() => {
+    const liveTexts = studioStore.getState().textObjects;
+    const selected = liveTexts.find((t) => t.id === selectedTextId);
+    if (!selected) return;
+    const style = extractTypographyStyle(selected);
+    studioStore.setState({ clipboardStyle: style });
+  }, [selectedTextId]);
+
+  const handlePasteStyle = useCallback(() => {
+    const { clipboardStyle, textObjects: liveTexts } = studioStore.getState();
+    if (!clipboardStyle || !selectedTextId) return;
+    const target = liveTexts.find((t) => t.id === selectedTextId);
+    if (!target) return;
+    const prev = [...liveTexts];
+    const updated = { ...target, ...clipboardStyle };
+    const typeset = recalculateBlockTypeset(
+      updated.text,
+      updated.fontFamily,
+      updated.width,
+      updated.height,
+      updated.fontSize
+    );
+    updated.lines = typeset.lines;
+
+    const next = liveTexts.map((t) => (t.id === selectedTextId ? updated : t));
+    studioStore.setState({ textObjects: next });
+    studioUndoStack.push({
+      id: `paste-style-${Date.now()}`,
+      timestamp: Date.now(),
+      description: 'Paste Typography Style',
+      textObjects: { before: prev, after: next },
+    });
+  }, [selectedTextId]);
+
+  const handleToggleBold = useCallback(() => {
+    const liveTexts = studioStore.getState().textObjects;
+    const selected = liveTexts.find((t) => t.id === selectedTextId);
+    if (!selected) return;
+
+    if (inlineSelection && inlineSelection.start !== inlineSelection.end) {
+      const charStyles = [...(selected.charStyles || new Array(selected.text.length).fill(null))];
+      const currentStartBold = charStyles[inlineSelection.start]?.bold ?? selected.bold;
+      const nextBold = !currentStartBold;
+      for (let i = inlineSelection.start; i < inlineSelection.end; i++) {
+        charStyles[i] = { ...(charStyles[i] || {}), bold: nextBold };
+      }
+      const updated = { ...selected, charStyles };
+      const prev = [...liveTexts];
+      const next = liveTexts.map((t) => (t.id === selected.id ? updated : t));
+      studioStore.setState({ textObjects: next });
+      studioUndoStack.push({
+        id: `format-bold-${Date.now()}`,
+        timestamp: Date.now(),
+        description: 'Format Word Bold',
+        textObjects: { before: prev, after: next },
+      });
+    } else {
+      const updated = { ...selected, bold: !selected.bold };
+      const prev = [...liveTexts];
+      const next = liveTexts.map((t) => (t.id === selected.id ? updated : t));
+      studioStore.setState({ textObjects: next });
+      studioUndoStack.push({
+        id: `format-bold-${Date.now()}`,
+        timestamp: Date.now(),
+        description: 'Toggle Box Bold',
+        textObjects: { before: prev, after: next },
+      });
+    }
+  }, [selectedTextId, inlineSelection]);
+
+  const handleToggleItalic = useCallback(() => {
+    const liveTexts = studioStore.getState().textObjects;
+    const selected = liveTexts.find((t) => t.id === selectedTextId);
+    if (!selected) return;
+
+    if (inlineSelection && inlineSelection.start !== inlineSelection.end) {
+      const charStyles = [...(selected.charStyles || new Array(selected.text.length).fill(null))];
+      const currentStartItalic = charStyles[inlineSelection.start]?.italic ?? selected.italic;
+      const nextItalic = !currentStartItalic;
+      for (let i = inlineSelection.start; i < inlineSelection.end; i++) {
+        charStyles[i] = { ...(charStyles[i] || {}), italic: nextItalic };
+      }
+      const updated = { ...selected, charStyles };
+      const prev = [...liveTexts];
+      const next = liveTexts.map((t) => (t.id === selected.id ? updated : t));
+      studioStore.setState({ textObjects: next });
+      studioUndoStack.push({
+        id: `format-italic-${Date.now()}`,
+        timestamp: Date.now(),
+        description: 'Format Word Italic',
+        textObjects: { before: prev, after: next },
+      });
+    } else {
+      const updated = { ...selected, italic: !selected.italic };
+      const prev = [...liveTexts];
+      const next = liveTexts.map((t) => (t.id === selected.id ? updated : t));
+      studioStore.setState({ textObjects: next });
+      studioUndoStack.push({
+        id: `format-italic-${Date.now()}`,
+        timestamp: Date.now(),
+        description: 'Toggle Box Italic',
+        textObjects: { before: prev, after: next },
+      });
+    }
+  }, [selectedTextId, inlineSelection]);
+
+  // Spacebar pan gesture & keyboard shortcut listeners
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.code === 'Space' && !e.repeat) {
@@ -284,6 +415,22 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
         e.preventDefault();
         handleDuplicateSelectedText();
       }
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'b' && selectedTextId) {
+        e.preventDefault();
+        handleToggleBold();
+      }
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'i' && selectedTextId) {
+        e.preventDefault();
+        handleToggleItalic();
+      }
+      if ((e.ctrlKey || e.metaKey) && e.altKey && e.key.toLowerCase() === 'c' && selectedTextId) {
+        e.preventDefault();
+        handleCopyStyle();
+      }
+      if ((e.ctrlKey || e.metaKey) && e.altKey && e.key.toLowerCase() === 'v' && selectedTextId) {
+        e.preventDefault();
+        handlePasteStyle();
+      }
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
@@ -298,7 +445,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [selectedTextId, editingTextId, handleDeleteSelectedText, handleDuplicateSelectedText]);
+  }, [selectedTextId, editingTextId, handleDeleteSelectedText, handleDuplicateSelectedText, handleCopyStyle, handlePasteStyle, handleToggleBold, handleToggleItalic]);
 
   // Mouse wheel listener: natural scrolling vs cursor-centered zoom
   const handleWheel = (e: React.WheelEvent) => {
@@ -530,7 +677,27 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       return;
     }
 
-    if (!isPointerDown) return;
+    if (!isPointerDown) {
+      if (activeTool === 'select' || activeTool === 'text') {
+        const liveTexts = studioStore.getState().textObjects;
+        const selectedObj = liveTexts.find((t) => t.id === selectedTextId);
+        if (selectedObj && !hideBoxes) {
+          const handle = CanvasFurniture.hitTestHandles(pt, selectedObj);
+          if (handle) {
+            setCanvasCursor(getHandleCursor(handle, selectedObj.rotation));
+            return;
+          }
+        }
+        for (let i = liveTexts.length - 1; i >= 0; i--) {
+          if (CanvasFurniture.hitTestBody(pt, liveTexts[i])) {
+            setCanvasCursor('move');
+            return;
+          }
+        }
+        setCanvasCursor(activeTool === 'text' ? 'text' : 'default');
+      }
+      return;
+    }
 
     const bgCanvas = bgCanvasRef.current;
     const bgCtx = bgCanvas?.getContext('2d', { willReadFrequently: true });
@@ -612,37 +779,53 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
         const centerY = initialTransformState.y + initialTransformState.height / 2;
         const angleRad = Math.atan2(pt.y - centerY, pt.x - centerX);
         updated.rotation = Math.round((angleRad * 180) / Math.PI + 90);
+      } else if (activeHandle === 'font-size') {
+        // Direct font-size scaling along diagonal
+        const rad = ((initialTransformState.rotation || 0) * Math.PI) / 180;
+        const localDeltaX = deltaX * Math.cos(rad) + deltaY * Math.sin(rad);
+        const localDeltaY = -deltaX * Math.sin(rad) + deltaY * Math.cos(rad);
+        const scaleStep = Math.round((localDeltaX - localDeltaY) * 0.25);
+        const newFontSize = Math.max(6, Math.min(140, Math.round(initialTransformState.fontSize + scaleStep)));
+        updated.fontSize = newFontSize;
+        const typeset = recalculateBlockTypeset(
+          updated.text,
+          updated.fontFamily,
+          updated.width,
+          updated.height,
+          newFontSize
+        );
+        updated.lines = typeset.lines;
+      } else if (activeHandle === 'wrap') {
+        // Wrap handle adjusts width with LOCKED font size
+        const newBounds = computeRotatedBounds(initialTransformState, 'e', deltaX, deltaY);
+        updated.x = newBounds.x;
+        updated.y = newBounds.y;
+        updated.width = newBounds.width;
+        updated.height = newBounds.height;
+        const typeset = recalculateBlockTypeset(
+          updated.text,
+          updated.fontFamily,
+          newBounds.width,
+          newBounds.height,
+          initialTransformState.fontSize
+        );
+        updated.lines = typeset.lines;
       } else {
-        const dragState: ActiveDragState = {
-          blockId: 0,
-          handle: activeHandle as DragHandle,
-          startX: dragStartPoint.x,
-          startY: dragStartPoint.y,
-          origX: initialTransformState.x,
-          origY: initialTransformState.y,
-          origW: initialTransformState.width,
-          origH: initialTransformState.height,
-          origFontSize: initialTransformState.fontSize,
-          origLines: initialTransformState.lines || [],
-          translatedText: initialTransformState.text,
-          fontFamily: initialTransformState.fontFamily,
-        };
-
-        const newBounds = computeNewBounds(dragState, deltaX, deltaY, imageWidth, imageHeight);
-        updated.x = Math.round(newBounds.x);
-        updated.y = Math.round(newBounds.y);
+        const newBounds = computeRotatedBounds(initialTransformState, activeHandle, deltaX, deltaY);
+        updated.x = newBounds.x;
+        updated.y = newBounds.y;
+        updated.width = newBounds.width;
+        updated.height = newBounds.height;
 
         if (activeHandle !== 'move') {
           // Box size/aspect ratio changed — automatically reflow lines and fit font size!
           const typeset = recalculateBlockTypeset(
             updated.text,
             updated.fontFamily,
-            newBounds.w,
-            newBounds.h,
+            newBounds.width,
+            newBounds.height,
             initialTransformState.fontSize
           );
-          updated.width = Math.round(newBounds.w);
-          updated.height = Math.round(newBounds.h);
           updated.fontSize = typeset.fontSize;
           updated.lines = typeset.lines;
         }
@@ -849,47 +1032,26 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       const current = currentList.find((t) => t.id === selectedTextId);
       if (current && JSON.stringify(current) !== JSON.stringify(initialTransformState)) {
         const prev = currentList.map((t) => (t.id === initialTransformState.id ? initialTransformState : t));
+        const actionDesc =
+          activeHandle === 'move'
+            ? 'Move Text Box'
+            : activeHandle === 'rot'
+            ? 'Rotate Text Box'
+            : activeHandle === 'font-size'
+            ? 'Scale Font Size'
+            : activeHandle === 'wrap'
+            ? 'Wrap Text Lines'
+            : 'Resize & Reflow Text Box';
+
         studioUndoStack.push({
           id: `transform-${Date.now()}`,
           timestamp: Date.now(),
-          description: activeHandle === 'move' ? 'Move Text Box' : 'Resize & Reflow Text Box',
+          description: actionDesc,
           textObjects: { before: prev, after: currentList },
         });
       }
       setInitialTransformState(null);
     }
-  };
-
-  // Floating Action Pill Handlers
-  const handleCopyStyle = () => {
-    const selected = textObjects.find((t) => t.id === selectedTextId);
-    if (!selected) return;
-    studioStore.setState({
-      clipboardStyle: {
-        fontFamily: selected.fontFamily,
-        fontSize: selected.fontSize,
-        color: selected.color,
-        strokeColor: selected.strokeColor,
-        strokeWidth: selected.strokeWidth,
-        align: selected.align,
-        isVertical: selected.isVertical,
-        shadowDistance: selected.shadowDistance,
-        shadowAngle: selected.shadowAngle,
-      },
-    });
-  };
-
-  const handlePasteStyle = () => {
-    if (!clipboardStyle || !selectedTextId) return;
-    const prev = [...textObjects];
-    const next = textObjects.map((t) => (t.id === selectedTextId ? { ...t, ...clipboardStyle } : t));
-    studioStore.setState({ textObjects: next });
-    studioUndoStack.push({
-      id: `paste-style-${Date.now()}`,
-      timestamp: Date.now(),
-      description: 'Paste Typography Style',
-      textObjects: { before: prev, after: next },
-    });
   };
 
   /**
@@ -947,6 +1109,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
   };
 
   const handleFinishInlineEdit = () => {
+    setInlineSelection(null);
     if (inlineInitialTextRef.current) {
       const prev = inlineInitialTextRef.current;
       const current = studioStore.getState().textObjects;
@@ -1059,8 +1222,9 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
             width: `${imageWidth * zoom}px`,
             height: `${imageHeight * zoom}px`,
             display: 'block',
+            cursor: isPointerDown && activeHandle === 'rot' ? 'grabbing' : canvasCursor,
           }}
-          className="block absolute top-0 left-0 cursor-crosshair"
+          className="block absolute top-0 left-0"
         />
 
         {/* Layer 4: Direct In-Place Text Editor Overlay */}
@@ -1078,9 +1242,6 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
           const totalBoxHeight = editingObj.height * zoom;
           const verticalPadding = Math.max(0, Math.floor((totalBoxHeight - contentHeight) / 2));
           const horizontalPadding = Math.round(4 * zoom);
-          const strokeWidthScaled = editingObj.strokeWidth
-            ? Math.max(1, Math.round(editingObj.strokeWidth * zoom))
-            : 0;
 
           // Check single-column vertical CJK layout
           const hasCjk = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/.test(editingObj.text);
@@ -1127,6 +1288,10 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
                   }
                   e.stopPropagation();
                 }}
+                onSelect={(e) => {
+                  const el = e.target as HTMLTextAreaElement;
+                  setInlineSelection({ start: el.selectionStart, end: el.selectionEnd });
+                }}
                 style={{
                   width: '100%',
                   height: '100%',
@@ -1138,7 +1303,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
                   fontFamily: editingObj.fontFamily || 'sans-serif',
                   fontWeight: editingObj.bold ? 'bold' : 'normal',
                   fontStyle: editingObj.italic ? 'italic' : 'normal',
-                  color: editingObj.color || '#000000',
+                  color: 'transparent',
                   textAlign: editingObj.align || 'center',
                   lineHeight: lineSpacing,
                   writingMode: isVerticalMode ? 'vertical-rl' : undefined,
@@ -1149,10 +1314,6 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
                   boxSizing: 'border-box',
                   overflow: 'hidden',
                   caretColor: '#f4446d',
-                  textShadow:
-                    editingObj.strokeColor && strokeWidthScaled > 0
-                      ? `-${strokeWidthScaled}px -${strokeWidthScaled}px 0 ${editingObj.strokeColor}, ${strokeWidthScaled}px -${strokeWidthScaled}px 0 ${editingObj.strokeColor}, -${strokeWidthScaled}px ${strokeWidthScaled}px 0 ${editingObj.strokeColor}, ${strokeWidthScaled}px ${strokeWidthScaled}px 0 ${editingObj.strokeColor}`
-                      : undefined,
                 }}
                 autoFocus
               />
@@ -1218,6 +1379,24 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
               className="p-1.5 rounded-lg hover:bg-[#1c1f2e] text-[#f4446d] hover:text-[#e0355e] transition"
             >
               <Edit3 className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={handleToggleBold}
+              title={inlineSelection && inlineSelection.start !== inlineSelection.end ? "Bold Selected Text (Ctrl+B)" : "Toggle Box Bold (Ctrl+B)"}
+              className={`p-1.5 rounded-lg transition ${
+                selectedObj.bold ? 'bg-[#f4446d]/20 text-[#f4446d]' : 'text-slate-300 hover:text-white hover:bg-[#1c1f2e]'
+              }`}
+            >
+              <Bold className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={handleToggleItalic}
+              title={inlineSelection && inlineSelection.start !== inlineSelection.end ? "Italic Selected Text (Ctrl+I)" : "Toggle Box Italic (Ctrl+I)"}
+              className={`p-1.5 rounded-lg transition ${
+                selectedObj.italic ? 'bg-[#f4446d]/20 text-[#f4446d]' : 'text-slate-300 hover:text-white hover:bg-[#1c1f2e]'
+              }`}
+            >
+              <Italic className="w-3.5 h-3.5" />
             </button>
             <button
               onClick={handleAddNewEmptyTextBox}

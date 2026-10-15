@@ -337,6 +337,8 @@ export interface TextBlockItem {
   sourceLineCount?: number;
   /** Horizontal alignment override; defaults to 'center' for the default renderer. */
   alignment?: 'left' | 'center' | 'right';
+  /** When true, block was filtered by bubble mode or user and should not be drawn onto the page. */
+  isSkipped?: boolean;
 }
 
 /**
@@ -575,6 +577,7 @@ function renderTextBlocksDefault(
 
   for (let i = 0; i < blocks.length; i++) {
     const b = blocks[i];
+    if (b.isSkipped) continue;
     const translation = (b.text || '').trim();
     if (!translation || !b.polygon || b.polygon.length < 3) continue;
 
@@ -737,6 +740,7 @@ function renderTextBlocksLegacy(
 
   // Phase 1: Compute font size, wrapped lines, and initial bounding box for every block
   const blockMeta = blocks.map((b, index) => {
+    if (b.isSkipped) return null;
     const text = b.text || '';
     if (!text.trim()) return null;
 

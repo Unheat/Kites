@@ -67,6 +67,7 @@ export interface TextBlock {
   bold?: boolean;
   italic?: boolean;
   align?: 'left' | 'center' | 'right';
+  isSkipped?: boolean;
 }
 
 const db = new Dexie('KitesDatabase') as Dexie & {

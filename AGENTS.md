@@ -118,3 +118,8 @@ Never deploy directly to live production users without pre-verification:
    Use `npx wrangler deploy --env staging --cwd worker` for end-to-end tests against an isolated staging DO SQLite database.
 3. **Production Promotion**:
    Only after preview/staging passes and tests succeed (`npm --prefix worker test`), deploy to production (`npm --prefix worker run deploy` or `npx wrangler versions deploy`).
+
+## 13 Strict Confidentiality & Clean-Room IP Rule
+- **NEVER mention, cite, or name commercial reference extensions, their product names, websites, authors, or external URLs in documentation, devlogs, commit messages, README files, or inline code comments.**
+- Naming commercial reference extensions creates copyright, DMCA, and intellectual property risks when studying public web extensions.
+- Always use neutral, generic technical descriptors instead (e.g. "commercial web extension donor pattern", "standard web reader layout reference", "established scanlation lettering workflows").

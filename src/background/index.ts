@@ -122,6 +122,18 @@ export function normalizePopupState(popupState: Partial<PopupState> | undefined)
     activeOcrId,
     renderFontPresetId,
     renderFontBold: completedState.renderFontBold === true,
+    renderFontItalic: completedState.renderFontItalic === true,
+    renderFontStrokeDisabled: completedState.renderFontStrokeDisabled === true,
+    renderFontAlignment:
+      completedState.renderFontAlignment === 'left' ||
+      completedState.renderFontAlignment === 'center' ||
+      completedState.renderFontAlignment === 'right'
+        ? completedState.renderFontAlignment
+        : 'auto',
+    renderFontMinSize:
+      typeof completedState.renderFontMinSize === 'number' && completedState.renderFontMinSize >= 4 && completedState.renderFontMinSize <= 24
+        ? completedState.renderFontMinSize
+        : 6,
     bubbleMode,
     historyRetention,
     glossaryEnabled: completedState.glossaryEnabled === true,
@@ -192,6 +204,22 @@ chrome.contextMenus.onClicked.addListener(async (info: chrome.contextMenus.OnCli
     chrome.tabs.sendMessage(_tab.id, { type: 'START_AREA_SELECTION' }).catch((err) => {
       console.warn('[Background] Failed to send START_AREA_SELECTION to tab:', err);
     });
+  }
+});
+
+// Forward keyboard command shortcuts declared in manifest.json to the active content tab
+chrome.commands?.onCommand?.addListener(async (command: string, tab?: chrome.tabs.Tab) => {
+  const activeTabId = tab?.id ?? (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.id;
+  if (!activeTabId) return;
+
+  if (command === 'translate-hovered-image') {
+    chrome.tabs.sendMessage(activeTabId, { type: 'TRANSLATE_HOVERED_IMAGE' }).catch(() => {});
+  } else if (command === 'start-screen-crop') {
+    chrome.tabs.sendMessage(activeTabId, { type: 'START_AREA_SELECTION' }).catch(() => {});
+  } else if (command === 'repeat-screen-crop') {
+    chrome.tabs.sendMessage(activeTabId, { type: 'REPEAT_SCREEN_CROP' }).catch(() => {});
+  } else if (command === 'open-chapter-reader') {
+    chrome.tabs.sendMessage(activeTabId, { type: 'OPEN_CHAPTER_READER' }).catch(() => {});
   }
 });
 
@@ -955,8 +983,62 @@ export async function processQueue() {
   }
 }
 
+let corsRuleCounter = 20000;
+
 /**
- * Fetches the image, saves it to Dexie (Zero-Copy Bus), and routes the task to the Offscreen Document.
+ * Fetches a cross-origin image with dynamic Referer/Origin session rules
+ * to bypass CDN anti-hotlinking protections (e.g. MangaDex, Kakao, Webtoon, Pixiv).
+ */
+async function fetchImageWithReferer(url: string, pageUrl?: string): Promise<Response> {
+  if (!url || url.startsWith('data:') || url.startsWith('blob:')) {
+    return fetch(url);
+  }
+
+  if (!chrome.declarativeNetRequest?.updateSessionRules || !pageUrl) {
+    return fetch(url);
+  }
+
+  const ruleId = ++corsRuleCounter;
+  let urlHostname = '';
+  try {
+    urlHostname = new URL(url).hostname;
+  } catch {
+    urlHostname = url.split('/')[2] || '';
+  }
+
+  const rule: chrome.declarativeNetRequest.Rule = {
+    id: ruleId,
+    priority: 2,
+    action: {
+      type: 'modifyHeaders' as chrome.declarativeNetRequest.RuleActionType,
+      requestHeaders: [
+        {
+          header: 'Referer',
+          operation: 'set' as chrome.declarativeNetRequest.HeaderOperation,
+          value: pageUrl,
+        },
+      ],
+    },
+    condition: {
+      urlFilter: urlHostname || '*',
+      resourceTypes: ['xmlhttprequest' as chrome.declarativeNetRequest.ResourceType, 'image' as chrome.declarativeNetRequest.ResourceType, 'other' as chrome.declarativeNetRequest.ResourceType],
+    },
+  };
+
+  try {
+    await chrome.declarativeNetRequest.updateSessionRules({
+      addRules: [rule],
+    });
+    return await fetch(url);
+  } finally {
+    chrome.declarativeNetRequest.updateSessionRules({
+      removeRuleIds: [ruleId],
+    }).catch(() => {});
+  }
+}
+
+/**
+ * Handles fetching, storing, and triggering processing for an image translation job.
  * 
  * @param {number} jobId - The ID of the queued translation job.
  * @param {string} srcUrl - The URL of the image to fetch and process.
@@ -969,7 +1051,16 @@ async function processImageTranslation(jobId: number, srcUrl: string, tabId?: nu
     const existingImage = await db.images.where('jobId').equals(jobId).first();
     if (!existingImage) {
       console.log(`[Background] Fetching image for job ${jobId} from URL: ${srcUrl}`);
-      const response = await fetch(srcUrl);
+      let pageUrl: string | undefined;
+      if (tabId) {
+        try {
+          const tab = await chrome.tabs.get(tabId);
+          pageUrl = tab.url;
+        } catch {
+          pageUrl = undefined;
+        }
+      }
+      const response = await fetchImageWithReferer(srcUrl, pageUrl);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }

@@ -9,13 +9,15 @@ import { createChapterTranslationRegistry, createChapterExporter, type ChapterTr
 import ChapterReaderModal, { type ChapterReaderPage } from './ChapterReaderModal';
 import ChapterReaderFloatingPill from './ChapterReaderFloatingPill';
 import { scanChapterPages, fastScrollPreload } from './scanner';
-import { handleReadingKeydown, handleReadingCommand, type ReadingShortcutActions } from './readingShortcuts';
+import { handleReadingKeydown, handleReadingKeyup, handleReadingCommand, type ReadingShortcutActions } from './readingShortcuts';
 import {
   normalizeSelection,
   calculateCaptureSourceRect,
   computeCropBounds,
   cropCapturedDataUrl,
   waitForCleanFrames,
+  saveLastCropSelection,
+  loadLastCropSelection,
   type CropDragHandle,
 } from './captureArea';
 import {
@@ -1663,6 +1665,7 @@ function GlobalOverlay() {
           : candidate));
         return;
       }
+      saveLastCropSelection(selection);
 
       setCrops((prev) => prev.map((candidate) => candidate.id === id
         ? { ...candidate, status: 'capturing', originalDataUrl: '', translatedDataUrl: undefined, jobId: undefined, error: undefined, showOriginal: false }
@@ -1738,6 +1741,28 @@ function GlobalOverlay() {
 
   useEffect(() => {
     if (!isEnabled) return;
+
+    const repeatLastScreenCrop = () => {
+      const last = loadLastCropSelection();
+      if (!last) return;
+      const newId = `crop_${Date.now()}`;
+      const newCrop: CropOverlayItem = {
+        id: newId,
+        sourceKey: `kites-capture:${newId}`,
+        left: Math.max(0, Math.min(window.innerWidth - last.width, last.left)),
+        top: Math.max(0, Math.min(window.innerHeight - last.height, last.top)),
+        width: last.width,
+        height: last.height,
+        status: 'draft',
+        originalDataUrl: '',
+        showOriginal: false,
+      };
+      setCrops((prev) => [...prev, newCrop]);
+      setTimeout(() => {
+        handleTranslateCrop(newId);
+      }, 50);
+    };
+
     const actions: ReadingShortcutActions<MediaTarget> = {
       getContext: () => {
         const cursor = lastCursorPositionRef.current;
@@ -1759,6 +1784,7 @@ function GlobalOverlay() {
         anchorName: getAnchorName(target.surfaceElement),
       }),
       startAreaSelection: () => setIsSnipping(true),
+      repeatLastScreenCrop,
       openChapterReader: () => {
         refreshChapterPages();
         setIsReaderOpen(true);
@@ -1788,6 +1814,9 @@ function GlobalOverlay() {
     const onKeydown = (event: KeyboardEvent): void => {
       handleReadingKeydown(event, actions);
     };
+    const onKeyup = (event: KeyboardEvent): void => {
+      handleReadingKeyup(event, actions);
+    };
     /**
      * Routes browser commands without retaining an asynchronous response channel.
      * @param message - Runtime command forwarded by background.
@@ -1799,11 +1828,13 @@ function GlobalOverlay() {
     document.addEventListener('mousemove', trackPointer, { passive: true });
     document.addEventListener('mouseout', clearPointer, { passive: true });
     document.addEventListener('keydown', onKeydown);
+    document.addEventListener('keyup', onKeyup);
     chrome.runtime.onMessage.addListener(onCommand);
     return () => {
       document.removeEventListener('mousemove', trackPointer);
       document.removeEventListener('mouseout', clearPointer);
       document.removeEventListener('keydown', onKeydown);
+      document.removeEventListener('keyup', onKeyup);
       chrome.runtime.onMessage.removeListener(onCommand);
     };
   }, [isEnabled, isSnipping, crops, refreshChapterPages]);

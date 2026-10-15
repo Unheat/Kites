@@ -11,10 +11,10 @@ const SRCSET_WIDTH_DESCRIPTOR = /^(\d+(?:\.\d+)?)w$/;
 const SRCSET_DENSITY_DESCRIPTOR = /^(\d+(?:\.\d+)?)x$/;
 const LAZY_SOURCE_ATTRIBUTE = /(?:^|[-_:])(src|srcset|url|image|original|highres|full)(?:$|[-_:])/i;
 const PLACEHOLDER_SOURCE = /(?:blank|placeholder|spacer|spinner|loading|shimmer|blurhash|1x1)/i;
-const MEDIA_SELECTOR = 'img, svg image';
+const MEDIA_SELECTOR = 'img, svg image, canvas';
 const CSS_IMAGE_URL = /url\(["']?([^"')]+)["']?\)/g;
 
-export type MediaTargetKind = 'img' | 'background' | 'svg-image';
+export type MediaTargetKind = 'img' | 'background' | 'svg-image' | 'canvas';
 
 export interface MediaTarget {
   kind: MediaTargetKind;
@@ -349,6 +349,26 @@ export function createMediaTarget(img: HTMLImageElement): MediaTarget | null {
  */
 function createNonHtmlImageTarget(element: Element): MediaTarget | null {
   if (!hasEligibleRect(element) || !isVisibleElement(element)) return null;
+
+  if (element instanceof HTMLCanvasElement) {
+    let srcUrl = '';
+    try {
+      srcUrl = element.toDataURL('image/png');
+    } catch {
+      srcUrl = '';
+    }
+    const anchorElement = resolveAnchorElement(element);
+    if (!srcUrl || !anchorElement) return null;
+    return {
+      kind: 'canvas',
+      sourceElement: element,
+      surfaceElement: element,
+      anchorElement,
+      srcUrl,
+      hiddenBacking: false,
+    };
+  }
+
   const isSvgImage = element instanceof SVGElement
     && element.localName === 'image'
     && element.namespaceURI === 'http://www.w3.org/2000/svg';

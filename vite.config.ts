@@ -32,6 +32,7 @@ export default defineConfig(({ mode }) => {
         'index.html',
         'src/offscreen/offscreen.html',
         'src/content/index.tsx',
+        'src/content/untaint.ts',
         'src/background/index.ts',
       ],
       exclude: [

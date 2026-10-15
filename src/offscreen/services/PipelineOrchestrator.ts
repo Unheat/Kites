@@ -302,12 +302,19 @@ export class PipelineOrchestrator {
             typesetBox,
             // Colors are decided at render time by background sampling (XianScan
             // color.ts port) — black text on light paper, white on dark panels.
-            fontSize: ocrResult.fontSizes ? ocrResult.fontSizes[i] : undefined,
+            fontSize: ocrResult.fontSizes
+              ? Math.max(popupState?.renderFontMinSize ?? 6, ocrResult.fontSizes[i])
+              : undefined,
             angle: ocrResult.angles ? ocrResult.angles[i] : undefined,
             // Default renderer inputs: original source text (length-ratio expansion) and merged
             // source line count (Cotrans used_rows). ocrResult.texts holds the pre-translation text.
             originalText: ocrResult.texts[i],
-            sourceLineCount: ocrResult.lineCounts ? ocrResult.lineCounts[i] : undefined
+            sourceLineCount: ocrResult.lineCounts ? ocrResult.lineCounts[i] : undefined,
+            alignment:
+              popupState?.renderFontAlignment && popupState.renderFontAlignment !== 'auto'
+                ? popupState.renderFontAlignment
+                : undefined,
+            strokeColor: popupState?.renderFontStrokeDisabled ? 'transparent' : undefined,
           });
           itemOcrIndices.push(i);
         }
@@ -396,8 +403,13 @@ export class PipelineOrchestrator {
           fontSize,
           fontFamily: resolvedFontFamily,
           bold: renderFontBold,
+          italic: popupState?.renderFontItalic ?? false,
+          align:
+            popupState?.renderFontAlignment && popupState.renderFontAlignment !== 'auto'
+              ? popupState.renderFontAlignment
+              : 'center',
           color: renderColors?.textColor ?? '#000000',
-          strokeColor: renderColors?.strokeColor ?? '#FFFFFF',
+          strokeColor: popupState?.renderFontStrokeDisabled ? 'transparent' : (renderColors?.strokeColor ?? '#FFFFFF'),
           direction: dir,
           lines: renderInfoByOcrIndex.get(i)?.lines
         };

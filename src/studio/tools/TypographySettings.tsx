@@ -14,8 +14,9 @@ import {
   Type,
   Image as ImageIcon,
   Plus,
+  ClipboardPaste,
 } from 'lucide-react';
-import { studioStore, useStudioStore } from '../state/studioStore';
+import { studioStore, useStudioStore, extractTypographyStyle } from '../state/studioStore';
 import { studioUndoStack } from '../state/undoStack';
 import { recalculateBlockTypeset } from '../canvas/studioTypeset';
 import type { TextObject } from '../types';
@@ -28,12 +29,45 @@ export const TypographySettings: React.FC = () => {
 
   const selectedObj = textObjects.find((t) => t.id === selectedTextId);
 
+  const clipboardStyle = useStudioStore((s) => s.clipboardStyle);
   const [copiedOriginal, setCopiedOriginal] = useState(false);
+  const [copiedStyle, setCopiedStyle] = useState(false);
   const [isEditingOriginal, setIsEditingOriginal] = useState(false);
   const [showCropPreview, setShowCropPreview] = useState(true);
 
   const cropCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const initialTextObjectsRef = useRef<TextObject[] | null>(null);
+
+  const handleCopyStyle = () => {
+    if (!selectedObj) return;
+    const style = extractTypographyStyle(selectedObj);
+    studioStore.setState({ clipboardStyle: style });
+    setCopiedStyle(true);
+    setTimeout(() => setCopiedStyle(false), 2000);
+  };
+
+  const handlePasteStyle = () => {
+    if (!clipboardStyle || !selectedObj) return;
+    const prev = [...textObjects];
+    const updated = { ...selectedObj, ...clipboardStyle };
+    const typeset = recalculateBlockTypeset(
+      updated.text,
+      updated.fontFamily,
+      updated.width,
+      updated.height,
+      updated.fontSize
+    );
+    updated.lines = typeset.lines;
+
+    const next = textObjects.map((t) => (t.id === selectedObj.id ? updated : t));
+    studioStore.setState({ textObjects: next });
+    studioUndoStack.push({
+      id: `paste-style-${Date.now()}`,
+      timestamp: Date.now(),
+      description: 'Paste Typography Style',
+      textObjects: { before: prev, after: next },
+    });
+  };
 
   // Render crop preview of original manga panel containing the selected text bubble
   useEffect(() => {
@@ -264,6 +298,50 @@ export const TypographySettings: React.FC = () => {
               All Bubbles
             </label>
           </div>
+
+          {/* Quick Style Clipboard & Skipped Status */}
+          {selectedObj && !globalEditMode && (
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between gap-1.5 p-1.5 rounded-lg bg-[#090a0f] border border-[#262a3b]">
+                <button
+                  type="button"
+                  onClick={handleCopyStyle}
+                  title="Copy typography styling (font, color, stroke, shadow, etc.)"
+                  className="flex-1 py-1 px-2 rounded text-[11px] font-medium bg-[#1c1f2e] text-slate-200 hover:text-white hover:bg-[#282d3f] border border-[#282d3f] transition flex items-center justify-center gap-1"
+                >
+                  {copiedStyle ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3 text-indigo-400" />}
+                  <span>{copiedStyle ? 'Copied!' : 'Copy Style'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handlePasteStyle}
+                  disabled={!clipboardStyle}
+                  title={clipboardStyle ? "Paste copied typography styling onto this bubble" : "Copy a style first"}
+                  className="flex-1 py-1 px-2 rounded text-[11px] font-medium bg-[#1c1f2e] text-slate-200 hover:text-white hover:bg-[#282d3f] border border-[#282d3f] disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center justify-center gap-1"
+                >
+                  <ClipboardPaste className="w-3 h-3 text-indigo-400" />
+                  <span>Paste Style</span>
+                </button>
+              </div>
+
+              {selectedObj.isSkipped && (
+                <div className="flex items-center justify-between p-2 rounded-lg bg-amber-950/30 border border-amber-800/40 text-amber-300 text-xs">
+                  <span className="text-[11px]">Filtered out by bubble detector</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      studioStore.setState({
+                        textObjects: textObjects.map((t) => (t.id === selectedObj.id ? { ...t, isSkipped: false } : t)),
+                      });
+                    }}
+                    className="px-2 py-0.5 rounded bg-amber-600/30 hover:bg-amber-600/50 text-amber-200 text-[10px] font-medium transition"
+                  >
+                    Include Bubble
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
 
       {/* ======================================================== */}
       {/* 1. ORIGINAL OCR SOURCE TEXT SECTION                      */}

@@ -194,3 +194,34 @@ export function waitForCleanFrames(): Promise<void> {
     }
   });
 }
+
+const LAST_CROP_STORAGE_KEY = 'kites_last_screen_crop';
+
+/**
+ * Persists the coordinates of the last translated screen crop to sessionStorage.
+ */
+export function saveLastCropSelection(selection: ViewportSelection): void {
+  try {
+    sessionStorage.setItem(LAST_CROP_STORAGE_KEY, JSON.stringify(selection));
+  } catch {
+    // SessionStorage may be restricted or full
+  }
+}
+
+/**
+ * Retrieves the coordinates of the last translated screen crop from sessionStorage.
+ */
+export function loadLastCropSelection(): ViewportSelection | null {
+  try {
+    const raw = sessionStorage.getItem(LAST_CROP_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed.left === 'number' && typeof parsed.width === 'number') {
+      return parsed as ViewportSelection;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+

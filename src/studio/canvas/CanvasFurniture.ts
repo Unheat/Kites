@@ -6,9 +6,12 @@ export const HANDLE_RADIUS = 6;
 /** Distance in image pixels between top handle and rotation handle nub. */
 export const ROTATION_HANDLE_OFFSET = 24;
 
+/** Offset in image pixels for secondary auxiliary handles (font size & wrap). */
+export const AUX_HANDLE_OFFSET = 16;
+
 export class CanvasFurniture {
   /**
-   * Draws selection border, 8-point handles, and rotation nub for an active TextObject.
+   * Draws selection border, 8-point handles, rotation nub, font-size nub, and wrap handle.
    *
    * @param ctx - Canvas 2D rendering context.
    * @param obj - Selected TextObject.
@@ -19,6 +22,9 @@ export class CanvasFurniture {
     obj: TextObject,
     borderColor: string = '#6366f1'
   ): void {
+    const isSkipped = !!obj.isSkipped;
+    const effectiveColor = isSkipped ? '#94a3b8' : borderColor;
+
     ctx.save();
     ctx.translate(obj.x, obj.y);
 
@@ -31,36 +37,63 @@ export class CanvasFurniture {
     }
 
     // 1. Draw dashed selection boundary
-    ctx.strokeStyle = borderColor;
+    ctx.strokeStyle = effectiveColor;
     ctx.lineWidth = 1.5;
-    ctx.setLineDash([4, 4]);
+    ctx.setLineDash(isSkipped ? [2, 3] : [4, 4]);
     ctx.strokeRect(0, 0, obj.width, obj.height);
     ctx.setLineDash([]);
 
     // 2. Draw stem line to rotation handle
     ctx.beginPath();
-    ctx.strokeStyle = borderColor;
+    ctx.strokeStyle = effectiveColor;
     ctx.moveTo(obj.width / 2, 0);
     ctx.lineTo(obj.width / 2, -ROTATION_HANDLE_OFFSET);
     ctx.stroke();
 
-    // 3. Draw rotation handle nub
-    this.drawHandleNub(ctx, obj.width / 2, -ROTATION_HANDLE_OFFSET, borderColor, true);
+    // 3. Draw rotation handle nub (circle)
+    this.drawHandleNub(ctx, obj.width / 2, -ROTATION_HANDLE_OFFSET, effectiveColor, true);
 
-    // 4. Draw 8 bounding handles
     const midX = obj.width / 2;
     const midY = obj.height / 2;
     const right = obj.width;
     const bottom = obj.height;
 
-    this.drawHandleNub(ctx, 0, 0, borderColor);
-    this.drawHandleNub(ctx, midX, 0, borderColor);
-    this.drawHandleNub(ctx, right, 0, borderColor);
-    this.drawHandleNub(ctx, right, midY, borderColor);
-    this.drawHandleNub(ctx, right, bottom, borderColor);
-    this.drawHandleNub(ctx, midX, bottom, borderColor);
-    this.drawHandleNub(ctx, 0, bottom, borderColor);
-    this.drawHandleNub(ctx, 0, midY, borderColor);
+    // 4. Draw font-size scaling handle (top-right aux nub with 'A' badge)
+    ctx.beginPath();
+    ctx.strokeStyle = effectiveColor;
+    ctx.moveTo(right, 0);
+    ctx.lineTo(right + AUX_HANDLE_OFFSET, -AUX_HANDLE_OFFSET / 2);
+    ctx.stroke();
+    this.drawHandleNub(ctx, right + AUX_HANDLE_OFFSET, -AUX_HANDLE_OFFSET / 2, '#38bdf8', true, 'A');
+
+    // 5. Draw horizontal wrap handle (right midpoint aux nub with 'W' badge)
+    ctx.beginPath();
+    ctx.strokeStyle = effectiveColor;
+    ctx.moveTo(right, midY);
+    ctx.lineTo(right + AUX_HANDLE_OFFSET, midY);
+    ctx.stroke();
+    this.drawHandleNub(ctx, right + AUX_HANDLE_OFFSET, midY, '#a855f7', true, '↔');
+
+    // 6. Draw 8 standard bounding handles
+    this.drawHandleNub(ctx, 0, 0, effectiveColor);
+    this.drawHandleNub(ctx, midX, 0, effectiveColor);
+    this.drawHandleNub(ctx, right, 0, effectiveColor);
+    this.drawHandleNub(ctx, right, midY, effectiveColor);
+    this.drawHandleNub(ctx, right, bottom, effectiveColor);
+    this.drawHandleNub(ctx, midX, bottom, effectiveColor);
+    this.drawHandleNub(ctx, 0, bottom, effectiveColor);
+    this.drawHandleNub(ctx, 0, midY, effectiveColor);
+
+    // If skipped, render a small label pill
+    if (isSkipped) {
+      ctx.save();
+      ctx.font = 'bold 9px sans-serif';
+      ctx.fillStyle = '#64748b';
+      ctx.fillRect(0, -14, 46, 12);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText('SKIPPED', 3, -5);
+      ctx.restore();
+    }
 
     ctx.restore();
   }
@@ -99,6 +132,16 @@ export class CanvasFurniture {
 
     // Rotation handle
     if (this.dist(localX, localY, midX, -ROTATION_HANDLE_OFFSET) <= radius) return 'rot';
+
+    // Font-size handle (top-right aux)
+    if (this.dist(localX, localY, right + AUX_HANDLE_OFFSET, -AUX_HANDLE_OFFSET / 2) <= radius + 2) {
+      return 'font-size';
+    }
+
+    // Wrap handle (right midpoint aux)
+    if (this.dist(localX, localY, right + AUX_HANDLE_OFFSET, midY) <= radius + 2) {
+      return 'wrap';
+    }
 
     // 8 edge & corner handles
     if (this.dist(localX, localY, 0, 0) <= radius) return 'nw';
@@ -142,7 +185,8 @@ export class CanvasFurniture {
     x: number,
     y: number,
     color: string,
-    isCircle: boolean = false
+    isCircle: boolean = false,
+    label?: string
   ): void {
     ctx.save();
     ctx.fillStyle = '#ffffff';
@@ -151,9 +195,17 @@ export class CanvasFurniture {
 
     if (isCircle) {
       ctx.beginPath();
-      ctx.arc(x, y, HANDLE_RADIUS, 0, Math.PI * 2);
+      ctx.arc(x, y, HANDLE_RADIUS + (label ? 1 : 0), 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
+
+      if (label) {
+        ctx.fillStyle = color;
+        ctx.font = 'bold 8px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(label, x, y);
+      }
     } else {
       ctx.fillRect(x - HANDLE_RADIUS, y - HANDLE_RADIUS, HANDLE_RADIUS * 2, HANDLE_RADIUS * 2);
       ctx.strokeRect(x - HANDLE_RADIUS, y - HANDLE_RADIUS, HANDLE_RADIUS * 2, HANDLE_RADIUS * 2);
