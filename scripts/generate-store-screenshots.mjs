@@ -22,7 +22,7 @@ function getBase64(relPath) {
 
 const demo2Input = getBase64('README_images/input/demo2.jpeg');
 const demo2Result = getBase64('README_images/result/demo2_result.png');
-const chapterReaderImg = getBase64('README_images/UI-feature/chapter-reader.jpg');
+const chapterReaderImg = getBase64('README_images/UI-feature/reader.jpg');
 const readerPanelImg = getBase64('README_images/UI-feature/reader-panel.jpg');
 const hoverImg = getBase64('README_images/UI-feature/hover-inplace-preview.png');
 const mainPanel = getBase64('README_images/UI-feature/main-panel.jpg');

@@ -112,7 +112,7 @@ Hover over any comic panel on Twitter/X, Pixiv, or manga sites. An unobtrusive f
 
 Read entire manga or webtoon chapters in one distraction-free view with automatic batch detection, continuous vertical webtoon mode, multi-page translation, and offline ZIP export:
 
-[![Kites Chapter Reader](./README_images/UI-feature/chapter-reader.jpg)](./README_images/UI-feature/chapter-reader.png)
+[![Kites Chapter Reader](./README_images/UI-feature/reader.jpg)](./README_images/UI-feature/reader.png)
 
 - **Fast Scan:** Automatically auto-scrolls and queues all lazy-loaded manga panels across chapter pages.
 - **Flexible Reader Modes:** Seamlessly switch between Webtoon continuous vertical strips, Single page, and Double spread layouts.
