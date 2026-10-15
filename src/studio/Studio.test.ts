@@ -109,18 +109,18 @@ describe('Studio State Management', () => {
     expect(studioStore.getState().isShowingOriginal).toBe(false);
   });
 
-  it('manages inpaint source configurations with original artwork as default', () => {
+  it('manages inpaint source configurations with background canvas as default', () => {
+    expect(studioStore.getState().inpaintSettings.source).toBe('background');
+
+    studioStore.setState((prev) => ({
+      inpaintSettings: { ...prev.inpaintSettings, source: 'original' },
+    }));
     expect(studioStore.getState().inpaintSettings.source).toBe('original');
 
     studioStore.setState((prev) => ({
       inpaintSettings: { ...prev.inpaintSettings, source: 'background' },
     }));
     expect(studioStore.getState().inpaintSettings.source).toBe('background');
-
-    studioStore.setState((prev) => ({
-      inpaintSettings: { ...prev.inpaintSettings, source: 'composition' },
-    }));
-    expect(studioStore.getState().inpaintSettings.source).toBe('composition');
   });
 
   it('manages engine tier selection and global sync toggle', () => {

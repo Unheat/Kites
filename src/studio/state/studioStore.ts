@@ -155,7 +155,7 @@ const initialState: StudioState = {
     feather: 0,
   },
   inpaintSettings: {
-    source: 'original',
+    source: 'background',
     shape: 'circle',
     size: 40,
   },

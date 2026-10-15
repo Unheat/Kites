@@ -27,53 +27,39 @@ export const InpaintSettings: React.FC = () => {
       {/* Selectable Inpaint Model Tier */}
       <StudioEngineSelector category="inpaint" />
 
-      {/* 3-Way Inpaint Source Selector */}
+      {/* 2-Way Inpaint Source Selector */}
       <div>
         <label className="block text-slate-400 font-medium mb-1.5">Inpaint Source</label>
-        <div className="grid grid-cols-3 gap-1.5 p-1 rounded-lg bg-[#090a0f] border border-[#282d3f]">
-          <button
-            type="button"
-            onClick={() => update({ source: 'original' })}
-            className={`py-1 px-1 rounded text-center text-[10px] font-medium transition cursor-pointer ${
-              inpaint.source === 'original'
-                ? 'bg-[#f4446d] text-white shadow'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-            title="Inpaint untouched original artwork (cleans original lettering/dialogue)"
-          >
-            Original
-          </button>
+        <div className="grid grid-cols-2 gap-1.5 p-1 rounded-lg bg-[#090a0f] border border-[#282d3f]">
           <button
             type="button"
             onClick={() => update({ source: 'background' })}
-            className={`py-1 px-1 rounded text-center text-[10px] font-medium transition cursor-pointer ${
+            className={`py-1.5 px-2 rounded-md font-medium text-center text-xs transition cursor-pointer ${
               inpaint.source === 'background'
-                ? 'bg-[#f4446d] text-white shadow'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'bg-[#f4446d] text-white shadow-xs'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-[#1c1f2e]/50'
             }`}
-            title="Inpaint currently cleaned background canvas (removes residual artifacts)"
+            title="Inpaint current working background canvas to remove residual artifacts (Default)"
           >
             Inpainted BG
           </button>
           <button
             type="button"
-            onClick={() => update({ source: 'composition' })}
-            className={`py-1 px-1 rounded text-center text-[10px] font-medium transition cursor-pointer ${
-              inpaint.source === 'composition'
-                ? 'bg-[#f4446d] text-white shadow'
-                : 'text-slate-400 hover:text-slate-200'
+            onClick={() => update({ source: 'original' })}
+            className={`py-1.5 px-2 rounded-md font-medium text-center text-xs transition cursor-pointer ${
+              inpaint.source === 'original'
+                ? 'bg-[#f4446d] text-white shadow-xs'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-[#1c1f2e]/50'
             }`}
-            title="Inpaint translated composite image (background + rendered text)"
+            title="Inpaint untouched original artwork to cleanly erase original dialogue/SFX"
           >
-            Translated
+            Original Artwork
           </button>
         </div>
         <p className="text-[10px] text-slate-500 mt-1">
-          {inpaint.source === 'original'
-            ? 'Crops untouched original artwork to cleanly erase original dialogue/SFX.'
-            : inpaint.source === 'background'
-            ? 'Crops current background canvas to retouch residual artifacts.'
-            : 'Crops the composite page including rendered translated text overlay.'}
+          {inpaint.source === 'background'
+            ? 'Crops current background canvas to retouch speech bubbles and artifacts.'
+            : 'Crops untouched original artwork to cleanly erase original dialogue/SFX.'}
         </p>
       </div>
 

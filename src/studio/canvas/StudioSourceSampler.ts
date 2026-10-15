@@ -26,7 +26,7 @@ export class StudioSourceSampler {
    * @returns Cropped canvas patch
    */
   public static extractCrop(
-    source: InpaintSource,
+    source: InpaintSource | 'composition',
     bounds: BoundingBox,
     context: SampleContext
   ): HTMLCanvasElement {
