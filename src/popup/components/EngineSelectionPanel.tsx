@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { Download, ChevronDown, Plus, Search, Check } from 'lucide-react';
+import { Download, ChevronDown, Plus, Search, Check, Bold } from 'lucide-react';
 import type { PopupState, BubbleDetectionMode } from '../../shared/types';
 import AddApiForm from './AddApiForm';
 import MiniSearch from 'minisearch';
@@ -750,8 +750,28 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
 
       {/* Render Font Selector */}
       <div className="flex flex-col gap-1.5">
-        <div className="flex items-center gap-1.5 mb-1 relative">
-          <h2 className="text-sm font-medium">Render Font</h2>
+        <div className="flex items-center justify-between mb-1 relative">
+          <div className="flex items-center gap-1.5">
+            <h2 className="text-sm font-medium">Render Font</h2>
+            <HelpTooltip
+              size="sm"
+              content="Typography used when rendering translated text back onto comic speech bubbles and artwork."
+            />
+          </div>
+          <button
+            type="button"
+            aria-label="Toggle Bold Font"
+            title={state.renderFontBold ? 'Bold text enabled (Click to use regular)' : 'Bold text disabled (Click to enable bold)'}
+            onClick={() => updateState({ renderFontBold: !state.renderFontBold })}
+            className={`flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold transition-colors cursor-pointer border ${
+              state.renderFontBold
+                ? 'bg-[var(--color-vellum)] border-[var(--color-editorial)] text-[var(--color-editorial)] shadow-xs'
+                : 'bg-transparent border-[var(--color-dust)] text-[var(--color-dust)] hover:border-[var(--color-ink)] hover:text-[var(--color-ink)]'
+            }`}
+          >
+            <Bold size={13} className={state.renderFontBold ? 'stroke-[2.5]' : 'stroke-[2]'} />
+            <span>Bold</span>
+          </button>
         </div>
 
         <div className="relative flex flex-col">

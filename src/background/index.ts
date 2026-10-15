@@ -121,6 +121,7 @@ export function normalizePopupState(popupState: Partial<PopupState> | undefined)
     activeInpaintId,
     activeOcrId,
     renderFontPresetId,
+    renderFontBold: completedState.renderFontBold === true,
     bubbleMode,
     historyRetention,
     glossaryEnabled: completedState.glossaryEnabled === true,

@@ -70,6 +70,7 @@ export interface StudioState {
   isShowingOriginal: boolean;
   isCanvasFlipped: boolean;
   hideBoxes: boolean;
+  isInfoPanelOpen: boolean;
   activeJobId: number | null;
   imageDimensions: { width: number; height: number };
 
@@ -127,6 +128,7 @@ const initialState: StudioState = {
   isShowingOriginal: false,
   isCanvasFlipped: false,
   hideBoxes: false,
+  isInfoPanelOpen: false,
   activeJobId: null,
   imageDimensions: { width: 0, height: 0 },
 

@@ -263,7 +263,8 @@ export function calculateOptimalFontSize(
   width: number,
   height: number,
   isWestern: boolean = true,
-  fontFamily: string = DEFAULT_RENDER_FONT_FAMILY
+  fontFamily: string = DEFAULT_RENDER_FONT_FAMILY,
+  isBold: boolean = false
 ): { fontSize: number; lines: string[]; lineHeight: number } {
   const targetWidth = Math.max(10, width * 0.85);
   const targetHeight = Math.max(10, height * 0.85);
@@ -277,7 +278,7 @@ export function calculateOptimalFontSize(
 
   while (minSize <= maxSize) {
     const midSize = Math.floor((minSize + maxSize) / 2);
-    ctx.font = fontSpec(midSize, fontFamily, text);
+    ctx.font = fontSpec(midSize, fontFamily, text, undefined, isBold);
 
     const lines = wrapText(ctx, text, targetWidth, isWestern);
     const lineHeight = midSize * 1.15;
@@ -293,7 +294,7 @@ export function calculateOptimalFontSize(
     }
   }
 
-  ctx.font = fontSpec(bestSize, fontFamily, text);
+  ctx.font = fontSpec(bestSize, fontFamily, text, undefined, isBold);
   bestLines = wrapText(ctx, text, targetWidth, isWestern);
 
   return {
@@ -366,11 +367,12 @@ export function measureBubbleLayoutFontSize(
   ctx: Parameters<typeof measureDefaultLayout>[0],
   block: TextBlockItem,
   box: NonNullable<TextBlockItem['typesetBox']>,
-  fontFamily: string = DEFAULT_RENDER_FONT_FAMILY
+  fontFamily: string = DEFAULT_RENDER_FONT_FAMILY,
+  isBold: boolean = false
 ): number {
   if (!block.text?.trim() || !Number.isFinite(box.w) || !Number.isFinite(box.h) || box.w < 1 || box.h < 1) return 0;
-  const fitted = measureDefaultLayout(ctx, block.text.trim(), box.w, box.h, bubbleLayoutFontTarget(block), undefined, fontFamily);
-  return defaultLayoutFits(ctx, fitted, box.w, box.h, fontFamily) ? fitted.size : 0;
+  const fitted = measureDefaultLayout(ctx, block.text.trim(), box.w, box.h, bubbleLayoutFontTarget(block), undefined, fontFamily, isBold);
+  return defaultLayoutFits(ctx, fitted, box.w, box.h, fontFamily, isBold) ? fitted.size : 0;
 }
 
 /** Per-block render outcome, aligned with the input blocks array. */
@@ -497,7 +499,8 @@ export function renderTextBlocksBatch(
   blocks: TextBlockItem[],
   targetLang: string = 'en',
   imageBounds?: RenderImageBounds,
-  fontFamily: string = DEFAULT_RENDER_FONT_FAMILY
+  fontFamily: string = DEFAULT_RENDER_FONT_FAMILY,
+  isBold: boolean = false
 ): (RenderedBlockInfo | null)[] {
   if (!blocks || blocks.length === 0) return [];
 
@@ -523,9 +526,9 @@ export function renderTextBlocksBatch(
   const orientation = LANGUAGE_ORIENTATION_PRESETS[langKey] || 'h';
 
   if (orientation === 'h') {
-    return renderTextBlocksDefault(ctx, coloredBlocks, bounds.width, bounds.height, fontFamily);
+    return renderTextBlocksDefault(ctx, coloredBlocks, bounds.width, bounds.height, fontFamily, isBold);
   }
-  return renderTextBlocksLegacy(ctx, coloredBlocks, targetLang, bounds, fontFamily);
+  return renderTextBlocksLegacy(ctx, coloredBlocks, targetLang, bounds, fontFamily, isBold);
 }
 
 /**
@@ -537,6 +540,7 @@ export function renderTextBlocksBatch(
  * @param pageWidth - Page width.
  * @param pageHeight - Page height.
  * @param fontFamily - CSS font-family stack to render and measure with.
+ * @param isBold - Whether to render text in bold weight.
  * @returns Per-block render info aligned with `blocks` (null for skipped blocks).
  */
 function renderTextBlocksDefault(
@@ -544,7 +548,8 @@ function renderTextBlocksDefault(
   blocks: TextBlockItem[],
   pageWidth: number,
   pageHeight: number,
-  fontFamily: string = DEFAULT_RENDER_FONT_FAMILY
+  fontFamily: string = DEFAULT_RENDER_FONT_FAMILY,
+  isBold: boolean = false
 ): (RenderedBlockInfo | null)[] {
   const results: (RenderedBlockInfo | null)[] = blocks.map(() => null);
   // WORKAROUND: [Tall strip font floor inflation] -> on extreme tall strips the Cotrans
@@ -619,7 +624,7 @@ function renderTextBlocksDefault(
       const { dstPoints, fontSize: targetFontSize } = fixed
         ? { dstPoints: poly, fontSize: bubbleLayoutFontTarget(b) }
         : resizeRegionToFontSize(region, pageWidth, pageHeight);
-      if (fixed && measureBubbleLayoutFontSize(ctx, b, b.typesetBox!, fontFamily) === 0) continue;
+      if (fixed && measureBubbleLayoutFontSize(ctx, b, b.typesetBox!, fontFamily, isBold) === 0) continue;
       const wordCount = translation.split(/\s+/).filter(Boolean).length;
       if (wordCount >= 2) {
         // Same quad dims renderRegionDefault will lay out against (edge midpoints).
@@ -629,8 +634,8 @@ function renderTextBlocksDefault(
         // Keep the Disabled/free-box baseline unchanged. Fixed layouts use the exact
         // renderer normalization shared with the layout solver's measurement callback.
         const fitted = fixed
-          ? measureDefaultLayout(ctx, translation, normH, normV, targetFontSize, undefined, fontFamily)
-          : fitFontSizeWithLines(ctx, translation, fontFamily, normH, normV, targetFontSize, Math.max(targetFontSize, 48), 0.05);
+          ? measureDefaultLayout(ctx, translation, normH, normV, targetFontSize, undefined, fontFamily, isBold)
+          : fitFontSizeWithLines(ctx, translation, fontFamily, normH, normV, targetFontSize, Math.max(targetFontSize, 48), 0.05, undefined, isBold);
         dialogueSizes.push(fitted.size);
       }
       planned.push({ index: i, region, dstPoints, targetFontSize, wordCount, fixed });
@@ -686,7 +691,7 @@ function renderTextBlocksDefault(
       const baselineCap = !plan.fixed && pageDialogueBaseline > 0 && isShortNonShout
         ? Math.max(18, Math.round(pageDialogueBaseline * 1.25))
         : undefined;
-      const info = renderRegionDefault(ctx, plan.region, plan.dstPoints, plan.targetFontSize, baselineCap, fontFamily);
+      const info = renderRegionDefault(ctx, plan.region, plan.dstPoints, plan.targetFontSize, baselineCap, fontFamily, isBold);
       if (info) {
         results[plan.index] = {
           fontSize: info.fontSize,
@@ -721,7 +726,8 @@ function renderTextBlocksLegacy(
   blocks: TextBlockItem[],
   targetLang: string,
   bounds: { width: number; height: number },
-  fontFamily: string = DEFAULT_RENDER_FONT_FAMILY
+  fontFamily: string = DEFAULT_RENDER_FONT_FAMILY,
+  isBold: boolean = false
 ): (RenderedBlockInfo | null)[] {
   const results: (RenderedBlockInfo | null)[] = blocks.map(() => null);
 
@@ -755,10 +761,11 @@ function renderTextBlocksLegacy(
       box.width,
       box.height,
       false,
-      fontFamily
+      fontFamily,
+      isBold
     );
 
-    ctx.font = fontSpec(fontSize, fontFamily, finalText);
+    ctx.font = fontSpec(fontSize, fontFamily, finalText, undefined, isBold);
     let maxLineWidth = 0;
     for (const line of lines) {
       const w = ctx.measureText(line).width;
@@ -814,7 +821,7 @@ function renderTextBlocksLegacy(
     // punctuation ordering (no manual string operations).
     ctx.direction = isRtl ? 'rtl' : 'ltr';
 
-    ctx.font = fontSpec(meta.fontSize, fontFamily, meta.finalText);
+    ctx.font = fontSpec(meta.fontSize, fontFamily, meta.finalText, undefined, isBold);
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 

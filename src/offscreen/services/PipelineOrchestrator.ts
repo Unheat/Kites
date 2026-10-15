@@ -114,6 +114,7 @@ export class PipelineOrchestrator {
       const targetLang = popupState?.targetLang || 'en';
       const ocrTier: OcrTier = popupState?.activeOcrId || 'v6-small';
       const resolvedFontFamily = resolveRenderFontFamily(popupState?.renderFontPresetId);
+      const renderFontBold = popupState?.renderFontBold === true;
 
       // 2. Fetch image from DB
       const imageRecord = await db.images.where('jobId').equals(jobId).first();
@@ -323,7 +324,7 @@ export class PipelineOrchestrator {
           accept: (index, proposed) => {
             const block = blockByOcrIndex.get(index);
             if (!block) return false;
-            const fitted = measureBubbleLayoutFontSize(ctx, block, proposed, resolvedFontFamily);
+            const fitted = measureBubbleLayoutFontSize(ctx, block, proposed, resolvedFontFamily, renderFontBold);
             return fitted > 0;
           },
           onDiagnostics: (counts) => console.log('[PipelineOrchestrator] Bubble layouts:', counts)
@@ -340,7 +341,8 @@ export class PipelineOrchestrator {
           width: bitmap.width,
           height: bitmap.height
         },
-        resolvedFontFamily
+        resolvedFontFamily,
+        renderFontBold
       );
 
       // Map render results (final font size actually drawn) back to OCR indices
@@ -393,6 +395,7 @@ export class PipelineOrchestrator {
           height: activeBox.h,
           fontSize,
           fontFamily: resolvedFontFamily,
+          bold: renderFontBold,
           color: renderColors?.textColor ?? '#000000',
           strokeColor: renderColors?.strokeColor ?? '#FFFFFF',
           direction: dir,
@@ -406,7 +409,20 @@ export class PipelineOrchestrator {
         await db.textBlocks.bulkAdd(textBlocksToSave);
       }
 
-      await db.translationJobs.update(jobId, { status: 'completed' });
+      const durationMs = Math.round(performance.now() - totalPipelineStart);
+      await db.translationJobs.update(jobId, {
+        status: 'completed',
+        completedAt: Date.now(),
+        durationMs,
+        ocrEngineId: ocrTier,
+        inpaintTier,
+        translationEngineId: popupState?.activeEngineId || 'gg-translate',
+        bubbleMode,
+        renderFontPresetId: popupState?.renderFontPresetId || 'standard',
+        renderFontBold,
+        sourceLang,
+        targetLang,
+      });
       
       // Notify active Studio or other dashboard tabs that this job is complete
       try {

@@ -155,7 +155,7 @@ describe('PipelineOrchestrator', () => {
       ])
     );
 
-    expect(db.translationJobs.update).toHaveBeenCalledWith(100, { status: 'completed' });
+    expect(db.translationJobs.update).toHaveBeenCalledWith(100, expect.objectContaining({ status: 'completed' }));
     
     blobSpy.mockRestore();
   });
@@ -283,7 +283,7 @@ describe('PipelineOrchestrator', () => {
     const renderSpy = vi.spyOn(canvasTypesetting, 'renderTextBlocksBatch');
     await pipelineOrchestrator.runPipeline(500);
     expect(measureSpy).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ text: 'Hello', fontSize: 18 }),
-      expect.any(Object), expect.any(String));
+      expect.any(Object), expect.any(String), expect.any(Boolean));
     const fixed = renderSpy.mock.calls[0][1][0].typesetBox!;
     expect(fixed).toBeDefined();
     expect(fixed.w).toBeGreaterThan(20);

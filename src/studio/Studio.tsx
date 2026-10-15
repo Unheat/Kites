@@ -21,7 +21,9 @@ import {
   Image as ImageIcon,
   RotateCcw,
   Loader,
+  Info,
 } from 'lucide-react';
+import { db } from '../db';
 import { studioStore, useStudioStore } from './state/studioStore';
 import { studioUndoStack } from './state/undoStack';
 import { requestStudioOcr } from './bridge/offscreenStudioBridge';
@@ -38,6 +40,7 @@ import { OcrSettings } from './tools/OcrSettings';
 import { TypographySettings } from './tools/TypographySettings';
 import { WarpSettings } from './tools/WarpSettings';
 import { ImageLayerSettings } from './tools/ImageLayerSettings';
+import { PageInfoSettings } from './tools/PageInfoSettings';
 import { FindReplaceModal } from './modals/FindReplaceModal';
 import { ExportTranscriptModal } from './modals/ExportTranscriptModal';
 import { ShortcutsModal } from './modals/ShortcutsModal';
@@ -48,6 +51,7 @@ import { WarpMesh } from './canvas/WarpMesh';
 import type { BoundedDirtyRectPatch, ImageLayer, StudioTool, TextObject } from './types';
 
 export interface StudioProps {
+  jobId?: number;
   originalImage: HTMLImageElement | null;
   cleanedImage: HTMLImageElement | null;
   initialTextObjects?: TextObject[];
@@ -67,6 +71,7 @@ const TOOLS: { id: StudioTool; label: string; icon: React.ComponentType<{ classN
 ];
 
 export const Studio: React.FC<StudioProps> = ({
+  jobId,
   originalImage,
   cleanedImage,
   initialTextObjects = [],
@@ -75,6 +80,7 @@ export const Studio: React.FC<StudioProps> = ({
   onBack,
 }) => {
   const activeTool = useStudioStore((s) => s.activeTool);
+  const isInfoPanelOpen = useStudioStore((s) => s.isInfoPanelOpen);
   const zoom = useStudioStore((s) => s.zoom);
   const viewMode = useStudioStore((s) => s.viewMode ?? (s.isShowingOriginal ? 'original' : 'translated'));
   const hideBoxes = useStudioStore((s) => s.hideBoxes);
@@ -139,25 +145,27 @@ export const Studio: React.FC<StudioProps> = ({
         e.preventDefault();
         handleRedo();
       } else if (e.key.toLowerCase() === 'v' || e.key.toLowerCase() === 't') {
-        studioStore.setState({ activeTool: 'text' });
+        studioStore.setState({ activeTool: 'text', isInfoPanelOpen: false });
+      } else if (e.key.toLowerCase() === 'i' && !e.ctrlKey && !e.metaKey) {
+        studioStore.setState((s) => ({ isInfoPanelOpen: !s.isInfoPanelOpen }));
       } else if ((e.ctrlKey || e.metaKey) && e.key === '1') {
         e.preventDefault();
-        studioStore.setState({ activeTool: 'erase' });
+        studioStore.setState({ activeTool: 'erase', isInfoPanelOpen: false });
       } else if ((e.ctrlKey || e.metaKey) && e.key === '2') {
         e.preventDefault();
-        studioStore.setState({ activeTool: 'paint' });
+        studioStore.setState({ activeTool: 'paint', isInfoPanelOpen: false });
       } else if ((e.ctrlKey || e.metaKey) && e.key === '3') {
         e.preventDefault();
-        studioStore.setState({ activeTool: 'inpaint' });
+        studioStore.setState({ activeTool: 'inpaint', isInfoPanelOpen: false });
       } else if ((e.ctrlKey || e.metaKey) && e.key === '4') {
         e.preventDefault();
-        studioStore.setState({ activeTool: 'ocr' });
+        studioStore.setState({ activeTool: 'ocr', isInfoPanelOpen: false });
       } else if ((e.ctrlKey || e.metaKey) && e.key === '5') {
         e.preventDefault();
-        studioStore.setState({ activeTool: 'warp' });
+        studioStore.setState({ activeTool: 'warp', isInfoPanelOpen: false });
       } else if ((e.ctrlKey || e.metaKey) && e.key === '6') {
         e.preventDefault();
-        studioStore.setState({ activeTool: 'image' });
+        studioStore.setState({ activeTool: 'image', isInfoPanelOpen: false });
       }
     };
 
@@ -279,6 +287,7 @@ export const Studio: React.FC<StudioProps> = ({
 
   const handleRetranslatePage = async () => {
     if (!originalImage || isRetranslating) return;
+    const retranslateStart = performance.now();
     setIsRetranslating(true);
     setToastMessage('Retranslating page with full AI pipeline…');
 
@@ -342,6 +351,51 @@ export const Studio: React.FC<StudioProps> = ({
         textObjects: result.textObjects,
       });
 
+      // Synchronize retranslation metadata and updated text blocks directly into IndexedDB
+      if (jobId) {
+        try {
+          const retranslateDuration = Math.round(performance.now() - retranslateStart);
+          const currentOcrId = studioStore.getState().selectedOcrEngineId || 'v6-small';
+          const currentInpaintId = studioStore.getState().selectedInpaintEngineId || 'lama-manga';
+          const currentTranslationId = studioStore.getState().selectedTranslationEngineId || 'gg-translate';
+
+          await db.translationJobs.update(jobId, {
+            status: 'completed',
+            completedAt: Date.now(),
+            durationMs: retranslateDuration,
+            ocrEngineId: currentOcrId,
+            inpaintTier: currentInpaintId,
+            translationEngineId: currentTranslationId,
+          });
+
+          const imageRecord = await db.images.where({ jobId }).first();
+          if (imageRecord?.id) {
+            await db.textBlocks.where({ imageId: imageRecord.id }).delete();
+            const blocksToSave = result.textObjects.map((obj) => ({
+              imageId: imageRecord.id!,
+              originalText: obj.originalText || '',
+              translatedText: obj.text,
+              posX: obj.x,
+              posY: obj.y,
+              width: obj.width,
+              height: obj.height,
+              fontSize: obj.fontSize || 16,
+              fontFamily: obj.fontFamily || 'WildWords, CCWildWords, sans-serif',
+              bold: obj.bold,
+              italic: obj.italic,
+              align: obj.align,
+              color: obj.color || '#000000',
+              strokeColor: obj.strokeColor || '#ffffff',
+              direction: (obj.isVertical ? 'v' : 'h') as 'v' | 'h',
+              lines: obj.lines,
+            }));
+            await db.textBlocks.bulkAdd(blocksToSave);
+          }
+        } catch (dbErr) {
+          console.warn('[Studio] Failed to sync retranslate into IndexedDB:', dbErr);
+        }
+      }
+
       setToastMessage('Page retranslated · Press Ctrl+Z to undo');
       setTimeout(() => {
         setToastMessage((curr) => (curr?.includes('retranslated') ? null : curr));
@@ -367,6 +421,17 @@ export const Studio: React.FC<StudioProps> = ({
           <div className="flex items-center justify-between pb-2.5 mb-2.5 border-b border-[#262a3b]">
             <span className="text-[11px] uppercase font-bold text-slate-400 tracking-wider">Tools</span>
             <div className="flex items-center gap-1">
+              <button
+                onClick={() => studioStore.setState({ isInfoPanelOpen: !isInfoPanelOpen })}
+                title={isInfoPanelOpen ? 'Close Page & Translation Info' : 'Page & Translation Info (I)'}
+                className={`p-1 rounded-md transition cursor-pointer ${
+                  isInfoPanelOpen
+                    ? 'bg-[#f4446d] text-white shadow-md shadow-[rgba(244,68,109,0.35)]'
+                    : 'text-slate-400 hover:text-white hover:bg-[#1c1f2e]'
+                }`}
+              >
+                <Info className="w-4 h-4" />
+              </button>
               <button
                 onClick={() => studioStore.setState({ activeModal: 'fontManager' })}
                 title="Manage Custom Fonts"
@@ -396,10 +461,10 @@ export const Studio: React.FC<StudioProps> = ({
             {TOOLS.map((t) => (
               <button
                 key={t.id}
-                onClick={() => studioStore.setState({ activeTool: t.id })}
+                onClick={() => studioStore.setState({ activeTool: t.id, isInfoPanelOpen: false })}
                 title={`${t.label} (${t.shortcut})`}
                 className={`flex items-center justify-center aspect-square rounded-md transition ${
-                  activeTool === t.id
+                  activeTool === t.id && !isInfoPanelOpen
                     ? 'bg-[#f4446d] text-white shadow-md shadow-[rgba(244,68,109,0.35)]'
                     : 'text-slate-400 hover:text-white hover:bg-[#1c1f2e]'
                 }`}
@@ -409,15 +474,21 @@ export const Studio: React.FC<StudioProps> = ({
             ))}
           </div>
 
-          {/* Active Tool Settings: Scrollable directly underneath the tools in Card 1 */}
+          {/* Active Tool Settings or Page Info: Scrollable directly underneath the tools in Card 1 */}
           <div className="flex-1 overflow-y-auto mt-3 pr-1">
-            {activeTool === 'erase' && <EraseSettings />}
-            {activeTool === 'paint' && <PaintSettings />}
-            {activeTool === 'inpaint' && <InpaintSettings />}
-            {activeTool === 'ocr' && <OcrSettings />}
-            {(activeTool === 'text' || (activeTool as any) === 'select') && <TypographySettings />}
-            {activeTool === 'warp' && <WarpSettings />}
-            {activeTool === 'image' && <ImageLayerSettings />}
+            {isInfoPanelOpen ? (
+              <PageInfoSettings jobId={jobId} onBack={() => studioStore.setState({ isInfoPanelOpen: false })} />
+            ) : (
+              <>
+                {activeTool === 'erase' && <EraseSettings />}
+                {activeTool === 'paint' && <PaintSettings />}
+                {activeTool === 'inpaint' && <InpaintSettings />}
+                {activeTool === 'ocr' && <OcrSettings />}
+                {(activeTool === 'text' || (activeTool as any) === 'select') && <TypographySettings />}
+                {activeTool === 'warp' && <WarpSettings />}
+                {activeTool === 'image' && <ImageLayerSettings />}
+              </>
+            )}
           </div>
 
           {/* Bottom of Card 1: Global Editing Pill Toggle */}
