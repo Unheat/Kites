@@ -266,6 +266,58 @@ export const TypographySettings: React.FC = () => {
     }
   };
 
+  const handleToggleTypesetMode = (newMode: 'balloon' | 'simple') => {
+    const prev = [...textObjects];
+    let next: TextObject[];
+
+    if (globalEditMode) {
+      // Global editing: apply newMode to ALL text objects on the page and recalculate each box
+      next = textObjects.map((t) => {
+        const typeset = recalculateBlockTypeset(
+          t.text || '',
+          t.fontFamily || 'sans-serif',
+          t.width || 140,
+          t.height || 50,
+          t.fontSize || 16,
+          newMode
+        );
+        return {
+          ...t,
+          typesetMode: newMode,
+          fontSize: newMode === 'balloon' ? typeset.fontSize : t.fontSize,
+          lines: typeset.lines,
+        };
+      });
+    } else if (selectedObj) {
+      // Local editing: apply newMode to ONLY the selected text object
+      const typeset = recalculateBlockTypeset(
+        selectedObj.text || '',
+        selectedObj.fontFamily || 'sans-serif',
+        selectedObj.width || 140,
+        selectedObj.height || 50,
+        selectedObj.fontSize || 16,
+        newMode
+      );
+      const updated: TextObject = {
+        ...selectedObj,
+        typesetMode: newMode,
+        fontSize: newMode === 'balloon' ? typeset.fontSize : selectedObj.fontSize,
+        lines: typeset.lines,
+      };
+      next = textObjects.map((t) => (t.id === selectedObj.id ? updated : t));
+    } else {
+      return;
+    }
+
+    studioStore.setState({ textObjects: next });
+    studioUndoStack.push({
+      id: `typeset-mode-${Date.now()}`,
+      timestamp: Date.now(),
+      description: `Switch Typesetting Mode to ${newMode === 'balloon' ? 'Auto Balloon' : 'Simple Wrap'}`,
+      textObjects: { before: prev, after: next },
+    });
+  };
+
   const handleCopyOriginal = () => {
     if (!obj.originalText) return;
     navigator.clipboard.writeText(obj.originalText);
@@ -626,22 +678,16 @@ export const TypographySettings: React.FC = () => {
 
       {/* Typesetting Mode Toggle */}
       <div>
-        <label className="block text-slate-400 font-medium mb-1">Typesetting Engine</label>
+        <div className="flex items-center justify-between mb-1">
+          <label className="block text-slate-400 font-medium">Typesetting Engine</label>
+          <span className="text-[10px] text-slate-500 font-mono">
+            {globalEditMode ? 'Global (All Bubbles)' : 'Local (Selected)'}
+          </span>
+        </div>
         <div className="flex p-0.5 rounded-lg bg-[#090a0f] border border-[#282d3f] text-xs">
           <button
             type="button"
-            onClick={() => {
-              const newMode = 'balloon';
-              const typeset = recalculateBlockTypeset(
-                obj.text || '',
-                obj.fontFamily || 'sans-serif',
-                obj.width || 140,
-                obj.height || 50,
-                obj.fontSize || 16,
-                newMode
-              );
-              updateSelected({ typesetMode: newMode, fontSize: typeset.fontSize, lines: typeset.lines });
-            }}
+            onClick={() => handleToggleTypesetMode('balloon')}
             className={`flex-1 py-1.5 px-2 rounded-md font-semibold transition-all flex items-center justify-center gap-1.5 cursor-pointer text-[11px] ${
               (obj.typesetMode || 'balloon') === 'balloon'
                 ? 'bg-[#1c1f2e] text-[#f4446d] shadow-xs'
@@ -654,18 +700,7 @@ export const TypographySettings: React.FC = () => {
           </button>
           <button
             type="button"
-            onClick={() => {
-              const newMode = 'simple';
-              const typeset = recalculateBlockTypeset(
-                obj.text || '',
-                obj.fontFamily || 'sans-serif',
-                obj.width || 140,
-                obj.height || 50,
-                obj.fontSize || 16,
-                newMode
-              );
-              updateSelected({ typesetMode: newMode, lines: typeset.lines });
-            }}
+            onClick={() => handleToggleTypesetMode('simple')}
             className={`flex-1 py-1.5 px-2 rounded-md font-semibold transition-all flex items-center justify-center gap-1.5 cursor-pointer text-[11px] ${
               obj.typesetMode === 'simple'
                 ? 'bg-[#1c1f2e] text-[#f4446d] shadow-xs'
