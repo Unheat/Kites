@@ -116,37 +116,75 @@ Explicit History selection may intentionally combine different source URLs. This
 
 ### 5.1 Home tab
 
-Remove the existing blind `Open Chapter Reader` and `Download Chapter ZIP` actions from Home. Do not replace them with another auto-detected chapter banner that has separate counting rules.
+Remove blind `Open Chapter Reader` and `Download Chapter ZIP` actions from Home completely. Do not add redundant full-width tab-switch buttons (e.g. `Manage & Export Pages`) to Home, as the top navbar already provides clean, direct tab navigation icons (`Home`, `Stack`, `Settings`).
 
-Keep language controls, enable/disable, auto-translate, crop translation, and Studio entry. The existing Stack tab is the page-management entry point. If a text shortcut is necessary, it only says `Manage images` and switches to Stack; it neither exports nor invents its own collection.
+Home tab retains only primary direct controls:
+- Source and Target language dropdowns
+- Auto-Translate toggle
+- Crop & Translate Area button
+- Open Edit Studio button
 
-### 5.2 Stack panel
+### 5.2 Stack panel (Selection Hub & Permanent Footer)
 
-Retain Current Page and History tabs with thumbnails and per-image state. Add a consistently visible action area based on explicit selection.
+Retain `Current Page` (or `Current Chapter`) and `History` tabs with thumbnails and per-image selection states.
 
-Illustrative layout:
+The bottom Action Footer must be **permanent and spatially stable**—buttons must never disappear or shift layout when 0 images are checked:
 
 ```text
-Current Page (24)                 History
-
-[ ] Select all        Refresh     Load more images
-
-[thumbnail] [thumbnail] [thumbnail] ...
-  selected     selected   not selected
-  translated   original  processing
-
-12 selected · 8 translated · 4 not translated
-[ Translate remaining 4 ]
-[ Open Reader (12) ]   [ Download ZIP… ]
-[ Clear selection ]
+┌──────────────────────────────────────────────────┐
+│  Kites                    ⏻   [Home] [Stack] [⚙] │
+├──────────────────────────────────────────────────┤
+│  [ Current Chapter (14) ]   [ History (42) ]     │
+├──────────────────────────────────────────────────┤
+│  ☑ 14 / 14 pages          ↺       [⚡ Fast Scan]  │
+├──────────────────────────────────────────────────┤
+│  [ #1 PAGE  ☑ ]         [ #2 PAGE  ☑ ]           │
+│  [   Thumbnail   ]         [   Thumbnail   ]     │
+│  [ #3 PAGE  ☑ ]         [ #4 PAGE  ☑ ]           │
+│  [   Thumbnail   ]         [   Thumbnail   ]     │
+├──────────────────────────────────────────────────┤
+│  ── Action Footer (Permanent · Never Shifts)     │
+│                                                  │
+│  [       ⚡ Translate 14 Selected Pages         ] │  <-- Primary action (Pink)
+│                                                  │
+│  [   📖 Open Reader   ]    [   📦 Export ZIP (0)   ] │  <-- Secondary tools (50/50)
+└──────────────────────────────────────────────────┘
 ```
 
 Rules:
+- **`Translate X Pages` (Primary Button)**:
+  - Exclusively driven by checkboxes.
+  - When $X > 0$: active pink, e.g. `Translate 14 Selected Pages`.
+  - When $X = 0$: disabled gray, `Select Pages to Translate`.
+  - When all selected are done: `All Selected Pages Done ✓`.
+- **`Open Reader` (Secondary Left)**:
+  - Follows selection abstraction cleanly: Reader is a dumb viewer that displays whatever page items it receives.
+  - If checkboxes are selected: opens Reader displaying that specific selected subset (works across both Current Chapter and History items).
+  - If 0 checkboxes are selected: opens Reader displaying all pages in the current chapter view.
+  - Never disabled, never hidden.
+- **`Export ZIP (N)` (Secondary Right)**:
+  - Exports translated pages belonging to the active chapter scope.
+  - $N$ displays the number of translated pages ready to download.
+  - If $N = 0$: disabled (opacity 50%) with tooltip: *"No translated pages in this chapter yet"*.
+  - Label is short and un-truncated: `Export ZIP (N)`.
+  - Never hidden.
 
-- Counts always have a label: selected, translated, discovered, or processing. Avoid an unexplained `8/24` badge.
-- No selection means selection actions are disabled with nearby text `Select images to continue`.
-- Do not silently fall back to all translated pages or all current-page images.
-- Rescanning updates available items and status, not the user's chosen membership.
+### 5.3 Unified Canonical Chapter Scope Resolver (`getChapterScopeId`)
+
+To prevent duplicate logic and resolve the difference between webtoons and paginated manga sites (e.g. nhentai, E-Hentai), define a single shared function `getChapterScopeId(rawUrl: string)` in `src/shared/siteRules.ts`:
+
+1. **Paginated Galleries** (`/g/\d+/\d+/`):
+   - `https://nhentai.net/g/677759/6/` $\to$ `https://nhentai.net/g/677759/`
+   - Strips trailing page index so all page flips (1 $\to$ 2 $\to$ 3...) share the exact same gallery root ID in memory.
+2. **Generic Paginated Patterns** (`/(?:p|page|ch-?\d+)/\d+/`):
+   - Strips trailing numeric page segments.
+3. **Webtoons & SPAs**:
+   - Strips hashes and query pagination parameters (`?page=6`, `#page6`).
+
+Consumed by all three consumer points:
+- **ZIP Exporter (`chapterZip.ts`)**: Collects all translated pages sharing `getChapterScopeId(currentUrl)`. On nhentai, exporting from page 7 now includes pages 1–6!
+- **Selection Panel (`BatchScanPanel.tsx`)**: Displays and accumulates discovered/translated pages under `getChapterScopeId(currentUrl)`.
+- **Reader Modal (`ChapterReaderModal.tsx`)**: Resolves and streams pages for the active chapter scope.
 - New discoveries do not automatically reselect items the user deselected.
 - `Select all` applies to the visible source tab. Cross-source selections remain visible through a compact selection summary/preview.
 - When selection contains History and Current Page entries, show the source counts and allow inspection of the complete selection before acting.
@@ -318,6 +356,30 @@ Test small, narrow, rotated, overlapping, and highly zoomed boxes. Do not assert
 ### 7.4 Acceptance
 
 Reproduce all three user click/drag sequences manually and in controlled gesture tests. Test final pointer-up before RAF, undo/redo final coordinates, cancellation, lost capture, locked objects, zoom levels, page switching, and no mutation after unmount.
+
+### 7.5 Studio Text Line Cache Normalization (`TextRenderer.ts:98-104`)
+
+- **Problem**: In `TextRenderer.wrapTextLines`, cached `existingLines` is compared to `text` by joining `existingLines` with spaces: `existingLines.join(' ').replace(/\s+/g, ' ').trim() === text.replace(/\s+/g, ' ').trim()`.
+- **Root Cause**: In CJK text (Japanese manga, Chinese manhua), words contain no inter-word spaces. Joining `existingLines` with spaces produces artificial spaces that never match the raw CJK `text`.
+- **Consequence**: The cache fails on every frame, falling through to greedy whitespace splitting (`text.split(/\s+/)`), which cannot break unspaced CJK words and dumps all text onto one overflowing line, throwing away the engine's balanced typeset lines.
+- **Fix**: Compare both with and without whitespace:
+  ```ts
+  if (
+    normalizedExisting === normalizedCurrent ||
+    existingLines.join('').replace(/\s+/g, '') === text.replace(/\s+/g, '')
+  ) {
+    return existingLines;
+  }
+  ```
+
+### 7.6 Studio OCR Engine Font Size & Orientation Preservation
+
+- **Problem**: When running Studio OCR on a cropped area, `offscreenStudioBridge.ts:137` hardcodes `fontSize: Math.max(12, Math.min(32, Math.round(t.height * 0.4)))` and forces `isVertical: false`.
+- **Root Cause**: `runStudioOcr` in `StudioOcr.ts` dropped `result.fontSizes` and `result.directions` from OCR result mapping, and `offscreenStudioBridge.ts` overwrote font size with `height * 0.4`.
+- **Consequence**: Tall dialogue boxes clamp to 32px, small single-line bubbles clamp to 12-16px, and vertical text loses its reading orientation.
+- **Fix**:
+  1. Forward `fontSize` from `result.fontSizes` and `isVertical` from `result.directions` in `StudioOcr.ts`.
+  2. In `offscreenStudioBridge.ts`, preserve `(t as any).fontSize` and `(t as any).isVertical`, falling back to `height * 0.4` only when engine font size is absent.
 
 ## 8. Bug fix B: AI initialization feedback
 

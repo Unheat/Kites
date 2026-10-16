@@ -266,14 +266,6 @@ function PopupApp() {
 
               <div className="flex flex-col gap-2 pt-2 border-t border-[var(--color-dust)] border-opacity-30">
                 <button
-                  onClick={() => setActiveTab('batch')}
-                  className="w-full py-2 bg-[var(--color-vellum)] text-[var(--color-ink)] border border-[var(--color-dust)] border-opacity-30 font-semibold rounded hover:border-[var(--color-editorial)] hover:text-[var(--color-editorial)] transition-colors flex items-center justify-center gap-2 cursor-pointer text-sm"
-                  title="View discovered comic panels, select pages, and batch translate or export"
-                >
-                  <Layers size={16} />
-                  Manage & Export Pages
-                </button>
-                <button
                   onClick={async () => {
                     try {
                       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });

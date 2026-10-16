@@ -87,6 +87,8 @@ export async function requestStudioOcr(
       height: number;
       text: string;
       originalText: string;
+      fontSize?: number;
+      isVertical?: boolean;
     }>;
     error?: string;
   }>((resolve) => {
@@ -134,13 +136,15 @@ export async function requestStudioOcr(
     height: t.height,
     text: t.text,
     originalText: t.originalText,
-    fontSize: Math.max(12, Math.min(32, Math.round(t.height * 0.4))),
+    fontSize: (t.fontSize && t.fontSize > 0)
+      ? t.fontSize
+      : Math.max(12, Math.min(32, Math.round(t.height * 0.4))),
     fontFamily: 'WildWords, CCWildWords, sans-serif',
     color: '#000000',
     strokeColor: '#ffffff',
     strokeWidth: 2,
     align: 'center',
-    isVertical: false,
+    isVertical: t.isVertical ?? false,
   }));
 
   return { inpaintedImage, textObjects };

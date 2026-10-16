@@ -102,4 +102,20 @@ describe('TextRenderer Rich Text (charStyles)', () => {
     expect(ctx.fillText).toHaveBeenCalledWith('Hello ', expect.any(Number), expect.any(Number));
     expect(ctx.fillText).toHaveBeenCalledWith('World', expect.any(Number), expect.any(Number));
   });
+
+  it('preserves CJK cached existingLines when text has no spaces', () => {
+    const ctx = createMockContext();
+    const existingLines = ['こんにちは', '世界'];
+    const text = 'こんにちは世界';
+    const lines = TextRenderer.wrapTextLines(ctx, text, 100, existingLines);
+    expect(lines).toBe(existingLines);
+  });
+
+  it('preserves Latin existingLines when text matches normalized spacing', () => {
+    const ctx = createMockContext();
+    const existingLines = ['Hello', 'World'];
+    const text = 'Hello\nWorld';
+    const lines = TextRenderer.wrapTextLines(ctx, text, 100, existingLines);
+    expect(lines).toBe(existingLines);
+  });
 });

@@ -98,7 +98,10 @@ export class TextRenderer {
     if (existingLines && existingLines.length > 0) {
       const normalizedExisting = existingLines.join(' ').replace(/\s+/g, ' ').trim();
       const normalizedCurrent = text.replace(/\s+/g, ' ').trim();
-      if (normalizedExisting === normalizedCurrent) {
+      if (
+        normalizedExisting === normalizedCurrent ||
+        existingLines.join('').replace(/\s+/g, '') === text.replace(/\s+/g, '')
+      ) {
         return existingLines;
       }
     }

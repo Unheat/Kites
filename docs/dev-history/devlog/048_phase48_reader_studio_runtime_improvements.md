@@ -51,6 +51,16 @@ Resolve core interaction defects in Studio text manipulation (drag freezing on p
 2. **Targeted DOM Traversal**: Optimized `collectQueryRoots` in `mediaTargets.ts` using `TreeWalker` to traverse DOM and Shadow DOM without allocating full node arrays.
 3. **128 MiB Session Budget Guard**: Implemented `SESSION_IMAGE_BYTE_LIMIT = 128 * 1024 * 1024` with `estimateDataUrlBytes` in `chapterZip.ts`. Rejects overflowing memory retention while leaving original DOM images intact and exposing explicit chapter cleanup helpers.
 
+### 3.6 Canonical Chapter Scope Resolver (`getChapterScopeId`) & Paginated Gallery Support
+1. **Single Source of Truth**: Created canonical `getChapterScopeId(url)` in `src/shared/siteRules.ts` shared across ZIP exporter (`chapterZip.ts`), Reader modal, and Stack selection panel.
+2. **Paginated Gallery Support (nhentai / e-hentai)**: Strips trailing numeric page segments (`https://nhentai.net/g/677759/6/` -> `https://nhentai.net/g/677759/`), allowing translated pages across multiple sequential page loads to accumulate under one unified chapter gallery instead of isolated 1-page silos.
+3. **Permanent Action Footer**: Made `Open Reader` and `Export ZIP (N)` permanently visible in `BatchScanPanel.tsx`. They never disappear when 0 checkboxes are selected. If 0 selected, Reader opens all pages in current view and ZIP downloads all translated pages ready in view; if specific checkboxes are selected, Reader opens only that chosen subset.
+4. **Home Tab Clutter Removal**: Removed redundant full-width `Manage & Export Pages` button from the Home tab, relying on the top navbar's direct tab navigation.
+
+### 3.7 Studio Text Line-Cache Normalization & Fitted Font Size Preservation
+1. **CJK Line-Cache Normalization**: Updated `TextRenderer.wrapTextLines` to compare unspaced text alongside spaced text. Prevents CJK strings from failing line-cache checks on every redraw and falling back to single-line greedy overflow.
+2. **Engine Font Size & Orientation Passthrough**: Updated `runStudioOcr` in `StudioOcr.ts` and `offscreenStudioBridge.ts` to forward `fontSize` and `isVertical` directly from OCR results, eliminating hardcoded `height * 0.4` overrides that previously clamped text to 12-32px.
+
 ---
 
 ## 4. Roadblocks & Decisions
@@ -64,8 +74,11 @@ Resolve core interaction defects in Studio text manipulation (drag freezing on p
 * **Issue: Missing model init banner on tier switches**:
   * *Root Cause*: Initial implementation only monitored the first cold start of the service worker, with a 700ms debounce that hid sub-second model creations.
   * *Resolution*: Built a multi-stage lifecycle reporter across all local managers (`ocr`, `inpaint`, `translation`, `bubble`), reduced debounce to 150ms, and displayed model identities dynamically.
+* **Issue: Disappearing secondary actions and truncated buttons in Stack panel**:
+  * *Root Cause*: Hiding the secondary action row when 0 checkboxes were checked broke user expectations, and long strings like `Open Reader for 14 Selected` truncated in two-column popup layouts.
+  * *Resolution*: Made the action row permanent, adopted concise un-truncated labels (`Reader (N)`, `Open Reader (M)`, `Export ZIP (N)`), and decoupled general chapter reading/export from batch translation selection.
 
 ---
 
 ## 5. Key Takeaways
-All 77 test suites and 757 unit tests passed cleanly. Production build completed in under 2 seconds. The extension now provides reliable, fluid text box interactions in Studio, predictable loading indicators on every model switch, leak-free tensor execution, clear and intuitive batch/reader controls, and a strictly bounded memory footprint for heavy reading sessions.
+All 77 test suites and 764 unit tests passed cleanly. Production build completed in under 2 seconds. The extension provides robust studio text manipulation, zero-lag model initialization banners, clean canonical chapter aggregation for paginated manga and webtoons, and an intuitive, non-disappearing action layout.

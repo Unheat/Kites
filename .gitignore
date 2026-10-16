@@ -25,6 +25,9 @@ dist-ssr
 *.sw?
 
 .agents
+.claude/skills
+agent/
+skills-lock.json
 .codebase-memory/
 
 !docs/fullplan.md

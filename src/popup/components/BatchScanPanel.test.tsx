@@ -189,7 +189,7 @@ describe('BatchScanPanel UI & Controls', () => {
 
     // Open reader for selected button should exist
     const readerBtn = Array.from(container.querySelectorAll('button')).find((b) =>
-      b.textContent?.includes('Open Reader for 2 Selected')
+      b.textContent?.includes('Reader') && b.textContent?.includes('2')
     );
     expect(readerBtn).toBeDefined();
 
