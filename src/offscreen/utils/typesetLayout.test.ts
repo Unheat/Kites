@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { findHyphenationPoints, balancedWrapText, fitFontSizeWithLines, decollideBoxes } from './typesetLayout';
+import {
+  findHyphenationPoints,
+  balancedWrapText,
+  fitFontSizeWithLines,
+  decollideBoxes,
+  isHardLineBreak,
+  NO_LINE_START_RE,
+  OPENING_MARK_RE,
+} from './typesetLayout';
 
 describe('typesetLayout', () => {
   describe('findHyphenationPoints', () => {
@@ -19,6 +27,18 @@ describe('typesetLayout', () => {
       const points = findHyphenationPoints('twenty-five');
       expect(points).toContain(7); // After "twenty-"
     });
+
+    it('never hyphenates pure numeric strings', () => {
+      expect(findHyphenationPoints('10000000')).toEqual([]);
+      expect(findHyphenationPoints('20261016')).toEqual([]);
+    });
+
+    it('never breaks contractions at apostrophes', () => {
+      const points = findHyphenationPoints("couldn't");
+      expect(points).toEqual([]);
+      const points2 = findHyphenationPoints("shouldn't");
+      expect(points2).toEqual([]);
+    });
   });
 
   describe('balancedWrapText', () => {
@@ -32,12 +52,61 @@ describe('typesetLayout', () => {
       const ellipsisText = "...I understand! But please don't force yourself!";
       
       const lines1 = balancedWrapText(mockCtx, apostropheText, 120);
-      // The word "There's" must remain intact as a full word, not chopped into a standalone "Ther" line
       expect(lines1.some(l => l === "Ther" || l === "Ther-")).toBe(false);
       expect(lines1.some(l => l.includes("There's"))).toBe(true);
 
       const lines2 = balancedWrapText(mockCtx, ellipsisText, 120);
       expect(lines2.some(l => l.includes("und-") || l.includes("erst-"))).toBe(false);
+    });
+
+    it('never generates orphan punctuation lines', () => {
+      const text = "Really?! You can't be serious!";
+      // Test at various narrow widths where "Really?!" might break
+      for (const w of [60, 70, 80, 90, 100]) {
+        const lines = balancedWrapText(mockCtx, text, w);
+        for (const line of lines) {
+          // No line should consist solely of punctuation marks
+          expect(/^[!?~.．…·:;,"'']+$/.test(line)).toBe(false);
+        }
+      }
+    });
+
+    it('binds opening marks forward without separation', () => {
+      expect(OPENING_MARK_RE.test('¿')).toBe(true);
+      expect(OPENING_MARK_RE.test('¡')).toBe(true);
+      const spanishText = "¿Cómo estás hoy?";
+      const lines = balancedWrapText(mockCtx, spanishText, 80);
+      // '¿' must not be left alone at end of any line
+      expect(lines.some(l => l.endsWith('¿'))).toBe(false);
+      // '¿Cómo' must remain bound
+      expect(lines.some(l => l.includes('¿Cómo'))).toBe(true);
+    });
+
+    it('enforces Kinsoku Shori prohibited line-start characters', () => {
+      const cjkText = "問題ありませんよ！本当ですよ。";
+      const lines = balancedWrapText(mockCtx, cjkText, 64);
+      for (const line of lines.slice(1)) {
+        // No line after the first should begin with prohibited punctuation
+        expect(NO_LINE_START_RE.test(line[0])).toBe(false);
+      }
+    });
+  });
+
+  describe('isHardLineBreak', () => {
+    it('allows soft-wrapped LLM text without terminal punctuation to reflow', () => {
+      expect(isHardLineBreak('I wanted to', 'go home')).toBe(false);
+      expect(isHardLineBreak('This is a great', 'opportunity')).toBe(false);
+    });
+
+    it('preserves true hard breaks with terminal punctuation', () => {
+      expect(isHardLineBreak('I wanted to go.', 'Next topic')).toBe(true);
+      expect(isHardLineBreak('Wait!', 'Who is there?')).toBe(true);
+      expect(isHardLineBreak('Really?', 'Yes')).toBe(true);
+    });
+
+    it('preserves list items and dialog colons as hard breaks', () => {
+      expect(isHardLineBreak('Hero:', 'I shall return.')).toBe(true);
+      expect(isHardLineBreak('Items:', '- Sword')).toBe(true);
     });
   });
 
@@ -78,6 +147,22 @@ describe('typesetLayout', () => {
       // Floor ensures it does not choke down to 6px
       expect(result.size).toBeGreaterThanOrEqual(8);
       expect(result.lines.length).toBeGreaterThan(0);
+    });
+
+    it('reduces redundant measureText calls via MeasureCache', () => {
+      let callCount = 0;
+      const countingCtx = {
+        font: '16px sans-serif',
+        measureText: (t: string) => {
+          callCount++;
+          const sz = parseInt(countingCtx.font.match(/(\d+)px/)?.[1] || '16', 10);
+          return { width: t.length * (sz * 0.5) };
+        }
+      };
+
+      const text = "This is a longer paragraph with several repeated words that need to be measured during binary search.";
+      fitFontSizeWithLines(countingCtx, text, 'sans-serif', 120, 160, 20, 28);
+      expect(callCount).toBeLessThan(350);
     });
   });
 
