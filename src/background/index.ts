@@ -251,7 +251,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         target: 'content',
         source: 'background',
         event: true,
-        payload: { jobId, phase: message.payload.phase, ...identity },
+        payload: {
+          jobId,
+          phase: message.payload.phase,
+          stage: message.payload.stage,
+          modelName: message.payload.modelName,
+          ...identity,
+        },
       }).catch((error) => {
         console.error(`[Background] Failed to forward model initialization for job ${jobId}:`, error);
       });
@@ -275,6 +281,32 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       sendResponse(DEFAULT_POPUP_STATE);
     });
     return true; // Keep channel open
+  }
+
+  if (message.type === 'GET_JOB_IMAGE' && Number.isInteger(message.payload?.jobId)) {
+    db.images.where('jobId').equals(message.payload.jobId).first().then(async (img) => {
+      if (!img) {
+        sendResponse({ status: 'error', error: 'Image not found' });
+        return;
+      }
+      const blob = img.translatedImageBlob || img.rawImageBlob;
+      if (!blob) {
+        sendResponse({ status: 'error', error: 'No image data available' });
+        return;
+      }
+      const buffer = await blob.arrayBuffer();
+      const bytes = new Uint8Array(buffer);
+      let binary = '';
+      for (let i = 0; i < bytes.byteLength; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      const base64 = btoa(binary);
+      const mime = blob.type || 'image/png';
+      sendResponse({ status: 'success', dataUrl: `data:${mime};base64,${base64}` });
+    }).catch((err) => {
+      sendResponse({ status: 'error', error: String(err) });
+    });
+    return true;
   }
 
   if (message.type === 'TRANSLATE_IMAGE') {

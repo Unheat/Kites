@@ -4,6 +4,8 @@ import {
   captureChapterPosition,
   createChapterTranslationRegistry,
   CHAPTER_ZIP_BYTE_LIMIT,
+  SESSION_IMAGE_BYTE_LIMIT,
+  estimateDataUrlBytes,
   orderChapterImages,
   createChapterExporter,
   downloadLocalBlob,
@@ -242,6 +244,80 @@ describe('chapterZip', () => {
       registry.remember('overlay');
       expect(registry.complete('overlay', 'data:result', 2)?.sourcePage).toBe(sourcePage);
       expect(registry.complete('untracked', 'data:result', 3)).toBeUndefined();
+    });
+
+    it('estimates data URL bytes accurately for padded and unpadded Base64', () => {
+      expect(SESSION_IMAGE_BYTE_LIMIT).toBe(128 * 1024 * 1024);
+      // 3 bytes -> 4 chars "AAAA"
+      expect(estimateDataUrlBytes('data:image/png;base64,AAAA')).toBe(3);
+      // 2 bytes -> 3 chars + '=' "AAA="
+      expect(estimateDataUrlBytes('data:image/png;base64,AAA=')).toBe(2);
+      // 1 byte -> 2 chars + '==' "AA=="
+      expect(estimateDataUrlBytes('data:image/png;base64,AA==')).toBe(1);
+      expect(estimateDataUrlBytes('')).toBe(0);
+      expect(estimateDataUrlBytes('blob:http://example.com/xyz')).toBe(0);
+    });
+
+    it('enforces bounded session image retention budget and rejects overflowing admissions', () => {
+      const sourcePage = 'https://example.com/read';
+      const revokeTranslatedUrl = vi.fn();
+      // Set a small 10-byte budget for testing
+      const registry = createChapterTranslationRegistry({
+        getSourcePage: () => sourcePage,
+        createTranslatedUrl: (data) => `blob:${data}`,
+        revokeTranslatedUrl,
+        maxSessionBytes: 10,
+      });
+
+      expect(registry.getSessionByteLimit()).toBe(10);
+      expect(registry.getCurrentSessionBytes()).toBe(0);
+
+      // 6 bytes payload ("AAAA" is 3 bytes, "AAAAAAAA" is 6 bytes)
+      registry.remember('https://example.com/p1.png');
+      const rec1 = registry.complete('https://example.com/p1.png', 'data:image/png;base64,AAAAAAAA', 1);
+      expect(rec1).toBeDefined();
+      expect(registry.getCurrentSessionBytes()).toBe(6);
+
+      // Attempt to add another 6 bytes: 6 + 6 = 12 > 10, should reject!
+      registry.remember('https://example.com/p2.png');
+      const rec2 = registry.complete('https://example.com/p2.png', 'data:image/png;base64,AAAAAAAA', 2);
+      expect(rec2).toBeUndefined();
+      expect(registry.isLimitReached()).toBe(false); // Current 6 <= 10
+      expect(registry.isLimitReached(6)).toBe(true);  // Candidate +6 > 10
+      expect(registry.getCurrentSessionBytes()).toBe(6);
+
+      // Replacing p1 with another 6 bytes should succeed (net change 0)
+      registry.remember('https://example.com/p1.png');
+      const rec1New = registry.complete('https://example.com/p1.png', 'data:image/png;base64,BBBBBBBB', 3);
+      expect(rec1New).toBeDefined();
+      expect(registry.getCurrentSessionBytes()).toBe(6);
+      expect(revokeTranslatedUrl).toHaveBeenCalledWith('blob:data:image/png;base64,AAAAAAAA');
+    });
+
+    it('clears earlier chapter records and reclaims memory when requested', () => {
+      let sourcePage = 'https://example.com/ch1';
+      const revokeTranslatedUrl = vi.fn();
+      const registry = createChapterTranslationRegistry({
+        getSourcePage: () => sourcePage,
+        createTranslatedUrl: (data) => `blob:${data}`,
+        revokeTranslatedUrl,
+        maxSessionBytes: 20,
+      });
+
+      registry.remember('https://example.com/p1.png');
+      registry.complete('https://example.com/p1.png', 'data:image/png;base64,AAAAAAAA', 1); // 6 bytes
+      expect(registry.getCurrentSessionBytes()).toBe(6);
+
+      sourcePage = 'https://example.com/ch2';
+      registry.remember('https://example.com/p2.png');
+      registry.complete('https://example.com/p2.png', 'data:image/png;base64,AAAAAAAA', 2); // 6 bytes
+      expect(registry.getCurrentSessionBytes()).toBe(12);
+
+      // Clear ch1 (earlier chapter)
+      const freed = registry.clearEarlierChapters('https://example.com/ch2');
+      expect(freed).toBe(6);
+      expect(registry.getCurrentSessionBytes()).toBe(6);
+      expect(revokeTranslatedUrl).toHaveBeenCalledWith('blob:data:image/png;base64,AAAAAAAA');
     });
   });
 

@@ -35,15 +35,20 @@ export interface ProcessJobMessage {
 }
 
 export type ModelInitializationPhase = 'started' | 'finished';
+export type ModelInitializationStage = 'ocr' | 'inpaint' | 'translation' | 'bubble';
 
 export interface ModelInitializationMessage {
   type: 'MODEL_INITIALIZATION';
-  target: 'background';
-  source: 'offscreen';
+  target: 'background' | 'content';
+  source: 'offscreen' | 'background';
   event: true;
   payload: {
-    jobId: number;
+    jobId?: number;
+    requestId?: string;
+    originalUrl?: string;
     phase: ModelInitializationPhase;
+    stage?: ModelInitializationStage;
+    modelName?: string;
   };
 }
 

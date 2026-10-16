@@ -2,6 +2,24 @@ import JSZip from 'jszip';
 
 // JSZip holds inputs and output in memory. This bounds archive bytes, not peak heap usage.
 export const CHAPTER_ZIP_BYTE_LIMIT = 256 * 1024 * 1024;
+// Bounded retention budget for the content-side session asset pool (128 MiB default).
+export const SESSION_IMAGE_BYTE_LIMIT = 128 * 1024 * 1024;
+
+/**
+ * Accurately estimates binary payload byte count from a data URL without decoding to string or Uint8Array.
+ * @param dataUrl - data:image/...;base64,... string.
+ * @returns Estimated binary byte length.
+ */
+export function estimateDataUrlBytes(dataUrl: string): number {
+  if (!dataUrl) return 0;
+  if (!dataUrl.startsWith('data:')) return 0;
+  const commaIdx = dataUrl.indexOf(',');
+  if (commaIdx === -1) return 0;
+  const b64Length = dataUrl.length - commaIdx - 1;
+  const padding = dataUrl.endsWith('==') ? 2 : dataUrl.endsWith('=') ? 1 : 0;
+  return Math.max(0, Math.floor((b64Length * 3) / 4) - padding);
+}
+
 // STORE local header, descriptor, central header and conservative UTF-8 filename overhead.
 const ZIP_ENTRY_OVERHEAD_BYTES = 1024;
 const ZIP_END_OVERHEAD_BYTES = 22;
@@ -33,12 +51,14 @@ interface ChapterTranslationRegistryOptions {
   getSourcePage: () => string;
   createTranslatedUrl: (dataUrl: string) => string;
   revokeTranslatedUrl: (url: string) => void;
+  maxSessionBytes?: number;
 }
 
 type ChapterSurface = Pick<ChapterImageRecord, 'surfaceElement' | 'sourceElement'>;
 
 /**
  * Owns queue-time chapter context and one completed version per document/source pair.
+ * Enforces a bounded session encoded-result retention budget (128 MiB default).
  * @param options - Current context and shared DOM blob lifecycle callbacks.
  * @returns Scoped lookup, queue/failure/completion commands, and archive records.
  */
@@ -46,6 +66,9 @@ export function createChapterTranslationRegistry(options: ChapterTranslationRegi
   const chapters = new Map<string, Map<string, ChapterTranslationRecord>>();
   const pending = new Map<string, ReturnType<typeof captureChapterPosition> & ChapterSurface>();
   const completedJobs = new Map<number, ChapterTranslationRecord | undefined>();
+  const byteSizes = new Map<string, number>();
+  let currentSessionBytes = 0;
+  const maxSessionBytes = options.maxSessionBytes ?? SESSION_IMAGE_BYTE_LIMIT;
   let sequence = 0;
   let contextMenu: { originalUrl: string; position: ReturnType<typeof captureChapterPosition> & ChapterSurface } | undefined;
 
@@ -113,18 +136,35 @@ export function createChapterTranslationRegistry(options: ChapterTranslationRegi
     let chapter = chapters.get(sourcePage);
     if (!chapter) chapters.set(sourcePage, chapter = new Map());
     const previous = chapter.get(originalUrl);
+
+    // Enforce the bounded session encoded-result retention budget (128 MiB default)
+    const dataSize = estimateDataUrlBytes(dataUrl);
+    const previousSize = previous ? (byteSizes.get(previous.translatedUrl) || 0) : 0;
+    const netChange = dataSize - previousSize;
+    if (netChange > 0 && currentSessionBytes + netChange > maxSessionBytes) {
+      console.warn(
+        `[ChapterTranslationRegistry] Result not retained: session image limit reached (${((currentSessionBytes + netChange) / (1024 * 1024)).toFixed(1)} MiB > ${(maxSessionBytes / (1024 * 1024)).toFixed(0)} MiB)`
+      );
+      forget(originalUrl);
+      return undefined;
+    }
+
     const metadata = position ?? {
       ...captureChapterPosition(target.surfaceElement, sourcePage, previous?.sequence ?? ++sequence),
       ...target,
     };
+    const translatedUrl = options.createTranslatedUrl(dataUrl);
     const record: ChapterTranslationRecord = {
-      originalUrl, translatedUrl: options.createTranslatedUrl(dataUrl), jobId, showOriginal: false,
+      originalUrl, translatedUrl, jobId, showOriginal: false,
       ...metadata,
     };
     chapter.set(originalUrl, record);
+    currentSessionBytes = Math.max(0, currentSessionBytes + netChange);
+    byteSizes.set(translatedUrl, dataSize);
     forget(originalUrl);
     if (jobId !== undefined) completedJobs.set(jobId, record);
     if (previous && previous.translatedUrl !== record.translatedUrl) {
+      byteSizes.delete(previous.translatedUrl);
       options.revokeTranslatedUrl(previous.translatedUrl);
       // Remember superseded identities without retaining their revoked bytes or DOM elements.
       if (previous.jobId !== undefined) completedJobs.set(previous.jobId, undefined);
@@ -132,7 +172,57 @@ export function createChapterTranslationRegistry(options: ChapterTranslationRegi
     return record;
   }
 
-  return { get, getRecords, remember, rememberContextMenu, forget, complete };
+  function getCurrentSessionBytes(): number {
+    return currentSessionBytes;
+  }
+
+  function getSessionByteLimit(): number {
+    return maxSessionBytes;
+  }
+
+  function isLimitReached(candidateBytes: number = 0): boolean {
+    return currentSessionBytes + candidateBytes > maxSessionBytes;
+  }
+
+  function clearChapter(sourcePage: string): number {
+    const chapter = chapters.get(sourcePage);
+    if (!chapter) return 0;
+    let freedBytes = 0;
+    for (const record of chapter.values()) {
+      const size = byteSizes.get(record.translatedUrl) || 0;
+      freedBytes += size;
+      byteSizes.delete(record.translatedUrl);
+      options.revokeTranslatedUrl(record.translatedUrl);
+      if (record.jobId !== undefined) completedJobs.delete(record.jobId);
+    }
+    chapters.delete(sourcePage);
+    currentSessionBytes = Math.max(0, currentSessionBytes - freedBytes);
+    return freedBytes;
+  }
+
+  function clearEarlierChapters(exceptSourcePage: string): number {
+    let totalFreed = 0;
+    for (const sourcePage of Array.from(chapters.keys())) {
+      if (sourcePage !== exceptSourcePage) {
+        totalFreed += clearChapter(sourcePage);
+      }
+    }
+    return totalFreed;
+  }
+
+  return {
+    get,
+    getRecords,
+    remember,
+    rememberContextMenu,
+    forget,
+    complete,
+    getCurrentSessionBytes,
+    getSessionByteLimit,
+    isLimitReached,
+    clearChapter,
+    clearEarlierChapters,
+  };
 }
 
 export type ChapterZipPhase = 'idle' | 'preparing' | 'packing' | 'success' | 'partial' | 'empty' | 'error';
@@ -359,10 +449,12 @@ export function createChapterExporter(options: ChapterExporterOptions) {
     return { ...status, errors: [...status.errors], total: status.busy ? status.total : orderChapterImages(options.getRecords(), sourcePage).length };
   }
   /** @returns Terminal result, or current busy status if another request already owns the export. */
-  async function exportChapter(): Promise<ChapterZipStatus> {
+  async function exportChapter(specificRecords?: ChapterImageRecord[]): Promise<ChapterZipStatus> {
     if (status.busy) return getStatus();
     const sourcePage = options.getSourcePage();
-    const records = orderChapterImages(options.getRecords(), sourcePage);
+    const records = specificRecords && specificRecords.length > 0
+      ? specificRecords
+      : orderChapterImages(options.getRecords(), sourcePage);
     const title = options.getTitle();
     lastSourcePage = sourcePage;
     status = { phase: 'preparing', busy: true, total: records.length, processed: 0, included: 0, failed: 0, percent: 0, message: 'Preparing translated pages…', errors: [] };

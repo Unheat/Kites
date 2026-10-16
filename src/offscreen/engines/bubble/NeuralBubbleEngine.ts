@@ -14,8 +14,8 @@ export class NeuralBubbleEngine implements IBubbleEngine {
    *
    * @param popupState - Settings state for WebGPU overrides.
    */
-  async init(_popupState?: PopupState): Promise<void> {
-    // The ONNX session is lazily created upon first detect, or preloaded here
+  async init(popupState?: PopupState): Promise<void> {
+    await NeuralBubbleDetector.ensureSession(popupState);
   }
 
   /**

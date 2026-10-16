@@ -26,6 +26,7 @@ export interface ChapterReaderPage {
   top: number;
   isTranslated: boolean;
   translatedUrl?: string;
+  jobId?: number;
   status?: 'idle' | 'queued' | 'processing' | 'completed' | 'error';
 }
 
@@ -68,12 +69,34 @@ export default function ChapterReaderModal({
   const [isRtl, setIsRtl] = useState(true); // Default RTL for Japanese manga
   const [currentIndex, setCurrentIndex] = useState(0);
   const [activeScrollPage, setActiveScrollPage] = useState(1);
+  const [isExporting, setIsExporting] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const totalPages = pages.length;
   const untranslatedUrls = pages.filter((p) => !p.isTranslated).map((p) => p.url);
   const translatedCount = pages.filter((p) => p.isTranslated).length;
   const isAllTranslated = totalPages > 0 && translatedCount === totalPages;
+
+  const handleZipClick = async () => {
+    if (translatedCount === 0) {
+      setToastMessage('⚠️ Translate pages in this reader before downloading ZIP.');
+      setTimeout(() => setToastMessage(null), 3500);
+      return;
+    }
+    if (!onExportZip || isExporting) return;
+    setIsExporting(true);
+    try {
+      await onExportZip();
+      setToastMessage(`✓ Download started (${translatedCount} pages)`);
+      setTimeout(() => setToastMessage(null), 3500);
+    } catch {
+      setToastMessage('ZIP Export failed. Try again.');
+      setTimeout(() => setToastMessage(null), 3500);
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   // Lock body scroll while modal is mounted
   useEffect(() => {
@@ -486,26 +509,62 @@ export default function ChapterReaderModal({
           {/* ZIP Export Button */}
           {onExportZip && (
             <button
-              onClick={onExportZip}
+              onClick={handleZipClick}
+              disabled={isExporting}
               className="kites-reader-btn"
               style={{
                 padding: '6px 8px',
                 borderRadius: '6px',
-                color: 'rgba(255, 255, 255, 0.8)',
-                cursor: 'pointer',
+                color: translatedCount === 0 ? 'rgba(255, 255, 255, 0.4)' : 'rgba(255, 255, 255, 0.9)',
+                cursor: isExporting ? 'wait' : translatedCount === 0 ? 'not-allowed' : 'pointer',
                 border: '1px solid rgba(255, 255, 255, 0.12)',
-                background: 'rgba(255, 255, 255, 0.08)',
+                background: translatedCount === 0 ? 'rgba(255, 255, 255, 0.04)' : 'rgba(255, 255, 255, 0.08)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
+                opacity: translatedCount === 0 ? 0.5 : 1,
               }}
-              title="Download Chapter ZIP"
+              title={
+                translatedCount === 0
+                  ? 'No translated pages in this reader yet. Translate pages first to export ZIP.'
+                  : `Download Chapter ZIP (${translatedCount} page${translatedCount === 1 ? '' : 's'})`
+              }
             >
-              <Download size={14} />
+              {isExporting ? <Loader size={14} className="animate-spin text-[#f4446d]" /> : <Download size={14} />}
             </button>
           )}
         </div>
       </header>
+
+      {/* Floating Status / Error Feedback Toast */}
+      {toastMessage && (
+        <div
+          role="status"
+          aria-live="polite"
+          style={{
+            position: 'fixed',
+            top: '56px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 999999,
+            backgroundColor: 'rgba(20, 20, 24, 0.95)',
+            color: '#ffffff',
+            padding: '8px 18px',
+            borderRadius: '9999px',
+            boxShadow: '0 6px 24px rgba(0, 0, 0, 0.6)',
+            border: '1px solid rgba(255, 255, 255, 0.15)',
+            fontSize: '12px',
+            fontWeight: 500,
+            backdropFilter: 'blur(10px)',
+            pointerEvents: 'none',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+          }}
+        >
+          {toastMessage}
+        </div>
+      )}
 
       {/* Main Reading Viewport Area */}
       <div

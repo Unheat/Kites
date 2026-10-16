@@ -1,4 +1,11 @@
-import type { ModelInitializationMessage, ModelInitializationPhase, ProcessJobMessage, StudioInpaintPayload, StudioOcrPayload } from '../shared/types';
+import type {
+  ModelInitializationMessage,
+  ModelInitializationPhase,
+  ModelInitializationStage,
+  ProcessJobMessage,
+  StudioInpaintPayload,
+  StudioOcrPayload,
+} from '../shared/types';
 import type { Point2D } from './engines/inpaint/BaseInpaintEngine';
 import { extractMaskPolygons } from './utils/maskPolygonExtractor';
 import { pipelineOrchestrator } from './services/PipelineOrchestrator';
@@ -496,13 +503,18 @@ async function runTranslationPipeline(jobId: number): Promise<string> {
    * @param phase - Whether initialization started or finished.
    * @returns Nothing.
    */
-  const reportInitialization = (eventJobId: number, phase: ModelInitializationPhase): void => {
+  const reportInitialization = (
+    eventJobId: number,
+    phase: ModelInitializationPhase,
+    stage?: ModelInitializationStage,
+    modelName?: string
+  ): void => {
     const event: ModelInitializationMessage = {
       type: 'MODEL_INITIALIZATION',
       target: 'background',
       source: 'offscreen',
       event: true,
-      payload: { jobId: eventJobId, phase },
+      payload: { jobId: eventJobId, phase, stage, modelName },
     };
     chrome.runtime.sendMessage(event).catch((error) => {
       console.error('[Offscreen] Failed to report model initialization:', error);

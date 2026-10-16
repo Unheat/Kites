@@ -99,12 +99,18 @@ export function isRightToLeftReadingOrder(
   return false;
 }
 
+import type { ModelInitializationStage } from '../../shared/types';
+
 /**
  * Available OCR tiers. Defaults to 'v6-small'.
  * Dynamically maps to any preset registered in ocrRegistry.
  */
 export type OcrTier = string;
-export type InitializationLifecycleCallback = (phase: 'started' | 'finished') => void;
+export type InitializationLifecycleCallback = (
+  phase: 'started' | 'finished',
+  stage?: ModelInitializationStage,
+  modelName?: string
+) => void;
 
 export class OcrManager {
   private activeTier: string | null = null;
@@ -219,7 +225,7 @@ export class OcrManager {
     }
     console.log(`[OcrManager] Instantiating OCR Engine for tier: ${canonicalTier}...`);
     const engine = new PaddleOcrEngine(canonicalTier);
-    onInitialization?.('started');
+    onInitialization?.('started', 'ocr', canonicalTier);
     try {
       await engine.init();
     } catch (error) {
@@ -227,7 +233,7 @@ export class OcrManager {
       await engine.destroy().catch(destroyError => console.error('[OcrManager] Failed to destroy partial engine', destroyError));
       throw error;
     } finally {
-      onInitialization?.('finished');
+      onInitialization?.('finished', 'ocr', canonicalTier);
     }
     this.activeTier = canonicalTier;
     this.activeEngine = engine;

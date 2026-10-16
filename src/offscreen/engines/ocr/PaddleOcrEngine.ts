@@ -435,42 +435,64 @@ export class PaddleOcrEngine implements IOcrEngine {
     const ctx = recognitor.buildContext();
     const dictionary = this.service.options.recognition?.charactersDictionary;
 
-    if (this.isWebGpuActive) {
-      const results: { text: string; confidence: number }[] = [];
+    // Track and dispose intermediate recognition output tensors
+    const originalRunInference = ctx.runInference?.bind(recognitor);
+    let activeOutputTensor: any = null;
+    if (originalRunInference) {
+      ctx.runInference = async (inputTensor: any) => {
+        if (activeOutputTensor?.dispose) {
+          try { activeOutputTensor.dispose(); } catch {}
+          activeOutputTensor = null;
+        }
+        const out = await originalRunInference(inputTensor);
+        activeOutputTensor = out;
+        return out;
+      };
+    }
 
-      for (let idx = 0; idx < polygons.length; idx++) {
+    try {
+      if (this.isWebGpuActive) {
+        const results: { text: string; confidence: number }[] = [];
+
+        for (let idx = 0; idx < polygons.length; idx++) {
+          try {
+            const finalCropCanvas = cropAndWarp(this.service.platform, sourceCanvas, sourcePixels, srcW, srcH, polygons[idx]);
+            const { text, confidence } = await recognitor.recognizeTextViaContext(finalCropCanvas, ctx, dictionary);
+            results.push({ text, confidence });
+          } catch (err: any) {
+            console.error(`[PaddleOcrEngine] WebGPU recognition failed on crop ${idx}:`, err?.message || err, err);
+            throw err;
+          }
+        }
+
+        return {
+          texts: results.map(result => result.text),
+          scores: results.map(result => result.confidence)
+        };
+      }
+
+      const promises = polygons.map(async (poly, idx) => {
         try {
-          const finalCropCanvas = cropAndWarp(this.service.platform, sourceCanvas, sourcePixels, srcW, srcH, polygons[idx]);
-          const { text, confidence } = await recognitor.recognizeTextViaContext(finalCropCanvas, ctx, dictionary);
-          results.push({ text, confidence });
+          const finalCropCanvas = cropAndWarp(this.service.platform, sourceCanvas, sourcePixels, srcW, srcH, poly);
+          return await recognitor.recognizeTextViaContext(finalCropCanvas, ctx, dictionary);
         } catch (err: any) {
-          console.error(`[PaddleOcrEngine] WebGPU recognition failed on crop ${idx}:`, err?.message || err, err);
+          console.error(`[PaddleOcrEngine] WASM recognition failed on crop ${idx}:`, err?.message || err, err);
           throw err;
         }
-      }
+      });
+
+      const results = await Promise.all(promises);
 
       return {
         texts: results.map(result => result.text),
         scores: results.map(result => result.confidence)
       };
-    }
-
-    const promises = polygons.map(async (poly, idx) => {
-      try {
-        const finalCropCanvas = cropAndWarp(this.service.platform, sourceCanvas, sourcePixels, srcW, srcH, poly);
-        return await recognitor.recognizeTextViaContext(finalCropCanvas, ctx, dictionary);
-      } catch (err: any) {
-        console.error(`[PaddleOcrEngine] WASM recognition failed on crop ${idx}:`, err?.message || err, err);
-        throw err;
+    } finally {
+      if (activeOutputTensor?.dispose) {
+        try { activeOutputTensor.dispose(); } catch {}
+        activeOutputTensor = null;
       }
-    });
-
-    const results = await Promise.all(promises);
-
-    return {
-      texts: results.map(result => result.text),
-      scores: results.map(result => result.confidence)
-    };
+    }
   }
 
   /**

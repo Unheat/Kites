@@ -1,6 +1,7 @@
 import type { BubbleDetectionMode, PopupState } from '../../shared/types';
 import type { BoxRect } from '../utils/bubbleExpansion';
 import type { IBubbleEngine, BubbleDetectionResult } from '../engines/bubble/BaseBubbleEngine';
+import type { InitializationLifecycleCallback } from './OcrManager';
 import { HeuristicBubbleEngine } from '../engines/bubble/HeuristicBubbleEngine';
 import { NeuralBubbleEngine } from '../engines/bubble/NeuralBubbleEngine';
 
@@ -58,7 +59,8 @@ export class BubbleManager {
    */
   async acquireEngine(
     mode: BubbleDetectionMode,
-    popupState?: PopupState
+    popupState?: PopupState,
+    onInitialization?: InitializationLifecycleCallback
   ): Promise<{ engine: IBubbleEngine | null; release: () => void }> {
     return this.serializeLifecycle(async () => {
       const isBothNeural =
@@ -76,7 +78,17 @@ export class BubbleManager {
         if (!this.activeEngine) {
           const newEngine = this.createEngine(mode);
           if (newEngine) {
-            await newEngine.init(popupState);
+            const isNeural = mode === 'neural' || mode === 'neural-mask';
+            if (isNeural) {
+              onInitialization?.('started', 'bubble', mode);
+            }
+            try {
+              await newEngine.init(popupState);
+            } finally {
+              if (isNeural) {
+                onInitialization?.('finished', 'bubble', mode);
+              }
+            }
             this.activeEngine = newEngine;
           }
         }
@@ -103,16 +115,18 @@ export class BubbleManager {
    * @param textBoxes - Original OCR text boxes.
    * @param mode - Selected bubble detection mode.
    * @param popupState - Settings state.
+   * @param onInitialization - Optional callback for model load lifecycle reporting.
    * @returns Detection result with bubble boxes, or null.
    */
   async detect(
     canvas: OffscreenCanvas | HTMLCanvasElement,
     textBoxes: BoxRect[],
     mode: BubbleDetectionMode,
-    popupState?: PopupState
+    popupState?: PopupState,
+    onInitialization?: InitializationLifecycleCallback
   ): Promise<BubbleDetectionResult | null> {
     if (mode === 'off') return null;
-    const { engine, release } = await this.acquireEngine(mode, popupState);
+    const { engine, release } = await this.acquireEngine(mode, popupState, onInitialization);
     if (!engine) {
       release();
       return null;

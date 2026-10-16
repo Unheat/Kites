@@ -361,6 +361,58 @@ export class NeuralBubbleDetector {
    * @param popupState - Extension settings state to read GPU acceleration overrides.
    * @returns Detailed detection result with bubble boxes and optional decoded prototype masks, or null if model unavailable.
    */
+  /**
+   * Bootstraps and caches the ONNX Runtime session for the YOLO bubble detector if cached weights exist.
+   *
+   * @param popupState - Extension settings state to read GPU acceleration overrides.
+   * @returns True if session is ready for inference, false if model is uninstalled/uncached.
+   */
+  static async ensureSession(popupState?: PopupState): Promise<boolean> {
+    const entry = bubbleRegistry['bubble-yolo'];
+    if (!entry) return false;
+
+    const isCached = await BubbleCacheManager.isModelCached(entry.onnxUrl);
+    if (!isCached) return false;
+
+    const wantGpu = popupState ? isBubbleGpuAvailable(popupState) : false;
+    const requestedProvider = wantGpu ? 'webgpu' : 'wasm';
+
+    if (!this.session || this.activeProvider !== requestedProvider) {
+      if (this.session) {
+        await this.dispose();
+      }
+      console.log(`[NeuralBubbleDetector] Loading model session (provider: ${requestedProvider})...`);
+      const modelBuffer = await BubbleCacheManager.getModelBuffer(entry.onnxUrl);
+
+      const ort = await import('onnxruntime-web');
+      if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.getURL) {
+        ort.env.wasm.wasmPaths = chrome.runtime.getURL('/ort-wasm/');
+      }
+
+      const providers = wantGpu
+        ? [{ name: 'webgpu', deviceType: 'gpu', powerPreference: 'high-performance' as const }, 'wasm']
+        : ['wasm'];
+
+      try {
+        this.session = await ort.InferenceSession.create(modelBuffer, {
+          executionProviders: providers as any,
+        });
+        this.activeProvider = wantGpu ? 'webgpu' : 'wasm';
+      } catch (gpuError) {
+        if (wantGpu) {
+          console.warn('[NeuralBubbleDetector] WebGPU session creation failed; falling back to WASM:', gpuError);
+          this.session = await ort.InferenceSession.create(modelBuffer, {
+            executionProviders: ['wasm'],
+          });
+          this.activeProvider = 'wasm';
+        } else {
+          throw gpuError;
+        }
+      }
+    }
+    return true;
+  }
+
   static async detectFull(
     canvas: OffscreenCanvas | HTMLCanvasElement,
     popupState?: PopupState
@@ -368,49 +420,11 @@ export class NeuralBubbleDetector {
     const entry = bubbleRegistry['bubble-yolo'];
     if (!entry) return null;
 
-    const isCached = await BubbleCacheManager.isModelCached(entry.onnxUrl);
-    if (!isCached) {
-      console.log('[NeuralBubbleDetector] Model not cached on disk. Skipping neural detection.');
-      return null;
-    }
-
-    const wantGpu = popupState ? isBubbleGpuAvailable(popupState) : false;
-    const requestedProvider = wantGpu ? 'webgpu' : 'wasm';
-
     try {
-      // Lazily create or re-create session if provider changed
-      if (!this.session || this.activeProvider !== requestedProvider) {
-        if (this.session) {
-          await this.dispose();
-        }
-        console.log(`[NeuralBubbleDetector] Loading model session (provider: ${requestedProvider})...`);
-        const modelBuffer = await BubbleCacheManager.getModelBuffer(entry.onnxUrl);
-
-        const ort = await import('onnxruntime-web');
-        if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.getURL) {
-          ort.env.wasm.wasmPaths = chrome.runtime.getURL('/ort-wasm/');
-        }
-
-        const providers = wantGpu
-          ? [{ name: 'webgpu', deviceType: 'gpu', powerPreference: 'high-performance' as const }, 'wasm']
-          : ['wasm'];
-
-        try {
-          this.session = await ort.InferenceSession.create(modelBuffer, {
-            executionProviders: providers as any,
-          });
-          this.activeProvider = wantGpu ? 'webgpu' : 'wasm';
-        } catch (gpuError) {
-          if (wantGpu) {
-            console.warn('[NeuralBubbleDetector] WebGPU session creation failed; falling back to WASM:', gpuError);
-            this.session = await ort.InferenceSession.create(modelBuffer, {
-              executionProviders: ['wasm'],
-            });
-            this.activeProvider = 'wasm';
-          } else {
-            throw gpuError;
-          }
-        }
+      const ready = await this.ensureSession(popupState);
+      if (!ready || !this.session) {
+        console.log('[NeuralBubbleDetector] Model not cached on disk. Skipping neural detection.');
+        return null;
       }
 
       const inputSize = entry.inputSize;
@@ -438,26 +452,39 @@ export class NeuralBubbleDetector {
         feeds.orig_target_sizes = new ort.Tensor('int64', new BigInt64Array([BigInt(width), BigInt(height)]), [1, 2]);
       }
 
-      const outputs = await this.session.run(feeds);
-
+      let outputs: any;
       let parsed: NeuralBubbleDetectionResult;
-      if (outputs.output0) {
-        parsed = NeuralBubbleDetector.parseYolo11Output(
-          outputs.output0,
-          width,
-          height,
-          inputSize,
-          0.35,
-          0.45,
-          outputs.output1
-        );
-      } else {
-        parsed = NeuralBubbleDetector.parseDetections(
-          outputs.labels.data as any,
-          outputs.boxes.data as any,
-          outputs.scores.data as any,
-          0.30
-        );
+      try {
+        outputs = await this.session.run(feeds);
+
+        if (outputs.output0) {
+          parsed = NeuralBubbleDetector.parseYolo11Output(
+            outputs.output0,
+            width,
+            height,
+            inputSize,
+            0.35,
+            0.45,
+            outputs.output1
+          );
+        } else {
+          parsed = NeuralBubbleDetector.parseDetections(
+            outputs.labels.data as any,
+            outputs.boxes.data as any,
+            outputs.scores.data as any,
+            0.30
+          );
+        }
+      } finally {
+        tensorImages.dispose();
+        feeds.orig_target_sizes?.dispose();
+        if (outputs) {
+          for (const tensor of Object.values(outputs) as any[]) {
+            if (typeof tensor?.dispose === 'function') {
+              tensor.dispose();
+            }
+          }
+        }
       }
 
       console.log(`[NeuralBubbleDetector] Detected ${parsed.bubbles.length} bubbles.`);

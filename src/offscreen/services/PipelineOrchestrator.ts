@@ -1,5 +1,5 @@
 import { db } from '../../db';
-import type { PopupState } from '../../shared/types';
+import type { PopupState, ModelInitializationStage } from '../../shared/types';
 import { OcrManager, type InitializationLifecycleCallback, type OcrTier } from './OcrManager';
 import { translationManager } from './TranslationManager';
 import { InpaintManager } from './InpaintManager';
@@ -72,29 +72,34 @@ export class PipelineOrchestrator {
    */
   async runPipeline(
     jobId: number,
-    onInitialization?: (jobId: number, phase: 'started' | 'finished') => void,
+    onInitialization?: (
+      jobId: number,
+      phase: 'started' | 'finished',
+      stage?: ModelInitializationStage,
+      modelName?: string
+    ) => void,
   ): Promise<string> {
-    let activeInitializations = 0;
-    let reportedInitializationStart = false;
-    const initializationLifecycle: InitializationLifecycleCallback = (phase) => {
-      if (phase === 'started') {
-        activeInitializations += 1;
-        if (!reportedInitializationStart) {
-          reportedInitializationStart = true;
-          onInitialization?.(jobId, 'started');
+    const activeInits = new Map<string, { stage?: ModelInitializationStage; modelName?: string }>();
+    const makeLifecycle = (defaultStage: ModelInitializationStage, defaultModel?: string): InitializationLifecycleCallback => {
+      return (phase, stage = defaultStage, modelName = defaultModel) => {
+        const key = `${stage}:${modelName || 'default'}`;
+        if (phase === 'started') {
+          activeInits.set(key, { stage, modelName });
+          onInitialization?.(jobId, 'started', stage, modelName);
+        } else {
+          activeInits.delete(key);
+          onInitialization?.(jobId, 'finished', stage, modelName);
         }
-        return;
-      }
-      activeInitializations = Math.max(0, activeInitializations - 1);
+      };
     };
     const finishInitializationLifecycle = (): void => {
-      if (!reportedInitializationStart) return;
-      if (activeInitializations !== 0) {
-        console.error(`[PipelineOrchestrator] Job ${jobId} ended with ${activeInitializations} unfinished initialization callback(s).`);
+      for (const [_, info] of activeInits) {
+        onInitialization?.(jobId, 'finished', info.stage, info.modelName);
       }
-      onInitialization?.(jobId, 'finished');
-      reportedInitializationStart = false;
+      activeInits.clear();
     };
+
+    let sourceBitmap: ImageBitmap | null = null;
 
     try {
       console.log(`[PipelineOrchestrator] Starting pipeline for Job ID: ${jobId}`);
@@ -125,14 +130,14 @@ export class PipelineOrchestrator {
       console.log(`[PipelineOrchestrator] Loaded image blob. Size: ${imageRecord.rawImageBlob.size} bytes`);
       const imageBuffer = await this.blobToArrayBuffer(imageRecord.rawImageBlob);
 
-      // Decode page dimensions once for the OCR pre-filter battery (geometry rules).
+      // Decode page dimensions once for the OCR pre-filter battery (geometry rules)
+      // and reuse the prepared decoded bitmap across pipeline stages (e.g. bubble carrier extraction).
       let pageWidth: number | undefined;
       let pageHeight: number | undefined;
       try {
-        const probe = await createImageBitmap(imageRecord.rawImageBlob);
-        pageWidth = probe.width;
-        pageHeight = probe.height;
-        probe.close();
+        sourceBitmap = await createImageBitmap(imageRecord.rawImageBlob);
+        pageWidth = sourceBitmap.width;
+        pageHeight = sourceBitmap.height;
       } catch {
         // Geometry battery simply stays inactive when dimensions are unavailable.
       }
@@ -144,7 +149,7 @@ export class PipelineOrchestrator {
         sourceLang: sourceLang !== 'auto' ? sourceLang : undefined,
         pageWidth,
         pageHeight
-      }, initializationLifecycle);
+      }, makeLifecycle('ocr', ocrTier));
       if (import.meta.env.DEV) {
         const ocrDuration = (performance.now() - ocrStart).toFixed(2);
         console.log(`[PipelineOrchestrator] OCR stage complete in ${ocrDuration}ms.`);
@@ -179,30 +184,36 @@ export class PipelineOrchestrator {
       const supportsBubbleLayout = (LANGUAGE_ORIENTATION_PRESETS[targetLang.toLowerCase().trim()] ?? 'h') === 'h';
       if (bubbleMode !== 'off' && supportsBubbleLayout && ocrResult.boxes && ocrResult.boxes.length > 0 && !ocrResult.typesetBoxes) {
         try {
-          const rawBitmap = await createImageBitmap(imageRecord.rawImageBlob);
-          const rawCanvas = new OffscreenCanvas(rawBitmap.width, rawBitmap.height);
-          const rawCtx = rawCanvas.getContext('2d', { willReadFrequently: true });
-          if (rawCtx) {
-            rawCtx.drawImage(rawBitmap, 0, 0);
-            // Acquire engine through BubbleManager (OOP lifecycle & clean eviction)
-            const { engine, release } = await bubbleManager.acquireEngine(bubbleMode, popupState);
-            try {
-              const isNeuralMode = bubbleMode === 'neural' || bubbleMode === 'neural-mask';
-              const neuralResult = isNeuralMode && engine
-                ? await engine.detect(rawCanvas, ocrResult.boxes, popupState)
-                : undefined;
-              bubbleGeometry = acquireBubbleGeometry(
-                rawCtx.getImageData(0, 0, rawBitmap.width, rawBitmap.height),
-                ocrResult.boxes,
-                neuralResult?.bubbles,
-                neuralResult?.shapes
-              );
-            } finally {
-              release();
+          const rawWidth = sourceBitmap?.width ?? (pageWidth || 0);
+          const rawHeight = sourceBitmap?.height ?? (pageHeight || 0);
+          if (rawWidth > 0 && rawHeight > 0) {
+            const rawCanvas = new OffscreenCanvas(rawWidth, rawHeight);
+            const rawCtx = rawCanvas.getContext('2d', { willReadFrequently: true });
+            if (rawCtx) {
+              if (sourceBitmap) {
+                rawCtx.drawImage(sourceBitmap, 0, 0);
+              } else {
+                const tempBitmap = await createImageBitmap(imageRecord.rawImageBlob);
+                rawCtx.drawImage(tempBitmap, 0, 0);
+                tempBitmap.close();
+              }
+              // Acquire engine through BubbleManager (OOP lifecycle & clean eviction)
+              const { engine, release } = await bubbleManager.acquireEngine(bubbleMode, popupState, makeLifecycle('bubble', bubbleMode));
+              try {
+                const isNeuralMode = bubbleMode === 'neural' || bubbleMode === 'neural-mask';
+                const neuralResult = isNeuralMode && engine
+                  ? await engine.detect(rawCanvas, ocrResult.boxes, popupState)
+                  : undefined;
+                bubbleGeometry = acquireBubbleGeometry(
+                  rawCtx.getImageData(0, 0, rawWidth, rawHeight),
+                  ocrResult.boxes,
+                  neuralResult?.bubbles,
+                  neuralResult?.shapes
+                );
+              } finally {
+                release();
+              }
             }
-          }
-          if (typeof rawBitmap.close === 'function') {
-            rawBitmap.close();
           }
         } catch (err) {
           console.warn('[PipelineOrchestrator] Bubble carrier extraction failed, falling back to default text boxes:', err);
@@ -220,8 +231,9 @@ export class PipelineOrchestrator {
       if (shouldInpaint) {
         console.log(`[PipelineOrchestrator] Running translation and inpainting in parallel (tier: ${inpaintTier}).`);
         
+        const activeTranslationEngineId = popupState?.activeEngineId || 'cloudflare-translate';
         const translationPromise = translationManager
-          .processTranslation(ocrResult.texts, sourceLang, targetLang, initializationLifecycle, popupState)
+          .processTranslation(ocrResult.texts, sourceLang, targetLang, makeLifecycle('translation', activeTranslationEngineId), popupState)
           .then((r) => {
             if (import.meta.env.DEV) {
               console.log(`[PipelineOrchestrator] Translation branch finished in ${(performance.now() - stage2Start).toFixed(2)}ms.`);
@@ -232,7 +244,7 @@ export class PipelineOrchestrator {
             console.warn(`[PipelineOrchestrator] Translation branch failed; preserving original source texts so pipeline does not stop:`, err);
             return ocrResult.texts;
           });
-        const inpaintPromise = this.inpaintManager.eraseText(imageBuffer, inpaintPolygons, inpaintTier as InpaintTier, ocrResult.maskRawCanvas, initializationLifecycle).then((r) => {
+        const inpaintPromise = this.inpaintManager.eraseText(imageBuffer, inpaintPolygons, inpaintTier as InpaintTier, ocrResult.maskRawCanvas, makeLifecycle('inpaint', inpaintTier)).then((r) => {
           if (import.meta.env.DEV) {
             console.log(`[PipelineOrchestrator] Inpaint branch (${inpaintTier}) finished in ${(performance.now() - stage2Start).toFixed(2)}ms.`);
           }
@@ -250,8 +262,9 @@ export class PipelineOrchestrator {
       } else {
         // No inpainting — just translate
         console.log(`[PipelineOrchestrator] Translating ${ocrResult.texts.length} text blocks (no inpainting)...`);
+        const activeTranslationEngineId = popupState?.activeEngineId || 'cloudflare-translate';
         try {
-          translatedTexts = await translationManager.processTranslation(ocrResult.texts, sourceLang, targetLang, initializationLifecycle, popupState);
+          translatedTexts = await translationManager.processTranslation(ocrResult.texts, sourceLang, targetLang, makeLifecycle('translation', activeTranslationEngineId), popupState);
         } catch (err) {
           console.warn(`[PipelineOrchestrator] Translation failed; preserving original source texts so pipeline does not stop:`, err);
           translatedTexts = ocrResult.texts;
@@ -469,6 +482,9 @@ export class PipelineOrchestrator {
       }
       throw error; // Rethrow to let the caller know
     } finally {
+      if (sourceBitmap && typeof sourceBitmap.close === 'function') {
+        sourceBitmap.close();
+      }
       finishInitializationLifecycle();
     }
   }
