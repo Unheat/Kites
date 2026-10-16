@@ -93,6 +93,7 @@ export function extractTypographyStyle(obj: TextObject): Partial<TextObject> {
     backgroundPadding: obj.backgroundPadding,
     backgroundBorderRadius: obj.backgroundBorderRadius,
     opacity: obj.opacity,
+    typesetMode: obj.typesetMode,
   };
 }
 

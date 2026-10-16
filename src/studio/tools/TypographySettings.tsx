@@ -16,6 +16,7 @@ import {
   Image as ImageIcon,
   Plus,
   ClipboardPaste,
+  Sparkles,
 } from 'lucide-react';
 import { studioStore, useStudioStore, extractTypographyStyle } from '../state/studioStore';
 import { studioUndoStack } from '../state/undoStack';
@@ -89,7 +90,8 @@ export const TypographySettings: React.FC = () => {
       updated.fontFamily,
       updated.width,
       updated.height,
-      updated.fontSize
+      updated.fontSize,
+      updated.typesetMode
     );
     updated.lines = typeset.lines;
 
@@ -232,7 +234,8 @@ export const TypographySettings: React.FC = () => {
       obj.fontFamily || 'sans-serif',
       obj.width || 140,
       obj.height || 50,
-      obj.fontSize || 16
+      obj.fontSize || 16,
+      obj.typesetMode
     );
     const next = textObjects.map((t) =>
       t.id === obj.id
@@ -620,6 +623,61 @@ export const TypographySettings: React.FC = () => {
       {/* ======================================================== */}
       {/* 3. TYPOGRAPHY CONTROLS (Font, Size, Align, Color)        */}
       {/* ======================================================== */}
+
+      {/* Typesetting Mode Toggle */}
+      <div>
+        <label className="block text-slate-400 font-medium mb-1">Typesetting Engine</label>
+        <div className="flex p-0.5 rounded-lg bg-[#090a0f] border border-[#282d3f] text-xs">
+          <button
+            type="button"
+            onClick={() => {
+              const newMode = 'balloon';
+              const typeset = recalculateBlockTypeset(
+                obj.text || '',
+                obj.fontFamily || 'sans-serif',
+                obj.width || 140,
+                obj.height || 50,
+                obj.fontSize || 16,
+                newMode
+              );
+              updateSelected({ typesetMode: newMode, fontSize: typeset.fontSize, lines: typeset.lines });
+            }}
+            className={`flex-1 py-1.5 px-2 rounded-md font-semibold transition-all flex items-center justify-center gap-1.5 cursor-pointer text-[11px] ${
+              (obj.typesetMode || 'balloon') === 'balloon'
+                ? 'bg-[#1c1f2e] text-[#f4446d] shadow-xs'
+                : 'text-slate-400 hover:text-white'
+            }`}
+            title="Auto Balloon: Balances lines into speech bubble diamond envelopes and auto-fits font size (Pipeline typesystem)"
+          >
+            <Sparkles size={12} className={(obj.typesetMode || 'balloon') === 'balloon' ? 'text-[#f4446d]' : ''} />
+            <span>Auto Balloon</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              const newMode = 'simple';
+              const typeset = recalculateBlockTypeset(
+                obj.text || '',
+                obj.fontFamily || 'sans-serif',
+                obj.width || 140,
+                obj.height || 50,
+                obj.fontSize || 16,
+                newMode
+              );
+              updateSelected({ typesetMode: newMode, lines: typeset.lines });
+            }}
+            className={`flex-1 py-1.5 px-2 rounded-md font-semibold transition-all flex items-center justify-center gap-1.5 cursor-pointer text-[11px] ${
+              obj.typesetMode === 'simple'
+                ? 'bg-[#1c1f2e] text-[#f4446d] shadow-xs'
+                : 'text-slate-400 hover:text-white'
+            }`}
+            title="Simple Wrap: Greedy line wrapping without auto font scaling (Torii simple mode)"
+          >
+            <AlignLeft size={12} className={obj.typesetMode === 'simple' ? 'text-[#f4446d]' : ''} />
+            <span>Simple Wrap</span>
+          </button>
+        </div>
+      </div>
 
       {/* Font Family */}
       <div>

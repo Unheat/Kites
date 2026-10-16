@@ -109,6 +109,7 @@ export interface TextObject {
   isLocked?: boolean;
   isVisible?: boolean;
   isSkipped?: boolean;
+  typesetMode?: 'balloon' | 'simple';
 }
 
 export interface ImageLayer {
@@ -125,6 +126,7 @@ export interface ImageLayer {
   flipV: boolean;
   isLocked?: boolean;
   isVisible?: boolean;
+  typesetMode?: 'balloon' | 'simple';
 }
 
 export interface BoundedDirtyRectPatch {

@@ -340,7 +340,8 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       updated.fontFamily,
       updated.width,
       updated.height,
-      updated.fontSize
+      updated.fontSize,
+      updated.typesetMode
     );
     updated.lines = typeset.lines;
 
@@ -686,7 +687,8 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
         updated.fontFamily,
         updated.width,
         updated.height,
-        newFontSize
+        newFontSize,
+        initialTransform.typesetMode
       );
       updated.lines = typeset.lines;
     } else if (handle === 'wrap') {
@@ -700,7 +702,8 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
         updated.fontFamily,
         newBounds.width,
         newBounds.height,
-        initialTransform.fontSize
+        initialTransform.fontSize,
+        initialTransform.typesetMode
       );
       updated.lines = typeset.lines;
     } else {
@@ -716,7 +719,8 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
           updated.fontFamily,
           newBounds.width,
           newBounds.height,
-          initialTransform.fontSize
+          initialTransform.fontSize,
+          initialTransform.typesetMode
         );
         updated.fontSize = typeset.fontSize;
         updated.lines = typeset.lines;

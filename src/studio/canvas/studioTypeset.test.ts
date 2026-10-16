@@ -32,4 +32,16 @@ describe('Studio Algorithmic Typeset & Line Reflow', () => {
     expect(res.fontSize).toBe(14);
     expect(res.lines).toEqual(['Hello']);
   });
+
+  it('reflows dialogue containing soft newlines when stretched wide', () => {
+    const textWithNewlines = 'How\nabout\nplaying\nBabu\nBabu\ngame?';
+    // Tall and narrow (80 x 300)
+    const tall = recalculateBlockTypeset(textWithNewlines, 'WildWords', 80, 300, 16);
+    expect(tall.lines.length).toBeGreaterThanOrEqual(4);
+
+    // Stretched wide (450 x 100) -> should reflow into fewer lines (1 or 2 lines)
+    const wide = recalculateBlockTypeset(textWithNewlines, 'WildWords', 450, 100, 16);
+    expect(wide.lines.length).toBeLessThan(tall.lines.length);
+    expect(wide.lines.length).toBeLessThanOrEqual(2);
+  });
 });
