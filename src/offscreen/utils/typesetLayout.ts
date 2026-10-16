@@ -190,8 +190,8 @@ export function wrapText(
       return { head: [], tail: current };
     }
 
-    const minStemLen = maxWidth < 60 ? 4 : 7;
-    if (stem.length < minStemLen) {
+    // Strict typography rule (Cotrans/XianScan): Never hyphenate words shorter than 7 letters
+    if (stem.length < 7) {
       return { head: [], tail: word };
     }
 
@@ -200,7 +200,7 @@ export function wrapText(
       const curStem = curPunctMatch && curPunctMatch[1] ? curPunctMatch[1] : current;
       const curPunct = curPunctMatch && curPunctMatch[2] ? curPunctMatch[2] : '';
 
-      if (curStem.length < minStemLen) {
+      if (curStem.length < 7) {
         break;
       }
 
@@ -223,13 +223,12 @@ export function wrapText(
         continue;
       }
 
-      // Character fallback only for words >= minStemLen
-      const minPrefix = minStemLen >= 7 ? 3 : 2;
+      // Character fallback only for long words (>= 7 letters, min 3 prefix / 3 suffix)
       let k = curStem.length - 2;
-      while (k >= minPrefix && ctx.measureText(curStem.slice(0, k) + '-').width > maxWidth) {
+      while (k >= 3 && ctx.measureText(curStem.slice(0, k) + '-').width > maxWidth) {
         k--;
       }
-      if (k < minPrefix || curStem.length - k < minPrefix) {
+      if (k < 3 || curStem.length - k < 3) {
         break;
       }
       const prefix = curStem.slice(0, k);
