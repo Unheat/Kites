@@ -90,6 +90,13 @@ describe('typesetLayout', () => {
         expect(NO_LINE_START_RE.test(line[0])).toBe(false);
       }
     });
+
+    it('handles standalone exclamation marks and shout punctuation', () => {
+      const lines = balancedWrapText(mockCtx, '!', 80);
+      expect(lines).toEqual(['!']);
+      const cjkLines = balancedWrapText(mockCtx, '！？', 80);
+      expect(cjkLines).toEqual(['！？']);
+    });
   });
 
   describe('isHardLineBreak', () => {
@@ -147,6 +154,20 @@ describe('typesetLayout', () => {
       // Floor ensures it does not choke down to 6px
       expect(result.size).toBeGreaterThanOrEqual(8);
       expect(result.lines.length).toBeGreaterThan(0);
+    });
+
+    it('scales up standalone exclamation mark to fill bubble', () => {
+      const result = fitFontSizeWithLines(
+        mockCtx,
+        '!',
+        'sans-serif',
+        100,
+        100,
+        24,
+        48
+      );
+      expect(result.lines).toEqual(['!']);
+      expect(result.size).toBeGreaterThanOrEqual(24);
     });
 
     it('reduces redundant measureText calls via MeasureCache', () => {
