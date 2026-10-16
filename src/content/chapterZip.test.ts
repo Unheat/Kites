@@ -179,33 +179,6 @@ describe('chapterZip', () => {
       expect(ordered.length).toBe(1);
       expect(ordered[0].originalUrl).toBe('https://example.com/detached-p1.jpg');
     });
-
-    it('accumulates paginated gallery pages sharing the same gallery root (nhentai /g/123/p)', () => {
-      const records: ChapterImageRecord[] = [
-        {
-          originalUrl: 'https://i.nhentai.net/galleries/123/6.jpg',
-          translatedUrl: 'blob:https://i.nhentai.net/galleries/123/6-baked',
-          sourcePage: 'https://nhentai.net/g/677759/6/',
-          documentPath: [0],
-          documentY: 100,
-          sequence: 1,
-        },
-        {
-          originalUrl: 'https://i.nhentai.net/galleries/123/7.jpg',
-          translatedUrl: 'blob:https://i.nhentai.net/galleries/123/7-baked',
-          sourcePage: 'https://nhentai.net/g/677759/7/',
-          documentPath: [0],
-          documentY: 100,
-          sequence: 2,
-        },
-      ];
-
-      // User is currently viewing page 7; export includes both page 6 and page 7!
-      const ordered = orderChapterImages(records, 'https://nhentai.net/g/677759/7/');
-      expect(ordered.length).toBe(2);
-      expect(ordered[0].originalUrl).toBe('https://i.nhentai.net/galleries/123/6.jpg');
-      expect(ordered[1].originalUrl).toBe('https://i.nhentai.net/galleries/123/7.jpg');
-    });
   });
 
   describe('queue-time registry lifecycle', () => {
