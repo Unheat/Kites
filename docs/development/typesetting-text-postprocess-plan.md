@@ -160,9 +160,10 @@ To prevent conflicts with parallel active branches (notably `feat/reader-studio-
 2. **Numeric Strings**:
    - In `breakLongWord`, pure numbers (e.g. `10000000`) fall back to character breaking with inserted hyphens (`1000-0000`).
    - *Fix*: Do not hyphenate numeric strings (`/^\d+$/`). If a number overflows a bubble, scale font size down rather than inserting false hyphens.
-3. **Narrow Vertical Bubble Short-Word Fallback**:
-   - When manga dialogue in a single vertical column (20–40px wide) is translated into Western text without bubble expansion, 5-6 letter words (`STRIKE`, `PLEASE`, `LITTLE`) fail the $\ge 7$ character hyphenation threshold. Font fitting collapses to the 6px minimum floor.
-   - *Fix*: When `availableWidth < 60` and `aspectRatio >= 1.8`, relax the word-breaking threshold to $\ge 4$ characters, enabling clean hyphenated breaks for short words instead of micro-text collapse.
+3. **Locked 7-Letter Stem Protection Invariant**:
+   - In accordance with standard English typography and reference engines (Cotrans/XianScan), words shorter than 7 letters must **never** be broken or hyphenated (`stem.length < 7` returns `{ head: [], tail: word }`).
+   - Relaxing this rule to $\ge 4$ characters was evaluated and rejected: lowering the stem threshold causes short words (`know`, `never`, `force`) to be diced into 2-letter fragments (`kn-ow!`, `ne-ver`, `fo-rce`), fooling the binary search into picking overly large font sizes and creating barcode-like line splits.
+   - Keeping the strict 7-letter invariant forces the binary search to select a proper readable font size that keeps words whole on their own lines.
 
 ### 3.6 Notch Depth & Elliptical Balance Scoring
 * **Enhancement**: Replace purely rectangular line-count balancing with organic comic balloon profiling.
