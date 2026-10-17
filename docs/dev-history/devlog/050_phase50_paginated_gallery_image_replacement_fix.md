@@ -36,15 +36,15 @@ On paginated single-page readers such as nhentai (`https://nhentai.net/g/677759/
 
 ### 3. Architecture & Solutions
 
-#### 3.1 Canonical Scope Guard in Message Dispatch
-Updated line 2047 in `src/content/index.tsx` to compare through `getChapterScopeId`:
-```ts
-if (getChapterScopeId(record.sourcePage) !== getChapterScopeId(window.location.href) || !target) {
-  console.warn(`[Content Script] Target media element detached or chapter changed; translation archived when context is known: ${originalUrl}`);
-  return;
-}
-```
-Now, both `record.sourcePage` and `window.location.href` resolve to `https://nhentai.net/g/677759/` for all pages in the gallery, executing `replaceImageWithTranslation` immediately upon translation completion.
+#### 3.1 Strict Source-Page URL Isolation Preserved (`window.location.href`)
+`getChapterScopeId` was deliberately rejected and discarded to avoid over-including subpages or merging distinct chapters that use numeric URL suffixes (e.g. `/manga/ch1/` and `/ch2/`). Strict `window.location.href` scoping is preserved across:
+- `translatedRegistry` (`getSourcePage: () => window.location.href`)
+- `chapterExporter` (`getSourcePage: () => window.location.href`)
+- `handleMessage` guard (`if (record.sourcePage !== window.location.href || !target)`)
+- `BatchScanPanel` export (`sourcePage: item.source === 'page' ? (tab.url || '') : 'history'`)
+- `orderChapterImages` (`if (record.sourcePage !== sourcePage || !record.translatedUrl)`)
+
+Because `record.sourcePage` and `window.location.href` are both the exact page URL (`https://nhentai.net/g/677759/1/`), they match on the current page, executing `replaceImageWithTranslation` immediately upon translation completion.
 
 #### 3.2 Auto-Healing & Instant Memory Restoration in `TranslateButton`
 Added active auto-healing to `TranslateButton`: when an image is known to be translated in the current session (`translatedRegistry.get(srcUrl)`) and the user has not chosen to view the original (`!showOriginal`), `TranslateButton` verifies whether the DOM element actually displays the translation. If recycled by the host site without Kites attributes, it immediately invokes `replaceImageWithTranslation(target, reg)` to eliminate any potential desync between the action buttons and the displayed image.

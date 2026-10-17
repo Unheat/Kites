@@ -1,5 +1,4 @@
 import JSZip from 'jszip';
-import { getChapterScopeId } from '../shared/siteRules';
 
 // JSZip holds inputs and output in memory. This bounds archive bytes, not peak heap usage.
 export const CHAPTER_ZIP_BYTE_LIMIT = 256 * 1024 * 1024;
@@ -297,10 +296,8 @@ function comparePaths(a: number[] | null, b: number[] | null): number {
  */
 export function orderChapterImages(records: Iterable<ChapterImageRecord>, sourcePage: string): ChapterImageRecord[] {
   const unique = new Map<string, ChapterImageRecord>();
-  const targetScope = getChapterScopeId(sourcePage);
   for (const record of records) {
-    const isMatchingScope = record.sourcePage === sourcePage || (Boolean(targetScope) && getChapterScopeId(record.sourcePage) === targetScope);
-    if (!isMatchingScope || !record.translatedUrl) continue;
+    if (record.sourcePage !== sourcePage || !record.translatedUrl) continue;
     // A recycled element belongs to its new page. Never refresh the archived page from that slot.
     const live = record.surfaceElement?.isConnected &&
       record.sourceElement?.getAttribute('data-kites-applied-src') === record.translatedUrl;

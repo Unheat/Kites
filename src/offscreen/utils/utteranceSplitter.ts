@@ -12,6 +12,25 @@ export interface InputLine {
   text: string;
 }
 
+/** Minimum horizontal step in pixels between adjacent columns to be considered distinct columns. */
+export const VERTICAL_COLUMN_MIN_HORIZ_STEP = 15;
+
+/** Maximum horizontal step in pixels within the same vertical column. */
+export const SAME_COLUMN_MAX_HORIZ_STEP = 18;
+
+/** Minimum vertical center translation in font size multiples for non-punctuated box splits. */
+export const BOX_TRANSLATION_CENTER_SHIFT_RATIO = 1.5;
+/** Minimum absolute vertical center translation in pixels for non-punctuated box splits. */
+export const BOX_TRANSLATION_MIN_CENTER_SHIFT = 30.0;
+
+/** Minimum top stagger in font size multiples for non-punctuated box splits. */
+export const BOX_TRANSLATION_TOP_STAGGER_RATIO = 1.5;
+/** Minimum absolute top stagger in pixels for non-punctuated box splits. */
+export const BOX_TRANSLATION_MIN_TOP_STAGGER = 35.0;
+
+/** Maximum allowable opposing bottom shrink in font size multiples (guards against convex oval bubble shrinkage). */
+export const BOX_TRANSLATION_OPPOSING_SHRINK_TOLERANCE_RATIO = 0.5;
+
 export function polygonThickness(poly: { x: number; y: number }[]): number {
   if (poly.length >= 4) {
     const dx01 = poly[1].x - poly[0].x;
@@ -182,18 +201,45 @@ export function clusterLinesIntoUtterances(
           const botStagger = (b.y + b.h) - (prevBounds.y + prevBounds.h);
           const vertGap = b.y - (prevBounds.y + prevBounds.h);
 
+          const prevCenterY = prevBounds.y + prevBounds.h / 2;
+          const currCenterY = b.y + b.h / 2;
+          const centerShiftY = currCenterY - prevCenterY;
+
           // 1. Same-column vertical split (one utterance above another in same column)
           const isSameColumnSplit =
-            horizStep < 18 &&
+            horizStep < SAME_COLUMN_MAX_HORIZ_STEP &&
             (vertGap >= Math.max(22.0, medianTh * 1.35) ||
               (endsWithTerm && vertGap >= Math.max(6.0, medianTh * 0.45)));
 
-          // 2. Staggered multi-lobe split (adjacent parallel columns shifted vertically,
-          // where column 1 ends with terminal punctuation like ！, ?, …)
-          const isStaggeredLobeSplit =
-            horizStep >= 15 &&
+          // 2a. Staggered multi-lobe split with terminal punctuation (XianScan base rule:
+          // adjacent parallel columns shifted vertically, where previous line ends with terminal punctuation)
+          const isPunctuationLobeSplit =
+            horizStep >= VERTICAL_COLUMN_MIN_HORIZ_STEP &&
             endsWithTerm &&
             (topStagger >= 15 || botStagger >= 25);
+
+          // 2b. Staggered box/lobe translation WITHOUT terminal punctuation (concordant translation:
+          // handles multi-box continuous sentences where top and bottom translate in the same direction,
+          // with large vertical centroid shift, distinguishing separate boxes from symmetric oval shrinkage).
+          const minCenterShift = Math.max(BOX_TRANSLATION_MIN_CENTER_SHIFT, medianTh * BOX_TRANSLATION_CENTER_SHIFT_RATIO);
+          const minTopStagger = Math.max(BOX_TRANSLATION_MIN_TOP_STAGGER, medianTh * BOX_TRANSLATION_TOP_STAGGER_RATIO);
+          const maxOpposingShrink = medianTh * BOX_TRANSLATION_OPPOSING_SHRINK_TOLERANCE_RATIO;
+
+          const isDownwardBoxTranslation =
+            topStagger >= minTopStagger &&
+            botStagger >= -maxOpposingShrink &&
+            centerShiftY >= minCenterShift;
+
+          const isUpwardBoxTranslation =
+            topStagger <= -minTopStagger &&
+            botStagger <= maxOpposingShrink &&
+            centerShiftY <= -minCenterShift;
+
+          const isExtremeBoxTranslation =
+            horizStep >= VERTICAL_COLUMN_MIN_HORIZ_STEP &&
+            (isDownwardBoxTranslation || isUpwardBoxTranslation);
+
+          const isStaggeredLobeSplit = isPunctuationLobeSplit || isExtremeBoxTranslation;
 
           if ((isSameColumnSplit || isStaggeredLobeSplit) && subCluster.length > 0) {
             finalVertUtterances.push(subCluster);
