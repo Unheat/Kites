@@ -16,6 +16,7 @@ import {
 import type { ScannedPageImage } from '../../content/scanner';
 import type { ChapterReaderPage } from '../../content/ChapterReaderModal';
 import { db, type ImageRecord } from '../../db';
+import { getChapterScopeId } from '../../shared/siteRules';
 
 export interface UnifiedGalleryItem {
   id: string; // `page:${url}` or `history:${jobId}`
@@ -426,7 +427,7 @@ export default function BatchScanPanel() {
       const recordsToExport = readyItems.map((item, idx) => ({
         originalUrl: item.url,
         translatedUrl: item.translatedUrl!,
-        sourcePage: item.source === 'page' ? (tab.url || '') : 'history',
+        sourcePage: item.source === 'page' ? getChapterScopeId(tab.url || '') : 'history',
         documentPath: null,
         documentY: idx * 1000,
         sequence: idx + 1,

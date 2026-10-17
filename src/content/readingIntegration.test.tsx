@@ -192,4 +192,24 @@ describe('real content reading shortcut wiring', () => {
     await deliver({ type: 'TRANSLATE_HOVERED_IMAGE' });
     expect(sendMessage).not.toHaveBeenCalled();
   });
+
+  it('replaces image on paginated manga readers (e.g. nhentai /g/123/1/) immediately upon IMAGE_TRANSLATED without requiring eye toggle', async () => {
+    delete (window as any).location;
+    window.location = new URL('https://nhentai.net/g/677759/1/') as any;
+    const target = image('https://i7.nhentai.net/galleries/677759/1.webp');
+    media.targets = [target];
+    media.underPointer = target;
+    await mount('hover');
+    content.translatedRegistry.remember(target.srcUrl, target);
+    await deliver({
+      type: 'IMAGE_TRANSLATED',
+      payload: {
+        originalUrl: target.srcUrl,
+        bakedBase64: 'data:image/png;base64,AA==',
+        jobId: 42,
+      },
+    });
+    expect(target.imgElement!.src).toBe('blob:translated');
+    expect(target.sourceElement.getAttribute('data-kites-translated')).toBe('true');
+  });
 });

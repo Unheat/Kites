@@ -4,7 +4,7 @@ import './content.css';
 import { Languages, Eye, EyeOff, ExternalLink, X, Crop, RotateCcw, Download } from 'lucide-react';
 import type { PopupState, CropOverlayItem, ViewportSelection, SiteSelectorRule } from '../shared/types';
 import { STORAGE_KEYS } from '../shared/constants';
-import { isDomainDisabled, findMatchingSiteRule } from '../shared/siteRules';
+import { isDomainDisabled, findMatchingSiteRule, getChapterScopeId } from '../shared/siteRules';
 import {
   createChapterTranslationRegistry,
   createChapterExporter,
@@ -158,14 +158,34 @@ function resolveTargetMedia(originalUrl: string): MediaTarget | null {
   // Tier 1: Check in-memory registry
   const registered = mediaTargetRegistry.get(originalUrl);
   if (registered && registered.sourceElement.isConnected && registered.surfaceElement.isConnected) {
-    return registered;
+    if (registered.sourceElement instanceof HTMLImageElement) {
+      const origSrc = registered.sourceElement.getAttribute('data-kites-orig-src');
+      const appliedSrc = registered.sourceElement.getAttribute('data-kites-applied-src');
+      const currentSrc = registered.sourceElement.currentSrc || registered.sourceElement.src || '';
+      const matchesOrig = origSrc === originalUrl || (currentSrc && (currentSrc === originalUrl || currentSrc === appliedSrc));
+      if (matchesOrig) {
+        return registered;
+      }
+    } else {
+      return registered;
+    }
   }
 
   const normalized = getNormalizedBaseUrl(originalUrl);
   if (normalized) {
     const normRegistered = mediaTargetRegistry.get(normalized);
     if (normRegistered && normRegistered.sourceElement.isConnected && normRegistered.surfaceElement.isConnected) {
-      return normRegistered;
+      if (normRegistered.sourceElement instanceof HTMLImageElement) {
+        const origSrc = normRegistered.sourceElement.getAttribute('data-kites-orig-src');
+        const appliedSrc = normRegistered.sourceElement.getAttribute('data-kites-applied-src');
+        const currentSrc = normRegistered.sourceElement.currentSrc || normRegistered.sourceElement.src || '';
+        const matchesOrig = origSrc === originalUrl || (currentSrc && (currentSrc === originalUrl || currentSrc === appliedSrc));
+        if (matchesOrig) {
+          return normRegistered;
+        }
+      } else {
+        return normRegistered;
+      }
     }
   }
 
@@ -282,7 +302,7 @@ export type TranslatedImageRecord = ChapterTranslationRecord;
 
 /** In-memory registry keeping track of translated images and their finished state, including detached pages. */
 export const translatedRegistry = createChapterTranslationRegistry({
-  getSourcePage: () => window.location.href,
+  getSourcePage: () => getChapterScopeId(window.location.href),
   createTranslatedUrl: createSafeBlobUrlFromData,
   revokeTranslatedUrl: (url) => {
     if (!url.startsWith('blob:')) return;
@@ -292,7 +312,7 @@ export const translatedRegistry = createChapterTranslationRegistry({
 });
 const chapterExporter = createChapterExporter({
   getRecords: translatedRegistry.getRecords,
-  getSourcePage: () => window.location.href,
+  getSourcePage: () => getChapterScopeId(window.location.href),
   getTitle: () => document.title,
 });
 
@@ -713,14 +733,26 @@ function TranslateButton({
 
   useEffect(() => {
     const update = () => {
+      const reg = translatedRegistry.get(srcUrl);
+      if (reg?.translatedUrl && !reg.showOriginal && anchorElement.getAttribute('data-kites-show-original') !== 'true') {
+        const isDomApplied = anchorElement.getAttribute('data-kites-translated') === 'true' ||
+          (anchorElement instanceof HTMLImageElement ? anchorElement.getAttribute('data-kites-translated') === 'true' : anchorElement.querySelector('img')?.getAttribute('data-kites-translated') === 'true');
+        if (!isDomApplied) {
+          const target = resolveTargetMedia(srcUrl);
+          if (target) {
+            replaceImageWithTranslation(target, reg);
+          }
+        }
+      }
+
       setIsTranslated(isElementTranslated());
       setShowOriginal(
-        translatedRegistry.get(srcUrl)?.showOriginal ??
+        reg?.showOriginal ??
         (anchorElement.getAttribute('data-kites-show-original') === 'true')
       );
-      const reg = translatedRegistry.get(srcUrl)?.jobId;
+      const regJobId = reg?.jobId;
       const attr = anchorElement.getAttribute('data-kites-job-id');
-      setJobId(reg ?? (attr ? Number(attr) : null));
+      setJobId(regJobId ?? (attr ? Number(attr) : null));
     };
 
     update();
@@ -2044,7 +2076,7 @@ function GlobalOverlay() {
       });
 
       // Late results belong to the queued chapter, never a same-URL image in the new SPA chapter.
-      if (record.sourcePage !== window.location.href || !target) {
+      if (getChapterScopeId(record.sourcePage) !== getChapterScopeId(window.location.href) || !target) {
         console.warn(`[Content Script] Target media element detached or chapter changed; translation archived when context is known: ${originalUrl}`);
         return;
       }
@@ -2380,7 +2412,7 @@ function GlobalOverlay() {
           const recordsToExport: ChapterImageRecord[] = translatedPages.map((page, idx) => ({
             originalUrl: page.url,
             translatedUrl: page.translatedUrl!,
-            sourcePage: window.location.href,
+            sourcePage: getChapterScopeId(window.location.href),
             documentPath: null,
             documentY: page.top,
             sequence: idx + 1,

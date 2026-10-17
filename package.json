@@ -23,7 +23,8 @@
     "test:visual:webllm": "npm run build:dev && tsx src/test/pipelineVisualTestWebLlm.ts",
     "worker:test": "npm run test:providers --prefix worker",
     "worker:deploy": "npm run deploy --prefix worker",
-    "test:e2e:roliascan": "node scripts/verify-roliascan-fix.js"
+    "test:e2e:roliascan": "node scripts/verify-roliascan-fix.js",
+    "test:e2e:nhentai": "node scripts/verify-nhentai-fix.js"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.117",
