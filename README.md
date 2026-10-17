@@ -172,7 +172,7 @@ Customize target languages, neural OCR models, and inpainting algorithms from th
 
 | Component | Options | Description |
 | :--- | :--- | :--- |
-| **Translation** | **WebLLM** *(Local WebGPU)*<br/>**Cloud Shared Pool** *(Free)*<br/>**Google Translate**<br/>**Custom API** *(OpenAI, Claude, Gemini)* | Run local LLMs right in your browser (Qwen 3.5, Qwen 3, Gemma 3, Llama 3.2), use our free community pool, or connect your own API key. |
+| **Translation** | **WebLLM** *(Local WebGPU)*<br/>**Cloud Shared Pool** *(100/day free)*<br/>**Google Translate**<br/>**Custom API** *(OpenAI, Claude, Gemini)* | Run unlimited local LLMs in-browser (Qwen 3.5, Qwen 3, Gemma 3, Llama 3.2), use our shared cloud pool (100 free requests/day), or connect your own API key. |
 | **Inpainting** | **LaMa Manga** *(Neural)*<br/>**AOT-GAN** *(Fast Neural)*<br/>**Telea Diffusion** *(Instant)*<br/>**Simple Fill** | Erases text strictly inside character boundaries to preserve comic art. |
 | **OCR** | **PaddleOCR v3 – v6** | Industry-standard multilingual text detection and recognition with seamless 1D webtoon strip tiling. |
 | **Bubble Fit** | **Neural YOLO** *(WebGPU)*<br/>**Heuristic** *(Instant)*<br/>**Classic MST** | Expands dialogue into natural balloon whitespace with tail severing, eliminating tiny fonts. |
