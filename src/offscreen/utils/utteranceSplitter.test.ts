@@ -179,7 +179,7 @@ describe('utteranceSplitter', () => {
             { x: 135, y: 920 },
             { x: 110, y: 920 }
           ],
-          text: '与えられるから…っ!!'
+          text: '与えられるから困るんだよ' // pure plain text, no punctuation
         }
       ];
 
@@ -188,7 +188,39 @@ describe('utteranceSplitter', () => {
       // First box
       expect(result[0].map((l) => l.text)).toEqual(['なんでも', '言うことを', '聞かせられる']);
       // Second box
-      expect(result[1].map((l) => l.text)).toEqual(['特権が', '与えられるから…っ!!']);
+      expect(result[1].map((l) => l.text)).toEqual(['特権が', '与えられるから困るんだよ']);
+    });
+
+    it('preserves single bubble with top-aligned short column next to long column (pure plain text, no punctuation)', () => {
+      // Column 1 (right): '逆らえる' (4 chars, top-aligned: y: 100..220)
+      // Column 2 (left): 'わけがないじゃないか本当に' (13 chars, top-aligned: y: 100..550, pure plain text)
+      const lines: InputLine[] = [
+        {
+          id: 0,
+          polygon: [
+            { x: 80, y: 100 },
+            { x: 105, y: 100 },
+            { x: 105, y: 220 },
+            { x: 80, y: 220 }
+          ],
+          text: '逆らえる'
+        },
+        {
+          id: 1,
+          polygon: [
+            { x: 50, y: 100 },
+            { x: 75, y: 100 },
+            { x: 75, y: 550 },
+            { x: 50, y: 550 }
+          ],
+          text: 'わけがないじゃないか本当に'
+        }
+      ];
+
+      const result = clusterLinesIntoUtterances(lines, true, true);
+      expect(result).toHaveLength(1);
+      expect(result[0]).toHaveLength(2);
+      expect(result[0].map((l) => l.text)).toEqual(['逆らえる', 'わけがないじゃないか本当に']);
     });
 
     it('preserves single oval bubble with uneven line lengths (guards against false positive splits)', () => {

@@ -114,9 +114,10 @@ In `src/offscreen/utils/utteranceSplitter.ts`:
 
 1. **New Unit Tests (`src/offscreen/utils/utteranceSplitter.test.ts`):**
    * Verified user image scenario: 5-line staggered box without punctuation splits into Box 1 (`なんでも言うことを聞かせられる`) and Box 2 (`特権が与えられるから…っ!!`).
+   * Verified single bubble with top-aligned short column next to long column (`逆らえる` [4 chars] next to `わけないじゃん…っ♡` [9 chars]): preserved as single cluster (`topStagger = 0`, no false split).
    * Verified regression protection on normal oval bubble: 3-column oval with variable line lengths (75px, 225px, 100px) remains unified without false splits.
    * Verified upward translation: right-to-left dialogue moving from a bottom box up to a top box splits correctly.
 2. **Full Regression Suite:**
-   * Ran `npm test`: all 77 test files and 787 tests passed.
+   * Ran `npm test`: all 77 test files and 788 tests passed.
 3. **Build Check:**
    * Ran `npm run build`: TypeScript compilation and Vite packaging succeeded.
