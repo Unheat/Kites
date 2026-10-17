@@ -1,8 +1,10 @@
 import type { Point2D } from '../../shared/utils/geometry';
 import { syllables } from './hyphenation';
-import { fitFontSizeWithLines, fontSpec } from './typesetLayout';
-import { sanitizeTypesetText } from '../../shared/utils/textCleaning';
+import { fitFontSizeWithLines, fontSpec, type MeasureCache } from './typesetLayout';
+import { sanitizeTypesetText, compactSpecialSymbols } from '../../shared/utils/textCleaning';
 import { getFontSizeMinimumBase } from '../engines/ocr/tallStripTiling';
+
+export { compactSpecialSymbols };
 
 /**
  * @file cotransDefaultRenderer.ts
@@ -112,21 +114,6 @@ function makeCanvas(ctx: any, w: number, h: number): AnyCanvas {
     height,
     getContext: () => ctx,
   };
-}
-
-/**
- * Collapses ellipses; strips FULL-WIDTH spaces after punctuation only.
- *
- * Deliberate divergence from Cotrans upstream master (which also strips ASCII spaces
- * after punctuation): fusing "Teacher, please" into "Teacher,please" glues two words
- * into one oversized token, forcing the wrap fallback to slice English mid-word
- * ("Teacher,p-" / "lease"). ASCII spacing is meaningful for Western word-wrap.
- */
-export function compactSpecialSymbols(text: string): string {
-  text = text.replace(/\.\.\./g, '…').replace(/\.\./g, '…');
-  // Remove full-width spaces immediately after a punctuation mark (ASCII space kept).
-  text = text.replace(/([^\w\s])[　]+/g, '$1');
-  return text;
 }
 
 /** Sets the measurement font and returns a memo-free width measurer for the current font size. */
@@ -699,7 +686,8 @@ export function measureDefaultLayout(
   fontSize: number,
   maxFontSizeCap?: number,
   fontFamily: string = DEFAULT_RENDER_FONT_FAMILY,
-  isBold: boolean = false
+  isBold: boolean = false,
+  measureCache?: MeasureCache
 ): ReturnType<typeof fitFontSizeWithLines> {
   return fitFontSizeWithLines(
     ctx,
@@ -711,7 +699,8 @@ export function measureDefaultLayout(
     Math.min(Math.max(fontSize, DEFAULT_FIT_MAX_FONT_SIZE), maxFontSizeCap ?? Number.POSITIVE_INFINITY),
     DEFAULT_FIT_INSET,
     undefined,
-    isBold
+    isBold,
+    measureCache
   );
 }
 
@@ -766,7 +755,8 @@ export function renderRegionDefault(
   fontSize: number,
   maxFontSizeCap?: number,
   fontFamily: string = DEFAULT_RENDER_FONT_FAMILY,
-  isBold: boolean = false
+  isBold: boolean = false,
+  measureCache?: MeasureCache
 ): DefaultRenderResult | null {
   const [tl, tr, br, bl] = dstPoints;
   // Layout and aspect padding must use the resized destination dimensions. Using the
@@ -781,7 +771,7 @@ export function renderRegionDefault(
   // XianScan-style fit returns both the verified font size and exact wrapped lines.
   // Rendering those same lines prevents Cotrans's independent syllable pass from
   // turning English dialogue into narrow barcode columns.
-  const fitted = measureDefaultLayout(ctx, region.translation, normH, normV, fontSize, maxFontSizeCap, fontFamily, isBold);
+  const fitted = measureDefaultLayout(ctx, region.translation, normH, normV, fontSize, maxFontSizeCap, fontFamily, isBold, measureCache);
   if (!fitted || fitted.lines.length === 0) return null;
 
   const drawableLines = fitted.lines.filter((line) => line.trim());
@@ -816,9 +806,20 @@ export function renderRegionDefault(
   ctx.textAlign = 'left';
   ctx.fillStyle = fg;
   ctx.lineJoin = 'round';
+  ctx.miterLimit = 2;
   if (bg) {
     ctx.strokeStyle = bg;
     ctx.lineWidth = strokeWidth;
+    for (let i = 0; i < drawableLines.length; i++) {
+      let lineX = (normH - maxLineWidth) / 2;
+      if (region.alignment === 'center') {
+        lineX += (maxLineWidth - widths[i]) / 2;
+      } else if (region.alignment === 'right') {
+        lineX += maxLineWidth - widths[i];
+      }
+      const lineY = startY + i * lineStep;
+      ctx.strokeText(drawableLines[i], lineX, lineY);
+    }
   }
 
   for (let i = 0; i < drawableLines.length; i++) {
@@ -829,9 +830,6 @@ export function renderRegionDefault(
       lineX += maxLineWidth - widths[i];
     }
     const lineY = startY + i * lineStep;
-    if (bg) {
-      ctx.strokeText(drawableLines[i], lineX, lineY);
-    }
     ctx.fillText(drawableLines[i], lineX, lineY);
   }
 

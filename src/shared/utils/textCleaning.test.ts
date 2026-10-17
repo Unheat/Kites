@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   sanitizeTypesetText,
+  compactSpecialSymbols,
   isScanlatorWatermark,
   isThoughtBubbleTailOrnament,
   isStandaloneDigitOrOrnamentNoise,
@@ -11,6 +12,8 @@ import {
   hasNativeScriptForLang,
   stripTrailingWatermarkDebris,
   isStandaloneNoiseStroke,
+  isComicLetteringFont,
+  formatComicLetteringCasing,
   CJK_SCRIPT_REGEX,
 } from './textCleaning';
 
@@ -139,8 +142,38 @@ describe('textCleaning', () => {
       expect(sanitizeTypesetText('Okay,, really')).toBe('Okay, really');
     });
 
+    it('preserves middle dot in names while converting full-width periods', () => {
+      expect(sanitizeTypesetText('John・Smith')).toBe('John・Smith');
+      expect(sanitizeTypesetText('End．Start')).toBe('End.Start');
+    });
+
+    it('preserves CJK quotes and interpuncts in Korean text', () => {
+      expect(sanitizeTypesetText('「한국어 대화」')).toBe('「한국어 대화」');
+      expect(sanitizeTypesetText('김・철수')).toBe('김・철수');
+    });
+
     it('leaves real CJK text intact aside from whitespace/tilde', () => {
       expect(sanitizeTypesetText('それはない～')).toBe('それはない~');
+    });
+  });
+
+  describe('compactSpecialSymbols', () => {
+    it('compacts spaced dots and ellipses', () => {
+      expect(compactSpecialSymbols('. . .')).toBe('…');
+      expect(compactSpecialSymbols('... ...')).toBe('……');
+    });
+
+    it('compacts ASCII and CJK exclamation, question, and tilde chains', () => {
+      expect(compactSpecialSymbols('! ! ! !')).toBe('!!!!');
+      expect(compactSpecialSymbols('? ? ?')).toBe('???');
+      expect(compactSpecialSymbols('！ ！ ！')).toBe('！！！');
+      expect(compactSpecialSymbols('？ ？')).toBe('？？');
+      expect(compactSpecialSymbols('~ ~')).toBe('~~');
+    });
+
+    it('preserves ASCII spaces after punctuation for Western word wrap', () => {
+      expect(compactSpecialSymbols('Teacher, please')).toBe('Teacher, please');
+      expect(compactSpecialSymbols('Wait! Now.')).toBe('Wait! Now.');
     });
   });
 
@@ -219,6 +252,31 @@ describe('textCleaning', () => {
       expect(CJK_SCRIPT_REGEX.test("don't…")).toBe(false);
       expect(CJK_SCRIPT_REGEX.test('待って')).toBe(true);
       expect(CJK_SCRIPT_REGEX.test('英雄')).toBe(true);
+    });
+  });
+
+  describe('comic lettering conventions', () => {
+    it('detects comic lettering font presets', () => {
+      expect(isComicLetteringFont('"CC Wild Words", sans-serif')).toBe(true);
+      expect(isComicLetteringFont('Anime Ace 2.0')).toBe(true);
+      expect(isComicLetteringFont('Comic Sans MS')).toBe(true);
+      expect(isComicLetteringFont('Arial, Helvetica, sans-serif')).toBe(false);
+      expect(isComicLetteringFont('Noto Sans CJK')).toBe(false);
+    });
+
+    it('applies crossbar I rule only for comic fonts', () => {
+      // For non-comic font: text is unchanged
+      expect(formatComicLetteringCasing('I think this is it.', false)).toBe('I think this is it.');
+
+      // For comic font: converts to uppercase, but uses stick 'i' inside words and crossbar 'I' for pronoun
+      const formatted = formatComicLetteringCasing('I think this is it.', true);
+      expect(formatted).toBe('I THiNK THiS iS iT.');
+
+      // Contractions: I'M, I'LL, I'D, I'VE keep crossbar I
+      expect(formatComicLetteringCasing("I'm sure I'll win!", true)).toBe("I'M SURE I'LL WiN!");
+
+      // Acronyms keep crossbar I
+      expect(formatComicLetteringCasing('FBI and CIA agents with AI', true)).toBe('FBI AND CIA AGENTS WiTH AI');
     });
   });
 });

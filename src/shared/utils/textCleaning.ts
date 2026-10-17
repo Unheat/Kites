@@ -356,7 +356,7 @@ export function sanitizeTypesetText(text: string): string {
       .replace(/[“”„‟]/g, '"')
       .replace(/[‘’‚‛＇]/g, "'")
       .replace(/[〜～∼]/g, '~')
-      .replace(/[．。﹒・]/g, '.');
+      .replace(/[．。﹒]/g, '.');
 
     // Collapse isolated letters produced by broken OCR spacing: "H E L L O".
     // Do not merge common contractions (I'M, IT'S) because apostrophes remain word-boundary separation.
@@ -381,4 +381,58 @@ export function sanitizeTypesetText(text: string): string {
 
   // True CJK content needs only whitespace consolidation and full-width tilde normalization.
   return out.replace(/[〜～]/g, '~').replace(/[ \t]{2,}/g, ' ').trim();
+}
+
+/**
+ * Collapses ellipses and compacts spaced special symbols and punctuation.
+ *
+ * Handles both ASCII and full-width punctuation chains (e.g. "! ! !", "？ ？", ". . ."),
+ * while preserving meaningful single ASCII spaces after punctuation for Western word wrap.
+ */
+export function compactSpecialSymbols(text: string): string {
+  if (!text) return '';
+  return text
+    // Compact spaced single-dot ellipses like ". . ." or ". . . ."
+    .replace(/(?:\.\s+){2,}\./g, '…')
+    .replace(/\.\.\./g, '…')
+    .replace(/\.\./g, '…')
+    // Compact spaced exclamation, question, and tilde marks (ASCII + CJK)
+    .replace(/([!?~！？～])\s+(?=[!?~！？～])/g, '$1')
+    // Compact spaced horizontal ellipses and multi-dot runs
+    .replace(/(\.{2,}|…)\s+(?=\.{2,}|…)/g, '$1')
+    // Remove full-width spaces immediately after a punctuation mark (ASCII space kept).
+    .replace(/([^\w\s])[　]+/g, '$1');
+}
+
+/**
+ * Checks whether a font family belongs to a comic lettering font family stack.
+ */
+export function isComicLetteringFont(fontFamily: string): boolean {
+  return /wild\s*words|anime\s*ace|comic\s*neue|comic\s*sans|bangers|kites\s*comic/i.test(fontFamily);
+}
+
+/**
+ * Applies comic lettering casing conventions to Western text.
+ * Uppercases text while reserving crossbar 'I' for personal pronouns ('I', "I'M", "I'LL", "I'D", "I'VE")
+ * and common acronyms (FBI, CIA, AI, UFO, DNA, VIP, ID). Converts internal 'I's within words to 'i'.
+ *
+ * @param text - Text to format.
+ * @param isComicFont - Whether the target font preset is a comic lettering font.
+ * @returns Formatted comic dialogue text.
+ */
+export function formatComicLetteringCasing(text: string, isComicFont: boolean): string {
+  if (!isComicFont || !text) return text;
+  // If text already has CJK characters, skip
+  if (CJK_SCRIPT_REGEX.test(text)) return text;
+
+  let upper = text.toUpperCase();
+  return upper
+    // Protect standalone pronoun I and contractions (I, I'M, I'LL, I'D, I'VE)
+    .replace(/\bI\b(?=['’]?(?:M|LL|D|VE)?\b)/g, '§PRON§')
+    // Protect common all-caps initialisms/acronyms
+    .replace(/\b(?:FBI|CIA|AI|UFO|DNA|VIP|ID)\b/g, (match) => match.replace(/I/g, '§PRON§'))
+    // Map non-pronoun I to lowercase i (stick I in comic font mapping)
+    .replace(/I/g, 'i')
+    // Restore protected pronoun crossbar I
+    .replace(/§PRON§/g, 'I');
 }
