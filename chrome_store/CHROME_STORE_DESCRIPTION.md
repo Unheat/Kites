@@ -16,7 +16,7 @@ Most translator extensions treat manga like standard text: they slap clunky popu
 Kites runs cutting-edge AI directly inside your browser:
 
 • 100 Free Community Translations/Day: Sign in with Google to get 100 free high-speed cloud translations daily from our shared AI pool—zero setup, no API key required.
-• 100% Free & Unlimited Local AI: Run on-device WebLLM or free web engines with no subscriptions, no paywalls, and no wait times.
+• Unlimited Free Translations: Run on-device WebLLM locally on your GPU or use unlimited Google Translate with no subscriptions, no paywalls, and no wait times.
 • 100% Private On-Device AI: Your images never touch a third-party server. All OCR detection and background cleaning happen locally on your GPU.
 • Seamless In-Panel Lettering: No floating white boxes. Text replaces the original dialogue naturally with balanced comic fonts and contrast-aware colors.
 
@@ -34,7 +34,7 @@ Kites runs cutting-edge AI directly inside your browser:
 
 • Smart Speech Balloon Fit: Vertical Japanese and Chinese text creates narrow columns that ruin English font size in ordinary tools. Kites uses Heuristic whitespace expansion and YOLO vision AI to expand text into the full bubble chamber, eliminating tiny, unreadable fonts.
 • Artwork Preservation Inpainting: Cleanly removes foreign text along the actual character strokes. Screentones, hatching, complex line art, and colored backgrounds remain intact without ugly blur boxes.
-• Next-Gen Translation AI: Enjoy 100 free daily translations from our community shared pool, run private on-device WebLLM (Qwen 3.5, Gemma 3, Llama 3.2) locally on your GPU, or connect private API keys (OpenAI, Claude, Gemini, DeepSeek) whenever you prefer.
+• Next-Gen Translation AI: Enjoy unlimited on-device WebLLM (Qwen 3.5, Gemma 3, Llama 3.2), unlimited Google Translate, 100 free daily cloud translations from our community pool, or connect private API keys (OpenAI, Claude, Gemini, DeepSeek).
 • Custom Translation Glossary: Lock character names, attack moves, and honorifics so your translations stay consistent across whole series.
 
 

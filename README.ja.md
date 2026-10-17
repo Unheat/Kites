@@ -172,7 +172,7 @@ Twitter/X、Pixiv、各種マンガ配信サイトのコマ上にマウスを乗
 
 | コンポーネント | 選択可能なエンジン | 説明 |
 | :--- | :--- | :--- |
-| **翻訳 (Translation)** | **WebLLM** *(ローカル WebGPU)*<br/>**クラウド共有プール** *(1日100回無料)*<br/>**Google 翻訳**<br/>**カスタム API** *(OpenAI, Claude, Gemini)* | ブラウザ内で無制限のローカル LLM（Qwen 3.5、Qwen 3、Gemma 3、Llama 3.2）を実行、コミュニティ共有クラウド（1日100回無料）、またはお手持ちの API キーを連携。 |
+| **翻訳 (Translation)** | **WebLLM** *(ローカル WebGPU)*<br/>**クラウド共有プール** *(1日100回無料)*<br/>**Google 翻訳** *(無制限・完全無料)*<br/>**カスタム API** *(OpenAI, Claude, Gemini)* | ブラウザ内で無制限のローカル LLM（Qwen 3.5、Qwen 3、Gemma 3、Llama 3.2）を実行、無制限の Google 翻訳、コミュニティ共有クラウド（1日100回無料）、またはお手持ちの API キーを連携。 |
 | **背景修復 (Inpainting)** | **LaMa Manga** *(ニューラルモデル)*<br/>**AOT-GAN** *(高速ニューラル)*<br/>**Telea Diffusion** *(即時)*<br/>**シンプル塗りつぶし (Simple Fill)** | 文字の境界内を厳密に消去し、マンガの主線やトーンを最大限に保護。 |
 | **文字認識 (OCR)** | **PaddleOCR v3 – v6** | 多言語に対応した業界標準の高精度テキスト検出・認識。長尺 Webtoon の 1D 分割結合にも対応。 |
 | **吹き出しフィッティング (Bubble Fit)** | **Neural YOLO** *(WebGPU)*<br/>**ヒューリスティック (Heuristic)** *(即時)*<br/>**Classic MST** | 吹き出しの「しっぽ」部分を自動分離し、自然な余白領域全体へ文字を美しく配置。文字の潰れを解消します。 |

@@ -172,7 +172,7 @@
 
 | 核心模块 | 可选方案 | 详细描述 |
 | :--- | :--- | :--- |
-| **翻译引擎 (Translation)** | **WebLLM** *(本地 WebGPU)*<br/>**云端共享公共池** *(每日100次免费)*<br/>**Google 翻译**<br/>**自定义 API** *(OpenAI, Claude, Gemini)* | 在浏览器中直接运行无限制的本地端侧 LLM（Qwen 3.5, Qwen 3, Gemma 3, Llama 3.2），使用免费社区公共池（每日100次配额），或接入你自己的 API 密钥。 |
+| **翻译引擎 (Translation)** | **WebLLM** *(本地 WebGPU)*<br/>**云端共享公共池** *(每日100次免费)*<br/>**Google 翻译** *(完全免费且不限次)*<br/>**自定义 API** *(OpenAI, Claude, Gemini)* | 在浏览器中直接运行无限制的本地端侧 LLM（Qwen 3.5, Qwen 3, Gemma 3, Llama 3.2），畅享不限次数的 Google 翻译，使用免费社区公共池（每日100次配额），或接入你自己的 API 密钥。 |
 | **图像修复 (Inpainting)** | **LaMa Manga** *(神经修复)*<br/>**AOT-GAN** *(超快神经模型)*<br/>**Telea Diffusion** *(即时传统算法)*<br/>**简单背景填充 (Simple Fill)** | 严格在文字边缘轮廓内擦除原文，最大程度保留原本线稿与网点质感。 |
 | **文字识别 (OCR)** | **PaddleOCR v3 – v6** | 行业标杆级多语言文字检测与识别，无缝支持超长条漫 1D 切片流式拼接。 |
 | **气泡贴合 (Bubble Fit)** | **Neural YOLO** *(WebGPU)*<br/>**启发式 (Heuristic)** *(极速)*<br/>**经典 MST** | 自动切除气泡小尾巴，将文字舒展贴合至自然圆形气泡留白区域，彻底告别文字挤压。 |

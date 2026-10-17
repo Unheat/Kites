@@ -172,7 +172,7 @@ Tuỳ biến ngôn ngữ đích, mô hình AI OCR và thuật toán xóa chữ t
 
 | Thành phần | Tuỳ chọn | Mô tả chi tiết |
 | :--- | :--- | :--- |
-| **Dịch thuật (Translation)** | **WebLLM** *(WebGPU cục bộ)*<br/>**Cloud Shared Pool** *(100 lượt/ngày free)*<br/>**Google Translate**<br/>**Custom API** *(OpenAI, Claude, Gemini)* | Chạy không giới hạn LLM cục bộ trên trình duyệt (Qwen 3.5, Qwen 3, Gemma 3, Llama 3.2), sử dụng cụm cloud cộng đồng (100 lượt/ngày miễn phí), hoặc kết nối API key của riêng bạn. |
+| **Dịch thuật (Translation)** | **WebLLM** *(WebGPU cục bộ)*<br/>**Cloud Shared Pool** *(100 lượt/ngày free)*<br/>**Google Translate** *(Miễn phí không giới hạn)*<br/>**Custom API** *(OpenAI, Claude, Gemini)* | Chạy không giới hạn LLM cục bộ trên trình duyệt (Qwen 3.5, Qwen 3, Gemma 3, Llama 3.2), dịch Google Translate không giới hạn, dùng cụm cloud cộng đồng (100 lượt/ngày miễn phí), hoặc kết nối API key riêng. |
 | **Xóa thoại & Khôi phục nền (Inpainting)** | **LaMa Manga** *(Neural)*<br/>**AOT-GAN** *(Fast Neural)*<br/>**Telea Diffusion** *(Tức thì)*<br/>**Simple Fill** | Xóa chữ chuẩn xác trong ranh giới ký tự để bảo toàn tối đa nét vẽ gốc của truyện. |
 | **Nhận diện chữ (OCR)** | **PaddleOCR v3 – v6** | Tiêu chuẩn công nghiệp trong nhận diện văn bản đa ngôn ngữ, hỗ trợ cắt ghép 1D mượt mà cho truyện dài tập. |
 | **Khớp bóng thoại (Bubble Fit)** | **Neural YOLO** *(WebGPU)*<br/>**Heuristic** *(Tức thì)*<br/>**Classic MST** | Cắt bỏ đuôi thoại và mở rộng khoảng trống bong bóng tự nhiên, loại bỏ hoàn toàn chữ bị ép nhỏ. |
