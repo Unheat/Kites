@@ -4,7 +4,7 @@ import './content.css';
 import { Languages, Eye, EyeOff, ExternalLink, X, Crop, RotateCcw, Download } from 'lucide-react';
 import type { PopupState, CropOverlayItem, ViewportSelection, SiteSelectorRule } from '../shared/types';
 import { STORAGE_KEYS } from '../shared/constants';
-import { isDomainDisabled, findMatchingSiteRule } from '../shared/siteRules';
+import { isDomainDisabled, findMatchingSiteRule, getChapterScopeId } from '../shared/siteRules';
 import {
   createChapterTranslationRegistry,
   createChapterExporter,
@@ -282,7 +282,7 @@ export type TranslatedImageRecord = ChapterTranslationRecord;
 
 /** In-memory registry keeping track of translated images and their finished state, including detached pages. */
 export const translatedRegistry = createChapterTranslationRegistry({
-  getSourcePage: () => window.location.href,
+  getSourcePage: () => getChapterScopeId(window.location.href),
   createTranslatedUrl: createSafeBlobUrlFromData,
   revokeTranslatedUrl: (url) => {
     if (!url.startsWith('blob:')) return;
@@ -292,7 +292,7 @@ export const translatedRegistry = createChapterTranslationRegistry({
 });
 const chapterExporter = createChapterExporter({
   getRecords: translatedRegistry.getRecords,
-  getSourcePage: () => window.location.href,
+  getSourcePage: () => getChapterScopeId(window.location.href),
   getTitle: () => document.title,
 });
 
@@ -2380,7 +2380,7 @@ function GlobalOverlay() {
           const recordsToExport: ChapterImageRecord[] = translatedPages.map((page, idx) => ({
             originalUrl: page.url,
             translatedUrl: page.translatedUrl!,
-            sourcePage: window.location.href,
+            sourcePage: getChapterScopeId(window.location.href),
             documentPath: null,
             documentY: page.top,
             sequence: idx + 1,
