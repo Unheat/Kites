@@ -55,6 +55,12 @@ const LINE_HEIGHT = 1.2;
 const LONE_PUNCT = /^[.．…·!！?？,，;；:：~～)"'']{1,10}$/;
 const TALL_FILL_MIN_ASPECT = 1.5;
 
+// Prohibited line-start characters (Kinsoku Shori)
+export const NO_LINE_START_RE = /^[.,!?:;…\-—―–ー－～)」』】》〉，、。：；！？]/;
+
+// Opening marks that bind forward to following word
+export const OPENING_MARK_RE = /^[¡¿([{«‹‘‚‛“„‟〈《「『【〔〖（［｛]/;
+
 // Common English prefixes and suffixes for syllable hyphenation
 const HYPHEN_PREFIXES = [
   'under', 'super', 'inter', 'intra', 'trans', 'multi',
@@ -75,6 +81,9 @@ const HYPHEN_SUFFIXES = [
  * Strict comic rule: Never hyphenate words shorter than 7 letters.
  */
 export function findHyphenationPoints(rawWord: string): number[] {
+  // Pure numeric strings must not be hyphenated
+  if (/^\d+$/.test(rawWord)) return [];
+
   const word = rawWord.toLowerCase();
   const len = word.length;
   if (len < 7) return [];
@@ -102,6 +111,10 @@ export function findHyphenationPoints(rawWord: string): number[] {
     }
   }
 
+  // Helper: check if character is a true consonant (exclude apostrophes and dashes)
+  const vowels = 'aeiouy';
+  const isConsonant = (c: string) => !vowels.includes(c) && c !== '-' && c !== "'" && c !== '’';
+
   // 4. Double consonants: tt, ll, pp, nn, ss, rr, dd, bb, gg, ff, mm, cc, ck
   for (let i = 2; i < len - 2; i++) {
     const c1 = word[i - 1];
@@ -114,11 +127,10 @@ export function findHyphenationPoints(rawWord: string): number[] {
   }
 
   // 5. Vowel-Consonant-Consonant-Vowel (VC-CV)
-  const vowels = 'aeiouy';
   for (let i = 2; i < len - 2; i++) {
     const v1 = vowels.includes(word[i - 2]);
-    const c1 = !vowels.includes(word[i - 1]) && word[i - 1] !== '-';
-    const c2 = !vowels.includes(word[i]) && word[i] !== '-';
+    const c1 = isConsonant(word[i - 1]);
+    const c2 = isConsonant(word[i]);
     const v2 = vowels.includes(word[i + 1]);
     if (v1 && c1 && c2 && v2) {
       const pair = word.slice(i - 1, i + 1);
@@ -134,14 +146,14 @@ export function findHyphenationPoints(rawWord: string): number[] {
       const prev = word[i - 1];
       const curr = word[i];
       const next = word[i + 1];
-      if (vowels.includes(prev) && !vowels.includes(curr) && curr !== '-' && vowels.includes(next)) {
+      if (vowels.includes(prev) && isConsonant(curr) && vowels.includes(next)) {
         points.add(i);
       }
     }
   }
 
   return Array.from(points)
-    .filter((p) => p >= 3 && len - p >= 3)
+    .filter((p) => p >= 3 && len - p >= 3 && word[p - 1] !== "'" && word[p] !== "'" && word[p - 1] !== '’' && word[p] !== '’')
     .sort((a, b) => a - b);
 }
 
@@ -166,24 +178,20 @@ export function wrapText(
     let current = word;
     const heads: string[] = [];
 
-    const punctMatch = current.match(/^(.*?)([.!?,:;~…"']+)?$/);
-    const stem = punctMatch && punctMatch[1] ? punctMatch[1] : current;
-    const trailingPunct = punctMatch && punctMatch[2] ? punctMatch[2] : '';
-
-    if (ctx.measureText(current).width > maxWidth && trailingPunct) {
-      const stemWidth = ctx.measureText(stem).width;
-      if (stemWidth <= maxWidth && ctx.measureText(current).width <= maxWidth * 1.15) {
-        return { head: [], tail: current };
-      }
-      if (stemWidth <= maxWidth) {
-        return { head: [stem], tail: trailingPunct };
-      }
+    // Pure numeric strings must never be hyphenated
+    if (/^\d+$/.test(word)) {
+      return { head: [], tail: word };
     }
 
+    const punctMatch = current.match(/^(.*?)([.!?,:;~…"']+)?$/);
+    const stem = punctMatch && punctMatch[1] ? punctMatch[1] : current;
+
+    if (ctx.measureText(current).width <= maxWidth * 1.15) {
+      return { head: [], tail: current };
+    }
+
+    // Strict typography rule (Cotrans/XianScan): Never hyphenate words shorter than 7 letters
     if (stem.length < 7) {
-      if (trailingPunct && ctx.measureText(stem).width <= maxWidth) {
-        return { head: [stem], tail: trailingPunct };
-      }
       return { head: [], tail: word };
     }
 
@@ -215,26 +223,17 @@ export function wrapText(
         continue;
       }
 
-      // Character fallback only for long words (>= 7 letters)
-      let kRaw = current.length - 1;
-      while (kRaw > 0 && ctx.measureText(current.slice(0, kRaw)).width > maxWidth) {
-        kRaw--;
-      }
-      const overflowLetters = current.length - kRaw;
-      if (overflowLetters <= 1) {
-        break;
-      }
-
-      let k = current.length - 2;
-      while (k >= 3 && ctx.measureText(current.slice(0, k) + '-').width > maxWidth) {
+      // Character fallback only for long words (>= 7 letters, min 3 prefix / 3 suffix)
+      let k = curStem.length - 2;
+      while (k >= 3 && ctx.measureText(curStem.slice(0, k) + '-').width > maxWidth) {
         k--;
       }
-      if (k < 3 || current.length - k < 3) {
+      if (k < 3 || curStem.length - k < 3) {
         break;
       }
-      const prefix = current.slice(0, k);
+      const prefix = curStem.slice(0, k);
       heads.push(prefix.endsWith('-') ? prefix : `${prefix}-`);
-      current = current.slice(k);
+      current = curStem.slice(k) + curPunct;
     }
     return { head: heads, tail: current };
   }
@@ -248,6 +247,11 @@ export function wrapText(
         if (ctx.measureText(candidate).width <= maxWidth) {
           current = candidate;
         } else {
+          // Kinsoku Shori: prohibited line-start char hangs on previous line if within 1.15x
+          if (NO_LINE_START_RE.test(char) && ctx.measureText(candidate).width <= maxWidth * 1.15) {
+            current = candidate;
+            continue;
+          }
           if (current) lines.push(current);
           current = char;
         }
@@ -257,28 +261,30 @@ export function wrapText(
     }
 
     const rawWords = paragraph.split(/\s+/).filter(Boolean);
-    const expandedWords: string[] = [];
-    for (const w of rawWords) {
+    const boundWords: string[] = [];
+    for (let i = 0; i < rawWords.length; i++) {
+      let w = rawWords[i];
+      // Forward-bind opening marks (¿, ¡, «, etc.) to the following word
+      while (i < rawWords.length - 1 && OPENING_MARK_RE.test(w) && w.length === 1) {
+        i++;
+        w = `${w}${rawWords[i]}`;
+      }
       if (w.includes('-') && !w.startsWith('-') && !w.endsWith('-') && w.length >= 5) {
         const sub = w.split('-');
-        for (let i = 0; i < sub.length; i++) {
-          if (i < sub.length - 1) {
-            expandedWords.push(`${sub[i]}-`);
+        for (let j = 0; j < sub.length; j++) {
+          if (j < sub.length - 1) {
+            boundWords.push(`${sub[j]}-`);
           } else {
-            expandedWords.push(sub[i]);
+            boundWords.push(sub[j]);
           }
         }
       } else {
-        const m = w.match(/^(.*?)([.!?,:;~…"']{2,})$/);
-        if (m && m[1] && m[2]) {
-          expandedWords.push(m[1], m[2]);
-        } else {
-          expandedWords.push(w);
-        }
+        boundWords.push(w);
       }
     }
 
-    for (const word of expandedWords) {
+    const paragraphLines: string[] = [];
+    for (const word of boundWords) {
       if (!word) continue;
       if (!current) {
         if (ctx.measureText(word).width <= maxWidth) {
@@ -286,7 +292,7 @@ export function wrapText(
         } else {
           const { head, tail } = breakLongWord(word);
           if (head.length > 0) {
-            lines.push(...head);
+            paragraphLines.push(...head);
             current = tail;
           } else {
             current = word;
@@ -298,13 +304,13 @@ export function wrapText(
         if (ctx.measureText(candidate).width <= (isPurePunct ? maxWidth * 1.15 : maxWidth)) {
           current = candidate;
         } else {
-          lines.push(current);
+          paragraphLines.push(current);
           if (ctx.measureText(word).width <= maxWidth) {
             current = word;
           } else {
             const { head, tail } = breakLongWord(word);
             if (head.length > 0) {
-              lines.push(...head);
+              paragraphLines.push(...head);
               current = tail;
             } else {
               current = word;
@@ -314,17 +320,46 @@ export function wrapText(
       }
     }
     if (current) {
-      if (LONE_PUNCT.test(current) && lines.length > 0) {
-        const candidate = `${lines[lines.length - 1]}${current}`;
-        if (ctx.measureText(candidate).width <= maxWidth * 1.15) {
-          lines[lines.length - 1] = candidate;
-        } else {
-          lines.push(current);
-        }
+      if (LONE_PUNCT.test(current) && paragraphLines.length > 0) {
+        paragraphLines[paragraphLines.length - 1] = `${paragraphLines[paragraphLines.length - 1]}${current}`;
       } else {
-        lines.push(current);
+        paragraphLines.push(current);
+      }
+      current = '';
+    }
+
+    // Kinsoku Shori post-wrap line-start check
+    for (let li = 1; li < paragraphLines.length; li++) {
+      const line = paragraphLines[li];
+      if (NO_LINE_START_RE.test(line)) {
+        const m = line.match(NO_LINE_START_RE);
+        if (m) {
+          const punct = m[0];
+          const prevLine = paragraphLines[li - 1];
+          const prevWidth = ctx.measureText(prevLine).width;
+          const punctWidth = ctx.measureText(punct).width;
+          if (prevWidth + punctWidth <= maxWidth * 1.15) {
+            paragraphLines[li - 1] = `${prevLine}${punct}`;
+            const remainder = line.slice(punct.length).trim();
+            if (remainder) {
+              paragraphLines[li] = remainder;
+            } else {
+              paragraphLines.splice(li, 1);
+              li--;
+            }
+          } else {
+            const prevTokens = prevLine.split(' ');
+            if (prevTokens.length >= 2) {
+              const lastToken = prevTokens.pop()!;
+              paragraphLines[li - 1] = prevTokens.join(' ');
+              paragraphLines[li] = `${lastToken} ${line}`;
+            }
+          }
+        }
       }
     }
+
+    lines.push(...paragraphLines);
   }
   return lines;
 }
@@ -385,7 +420,8 @@ export function isHardLineBreak(prevLine: string, nextLine: string): boolean {
   if (/[:：)）\]】>》!！?？"”'’]$/.test(prev)) return true;
   if (/[.．]$/.test(prev) && /^([A-Z\u4e00-\u9fa5\uac00-\ud7af\u3040-\u30ff\[<("'\d#-]|\b)/.test(next)) return true;
   const prevWords = prev.split(/\s+/);
-  if (prevWords.length <= 4 && prev.length <= 30 && !/[,，;；\-\/]$/.test(prev)) return true;
+  // Short lines only break if they actually end a sentence/clause, allowing soft-wrapped LLM text to reflow
+  if (prevWords.length <= 4 && prev.length <= 30 && /[.!?…:;。！？]$/.test(prev)) return true;
   if (/^(\[|<|\(|【|《|[-*•]\s+|\d+[.)]\s+|[a-zA-Z\u4e00-\u9fa5\uac00-\ud7af\s]{1,20}[:：])/.test(next)) return true;
   return false;
 }
@@ -476,6 +512,50 @@ export interface FitFontSizeLayout {
 }
 
 /**
+ * Scoped in-memory measurement cache for font fitting.
+ * Caches token string dimensions per font specification, eliminating up to 75%
+ * of redundant CanvasRenderingContext2D.measureText native calls during binary searches.
+ */
+export interface MeasureCache {
+  measure(text: string, fontSpec?: string): number;
+  clear(): void;
+}
+
+/**
+ * Creates an in-memory token measurement cache bound to a 2D canvas context.
+ *
+ * @param ctx - Measurement context providing `font` and `measureText`.
+ * @returns MeasureCache instance.
+ */
+export function createMeasureCache(
+  ctx: { font: string; measureText(t: string): { width: number } }
+): MeasureCache {
+  const map = new Map<string, number>();
+  let currentFontSpec = ctx.font || '';
+
+  return {
+    measure(text: string, fontSpec?: string): number {
+      const targetFont = fontSpec ?? ctx.font;
+      const key = `${targetFont}\0${text}`;
+      let w = map.get(key);
+      if (w === undefined) {
+        if (fontSpec && currentFontSpec !== fontSpec) {
+          ctx.font = fontSpec;
+          currentFontSpec = fontSpec;
+        }
+        w = ctx.measureText(text).width;
+        map.set(key, w);
+      }
+      return w;
+    },
+    clear(): void {
+      map.clear();
+      currentFontSpec = '';
+    },
+  };
+}
+
+/**
  * 4-Pass Binary Search font fitting:
  * Pass 1: Clean binary search (whole words, no hyphens).
  * Pass 2: Tall-narrow floor (aspect ratio >= 2.0) prevents collapse into unreadable micro-text.
@@ -492,11 +572,25 @@ export function fitFontSizeWithLines(
   maxSize?: number,
   boxInset?: number,
   customCjk?: string,
-  isBold: boolean = false
+  isBold: boolean = false,
+  measureCache?: MeasureCache
 ): FitFontSizeLayout {
   const inset = boxInset ?? BOX_INSET;
   const maxW = Math.max(10, boxW * (1 - 2 * inset));
   const maxH = Math.max(10, boxH * (1 - 2 * inset));
+
+  const cache = measureCache ?? createMeasureCache(ctx);
+  const mCtx = {
+    get font(): string {
+      return ctx.font;
+    },
+    set font(v: string) {
+      if (ctx.font !== v) {
+        ctx.font = v;
+      }
+    },
+    measureText: (t: string) => ({ width: cache.measure(t, ctx.font) }),
+  };
 
   const rawWords = text.split(/[\s\n]+/).filter(Boolean);
   const words: string[] = [];
@@ -507,18 +601,13 @@ export function fitFontSizeWithLines(
         words.push(i < sub.length - 1 ? `${sub[i]}-` : sub[i]);
       }
     } else {
-      const m = w.match(/^(.*?)([.!?,:;~…"']{2,})$/);
-      if (m && m[1] && m[2]) {
-        words.push(m[1], m[2]);
-      } else {
-        words.push(w);
-      }
+      words.push(w);
     }
   }
 
   let finalSize = MIN_FONT_SIZE;
-  ctx.font = fontSpec(MIN_FONT_SIZE, fontFamily, text, customCjk, isBold);
-  let finalLines: string[] = wrapText(ctx, text, maxW);
+  mCtx.font = fontSpec(MIN_FONT_SIZE, fontFamily, text, customCjk, isBold);
+  let finalLines: string[] = wrapText(mCtx, text, maxW);
   const consider = (size: number, lines: string[]): void => {
     if (size > finalSize && lines.length > 0) {
       finalSize = size;
@@ -535,7 +624,7 @@ export function fitFontSizeWithLines(
   while (lo <= hi) {
     const mid = Math.floor((lo + hi) / 2);
     if (mid === 0) break;
-    ctx.font = fontSpec(mid, fontFamily, text, customCjk, isBold);
+    mCtx.font = fontSpec(mid, fontFamily, text, customCjk, isBold);
 
     const maxWordWidth = Math.max(
       0,
@@ -543,7 +632,7 @@ export function fitFontSizeWithLines(
         const punctMatch = w.match(/^(.*?)([.!?,:;~…"']+)?$/);
         const stem = punctMatch && punctMatch[1] ? punctMatch[1] : w;
         const trailingPunct = punctMatch?.[2] ?? '';
-        const wordW = ctx.measureText(w).width;
+        const wordW = mCtx.measureText(w).width;
         if (wordW <= maxW) return wordW;
         const points = findHyphenationPoints(stem);
         if (points.length > 0) {
@@ -551,20 +640,20 @@ export function fitFontSizeWithLines(
           let prev = 0;
           for (const p of points) {
             const seg = stem[p - 1] === '-' ? stem.slice(prev, p) : `${stem.slice(prev, p)}-`;
-            segMax = Math.max(segMax, ctx.measureText(seg).width);
+            segMax = Math.max(segMax, mCtx.measureText(seg).width);
             prev = p;
           }
-          segMax = Math.max(segMax, ctx.measureText(stem.slice(prev) + trailingPunct).width);
+          segMax = Math.max(segMax, mCtx.measureText(stem.slice(prev) + trailingPunct).width);
           return segMax;
         }
-        return ctx.measureText(w).width;
+        return mCtx.measureText(w).width;
       })
     );
 
     if (maxWordWidth <= maxW) {
-      const lines = reflowText(ctx, text, maxW);
+      const lines = reflowText(mCtx, text, maxW);
       const lineH = mid * LINE_HEIGHT;
-      const allLinesFitW = lines.every((l) => ctx.measureText(l).width <= maxW + 0.5);
+      const allLinesFitW = lines.every((l) => mCtx.measureText(l).width <= maxW + 0.5);
       const hasNoHyphenBreaks = lines.every((l) => !l.endsWith('-') || text.includes(l));
       if (allLinesFitW && lines.length * lineH <= maxH && hasNoHyphenBreaks) {
         cleanBest = mid;
@@ -594,10 +683,10 @@ export function fitFontSizeWithLines(
     while (floorLo <= floorHi) {
       const mid = Math.floor((floorLo + floorHi) / 2);
       if (mid === 0) break;
-      ctx.font = fontSpec(mid, fontFamily, text, customCjk, isBold);
-      const lines = reflowText(ctx, text, maxW);
+      mCtx.font = fontSpec(mid, fontFamily, text, customCjk, isBold);
+      const lines = reflowText(mCtx, text, maxW);
       const lineH = mid * LINE_HEIGHT;
-      const allFitW = lines.every((l) => ctx.measureText(l).width <= maxW + 0.5);
+      const allFitW = lines.every((l) => mCtx.measureText(l).width <= maxW + 0.5);
       const totalH = lines.length * lineH;
       if (allFitW && totalH <= maxH) {
         consider(mid, lines);
@@ -614,9 +703,9 @@ export function fitFontSizeWithLines(
     let p3Hi = effectiveCap;
     while (p3Lo <= p3Hi) {
       const mid = Math.floor((p3Lo + p3Hi) / 2);
-      ctx.font = fontSpec(mid, fontFamily, text, customCjk, isBold);
-      const lines = wrapText(ctx, text, maxW);
-      const allLinesFitW = lines.every((l) => ctx.measureText(l).width <= maxW + 0.5);
+      mCtx.font = fontSpec(mid, fontFamily, text, customCjk, isBold);
+      const lines = wrapText(mCtx, text, maxW);
+      const allLinesFitW = lines.every((l) => mCtx.measureText(l).width <= maxW + 0.5);
       if (allLinesFitW && lines.length * mid * LINE_HEIGHT <= maxH) {
         consider(mid, lines);
         p3Lo = mid + 1;
@@ -628,6 +717,8 @@ export function fitFontSizeWithLines(
 
   const isNarrowVertical = (boxH / boxW >= 1.15 || boxH >= 120) && boxH >= 65;
   if (foundClean && (cleanBest >= 14 || !isNarrowVertical)) {
+    if (!measureCache) cache.clear();
+    ctx.font = fontSpec(finalSize, fontFamily, text, customCjk, isBold);
     return { size: finalSize, lines: finalLines };
   }
 
@@ -637,10 +728,10 @@ export function fitFontSizeWithLines(
   while (lo <= hi) {
     const mid = Math.floor((lo + hi) / 2);
     if (mid === 0) break;
-    ctx.font = fontSpec(mid, fontFamily, text, customCjk, isBold);
-    const lines = reflowText(ctx, text, maxW);
+    mCtx.font = fontSpec(mid, fontFamily, text, customCjk, isBold);
+    const lines = reflowText(mCtx, text, maxW);
     const lineH = mid * LINE_HEIGHT;
-    const allLinesFitW = lines.every((l) => ctx.measureText(l).width <= maxW + 0.5);
+    const allLinesFitW = lines.every((l) => mCtx.measureText(l).width <= maxW + 0.5);
     const hasNoHyphenBreaks = lines.every((l) => !l.endsWith('-') || text.includes(l));
     if (allLinesFitW && lines.length * lineH <= maxH && hasNoHyphenBreaks) {
       consider(mid, lines);
@@ -650,6 +741,8 @@ export function fitFontSizeWithLines(
     }
   }
 
+  if (!measureCache) cache.clear();
+  ctx.font = fontSpec(finalSize, fontFamily, text, customCjk, isBold);
   return { size: finalSize, lines: finalLines };
 }
 

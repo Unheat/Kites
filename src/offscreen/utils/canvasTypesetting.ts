@@ -7,9 +7,10 @@ import {
   defaultLayoutFits,
   type DefaultRenderRegion
 } from './cotransDefaultRenderer';
-import { fitFontSizeWithLines, decollideBoxes, fontSpec } from './typesetLayout';
+import { fitFontSizeWithLines, decollideBoxes, fontSpec, createMeasureCache } from './typesetLayout';
 import { pickTextColor } from '../../shared/utils/textColor';
 import { getFontSizeMinimumBase } from '../engines/ocr/tallStripTiling';
+import { sanitizeTypesetText, compactSpecialSymbols } from '../../shared/utils/textCleaning';
 
 /**
  * Batch driver for translated-text rendering.
@@ -94,7 +95,7 @@ export function convertCjkPunctuation(text: string): string {
 export function segEng(text: string): string[] {
   text = text.trim();
   if (UPPERCASE_TEXT) text = text.toUpperCase();
-  text = text.replace('  ', ' ').replace(' .', '.').replace(/\n/g, ' ');
+  text = text.replace(/\s{2,}/g, ' ').replace(/\s+([.,!?:;])/g, '$1').replace(/\n/g, ' ');
 
   // Ensure spaces after sentence punctuation followed by a letter/number
   let processedText = '';
@@ -574,6 +575,7 @@ function renderTextBlocksDefault(
     fixed: boolean;
   }[] = [];
   const dialogueSizes: number[] = [];
+  const pageMeasureCache = createMeasureCache(ctx);
 
   for (let i = 0; i < blocks.length; i++) {
     const b = blocks[i];
@@ -636,9 +638,10 @@ function renderTextBlocksDefault(
         const normV = Math.hypot((bl.x + br.x) / 2 - (tl.x + tr.x) / 2, (bl.y + br.y) / 2 - (tl.y + tr.y) / 2);
         // Keep the Disabled/free-box baseline unchanged. Fixed layouts use the exact
         // renderer normalization shared with the layout solver's measurement callback.
+        const sanitizedTranslation = sanitizeTypesetText(compactSpecialSymbols(translation));
         const fitted = fixed
-          ? measureDefaultLayout(ctx, translation, normH, normV, targetFontSize, undefined, fontFamily, isBold)
-          : fitFontSizeWithLines(ctx, translation, fontFamily, normH, normV, targetFontSize, Math.max(targetFontSize, 48), 0.05, undefined, isBold);
+          ? measureDefaultLayout(ctx, sanitizedTranslation, normH, normV, targetFontSize, undefined, fontFamily, isBold, pageMeasureCache)
+          : fitFontSizeWithLines(ctx, sanitizedTranslation, fontFamily, normH, normV, targetFontSize, Math.max(targetFontSize, 48), 0.05, undefined, isBold, pageMeasureCache);
         dialogueSizes.push(fitted.size);
       }
       planned.push({ index: i, region, dstPoints, targetFontSize, wordCount, fixed });
@@ -694,7 +697,7 @@ function renderTextBlocksDefault(
       const baselineCap = !plan.fixed && pageDialogueBaseline > 0 && isShortNonShout
         ? Math.max(18, Math.round(pageDialogueBaseline * 1.25))
         : undefined;
-      const info = renderRegionDefault(ctx, plan.region, plan.dstPoints, plan.targetFontSize, baselineCap, fontFamily, isBold);
+      const info = renderRegionDefault(ctx, plan.region, plan.dstPoints, plan.targetFontSize, baselineCap, fontFamily, isBold, pageMeasureCache);
       if (info) {
         results[plan.index] = {
           fontSize: info.fontSize,
@@ -710,6 +713,7 @@ function renderTextBlocksDefault(
     }
   }
 
+  pageMeasureCache.clear();
   return results;
 }
 
@@ -835,15 +839,21 @@ function renderTextBlocksLegacy(
     ctx.fillStyle = textColor;
     ctx.strokeStyle = strokeColor;
     ctx.lineWidth = Math.max(2, Math.floor(meta.fontSize * 0.15));
+    ctx.lineJoin = 'round';
+    ctx.miterLimit = 2;
 
-    let startY = -meta.totalHeight / 2 + meta.lineHeight / 2;
-
-    for (const line of meta.lines) {
-      if (strokeColor && strokeColor !== 'transparent') {
-        ctx.strokeText(line, 0, startY);
+    if (strokeColor && strokeColor !== 'transparent') {
+      let strokeY = -meta.totalHeight / 2 + meta.lineHeight / 2;
+      for (const line of meta.lines) {
+        ctx.strokeText(line, 0, strokeY);
+        strokeY += meta.lineHeight;
       }
-      ctx.fillText(line, 0, startY);
-      startY += meta.lineHeight;
+    }
+
+    let fillY = -meta.totalHeight / 2 + meta.lineHeight / 2;
+    for (const line of meta.lines) {
+      ctx.fillText(line, 0, fillY);
+      fillY += meta.lineHeight;
     }
 
     ctx.restore();
