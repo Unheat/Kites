@@ -155,6 +155,63 @@ This document preserves the complete technical background, rationale, and implem
 * **The Invariant Fix (Algorithmic Hysteresis):**
   Never attempt to force FP64 emulation in the browser. Instead, use an algorithmic hysteresis buffer: `src/offscreen/engines/ocr/extractPolygons.ts` sets `BOX_THRESHOLD = 0.5` (lowered from default `0.6`). This 10% safety buffer absorbs the 0.004 browser precision drift with zero lost text blocks.
 
+---
+
+## 11. Alexandru Telea FMM Gradient Stabilization & Taylor Series Boundary Capping
+
+**Affected Files:** [`src/offscreen/engines/inpaint/TeleaInpaintEngine.ts`](file:///Users/dangtruongan/study/Kites/src/offscreen/engines/inpaint/TeleaInpaintEngine.ts), `src/offscreen/engines/inpaint/telea.ts`  
+**Related Devlog:** [`043_phase43_real_telea_fmm_precise_fill_and_centralized_inpaint_catalog.md`](file:///Users/dangtruongan/study/Kites/docs/dev-history/devlog/043_phase43_real_telea_fmm_precise_fill_and_centralized_inpaint_catalog.md)  
+**Related ADR:** [`ADR-007-alexandru-telea-fmm-inpainting-and-centralized-catalog.md`](file:///Users/dangtruongan/study/Kites/docs/decisions/ADR-007-alexandru-telea-fmm-inpainting-and-centralized-catalog.md)
+
+* **Why classical Telea FMM produces Taylor gradient explosions in pure TypeScript:**
+  Classical Fast Marching Method (FMM) approximates image gradients $\nabla I$ along the distance wavefront $T(x,y)$:
+  $$I(p) = I(q) + \nabla I(q) \cdot (p - q)$$
+  Where normalized gradient vectors $\mathbf{n} = \frac{\nabla T}{\|\nabla T\|}$ direct pixel sampling. Near sharp polygon corners or zero-distance contours, dividing by $\|\nabla T\| \to 0$ causes division by zero. In JavaScript, this yields `NaN` or `Infinity`, corrupting pixel buffers and trapping the narrow-band priority queue in an infinite loop.
+* **The Invariant Fix (Epsilon Guards & Clamping):**
+  Add an explicit numerical epsilon guard ($\epsilon = 10^{-6}$):
+  $$\mathbf{n} = \frac{\nabla T}{\sqrt{\|\nabla T\|^2 + \epsilon}}$$
+  Clamp directional offsets to $\pm 1$ pixel and discard gradient contributions that fall outside the patch canvas boundary. This guarantees stable, deterministic inpainting without browser lockup.
+
+---
+
+## 12. Studio Pointer Gesture State Machine & 3px Drag Deadzone
+
+**Affected Files:** [`src/studio/canvas/StudioCanvas.tsx`](file:///Users/dangtruongan/study/Kites/src/studio/canvas/StudioCanvas.tsx), [`src/studio/canvas/CanvasFurniture.ts`](file:///Users/dangtruongan/study/Kites/src/studio/canvas/CanvasFurniture.ts)  
+**Related Devlog:** [`048_phase48_reader_studio_runtime_improvements.md`](file:///Users/dangtruongan/study/Kites/docs/dev-history/devlog/048_phase48_reader_studio_runtime_improvements.md)
+
+* **Why rapid clicking froze Studio text dragging:**
+  Native browser pointer events fire `pointerdown` and `dblclick` in rapid succession. If drag states and double-click timers are managed simultaneously inside `pointerdown`, rapid clicks on a box are misclassified as drag attempts or text-editing entries, locking mouse capture and leaving the box frozen during subsequent movements.
+* **The Invariant Fix (Screen-Pixel Deadzone & PointerUp Disambiguation):**
+  1. Treat mouse displacement below 3 screen pixels as stationary. Only transition to drag mode when movement exceeds 3px (`hasMoved = true`).
+  2. Shift double-click inline text editing detection strictly to `handlePointerUp` when `hasMoved === false` and click delta $< 350\text{ ms}$ on the identical box ID.
+  3. Clamp resize handle radii in `CanvasFurniture.ts` to `Math.max(3, Math.min(w, h) * 0.28)`. This guarantees that corner and edge resize handles never swallow the center body of narrow vertical dialogue bubbles.
+  4. Throttle binary search layout recalculations to `requestAnimationFrame` ticks during box transformations to prevent 60–240 Hz UI thrashing.
+
+---
+
+## 13. Strict 7-Letter Hyphenation & Korean Hangul Script Invariants
+
+**Affected Files:** [`src/offscreen/utils/typesetLayout.ts`](file:///Users/dangtruongan/study/Kites/src/offscreen/utils/typesetLayout.ts), [`src/shared/utils/textCleaning.ts`](file:///Users/dangtruongan/study/Kites/src/shared/utils/textCleaning.ts)  
+**Related Devlog:** [`049_phase49_typesetting_text_postprocess_and_dual_engine.md`](file:///Users/dangtruongan/study/Kites/docs/dev-history/devlog/049_phase49_typesetting_text_postprocess_and_dual_engine.md)  
+**Related ADR:** [`ADR-008-dual-typesetting-engine-and-advanced-typography-invariants.md`](file:///Users/dangtruongan/study/Kites/docs/decisions/ADR-008-dual-typesetting-engine-and-advanced-typography-invariants.md)
+
+* **Never allow hyphenation on words shorter than 7 letters:**
+  Lowering the hyphenation threshold for narrow speech bubbles (e.g. allowing 4-letter stems) produces awkward, jarring breaks in dialogue (`th-at`, `wi-th`, `fo-rce`). Stems shorter than 7 characters (`stem.length < 7`) must wrap whole to the next line or scale down via binary search font fitting. Words $\ge 7$ letters must retain at least 3 letters on the head line and 3 letters on the tail line.
+* **Keep Korean Hangul in `CJK_SCRIPT_REGEX`:**
+  Omitting Hangul Unicode blocks (`\uac00-\ud7af`, `\u1100-\u11ff`, `\u3130-\u318f`) routes Korean text into Latin text sanitizers, corrupting East Asian corner brackets `「` `」` into ASCII quotes and converting name-separator interpuncts `・` into periods. Always include Hangul ranges in `CJK_SCRIPT_REGEX`.
+
+---
+
+## 14. Canvas Untaint & Same-Origin Data URL / Blob Normalization for Studio Export
+
+**Affected Files:** [`src/studio/canvas/StudioCanvas.tsx`](file:///Users/dangtruongan/study/Kites/src/studio/canvas/StudioCanvas.tsx), [`src/studio/tools/StudioExportMenu.tsx`](file:///Users/dangtruongan/study/Kites/src/studio/tools/StudioExportMenu.tsx)  
+**Related Devlog:** [`046_phase46_advanced_lettering_rotation_untaint_peek_shortcuts.md`](file:///Users/dangtruongan/study/Kites/docs/dev-history/devlog/046_phase46_advanced_lettering_rotation_untaint_peek_shortcuts.md)
+
+* **Why direct canvas export throws `SecurityError: The operation is insecure`:**
+  Under HTML5 canvas security specifications, drawing an image loaded from a cross-origin URL without CORS headers marks the canvas as "tainted". Any subsequent call to `canvas.toDataURL()` or `canvas.toBlob()` throws a fatal `SecurityError`.
+* **The Invariant Fix (Origin Isolation via Blobs):**
+  Never draw raw remote web image URLs directly onto the export canvas. Always resolve source images through IndexedDB (`GET_JOB_IMAGE`) or background fetchers, converting image bytes into same-origin Blob URLs (`URL.createObjectURL(blob)`) or base64 Data URLs prior to canvas rendering.
+
 
 
 

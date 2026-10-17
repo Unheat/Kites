@@ -31,16 +31,16 @@ flowchart TD
         NoiseFilter["14-Stage Noise Battery &<br/>Kruskal-MST Grouping"]:::offscreen
         
         subgraph ParallelCompute["Parallel Compute Branches"]
-            InpaintEng["Polygon-Strict Inpainting<br/>(LaMa 64px / AOT-GAN / Simple Hist)"]:::offscreen
+            InpaintEng["Polygon-Strict Inpainting<br/>(LaMa 64px / AOT-GAN / Telea FMM / Simple)"]:::offscreen
             TransWaterfall["Keyed JSON Translation Waterfall<br/>(WebLLM / Cloud Pool / Google)"]:::offscreen
         end
 
-        Typesetter["4-Pass Binary Search Typesetter<br/>& Affine Matrix Canvas Bake"]:::offscreen
+        Typesetter["Dual Typesetting Engine<br/>(Auto Balloon / Simple Wrap & Affine Bake)"]:::offscreen
     end
 
     subgraph StorageLayer["4. Storage & Post-Editing (db.ts & App.tsx)"]
         IndexedDB["Dexie.js IndexedDB<br/>(Clean Plate + TextBlocks, 7-Day TTL)"]:::storage
-        StudioApp["Kites Studio Editor<br/>(Interactive 8-Point Bounding Boxes)"]:::storage
+        StudioApp["Kites Studio V2 & Chapter Reader<br/>(Gesture State Machine, Inpaint & ZIP Export)"]:::storage
     end
 
     DOMImg --> HoverBtn
@@ -125,6 +125,8 @@ Key technical decisions and architectural trade-offs are documented under [`docs
 - **[ADR-004: 1D In-Memory Canvas Tiling for Tall Webtoons](decisions/ADR-004-1d-in-memory-tiled-ocr-for-webtoons.md)** — Why 1D in-memory canvas tiling was chosen over DOM splitting or viewport scrolling.
 - **[ADR-005: Dexie IndexedDB Clean Plate Storage Architecture](decisions/ADR-005-dexie-indexeddb-clean-plate-storage.md)** — Why clean inpainted backgrounds are persisted separately from text blocks.
 - **[ADR-006: Hybrid Bubble Detection & Conservative Sub-Chamber Partitioning](decisions/ADR-006-hybrid-bubble-detection-and-conservative-subchamber-partitioning.md)** — Why single balloons expand into safe cores while ambiguous multi-lobe balloons safely fall back to the exact Disabled tier.
+- **[ADR-007: Alexandru Telea Fast Marching Method (FMM) Inpainting & Centralized Inpaint Catalog](decisions/ADR-007-alexandru-telea-fmm-inpainting-and-centralized-catalog.md)** — Why native Telea FMM was implemented to provide 0MB line-preserving inpainting and why inpainting tiers are centralized.
+- **[ADR-008: Dual Typesetting Engine Architecture & Advanced Typography Post-Processing Invariants](decisions/ADR-008-dual-typesetting-engine-and-advanced-typography-invariants.md)** — Why Auto Balloon and Simple Wrap modes coexist, and how Kinsoku Shori, 7-letter hyphenation, and MeasureCache guarantee scanlation-grade lettering.
 
 ---
 
@@ -133,13 +135,15 @@ Key technical decisions and architectural trade-offs are documented under [`docs
 - **[Development Setup](development/setup.md)** — Toolchain prerequisites (Node.js 22.14 LTS), Chrome WebGPU flags, and building with Vite + CRXJS.
 - **[Testing & Quality Gates](development/testing.md)** — Automated unit testing (`npm test`), E2E browser tests, and standalone visual tests.
 - **[Coding Standards & Invariants](development/coding-standards.md)** — WebGPU lifecycle, defensive programming, docstring requirements, and no magic numbers/strings.
-- **[Workarounds & Upstream Mitigations](development/workarounds.md)** — Documented mitigations for Vite 8 / Rolldown, CRXJS 2.7.1, SPA image replacement, and WebGPU state restoration.
+- **[Workarounds & Upstream Mitigations](development/workarounds.md)** — Documented mitigations for Vite 8 / Rolldown, CRXJS 2.7.1, SPA image replacement, WebGPU state restoration, and Telea Taylor gradient stabilization.
 - **[Speech Bubble Detection & Typesetting Plan](development/bubble_detection_and_typesetting_upgrade_plan.md)** — Complete specification for Tier 1 Heuristic, Tier 2 Neural YOLO, sub-chamber partitioning, and future segmentation research.
+- **[Reader & Studio Runtime Improvement Plan](development/reader-studio-runtime-improvement-plan.md)** — Architectural blueprint for gesture state machines, AI cold-start lifecycle feedback, and chapter memory bounding.
+- **[Typesetting & Text Post-Processing Improvement Plan](development/typesetting-text-postprocess-plan.md)** — Specifications for Korean Hangul hygiene, Japanese Kinsoku Shori line breaking, comic crossbar "I" convention, and MeasureCache layout memoization.
 
 ---
 
 ### 🗄️ Historical Development Archive
 
 All historical development records, research reports, and phase logs are preserved in:
-- **[`docs/dev-history/devlog/`](dev-history/devlog/)** — 24 detailed development phase logs covering architectural milestones, bug investigations, and performance tuning.
+- **[`docs/dev-history/devlog/`](dev-history/devlog/)** — 49 detailed development phase logs covering architectural milestones, bug investigations, and performance tuning.
 - **[`docs/fullplan.md`](fullplan.md)** — The master project scope specification and roadmap.

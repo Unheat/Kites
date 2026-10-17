@@ -133,6 +133,59 @@ When users move their cursor rapidly across panel boundaries, mouseleave events 
 
 ---
 
+## 📖 Distraction-Free Chapter Reader & Streaming Mode (`ChapterReaderModal.tsx`)
+
+To provide an immersive comic reading experience without intrusive webpage clutter or ads, Kites incorporates the **Distraction-Free Chapter Reader**:
+
+```mermaid
+flowchart TD
+    PageImages["Translated Webpage / Gallery Images"] --> ScopeResolver["Canonical Chapter Scope Resolver<br/>(getChapterScopeId)"]
+    ScopeResolver --> StackHub["Stack & Batch Scan Hub"]
+    StackHub --> ReaderTrigger{"User Action"}
+    ReaderTrigger -->|Open Reader| ModalView["Fullscreen Reader Modal<br/>(CSS Isolated Container)"]
+    ReaderTrigger -->|Export ZIP| ZipExporter["Ordered Chapter ZIP Archiver<br/>(128 MiB Session Budget Guard)"]
+
+    ModalView --> ViewMode{"Reading Mode"}
+    ViewMode -->|Webtoon| ContinuousScroll["Vertical Continuous Scroll"]
+    ViewMode -->|Single| SingleSpread["Single Page Spread"]
+    ViewMode -->|Double| DoubleSpread["Double Page Manga Spread"]
+
+    StreamingQueue["Background Translation Pipeline"] -.->|Live Hot-Swap| ModalView
+```
+
+### 1. CSS Style Isolation & Recycled Image Guards
+- **Container Isolation:** Renders inside a dedicated root element (`#kites-reader-modal-root`) with CSS resets, ensuring host website styles, floating ads, and navigation bars cannot contaminate reader layouts.
+- **Recycled Image Reset:** Modern infinite-scroll manga websites recycle DOM `<img>` tags as users scroll down. Kites tracks image source hashes and resets translated overlays whenever an element is recycled for a new image.
+
+### 2. Canonical Chapter Scope Resolver (`getChapterScopeId`)
+- Defined in `src/shared/siteRules.ts` as the single source of truth across the Reader modal, ZIP exporter, and Stack selection hub.
+- **Paginated Gallery Normalization:** Automatically strips trailing numeric page segments (e.g. `https://nhentai.net/g/677759/6/` $\to$ `https://nhentai.net/g/677759/`), allowing translated pages across sequential URL navigations to accumulate under one unified chapter gallery.
+
+### 3. Streaming Chapter Reader & Live Hot-Swap
+- Users can launch the reader immediately with untranslated or partially translated chapters.
+- As the background translation worker finishes pages, the reader dynamically hot-swaps low-res originals with freshly translated clean plates without disrupting the user's reading position.
+
+### 4. 128 MiB Session Memory Budget Guard
+- To prevent browser tab crashes during 100+ page webtoon translation sessions:
+  - Enforces `SESSION_IMAGE_BYTE_LIMIT = 128 * 1024 * 1024` (128 MiB) via `estimateDataUrlBytes` in `chapterZip.ts`.
+  - Safely prunes memory-resident blobs while keeping host DOM elements and persistent Dexie records intact.
+
+---
+
+## ⌨️ In-Page Reading Shortcuts & Custom Site Rules
+
+### 1. Cross-Platform Reading Hotkeys
+Kites registers global keyboard shortcuts with cross-platform keydown fallbacks:
+- `Alt + Shift + Z`: Translates the currently hovered comic panel or visible viewport image.
+- `Alt + Shift + X`: Launches the Xnip-style Screen Crop overlay tool.
+- `F`: Instantly toggles between the translated composite and the original raw artwork (Peek mode).
+
+### 2. Domain Disable Toggle & Blacklist
+- Users can disable Kites on specific domains with a single click from the popup.
+- Blacklisted domains and custom CSS selectors are persisted in `chrome.storage.local` under centralized keys registered in `STORAGE_KEYS`.
+
+---
+
 ## ✂️ Screen Crop Translation Subsystem (`captureArea.ts`)
 
 For comics rendered inside protected HTML5 `<canvas>` elements, WebGL games, or complex iframe readers where direct DOM image extraction is impossible, Kites provides the **Screen Crop Tool**:

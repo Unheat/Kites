@@ -26,15 +26,16 @@ graph TD
 ```
 
 ### 1. WebGPU (JSEP) Execution Provider
-Kites leverages **ONNX Runtime Web (`onnxruntime-web`)** with the JavaScript Execution Provider (JSEP) for WebGPU:
+Kites leverages **ONNX Runtime Web (`onnxruntime-web` 1.30.0)** with the JavaScript Execution Provider (JSEP) for WebGPU:
 - Direct shader dispatch for matrix multiplications, convolutions, and attention kernels.
 - Bypasses WebGL overhead and CPU round-trips.
 - Preference: `powerPreference: 'high-performance'` to engage discrete GPUs on dual-GPU laptops.
+- **WebGPU Precision Invariant:** FP32 precision is strictly preserved for OCR text recognition and LaMa Fast Fourier Convolutions to prevent character recognition drift and FFT color banding. Experimental `shader-f16` is reserved exclusively for YOLO bubble detection ($<0.2\%$ mAP impact, $50\%$ model size reduction).
 
 ### 2. WebAssembly (WASM SIMD) Fallback
 If WebGPU is disabled by enterprise policy, unsupported by hardware, or encounters driver errors:
 - Kites gracefully falls back to multi-threaded WASM SIMD (`ort-wasm-simd-threaded.wasm`).
-- Inpainting falls back to CPU Fast Marching (Telea) or Instant Simple Fill.
+- Inpainting falls back to Alexandru Telea Fast Marching (FMM) or Instant Simple Fill.
 - Translation switches to the Cloudflare Shared Pool or remote APIs.
 
 ---
@@ -112,13 +113,14 @@ graph TD
 ```
 
 ### 1. WebLLM (On-Device WebGPU Inference)
-- **Framework:** `@mlc-ai/web-llm` running TVM/Relax compiled WebGPU shaders.
+- **Framework:** `@mlc-ai/web-llm` (v0.2.86) running TVM/Relax compiled WebGPU shaders.
 - **Privacy Guarantee:** Complete on-device execution. Model weights are cached locally in the browser's Cache API / IndexedDB.
-- **Supported Models:**
-  - `Qwen2.5-1.5B-Instruct-q4f16_1-MLC` (Best multilingual performance for Asian languages).
-  - `Llama-3.2-1B-Instruct-q4f16_1-MLC` (Strong Latin/English translation).
-  - `Phi-3.5-mini-instruct-q4f16_1-MLC` (High reasoning capacity).
-  - `SmolLM2-135M-Instruct-q0f16-MLC` (Ultra-lightweight test tier).
+- **Curated 2026 Model Registry:**
+  - `Qwen2.5-1.5B-Instruct-q4f16_1-MLC` & `Qwen3-1.7B-Instruct-q4f16_1-MLC` (Leading multilingual performance for Japanese, Korean, and Chinese manga).
+  - `Llama-3.2-1B-Instruct-q4f16_1-MLC` (Fast, high-quality Latin/Western dialogue).
+  - `Gemma-3-1B-it-q4f16_1-MLC` (Compact Google vision/text architecture).
+  - `Ministral-3B-Instruct-q4f16_1-MLC` (High reasoning capacity for dense literary prose).
+  - `SmolLM2-135M-Instruct-q0f16-MLC` (Ultra-lightweight pipeline verification tier).
 
 ### 2. Cloudflare Shared Pool (`worker/`)
 - Edge-hosted community pool with multi-provider failover:
@@ -174,12 +176,17 @@ graph TD
 
 ---
 
-## 💾 Model Caching & Lifecycle Management
+## 💾 Model Caching, Lifecycle Management & Tensor Disposal
 
 1. **Persistent Browser Cache API (`caches.open('kites-model-cache')`):**
    - ONNX model buffers (`.onnx`), external tensor blobs (`.data`), and character dictionaries (`.txt`) are cached upon first download.
    - Subsequent extension launches load models from local disk cache with zero network requests.
-2. **Monotonic Progress Reporting:**
+2. **Multi-Stage Cold-Start Lifecycle Feedback:**
+   - Cold model initialization across `ocr`, `inpaint`, `translation`, and `bubble` managers triggers `ModelInitializationMessage` events.
+   - UI status indicators display informative badges (e.g. `"Preparing OCR (v6-medium)…"`) with a snappy 150ms debounce, giving instant feedback when switching tiers.
+3. **Explicit Tensor Ownership & Memory Disposal:**
+   - All ONNX inference blocks (`NeuralBubbleDetector`, `CustomPaddleDetector`, `PaddleOcrEngine`) execute inside `try ... finally` blocks.
+   - Input tensors (`tensorImages`, `orig_target_sizes`) and all returned output tensors explicitly call `.dispose()` immediately after reading data, preventing WebGPU VRAM leaks.
+4. **Monotonic Progress Reporting & Session Eviction:**
    - Background downloads emit `MODEL_DOWNLOAD_PROGRESS` events to update extension UI progress bars.
-3. **Graceful Engine Eviction:**
-   - When users switch OCR or Inpainting tiers in settings, the previous ONNX session or WebLLM instance is cleanly disposed of via `engine.destroy()`, releasing GPU buffers and WebGPU VRAM.
+   - When users switch OCR or Inpainting tiers in settings, previous ONNX sessions or WebLLM instances are cleanly disposed of via `engine.destroy()`, releasing GPU buffers and WebGPU VRAM.

@@ -79,24 +79,55 @@ Kites adopts a **Clean Plate Architecture**:
 
 ---
 
-## 📐 Interactive 8-Handle Bounding Box Manipulation
+## 📐 Interactive Bounding Box Manipulation & Gesture State Machine
 
-In Kites Studio, each speech balloon is represented as an interactive bounding box overlay:
+In Kites Studio, each speech balloon is represented as an interactive bounding box overlay managed through a robust gesture state machine:
 
-### 1. 8-Directional Resize Handles
-Users can interact with 8 distinct resize anchors:
-$$\text{Handles} = \{\text{n}, \text{s}, \text{e}, \text{w}, \text{nw}, \text{ne}, \text{se}, \text{sw}\}$$
-- Dragging a corner handle scales both width and height simultaneously.
-- Dragging an edge handle adjusts a single dimension while clamping opposite edges.
+### 1. Pointer Gesture State Machine & Drag Deadzone
+To eliminate conflicts between selection, double-click editing, and dragging:
+1. **Screen-Pixel Deadzone (3px):** Mouse movements below 3px screen distance are treated as stationary clicks. Movement exceeding 3px transitions to active dragging and sets `hasMoved = true`.
+2. **Double-Click Disambiguation:** Double-click detection for inline text editing occurs on `handlePointerUp` only when `hasMoved === false` and the time delta between clicks is $< 350\text{ ms}$ on the same target. This guarantees that dragging at any speed never freezes or accidentally triggers text editing.
+3. **RAF-Throttled Layout Reflow:** Binary search font fitting (`recalculateBlockTypeset`) is throttled to `requestAnimationFrame` ticks during live move/resize gestures, preventing 60–240 Hz layout thrashing and UI stutter.
+4. **Handle Hit Radius Clamping:** Resize handle hit radii in `CanvasFurniture.ts` are dynamically clamped:
+   $$R_{\text{handle}} = \max\left(3, \min(W, H) \times 0.28\right)$$
+   This ensures corner/edge handles never swallow the interior body of narrow vertical dialogue bubbles, keeping them easily draggable.
+5. **Cancellation Rollback:** Handling `pointercancel` cleanly restores the box transform to the `initialTransform` snapshot without saving dirty undo transactions.
 
 ### 2. Viewport-to-Canvas Coordinate Normalization
 User pointer interactions take place in viewport CSS pixels, which vary with zoom level and pan offsets. Kites normalizes pointer coordinates to the image's original native pixels:
 $$X_{\text{natural}} = \frac{X_{\text{pointer}} - X_{\text{pan}}}{\text{Scale}}$$
 $$Y_{\text{natural}} = \frac{Y_{\text{pointer}} - Y_{\text{pan}}}{\text{Scale}}$$
 
-### 3. Live Layout Reflow & Auto-Persistence
-- As bounding boxes are resized in real time, the typesetting engine immediately reflows text to preview wrapping.
-- When the pointer is released (`pointerup`), updated coordinates and font dimensions are automatically persisted to Dexie IndexedDB.
+### 3. Rotated Transforms & Curved Handle Snapping
+- **Angle Persistence:** Persists OCR detected orientation angles (`angle`) on text blocks.
+- **Rotation Slider & Handle:** Features a rotation slider and curved rotation handle with angular snapping (snaps to multiples of $45^\circ$ within a $3^\circ$ threshold).
+- **Affine Matrix Transformation:** Bounding box furniture, selection outlines, and text lines rotate synchronously around the box centroid using 2D canvas transforms.
+
+---
+
+## 🎛️ Dual Typesetting Engine Toggle (Auto Balloon vs Simple Wrap)
+
+Studio V2 provides a dedicated **Typesetting Engine** switcher in `TypographySettings.tsx` (see ADR-008):
+
+```mermaid
+flowchart TD
+    ModeSelect{"Typesetting Engine Mode"}
+    ModeSelect -->|Auto Balloon| Auto["Auto Balloon Engine<br/>(4-Pass Binary Search + Diamond Stanza)"]
+    ModeSelect -->|Simple Wrap| Simple["Simple Wrap Engine<br/>(Greedy Rectangular Wrap at Fixed Size)"]
+    Auto --> Reflow["Dynamic Font Reflow on Box Resize"]
+    Simple --> Fixed["Predictable Caption Wrapping"]
+```
+
+1. **`Auto Balloon` Mode (Default for Detected Dialogue):**
+   - Implements 4-pass binary search fitting and balanced diamond line-envelope wrapping (`typesetLayout.ts`).
+   - Automatically reflows line wraps and scales font size as the user drags resize handles.
+   - Employs strict 7-letter hyphenation and Kinsoku Shori punctuation rules.
+2. **`Simple Wrap` Mode (For Narration & Rectangular Boxes):**
+   - Implements greedy rectangular word-wrapping at a fixed user-defined font size (`studioTypeset.ts`).
+   - Preserves exact user font choices without automatic downscaling or diamond curvature.
+3. **Dual Editing Scope Integration:**
+   - When text boxes are selected, toggling updates the active boxes locally.
+   - When no text boxes are selected, toggling updates the global studio default for newly created boxes.
 
 ---
 
@@ -164,22 +195,39 @@ Studio V2 provides direct on-canvas dialogue editing and interactive inpainting:
   $$\text{Padding}_{\text{vert}} = \max\left(0, \left\lfloor \frac{\text{BoxHeight} - \text{ContentHeight}}{2} \right\rfloor \right)$$
 - **CJK Vertical Mode:** When text contains CJK glyphs and `isVertical` is true, applies `writingMode: 'vertical-rl'`.
 
-### 2. Localized AI Brush Inpainting
-- When brushing over artwork defects or untranslated SFX in Inpaint mode:
+### 2. Localized AI Brush Inpainting & 3-Way View Mode
+- **3-Way View Switcher:** Toggles canvas display between:
+  - `Original`: Displays the untouched raw image for quick verification.
+  - `Inpainted`: Displays the clean plate background with all dialogue layers hidden, enabling dedicated artwork inspection.
+  - `Typeset`: Displays the full composite translated page.
+- **Inpaint Source Selection:** Allows users to choose whether manual brush operations sample from the `Inpainted` background plate (default) or the `Original` raw image.
+- **Universal Brush Gestures:** Supports continuous click-and-drag strokes for erase and paint brushes with live overlay previews.
+- **Stroke Mask Extraction:**
   1. `BrushEngine` records the user's stroke raster into `dabCanvas`.
   2. `StudioCanvas` renders the exact stroke path into `maskCanvas` with relative crop offsets.
   3. Offscreen RPC decodes the mask patch and runs `extractMaskPolygons()` using connected-component analysis, extracting tight 4-point bounding polygons for each drawn stroke blob.
   4. The inpaint manager erases strictly within the stroke contours, preserving unstroked context across the rest of the patch.
 
-### 3. Reactive Store Invariants for Hotkeys
-- Canvas hotkeys (`Delete`, `Backspace`, `Ctrl+D`) read live state from `studioStore.getState().textObjects` rather than stale component closures, preventing accidental reverts of intervening dialogue edits.
+### 3. Partial Word Styling & Inline Runs
+- Allows users to highlight specific words or phrases inside a dialogue box and apply distinct typography (e.g. bold emphasis, alternate color, or custom font preset) without splitting the container.
+- Prevents resize handle collisions and cursor thrashing on small highlighted words.
+
+### 4. Reactive Store Invariants for Hotkeys & Context Menu
+- Canvas hotkeys (`Delete`, `Backspace`, `Ctrl+D`, `Space` for pan) read live state from `studioStore.getState().textObjects` rather than stale component closures, preventing accidental reverts of intervening dialogue edits.
+- Custom canvas context menu provides quick access to box duplication, z-index reordering (`Bring to Front`, `Send to Back`), deletion, and OCR re-scanning.
 
 ---
 
-## 📤 High-Resolution Lossless Export
+## 📤 High-Resolution Lossless Export & Canvas Untaint
 
 Kites Studio renders directly onto a hidden full-resolution `OffscreenCanvas`:
-1. Renders the clean inpainted background bitmap at 100% scale.
-2. Renders each `TextBlock` using vector canvas primitives (`fillText`, `strokeText`, `setTransform`).
-3. Encodes the result as a lossless `image/png` blob.
-4. Triggers automatic browser download or copies the bitmap directly to the system clipboard.
+1. **Canvas Untaint Guard:** Ensures all source images (clean plate blobs and background layers) are loaded as same-origin Blobs or authenticated Data URLs. Prevents browser security exceptions (`SecurityError: The operation is insecure`) when invoking `toDataURL()` or `toBlob()`.
+2. **Lossless Vector Composition:**
+   - Renders the clean inpainted background bitmap at 100% native resolution.
+   - Renders each `TextBlock` using vector canvas primitives (`fillText`, `strokeText`, `setTransform`).
+3. **Multi-Format Export:**
+   - **PNG:** Lossless compression preserving all crisp text edges and transparency.
+   - **JPEG:** High-quality lossy compression (quality 0.92) for smaller file sizes.
+   - **Clipboard Copy:** Encodes the canvas directly as a binary `image/png` clipboard item via `navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])`.
+4. **Metadata & Info Inspector:**
+   - The Studio Inspector panel displays full translation metadata: source language, target language, OCR engine tier, inpaint model used, translation provider, bounding box count, and processing timestamps.

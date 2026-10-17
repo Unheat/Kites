@@ -134,27 +134,35 @@ After clustering, bubbles across the entire page must be sequenced logically so 
 
 ### Stage 3: Polygon-Strict Inpainting (`InpaintManager.ts`)
 
-> ⚠️ **Core Architectural Contract:** Inpainting engines receive **only surviving character polygon masks**, never full speech-bubble bounding rectangles or raw DBNet probability masks. This prevents the accidental erasure of background art, screen tones, and balloon boundaries.
+> ⚠️ **Core Architectural Contract:** Inpainting engines receive **only surviving character polygon masks**, never full speech-bubble bounding rectangles or raw DBNet probability masks (see ADR-002 and ADR-007). This prevents the accidental erasure of background art, screen tones, and balloon boundaries.
+
+All inpainting engines are registered in the canonical **Centralized Inpaint Catalog** (`src/shared/inpaintTiers.ts`), which acts as the single source of truth across the entire codebase:
 
 ```mermaid
 graph TD
-    Mask[Surviving Character Polygons] --> Choice{Inpaint Engine}
+    Mask[Surviving Character Polygons] --> Choice{Inpaint Engine Router}
     Choice -->|Simple| Simple[16-Bin Luminance Histogram<br/>Adaptive Polarity Fill]
-    Choice -->|Telea| Telea[CPU Fast Marching Diffusion<br/>Radius r = 3]
-    Choice -->|LaMa Manga| LaMa[WebGPU 64px Dynamic Patch<br/>Zero-Resizing Invariant]
-    Choice -->|AOT-GAN| AOT[WebGPU Dynamic Patch<br/>Multi-Scale Dilated Convolutions]
+    Choice -->|Telea FMM| Telea[Alexandru Telea Fast Marching<br/>Binarizer Stroke Mask + Eikonal Diffusion]
+    Choice -->|LaMa Manga| LaMa[WebGPU 64px Dynamic Patch<br/>Fourier CNN ONNX Invariant]
+    Choice -->|AOT-GAN| AOT[WebGPU Dynamic Patch<br/>Multi-Scale Contextual Convolutions]
+    Choice -->|None| None[Bypass Erase<br/>Overlay Directly]
 ```
 
 1. **Simple Inpaint (Adaptive Polarity Fill):**
    - Computes a 16-bin luminance histogram of the interior patch.
    - Detects background polarity: light balloon ($\text{luminance} \ge 128$) vs dark balloon / inverted night panel ($\text{luminance} < 128$).
-   - Samples margin pixels around each character polygon and floods with the polarity-adapted background color.
-2. **Telea Inpaint (CPU Fast Marching):**
-   - Local CPU diffusion with radius $r = 3$ to reconstruct complex gradients without requiring neural weights.
+   - Samples margin pixels around each character polygon and floods with the polarity-adapted background color (`0MB` footprint, microsecond execution).
+2. **Telea Inpaint (Alexandru Telea Fast Marching Method FMM):**
+   - Pure TypeScript implementation solving the Eikonal equation $|\nabla T| = 1$ via binary min-heap narrow-band marching.
+   - **Otsu Binarizer Stroke Mask Wiring:** Erases exact text ink strokes rather than blocky boxes, with dynamic morphological dilation ($2-4\text{ px}$) to envelope anti-aliased character edges.
+   - **Taylor Series Gradient Stabilization:** Adds epsilon guards ($\epsilon = 10^{-6}$) and clamps boundary gradient vectors, completely eliminating numerical overflow (`NaN`/`Infinity`) and runaway pixel loops (ADR-007).
+   - Preserves screentones, delicate speech balloon borders, and background line art with zero model downloads (`0MB`, $15-50\text{ ms}$ per bubble).
 3. **LaMa Manga & AOT-GAN (Neural Dynamic Patching):**
    - **Dynamic 64px Bucketing:** Rather than squashing the entire page to $512\times 512$ (which destroys resolution and produces gray artifacts), crops tightly around character clusters and snaps dimensions to multiples of 64 ($\lceil\text{dim} / 64\rceil \times 64$, minimum $128\text{ px}$).
    - **Zero-Resizing Invariant:** Retains 1:1 pixel coordinates between the crop and canvas paste-back.
-   - **Mask Dilation:** Renders polygon masks with `lineWidth = 4` and `lineJoin = 'round'` to cleanly envelope anti-aliased character edges.
+   - **Mask Dilation:** Renders polygon masks with `lineWidth = 4` and `lineJoin = 'round'` (`UNCLIP_RATIO = 1.8`) to cleanly envelope anti-aliased character edges.
+4. **None (Bypass):**
+   - Bypasses text erasure entirely, overlaying translated text directly on top of the original image.
 
 ---
 
@@ -268,16 +276,29 @@ Before drawing text, Kites inspects the local pixel neighborhood around the bubb
   - $Y < 128$ (Dark panel or black speech bubble): Renders **White text** (`#FFFFFF`) with **Black stroke** (`#000000`).
   - $Y \ge 128$ (Standard white paper / light balloon): Renders **Black text** (`#000000`) with **White stroke** (`#FFFFFF`).
 
-#### 2. 4-Pass Binary Search Typography Layout
+#### 2. 4-Pass Binary Search Typography Layout & MeasureCache Memoization
 1. **Pass 1 (Binary Search Fitting):** Binary searches font size between $6\text{ px}$ and the maximum bubble height until text wraps within an inner safety padding.
 2. **Pass 2 (Tall-Box Aspect Cap):** When bubble aspect ratio $H / W \ge 2.0$, caps font size to prevent narrow speech balloons from producing oversized text.
-3. **Pass 3 (Hyphenation Scan):** For Latin text containing long words ($\ge 7$ characters) in narrow balloons, invokes algorithmic hyphenation to eliminate awkward single-word line overflows.
+3. **Pass 3 (Hyphenation Scan & Strict 7-Letter Invariant):** For Latin text in narrow balloons, invokes syllable hyphenation (`findHyphenationPoints`). Stems shorter than 7 letters are strictly forbidden from hyphenating (`stem.length < 7`), eliminating awkward breaks on short words (`wi-th`, `th-at`). Words $\ge 7$ letters require a minimum 3-letter prefix and 3-letter suffix. Contractions and digit sequences are strictly protected against hyphenation.
 4. **Pass 4 (Readability Floor):** Enforces a minimum $6\text{ px}$ font size floor.
+5. **Token Measurement Memoization (`MeasureCache`):** An in-memory cache mapping `${token}:${fontSize}:${fontFamily}` to measured pixel width eliminates $60-75\%$ of redundant `ctx.measureText()` calls during iterative binary search passes, reducing layout latency from ~140ms to ~35ms per page.
 
-#### 3. Balanced Stanza Wrapping
-Greedy wrapping creates awkward hanging words. Kites finds the minimum bounding width that preserves the optimal line count $N$, shaping dialogue into an aesthetically balanced inverted pyramid or diamond stanza.
+#### 3. Kinsoku Shori (禁則処理) & Punctuation Attachment
+To prevent orphaned punctuation marks and preserve authentic East Asian / Western typography:
+- **Line-Start Prohibitions (`KINSOKU_LINE_START_PROHIBITED`):** Closing brackets, quotation marks (`」`, `』`, `）`, `]`, `}`, `”`, `’`), and punctuation marks (`、`, `。`, `,`, `.`, `!`, `?`, `…`, `〜`) cannot start a new line. They are pulled back onto the preceding line.
+- **Line-End Prohibitions (`KINSOKU_LINE_END_PROHIBITED`):** Opening brackets and quotes (`「`, `『`, `（`, `[`, `{`, `“`, `‘`, Spanish `¿`, `¡`) cannot end a line; they bind forward to the subsequent word token.
+- **Symbol Compaction (`compactSpecialSymbols`):** Spaced single-dot ellipses (`. . .`) and multi-dot runs are normalized to `…`; spaced exclamation/question marks (`! ! !`) are compacted to `!!!`, while preserving single ASCII spaces for Western word wrap.
+- **Korean Script Protection:** `CJK_SCRIPT_REGEX` includes Hangul syllables (`\uac00-\ud7af`) and Jamo blocks, preventing Korean quotation brackets (`「`, `」`) from being converted to ASCII quotes.
 
-#### 4. Affine Matrix Placement
+#### 4. Balanced Stanza Wrapping & Dual Typesetting Modes
+- **`Auto Balloon` Mode (Default):** Shapes dialogue lines into an aesthetically balanced inverted pyramid or diamond stanza (`balancedWrapText`), matching the curved geometry of speech balloons.
+- **`Simple Wrap` Mode:** Uses greedy rectangular word wrapping at a fixed user-defined font size, tailored for rectangular captions, square signs, and SFX without diamond curvature or font shrinkage (see ADR-008).
+
+#### 5. Comic Lettering & Stroke-Then-Fill Canvas Layering
+- **Crossbar "I" Convention:** For comic fonts (`Wild Words`, `Anime Ace`, `Comic Neue`), all-caps text converts non-pronoun "I" letters to stick-I (`i`), reserving crossbar "I" strictly for personal pronouns (`I`, `I'M`, `I'LL`, `I'D`, `I'VE`) and acronyms (`FBI`, `CIA`, `AI`).
+- **Stroke-Then-Fill Layering:** Canvas rendering executes `ctx.strokeText()` prior to `ctx.fillText()`. This prevents outline strokes from bleeding into interior letter loops (`e`, `o`, `a`), ensuring clean vector boundaries.
+
+#### 6. Affine Matrix Placement
 For angled speech bubbles ($|\theta| \ge 3^\circ$), text is rendered through a 2D affine transformation matrix:
 ```ts
 ctx.translate(centerX, centerY);

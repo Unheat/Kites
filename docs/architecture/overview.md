@@ -30,25 +30,26 @@ graph TB
     subgraph OffscreenDoc["3. Offscreen Document Sandbox"]
         WebGPU["ONNX WebGPU / WASM<br/>Hardware Context"]
         OcrSvc["OcrManager<br/>(PaddleOCR & 1D Tiler)"]
-        InpaintSvc["InpaintManager<br/>(LaMa / AOT-GAN / Simple)"]
+        InpaintSvc["InpaintManager<br/>(LaMa / AOT-GAN / Telea FMM / Simple)"]
         TransSvc["TranslationManager<br/>(Keyed JSON Protocol)"]
-        RenderSvc["Canvas Renderer<br/>(Typesetting & Affine Bake)"]
+        RenderSvc["Canvas Renderer<br/>(Dual Engine: Auto Balloon / Simple Wrap)"]
     end
 
     subgraph LocalStorage["4. Browser Local Storage"]
         DexieDB[("IndexedDB (Dexie.js)<br/>Jobs · Blobs · TextBlocks")]
-        LocalStore[("chrome.storage.local<br/>User Settings & Keys")]
+        LocalStore[("chrome.storage.local<br/>User Settings, Keys & Blacklist")]
     end
 
     subgraph CloudflareBackend["5. Cloudflare Worker Backend (Optional)"]
         WorkerRouter["API Gateway Router<br/>(api.12094852.xyz)"]
         WorkerDO["Durable Object (SQLite)<br/>Quota & Rate Limiting"]
-        ProviderPool["AI Provider Pool<br/>(Groq / Mistral / OpenRouter / CF)"]
+        ProviderPool["AI Provider Pool<br/>(Groq / Mistral / Google / CF)"]
     end
 
     subgraph DesktopUI["6. Extension UI & Dashboard"]
-        PopupView["Quick Menu (Popup)<br/>Language & Mode Toggles"]
-        StudioApp["Kites Studio (App)<br/>Interactive 8-Point Editor"]
+        PopupView["Quick Menu & Batch Scanner<br/>Language, Domain Rules & Queue Hub"]
+        StudioApp["Kites Studio V2<br/>Canvas Tools, Inpaint & Dual Typeset"]
+        ReaderModal["Chapter Reader Modal<br/>Fullscreen, Webtoon Scroll & ZIP Export"]
     end
 
     UIButtons -->|TRANSLATE_IMAGE| Hub
@@ -87,12 +88,14 @@ graph TB
   - Invisible backing `<img>` layers beneath pointer overlays (Twitter/X, Pixiv).
   - SVG placeholder handling: Detects and skips inline data-URL SVG placeholders without wedging queues.
   - CSS `background-image` extraction on div-based readers.
-- **CSS Anchor Positioning:** Floats translation action buttons directly over comic panels using modern CSS Anchor Positioning without mutating host page layouts.
+- **CSS Anchor Positioning & Hover Halo:** Floats translation action buttons directly over comic panels using modern CSS Anchor Positioning with a 3px boundary halo to prevent pointer flicker.
 - **Single-Page Application (SPA) Reversion Shield:** Modern reactive SPAs (React Native for Web, Vue) re-render and wipe mutated `src` attributes. Kites mounts a targeted `MutationObserver` (`attachReversionShield`):
   - Clears `srcset` attributes to prevent responsive image resets.
   - Converts large Base64 strings to same-origin Blob URLs (`URL.createObjectURL(blob)`) to avoid DOM bloat and CSP rejections.
   - Intercepts SPA re-renders and re-applies the translated image.
 - **Screen Crop Translation (`ScreenCropManager`):** For protected canvas elements, WebGL viewers, or complex panels, users can draw a screen-pinned crop box (Xnip-style `position: fixed` viewport overlay) to translate arbitrary screen areas.
+- **Distraction-Free Chapter Reader Modal (`ChapterReaderModal.tsx`):** Provides fullscreen reading with webtoon vertical scroll and double-page spreads, live streaming page updates, canonical chapter scope resolution (`getChapterScopeId`), and ordered ZIP export bounded by a 128 MiB session budget.
+- **Reading Shortcuts:** Built-in `Alt+Shift+Z` (translate), `Alt+Shift+X` (screen crop), and `F` (peek original) hotkeys with cross-platform keydown fallbacks.
 
 👉 *Detailed guide: [`docs/architecture/content-script-and-media.md`](content-script-and-media.md)*
 
@@ -115,8 +118,9 @@ graph TB
 - **Pipeline Orchestrator (`PipelineOrchestrator.ts`):** Controls the end-to-end pipeline:
   1. OCR via `OcrManager` (with 1D tiling for $h \ge 2500\text{ px}$ images).
   2. 14-stage geometric and noise filtering + Kruskal MST bubble clustering.
-  3. Parallel execution of Inpainting and Translation via `Promise.all`.
-  4. 4-pass binary search typesetting with affine matrix canvas baking.
+  3. Parallel execution of Inpainting (Simple, Telea FMM, LaMa Manga, AOT-GAN) and Translation via `Promise.all`.
+  4. Dual-mode Typesetting (Auto Balloon with Kinsoku Shori and MeasureCache memoization vs Simple Wrap).
+  5. Affine matrix canvas baking.
 
 👉 *Detailed guide: [`docs/architecture/pipeline.md`](pipeline.md)*
 
@@ -133,7 +137,7 @@ graph TB
 - **API Gateway (`api.12094852.xyz`):** An edge-hosted translation proxy enabling shared community AI access without requiring users to purchase API keys.
 - **Durable Objects with SQLite:** Enforces daily user quotas (e.g. 50 pages/day) and sliding-window rate limits per Google account.
 - **Resilient Multi-Provider Waterfall:**
-  $$\text{Groq} \longrightarrow \text{Mistral} \longrightarrow \text{OpenRouter} \longrightarrow \text{Cloudflare Workers AI}$$
+  $$\text{Groq} \longrightarrow \text{Mistral} \longrightarrow \text{Google AI Studio} \longrightarrow \text{Cloudflare Workers AI}$$
   If one provider experiences downtime or rate limits (HTTP 429), the Worker automatically cascades to the next provider within milliseconds.
 
 👉 *Detailed guide: [`docs/architecture/backend-worker.md`](backend-worker.md)*
@@ -142,8 +146,11 @@ graph TB
 
 ### 6. Kites Studio & Typesetting Editor (`src/App.tsx`)
 - A full-screen desktop dashboard built with React 19 and Tailwind CSS 4.
-- **Interactive 8-Point Bounding Boxes:** Click any speech bubble to reposition, resize with 8 handles, edit original and translated text, adjust font families, or tweak colors.
-- **Lossless PNG Export:** Exports high-resolution 1:1 comic pages with re-rendered vector typography.
+- **Interactive 8-Point Bounding Boxes & Gesture State Machine:** 3px drag deadzone, RAF-throttled reflow, decoupled double-click editing, and clamped handle hit radii.
+- **Dual Typesetting Mode (Auto Balloon vs Simple Wrap):** Switch between dynamic binary-search diamond stanzas and predictable rectangular caption wrapping per dialogue box or globally.
+- **Advanced Lettering Tools:** Rotation angle slider with curved handle & snapping, partial word selection styling, and stroke-then-fill canvas layering.
+- **3-Way View Switcher & Universal Brushes:** Quick toggles between Original, Inpainted, and Typeset canvases with direct AI brush inpainting.
+- **Lossless PNG/JPEG & Clipboard Export:** Exports high-resolution 1:1 comic pages with canvas untaint guards.
 
 👉 *Detailed guide: [`docs/architecture/studio-and-typesetting.md`](studio-and-typesetting.md)*
 
