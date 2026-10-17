@@ -30,7 +30,7 @@ graph TB
     subgraph OffscreenDoc["3. Offscreen Document Sandbox"]
         WebGPU["ONNX WebGPU / WASM<br/>Hardware Context"]
         OcrSvc["OcrManager<br/>(PaddleOCR & 1D Tiler)"]
-        InpaintSvc["InpaintManager<br/>(LaMa / AOT-GAN / Telea FMM / Simple)"]
+        InpaintSvc["InpaintManager & Binarizer<br/>(LaMa / AOT-GAN / Telea / Precise / Simple)"]
         TransSvc["TranslationManager<br/>(Keyed JSON Protocol)"]
         RenderSvc["Canvas Renderer<br/>(Dual Engine: Auto Balloon / Simple Wrap)"]
     end
@@ -118,7 +118,7 @@ graph TB
 - **Pipeline Orchestrator (`PipelineOrchestrator.ts`):** Controls the end-to-end pipeline:
   1. OCR via `OcrManager` (with 1D tiling for $h \ge 2500\text{ px}$ images).
   2. 14-stage geometric and noise filtering + Kruskal MST bubble clustering.
-  3. Parallel execution of Inpainting (Simple, Telea FMM, LaMa Manga, AOT-GAN) and Translation via `Promise.all`.
+  3. Parallel execution of Inpainting (Simple, Precise Stroke Fill, Telea FMM, LaMa Manga, AOT-GAN) and Translation via `Promise.all`.
   4. Dual-mode Typesetting (Auto Balloon with Kinsoku Shori and MeasureCache memoization vs Simple Wrap).
   5. Affine matrix canvas baking.
 

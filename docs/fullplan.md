@@ -157,24 +157,28 @@ graph TD
     
     InpaintManager --> EngineRouter{Engine Selector}
     
-    EngineRouter -- Tier 1: Simple Fill --> SimpleEngine[SimpleInpaintEngine: Inside-Polygon Bright-Pixel Median Fill]
-    EngineRouter -- Tier 2: Telea Math --> TeleaEngine[TeleaInpaintEngine: Synthesizes Dilated Polygon Mask + FMM Diffusion]
-    EngineRouter -- Tier 3: AOT-GAN --> AotEngine[AotInpaintEngine: Polygon Mask + Quantized ONNX Model]
-    EngineRouter -- Tier 4: LaMa AI --> LamaEngine[LamaInpaintEngine: Polygon Mask + Fourier CNN ONNX Model]
-    EngineRouter -- Tier 5: None --> NoneEngine[NoneInpaintEngine: Bypass Erase]
+    EngineRouter -- Tier 1: Simple Fill --> SimpleEngine["SimpleInpaintEngine: Inside-Polygon Dominant Color Fill"]
+    EngineRouter -- Tier 2: Precise Fill --> PreciseEngine["StrokeFillInpaintEngine: Binarizer Stroke Mask + Paper Flood"]
+    EngineRouter -- Tier 3: Telea Math --> TeleaEngine["TeleaInpaintEngine: Binarizer Stroke Mask + FMM Diffusion"]
+    EngineRouter -- Tier 4: AOT-GAN --> AotEngine["AotInpaintEngine: Polygon Mask + Contextual ONNX Model"]
+    EngineRouter -- Tier 5: LaMa AI --> LamaEngine["LamaInpaintEngine: Polygon Mask + Fourier CNN ONNX Model"]
+    EngineRouter -- Tier 6: None --> NoneEngine["NoneInpaintEngine: Bypass Erase"]
     
     ImageBuffer --> SimpleEngine
     Polygons -.-> SimpleEngine
+    Polygons -.-> PreciseEngine
     Polygons -.-> TeleaEngine
     Polygons -.-> AotEngine
     Polygons -.-> LamaEngine
     
+    ImageBuffer --> PreciseEngine
     ImageBuffer --> TeleaEngine
     ImageBuffer --> AotEngine
     ImageBuffer --> LamaEngine
     ImageBuffer --> NoneEngine
     
     SimpleEngine --> CleanBuffer[Clean Text-Free Image]
+    PreciseEngine --> CleanBuffer
     TeleaEngine --> CleanBuffer
     AotEngine --> CleanBuffer
     LamaEngine --> CleanBuffer
@@ -182,16 +186,19 @@ graph TD
 ```
 
 #### The Binarizer (Handling the Border-Erase Problem)
-Instead of masking the entire blocky bounding box, we extract a **pixel-perfect mask of the exact text strokes**.
-* **Grayscale + Otsu's Adaptive Thresholding:** Runs on each cropped text box canvas to separate high-contrast text strokes from the bubble background.
-* **Contract note (locked):** Each engine synthesizes its own mask internally from the polygons it receives (e.g. Telea dilates the polygon; LaMa rasterizes polygon fills). The standalone `Binarizer` class and the DBNet raw mask (`maskRawCanvas`) remain available for diagnostics and visual tests, but are not part of the production fill path — see the LOCKED DECISION note above.
-#### The 6 Inpainting Tiers:
-1. **Tier 1: Simple Inpaint (Dominant Color Fill):** Samples bright pixels (luminance >= 180, first-pixel fallback) strictly inside the OCR polygon — the bubble paper between glyph strokes — and fills the polygon with the sampled median color. Runs in microseconds (`0MB`). Deliberately kept at v1 logic: quality work belongs to the higher tiers.
-2. **Tier 2: Telea Math Inpaint (FMM Diffusion):** Applies Alexandru Telea's Fast Marching Method FMM algorithm on the stroke mask, propagating surrounding background colors inward to erase characters. Extremely fast (`0MB`), preserves outlines.
-3. **Tier 3: AOT-GAN Inpaint (Quantized ONNX):** Runs a lightweight generative adversarial network inpainting model. Learns manga textures and screentones to reconstruct backgrounds behind erased text. Fast (`~10MB`), runs via WebGPU when available.
-4. **Tier 4: LaMa Inpaint (Fourier CNN ONNX):** Runs the Large Mask Inpainting model using Fast Fourier Convolutions to hallucinate large or complex textures globally. Highly robust, larger download (`~30MB`).
-5. **Tier 5: None:** Bypasses inpainting entirely. Returns the original image. The OCR and translation pipeline will still overlay translated text on top of the original text.
-6. **Tier 6: Original:** Bypasses the entire translation/inpainting pipeline and just returns a raw copy of the original image without any modifications.
+Instead of masking the entire blocky bounding box, we extract a **pixel-perfect mask of the exact text strokes**:
+* **Grayscale + Otsu's Adaptive Thresholding:** Runs on each cropped text box canvas to separate high-contrast text strokes from the bubble background ($Y = 0.299R + 0.587G + 0.114B$).
+* **Dynamic Cotrans Dilation:** Scaled to 12% of estimated font size (clamped between 2px and 5px) to swallow artist white boundary halos (*fuchidori*) and anti-aliasing without merging adjacent vertical text lines.
+* **Production Integration:** Both **Precise Fill** (`StrokeFillInpaintEngine`) and **Telea Diffusion** (`TeleaInpaintEngine`) utilize the `Binarizer` stroke mask to replace/diffuse text strokes while completely preserving surrounding comic drawings, speech bubble paper, and screentones.
+* **Contract note (locked):** Each engine receives only text polygons and synthesizes its own mask internally (or delegates to `Binarizer`). The DBNet raw probability map (`maskRawCanvas`) is deliberately NOT forwarded to inpaint engines—see the LOCKED DECISION note above.
+
+#### The 6 Inpainting Tiers (`INPAINT_TIER_CATALOG`):
+1. **Tier 1: Simple Inpaint (`simple` - Dominant Color Fill):** Samples bright pixels (luminance >= 180, first-pixel fallback) strictly inside the OCR polygon — the bubble paper between glyph strokes — and fills the polygon with the sampled median color. Runs in microseconds (`0MB`). Deliberately kept at v1 logic: quality work belongs to higher tiers.
+2. **Tier 2: Precise Fill (`stroke-fill` - Smart Text Eraser):** Extracts text glyph strokes via `Binarizer` Otsu thresholding with dynamic dilation, filling strictly the character strokes with sampled background paper color. Leaves speech bubble borders, line art, and screentones intact (`0MB`).
+3. **Tier 3: Telea Math Inpaint (`telea` - FMM Diffusion):** Applies Alexandru Telea's Fast Marching Method FMM algorithm on the `Binarizer` stroke mask, propagating surrounding background colors inward to erase characters. Includes Taylor series gradient stabilization to prevent numerical overflow (`0MB`).
+4. **Tier 4: AOT-GAN Inpaint (`aotgan` - Quantized ONNX):** Runs a lightweight generative adversarial network inpainting model. Learns manga textures and screentones to reconstruct backgrounds behind erased text. Fast (`~60MB`), runs via WebGPU when available.
+5. **Tier 5: LaMa Inpaint (`lama-manga` - Fourier CNN ONNX):** Runs the Large Mask Inpainting model using Fast Fourier Convolutions to hallucinate large or complex textures globally. Highly robust, larger download (`~50MB`).
+6. **Tier 6: None (`none`):** Bypasses inpainting entirely. Returns the original image. The OCR and translation pipeline will still overlay translated text on top of the original text.
 
 #### Custom Inpainting Model Registry & URL Management
 Because adding a completely new inpainting model architecture requires specific custom pre-processing and post-processing code (e.g. AOT-GAN's input tensor shape differs from LaMa's), we do not need a remote dynamic registry for inpainting. Instead, we manage custom model options via an internal local TypeScript registry file (`inpaintRegistry.ts`). This local registry maps model configurations to their remote download links (hosted on Hugging Face).

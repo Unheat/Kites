@@ -31,7 +31,7 @@ flowchart TD
         NoiseFilter["14-Stage Noise Battery &<br/>Kruskal-MST Grouping"]:::offscreen
         
         subgraph ParallelCompute["Parallel Compute Branches"]
-            InpaintEng["Polygon-Strict Inpainting<br/>(LaMa 64px / AOT-GAN / Telea FMM / Simple)"]:::offscreen
+            InpaintEng["Polygon-Strict Inpainting & Binarizer<br/>(LaMa / AOT-GAN / Telea / Precise / Simple)"]:::offscreen
             TransWaterfall["Keyed JSON Translation Waterfall<br/>(WebLLM / Cloud Pool / Google)"]:::offscreen
         end
 

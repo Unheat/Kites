@@ -132,36 +132,55 @@ After clustering, bubbles across the entire page must be sequenced logically so 
 
 ---
 
-### Stage 3: Polygon-Strict Inpainting (`InpaintManager.ts`)
+### Stage 3: Polygon-Strict Inpainting & The Binarizer (`InpaintManager.ts` & `Binarizer.ts`)
 
 > ⚠️ **Core Architectural Contract:** Inpainting engines receive **only surviving character polygon masks**, never full speech-bubble bounding rectangles or raw DBNet probability masks (see ADR-002 and ADR-007). This prevents the accidental erasure of background art, screen tones, and balloon boundaries.
 
-All inpainting engines are registered in the canonical **Centralized Inpaint Catalog** (`src/shared/inpaintTiers.ts`), which acts as the single source of truth across the entire codebase:
+All inpainting engines are registered in the canonical **Centralized Inpaint Catalog** (`src/shared/inpaintTiers.ts`), which acts as the single source of truth across the entire codebase.
+
+For stroke-level text erasure without neural hallucination, Kites runs the **Binarizer** (`src/offscreen/engines/inpaint/Binarizer.ts`):
+1. **Grayscale & Luminance:** Converts local crops to grayscale using perceived luminance ($Y = 0.299R + 0.587G + 0.114B$).
+2. **Polarity Detection:** Samples outer border pixels to determine background paper color.
+3. **Otsu Adaptive Thresholding:** Dynamically calculates the optimal bimodal threshold to separate text ink from paper.
+4. **Dynamic Cotrans Dilation:** Morphologically dilates text strokes by $2–5\text{ px}$ ($\approx 12\%$ of estimated font size), swallowing artist white halos (*fuchidori*) and anti-aliasing while preventing adjacent text lines from merging.
+5. **In-Polygon Clipping:** Clamps the resulting stroke mask strictly within the detected text polygon.
 
 ```mermaid
 graph TD
-    Mask[Surviving Character Polygons] --> Choice{Inpaint Engine Router}
-    Choice -->|Simple| Simple[16-Bin Luminance Histogram<br/>Adaptive Polarity Fill]
-    Choice -->|Telea FMM| Telea[Alexandru Telea Fast Marching<br/>Binarizer Stroke Mask + Eikonal Diffusion]
-    Choice -->|LaMa Manga| LaMa[WebGPU 64px Dynamic Patch<br/>Fourier CNN ONNX Invariant]
-    Choice -->|AOT-GAN| AOT[WebGPU Dynamic Patch<br/>Multi-Scale Contextual Convolutions]
-    Choice -->|None| None[Bypass Erase<br/>Overlay Directly]
+    Mask[Surviving Character Polygons] --> Binarizer["Binarizer (Otsu Thresholding + Dynamic Dilation)"]
+    Binarizer --> StrokeMask["Text Stroke Mask Canvas"]
+
+    Mask --> EngineRouter{Inpaint Engine Router}
+    StrokeMask --> EngineRouter
+
+    EngineRouter -->|Simple Fill| Simple["SimpleInpaintEngine<br/>(16-Bin Adaptive Polarity Flood)"]
+    EngineRouter -->|Precise Fill| Precise["StrokeFillInpaintEngine<br/>(Binarizer Stroke Mask + Paper Color)"]
+    EngineRouter -->|Telea FMM| Telea["TeleaInpaintEngine<br/>(Binarizer Stroke + Fast Marching Diffusion)"]
+    EngineRouter -->|LaMa Manga| LaMa["LamaMangaInpaintEngine<br/>(WebGPU 64px Dynamic Patch + FFC)"]
+    EngineRouter -->|AOT-GAN| AOT["AotInpaintEngine<br/>(WebGPU Contextual Convolutions)"]
+    EngineRouter -->|None| None["NoneInpaintEngine<br/>(Bypass Erase / Direct Overlay)"]
 ```
 
-1. **Simple Inpaint (Adaptive Polarity Fill):**
+1. **Simple Inpaint (`simple` - Fast Color Flood):**
    - Computes a 16-bin luminance histogram of the interior patch.
    - Detects background polarity: light balloon ($\text{luminance} \ge 128$) vs dark balloon / inverted night panel ($\text{luminance} < 128$).
-   - Samples margin pixels around each character polygon and floods with the polarity-adapted background color (`0MB` footprint, microsecond execution).
-2. **Telea Inpaint (Alexandru Telea Fast Marching Method FMM):**
-   - Pure TypeScript implementation solving the Eikonal equation $|\nabla T| = 1$ via binary min-heap narrow-band marching.
-   - **Otsu Binarizer Stroke Mask Wiring:** Erases exact text ink strokes rather than blocky boxes, with dynamic morphological dilation ($2-4\text{ px}$) to envelope anti-aliased character edges.
+   - Samples margin pixels around each character polygon and floods the entire polygon envelope with the polarity-adapted background color (`0MB` footprint, microsecond execution).
+2. **Precise Fill (`stroke-fill` - Smart Text Eraser):**
+   - Combines `Binarizer` stroke extraction with `SimpleInpaintEngine` median background sampling.
+   - Unlike Simple Fill (which floods the entire polygon bounding box), Precise Fill only replaces the actual text glyph strokes, leaving surrounding drawings, bubble paper, panel borders, and screentones intact (`0MB` footprint, ultra-fast).
+3. **Telea Inpaint (`telea` - Fast Marching Diffusion):**
+   - Pure TypeScript implementation of Alexandru Telea's Fast Marching Method (FMM) solving the Eikonal equation $|\nabla T| = 1$ via binary min-heap narrow-band marching.
+   - Propagates surrounding pixel gradients inward strictly across the `Binarizer` stroke mask.
    - **Taylor Series Gradient Stabilization:** Adds epsilon guards ($\epsilon = 10^{-6}$) and clamps boundary gradient vectors, completely eliminating numerical overflow (`NaN`/`Infinity`) and runaway pixel loops (ADR-007).
    - Preserves screentones, delicate speech balloon borders, and background line art with zero model downloads (`0MB`, $15-50\text{ ms}$ per bubble).
-3. **LaMa Manga & AOT-GAN (Neural Dynamic Patching):**
+4. **LaMa Manga (`lama-manga` - Neural Dynamic Patching):**
    - **Dynamic 64px Bucketing:** Rather than squashing the entire page to $512\times 512$ (which destroys resolution and produces gray artifacts), crops tightly around character clusters and snaps dimensions to multiples of 64 ($\lceil\text{dim} / 64\rceil \times 64$, minimum $128\text{ px}$).
    - **Zero-Resizing Invariant:** Retains 1:1 pixel coordinates between the crop and canvas paste-back.
    - **Mask Dilation:** Renders polygon masks with `lineWidth = 4` and `lineJoin = 'round'` (`UNCLIP_RATIO = 1.8`) to cleanly envelope anti-aliased character edges.
-4. **None (Bypass):**
+5. **AOT-GAN (`aotgan` - High-Detail Screentone Synthesis):**
+   - Aggregated Contextual Transformations GAN ONNX model running on WebGPU.
+   - High-capacity inpainting for complex texture reconstruction, halftone dots, and speedline backgrounds when erasing sound effects (SFX).
+6. **None (`none` - Bypass):**
    - Bypasses text erasure entirely, overlaying translated text directly on top of the original image.
 
 ---
@@ -227,7 +246,7 @@ flowchart TD
     PartitionXY --> AllFit{"All Members Fit?"}
     AllFit -->|Yes| EmitGroup["Emit Sub-Chamber typesetBoxes"]
     AllFit -->|No| DisabledFallback
-    AxisCheck -->|No (Diagonal / Overlapping / Slits)| DisabledFallback
+    AxisCheck -->|"No (Diagonal / Overlapping / Slits)"| DisabledFallback
 ```
 
 #### 1. Dual-Route Separation

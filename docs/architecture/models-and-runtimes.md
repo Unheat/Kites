@@ -70,32 +70,56 @@ Kites employs an optimized TypeScript port of Baidu's **PaddleOCR (PP-OCR)** pip
 ## 🎨 Inpainting Models & Patch Architecture
 
 ```mermaid
-flowchart LR
-    PolygonMask["Character Polygon Mask"] --> PatchCrop["Dynamic 64px Bucket Crop<br/>(min 128px, snapped to 64px)"]
+flowchart TD
+    PolygonMask["Character Polygon Mask"] --> Binarizer["Binarizer (Otsu Thresholding + 2-5px Dilation)"]
+    Binarizer --> StrokeMask["Text Stroke Mask"]
+
+    PolygonMask --> PatchCrop["Dynamic 64px Bucket Crop<br/>(min 128px, snapped to 64px)"]
     PatchCrop --> EngineSelect{"Selected Engine"}
+
     EngineSelect -->|LaMa Manga| LaMaONNX["LaMa Manga ONNX (WebGPU)<br/>Fast Fourier Convolutions"]
     EngineSelect -->|AOT-GAN| AOTONNX["AOT-GAN ONNX + .data (WebGPU)<br/>Contextual Transformations"]
     EngineSelect -->|Simple Fill| SimpleHist["16-Bin Luminance Histogram<br/>Adaptive Polarity Fill (Instant CPU)"]
-    EngineSelect -->|Telea| TeleaDiffusion["CPU Fast Marching (r = 3)"]
+    EngineSelect -->|Precise Fill| PreciseFill["StrokeFillInpaintEngine<br/>(Binarizer Stroke + Paper Flood)"]
+    EngineSelect -->|Telea FMM| TeleaDiffusion["TeleaInpaintEngine<br/>(Binarizer Stroke + Fast Marching)"]
+
+    StrokeMask -.-> PreciseFill
+    StrokeMask -.-> TeleaDiffusion
+
     LaMaONNX --> PasteBack["1:1 Coordinate Paste-Back<br/>(Zero-Resizing Invariant)"]
     AOTONNX --> PasteBack
     SimpleHist --> PasteBack
+    PreciseFill --> PasteBack
     TeleaDiffusion --> PasteBack
 ```
 
-### 1. LaMa Manga (`ogkalu/lama-manga-onnx-dynamic`)
+### 1. The Binarizer & Stroke Extraction (`Binarizer.ts`)
+- **Pixel-Level Stroke Isolation:** Implements Otsu's bimodal adaptive thresholding on grayscale image luminance ($Y = 0.299R + 0.587G + 0.114B$) to isolate actual text characters from speech balloon background paper.
+- **Dynamic Cotrans Dilation:** Scaled to $12\%$ of estimated font size (clamped between $2\text{ px}$ and $5\text{ px}$). Swallows artist white boundary halos (*fuchidori*) and anti-aliased character edges without merging neighboring vertical text lines.
+- **Context Isolation:** Clamps generated stroke masks strictly within detected text bounding polygons.
+
+### 2. Precise Fill (`StrokeFillInpaintEngine.ts`, 0 MB Built-in)
+- Combines the `Binarizer` stroke mask with `SimpleInpaintEngine` median background color sampling.
+- Replaces strictly text glyph strokes, leaving surrounding line art, bubble paper, and screentones intact with microsecond CPU execution.
+
+### 3. Telea Fast Marching Diffusion (`TeleaInpaintEngine.ts`, 0 MB Built-in)
+- Pure TypeScript implementation of Alexandru Telea's Fast Marching Method (FMM) solving the Eikonal equation $|\nabla T| = 1$ via a binary min-heap narrow band.
+- Diffuses surrounding image colors inward across the `Binarizer` stroke mask.
+- **Taylor Series Gradient Stabilization:** Incorporates an epsilon guard ($\epsilon = 10^{-6}$) and clamped gradient vectors, eliminating numerical overflow (`NaN`/`Infinity`) and runaway narrow-band loops (ADR-007).
+
+### 4. LaMa Manga (`ogkalu/lama-manga-onnx-dynamic`, ~50 MB)
 - **Architecture:** Resolution-robust Large Mask Inpainting (LaMa) using Fast Fourier Convolutions (FFC).
 - **Domain Fine-Tuning:** Trained on manga, anime line art, screentones, and speech balloon textures.
 - **Dynamic 64px Patching:** Slices out the local bubble cluster, snaps dimensions to multiples of 64 ($\lceil\text{dim}/64\rceil \times 64$, minimum $128\text{ px}$), and pastes back at 1:1 pixel coordinates without resolution loss.
 
-### 2. AOT-GAN (`Unhead/aotgan`)
+### 5. AOT-GAN (`Unhead/aotgan`, ~60 MB)
 - **Architecture:** Aggregated Contextual Transformations GAN.
 - **Weights:** Ships split weights (`aotgan.onnx` graph + `aotgan-dynamic.onnx.data` external tensors).
 - **Capability:** Reconstructs complex screentone patterns, halftone dots, and speedline backgrounds when erasing sound effects (SFX).
 
-### 3. Simple Inpaint (Adaptive Polarity Fill)
+### 6. Simple Inpaint (Adaptive Polarity Fill, 0 MB Built-in)
 - **Zero-Model CPU Algorithm:** Instant execution for clean dialogue bubbles.
-- **16-Bin Luminance Histogram:** Evaluates interior bubble luminance to detect white vs dark bubble polarity, sampling margin pixels and flooding the character polygons with the polarity-adapted background color.
+- **16-Bin Luminance Histogram:** Evaluates interior bubble luminance to detect white vs dark bubble polarity, sampling margin pixels and flooding the entire character polygon envelope with the polarity-adapted background color.
 
 ---
 
@@ -109,7 +133,7 @@ graph TD
     Routing -->|On-Device WebGPU| WebLLM["WebLLM (MLC-AI)<br/>Zero Data Leaves Browser"]
     Routing -->|Community Pool| CloudflarePool["Cloudflare Shared Pool<br/>(api.12094852.xyz)"]
     Routing -->|Zero-Setup Cloud| Google["Google Translate API"]
-    Routing -->|BYOK (Own Keys)| CustomAPI["Custom API<br/>(OpenAI / Claude / Gemini)"]
+    Routing -->|"BYOK (Own Keys)"| CustomAPI["Custom API<br/>(OpenAI / Claude / Gemini)"]
 ```
 
 ### 1. WebLLM (On-Device WebGPU Inference)
