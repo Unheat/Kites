@@ -19,14 +19,14 @@ export const VERTICAL_COLUMN_MIN_HORIZ_STEP = 15;
 export const SAME_COLUMN_MAX_HORIZ_STEP = 18;
 
 /** Minimum vertical center translation in font size multiples for non-punctuated box splits. */
-export const BOX_TRANSLATION_CENTER_SHIFT_RATIO = 1.5;
+export const BOX_TRANSLATION_CENTER_SHIFT_RATIO = 0.85;
 /** Minimum absolute vertical center translation in pixels for non-punctuated box splits. */
-export const BOX_TRANSLATION_MIN_CENTER_SHIFT = 30.0;
+export const BOX_TRANSLATION_MIN_CENTER_SHIFT = 25.0;
 
 /** Minimum top stagger in font size multiples for non-punctuated box splits. */
-export const BOX_TRANSLATION_TOP_STAGGER_RATIO = 1.5;
+export const BOX_TRANSLATION_TOP_STAGGER_RATIO = 1.2;
 /** Minimum absolute top stagger in pixels for non-punctuated box splits. */
-export const BOX_TRANSLATION_MIN_TOP_STAGGER = 35.0;
+export const BOX_TRANSLATION_MIN_TOP_STAGGER = 30.0;
 
 /** Maximum allowable opposing bottom shrink in font size multiples (guards against convex oval bubble shrinkage). */
 export const BOX_TRANSLATION_OPPOSING_SHRINK_TOLERANCE_RATIO = 0.5;

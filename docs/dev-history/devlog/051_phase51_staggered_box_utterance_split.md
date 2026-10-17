@@ -63,10 +63,10 @@ In `src/offscreen/utils/utteranceSplitter.ts`:
 1. Extracted named constants (avoiding magic numbers per Rule 3):
    * `VERTICAL_COLUMN_MIN_HORIZ_STEP = 15`
    * `SAME_COLUMN_MAX_HORIZ_STEP = 18`
-   * `BOX_TRANSLATION_CENTER_SHIFT_RATIO = 1.5`
-   * `BOX_TRANSLATION_MIN_CENTER_SHIFT = 30.0`
-   * `BOX_TRANSLATION_TOP_STAGGER_RATIO = 1.5`
-   * `BOX_TRANSLATION_MIN_TOP_STAGGER = 35.0`
+   * `BOX_TRANSLATION_CENTER_SHIFT_RATIO = 0.85`
+   * `BOX_TRANSLATION_MIN_CENTER_SHIFT = 25.0`
+   * `BOX_TRANSLATION_TOP_STAGGER_RATIO = 1.2`
+   * `BOX_TRANSLATION_MIN_TOP_STAGGER = 30.0`
    * `BOX_TRANSLATION_OPPOSING_SHRINK_TOLERANCE_RATIO = 0.5`
 2. Added concordant translation split rule alongside the existing punctuation rule:
    ```ts
