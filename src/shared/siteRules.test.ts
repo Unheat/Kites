@@ -7,6 +7,7 @@ import {
   normalizeSiteRules,
   findMatchingSiteRule,
   MANGA_READER_CONTAINER_SELECTORS,
+  getChapterScopeId,
 } from './siteRules';
 
 describe('siteRules utilities', () => {
@@ -128,6 +129,36 @@ describe('siteRules utilities', () => {
       expect(MANGA_READER_CONTAINER_SELECTORS).toContain('#readerarea');
       expect(MANGA_READER_CONTAINER_SELECTORS).toContain('div[class*="reading-content"]');
       expect(MANGA_READER_CONTAINER_SELECTORS).toContain('div[class*="wt_viewer"]');
+    });
+  });
+
+  describe('getChapterScopeId', () => {
+    it('normalizes paginated gallery readers to the common book root', () => {
+      expect(getChapterScopeId('https://nhentai.net/g/677759/6/')).toBe('https://nhentai.net/g/677759/');
+      expect(getChapterScopeId('https://nhentai.net/g/677759/7/')).toBe('https://nhentai.net/g/677759/');
+      expect(getChapterScopeId('https://nhentai.net/g/677759/6')).toBe('https://nhentai.net/g/677759/');
+    });
+
+    it('normalizes generic paginated manga reader URLs', () => {
+      expect(getChapterScopeId('https://example.com/manga/title/chapter-1/page-2/')).toBe(
+        'https://example.com/manga/title/chapter-1/'
+      );
+      expect(getChapterScopeId('https://example.com/ch1/p5')).toBe('https://example.com/ch1/');
+    });
+
+    it('strips query parameters and preserves chapter routing from webtoon URLs', () => {
+      expect(getChapterScopeId('https://mangadex.org/chapter/abcdef?page=3#header')).toBe(
+        'https://mangadex.org/chapter/abcdef#header'
+      );
+      expect(getChapterScopeId('https://example.com/read/105?p=2&mode=webtoon')).toBe(
+        'https://example.com/read/105?mode=webtoon'
+      );
+    });
+
+    it('handles empty or malformed input gracefully', () => {
+      expect(getChapterScopeId('')).toBe('');
+      expect(getChapterScopeId(null as any)).toBe('');
+      expect(getChapterScopeId('just-a-plain-string')).toBe('just-a-plain-string');
     });
   });
 });

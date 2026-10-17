@@ -389,6 +389,14 @@ describe('queue capacity limit', () => {
       popupState: { concurrency: 2 },
     });
 
+    // Seed 1 active job to keep the offscreen pipeline busy so queued jobs are not drained
+    await db.translationJobs.add({
+      timestamp: Date.now(),
+      status: 'processing',
+      srcUrl: 'https://cdn.example.com/active.webp',
+      tabId: 1,
+    });
+
     // Seed 2 queued jobs
     await db.translationJobs.add({
       timestamp: Date.now(),

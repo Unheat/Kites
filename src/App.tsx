@@ -108,6 +108,15 @@ export default function App() {
   const [cleanedImageEl, setCleanedImageEl] = useState<HTMLImageElement | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const activeBlobUrlsRef = useRef<string[]>([]);
+
+  // Revoke active Blob URLs on component unmount
+  useEffect(() => {
+    return () => {
+      activeBlobUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+      activeBlobUrlsRef.current = [];
+    };
+  }, []);
 
   // Load jobs from Dexie
   const loadJobs = useCallback(async () => {
@@ -140,6 +149,10 @@ export default function App() {
     }
 
     try {
+      // Revoke prior page Blob URLs to prevent memory accumulation across page switches
+      activeBlobUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+      activeBlobUrlsRef.current = [];
+
       const img = await db.images.where({ jobId: jobIdToLoad }).first();
       setImageRecord(img || null);
 
@@ -153,6 +166,7 @@ export default function App() {
       // Load original image element
       if (img?.rawImageBlob) {
         const origUrl = URL.createObjectURL(img.rawImageBlob);
+        activeBlobUrlsRef.current.push(origUrl);
         const origImg = new Image();
         origImg.onload = () => setOriginalImageEl(origImg);
         origImg.src = origUrl;
@@ -163,6 +177,7 @@ export default function App() {
       // Load cleaned image element
       if (img?.translatedImageBlob) {
         const cleanUrl = URL.createObjectURL(img.translatedImageBlob);
+        activeBlobUrlsRef.current.push(cleanUrl);
         const cleanImg = new Image();
         cleanImg.onload = () => setCleanedImageEl(cleanImg);
         cleanImg.src = cleanUrl;

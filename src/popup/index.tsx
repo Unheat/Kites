@@ -7,8 +7,6 @@ import SettingsView from './components/SettingsView';
 import BatchScanPanel from './components/BatchScanPanel';
 
 import { Settings, Home, Power, Crop, Globe, Layers } from 'lucide-react';
-import PageExportControl from './components/PageExportControl';
-import ReaderLaunchControl from './components/ReaderLaunchControl';
 
 import type { PopupState } from '../shared/types';
 import { DEFAULT_POPUP_STATE } from '../shared/types';
@@ -267,8 +265,6 @@ function PopupApp() {
               <EngineDropdown state={state} updateState={updateState} />
 
               <div className="flex flex-col gap-2 pt-2 border-t border-[var(--color-dust)] border-opacity-30">
-                <ReaderLaunchControl />
-                <PageExportControl />
                 <button
                   onClick={async () => {
                     try {

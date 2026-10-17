@@ -5,7 +5,12 @@ import { Languages, Eye, EyeOff, ExternalLink, X, Crop, RotateCcw, Download } fr
 import type { PopupState, CropOverlayItem, ViewportSelection, SiteSelectorRule } from '../shared/types';
 import { STORAGE_KEYS } from '../shared/constants';
 import { isDomainDisabled, findMatchingSiteRule } from '../shared/siteRules';
-import { createChapterTranslationRegistry, createChapterExporter, type ChapterTranslationRecord } from './chapterZip';
+import {
+  createChapterTranslationRegistry,
+  createChapterExporter,
+  type ChapterTranslationRecord,
+  type ChapterImageRecord,
+} from './chapterZip';
 import ChapterReaderModal, { type ChapterReaderPage } from './ChapterReaderModal';
 import ChapterReaderFloatingPill from './ChapterReaderFloatingPill';
 import { scanChapterPages, fastScrollPreload } from './scanner';
@@ -42,9 +47,17 @@ const REVEALED_BACKING_Z_INDEX = '1';
 const REVEALED_BACKING_POINTER_EVENTS = 'none';
 const TRANSLATE_CONTROL_SELECTOR = '[data-kites-translate-control]';
 const IMAGE_DISPLAY_CHANGED_EVENT = 'kites-image-display-changed';
-// Avoid flashing cold-start copy for model setup that completes quickly.
-const MODEL_INITIALIZATION_LABEL_DELAY_MS = 700;
-const MODEL_INITIALIZATION_LABEL = 'Preparing AI · first use this session';
+// Snappy feedback: 150ms delay avoids flickering on sub-100ms no-ops while catching all genuine model inits
+const MODEL_INITIALIZATION_LABEL_DELAY_MS = 150;
+const MODEL_INITIALIZATION_LABEL = 'Preparing AI model…';
+
+function formatModelInitializationLabel(stage?: string, modelName?: string): string {
+  if (stage === 'ocr') return `Preparing OCR${modelName ? ` (${modelName})` : ''}…`;
+  if (stage === 'inpaint') return `Preparing Inpainting${modelName ? ` (${modelName})` : ''}…`;
+  if (stage === 'translation') return `Preparing Translation${modelName ? ` (${modelName})` : ''}…`;
+  if (stage === 'bubble') return `Preparing Bubble Detector…`;
+  return 'Preparing AI model…';
+}
 // How long the translate button keeps its visible failure state after a terminal error.
 const TRANSLATION_FAILURE_VISIBLE_MS = 3000;
 const TRANSLATION_FAILURE_LABEL = 'Translation failed. Click to retry.';
@@ -314,7 +327,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return;
   }
   if (message.type === 'EXPORT_CHAPTER_ZIP') {
-    void chapterExporter.exportChapter().then(sendResponse).catch((error) => {
+    void chapterExporter.exportChapter(message.payload?.records).then(sendResponse).catch((error) => {
       console.error('[Chapter ZIP] Message failed:', error);
       sendResponse({ ...chapterExporter.getStatus(), phase: 'error', busy: false, message: 'ZIP export failed. Nothing downloaded.' });
     });
@@ -625,6 +638,7 @@ function TranslateButton({
   const initializationLabelId = useId();
   const [localTranslating, setLocalTranslating] = useState(false);
   const [showInitializationLabel, setShowInitializationLabel] = useState(false);
+  const [initializationText, setInitializationText] = useState<string>(MODEL_INITIALIZATION_LABEL);
   // Visible failure feedback: terminal errors used to reset silently, so a dead queue
   // looked like nothing happened. The button shows the failure briefly, then returns to
   // its idle look so the next click reads as a retry.
@@ -887,6 +901,8 @@ function TranslateButton({
         if (message.payload.phase === 'started') {
           clearInitializationFeedback();
           activeInitializationJobIdRef.current = eventJobId;
+          const label = formatModelInitializationLabel(message.payload.stage, message.payload.modelName);
+          setInitializationText(label);
           initializationDelayRef.current = setTimeout(() => {
             initializationDelayRef.current = null;
             if (activeInitializationJobIdRef.current === eventJobId) setShowInitializationLabel(true);
@@ -1004,7 +1020,7 @@ function TranslateButton({
           hasFailed
             ? TRANSLATION_FAILURE_LABEL
             : showInitializationLabel
-            ? MODEL_INITIALIZATION_LABEL
+            ? initializationText
             : isTranslated && !activeTranslating
             ? 'Re-translate Image'
             : 'Translate Image'
@@ -1166,7 +1182,7 @@ function TranslateButton({
             fontFamily: 'system-ui, -apple-system, sans-serif',
           }}
         >
-          {MODEL_INITIALIZATION_LABEL}
+          {initializationText}
         </span>
       )}
     </div>
@@ -1292,12 +1308,33 @@ function CropOverlayBox({ crop, onTranslate, onReset, onGeometryChange, onToggle
   const isEditable = crop.status === 'draft' || crop.status === 'failed';
   const isTranslating = crop.status === 'capturing' || crop.status === 'translating';
   const displayUrl = crop.showOriginal ? crop.originalDataUrl : (crop.translatedDataUrl || crop.originalDataUrl);
+  const [initFeedback, setInitFeedback] = useState<string | null>(null);
   const dragRef = useRef<{
     handle: CropDragHandle;
     startClientX: number;
     startClientY: number;
     initial: { left: number; top: number; width: number; height: number };
   } | null>(null);
+
+  useEffect(() => {
+    const handleMessage = (message: any) => {
+      if (
+        message.type === 'MODEL_INITIALIZATION' &&
+        message.target === 'content' &&
+        message.source === 'background' &&
+        message.event === true &&
+        message.payload?.requestId === crop.id
+      ) {
+        if (message.payload.phase === 'started') {
+          setInitFeedback(formatModelInitializationLabel(message.payload.stage, message.payload.modelName));
+        } else if (message.payload.phase === 'finished') {
+          setInitFeedback(null);
+        }
+      }
+    };
+    chrome.runtime.onMessage.addListener(handleMessage);
+    return () => chrome.runtime.onMessage.removeListener(handleMessage);
+  }, [crop.id]);
 
   const openInStudio = () => {
     try {
@@ -1406,7 +1443,7 @@ function CropOverlayBox({ crop, onTranslate, onReset, onGeometryChange, onToggle
       {isTranslating && crop.originalDataUrl && (
         <div className="kites-crop-loading-badge">
           <Languages size={16} className="kites-anim-spin" />
-          <span>{crop.status === 'capturing' ? 'Capturing...' : 'Translating...'}</span>
+          <span>{initFeedback || (crop.status === 'capturing' ? 'Capturing...' : 'Translating...')}</span>
         </div>
       )}
 
@@ -1445,6 +1482,7 @@ function GlobalOverlay() {
   const [isPillDismissed, setIsPillDismissed] = useState<boolean>(false);
   const [chapterPages, setChapterPages] = useState<ChapterReaderPage[]>([]);
   const [isTranslatingChapter, setIsTranslatingChapter] = useState<boolean>(false);
+  const isCustomReaderRef = useRef<boolean>(false);
 
   const activeImgRef = useRef(activeImg);
   const translatingUrlsRef = useRef(translatingUrls);
@@ -1476,9 +1514,11 @@ function GlobalOverlay() {
 
   useEffect(() => {
     if (!isEnabled) return;
-    refreshChapterPages();
+    if (!isReaderOpen && !isCustomReaderRef.current) {
+      refreshChapterPages();
+    }
     const interval = setInterval(() => {
-      if (!isReaderOpen) refreshChapterPages();
+      if (!isReaderOpen && !isCustomReaderRef.current) refreshChapterPages();
     }, 4000);
     return () => clearInterval(interval);
   }, [isEnabled, isReaderOpen, refreshChapterPages]);
@@ -1511,14 +1551,50 @@ function GlobalOverlay() {
   }, []);
 
   useEffect(() => {
-    const handleOpenReader = (event: Event) => {
+    const handleOpenReader = async (event: Event) => {
       const customEvent = event as CustomEvent<{ pages?: ChapterReaderPage[] } | undefined>;
       if (customEvent.detail?.pages && Array.isArray(customEvent.detail.pages) && customEvent.detail.pages.length > 0) {
-        setChapterPages(customEvent.detail.pages);
+        isCustomReaderRef.current = true;
+        const initialPages = customEvent.detail.pages;
+        setChapterPages(initialPages);
+        setIsReaderOpen(true);
+
+        // Resolve any history pages requiring durable, content-script-owned Blob URLs
+        const historyPages = initialPages.filter((p) => p.jobId && (!p.translatedUrl || p.translatedUrl.startsWith('blob:chrome-extension:')));
+        if (historyPages.length > 0) {
+          try {
+            const resolved = await Promise.all(
+              historyPages.map(async (page) => {
+                try {
+                  const res = await chrome.runtime.sendMessage({
+                    type: 'GET_JOB_IMAGE',
+                    target: 'background',
+                    source: 'content',
+                    request: true,
+                    payload: { jobId: page.jobId },
+                  });
+                  if (res?.status === 'success' && res.dataUrl) {
+                    return { id: page.id, translatedUrl: createSafeBlobUrlFromData(res.dataUrl) };
+                  }
+                } catch {}
+                return null;
+              })
+            );
+            setChapterPages((current) =>
+              current.map((page) => {
+                const match = resolved.find((r) => r && r.id === page.id);
+                return match ? { ...page, translatedUrl: match.translatedUrl } : page;
+              })
+            );
+          } catch (err) {
+            console.warn('[Content Script] Failed resolving history images:', err);
+          }
+        }
       } else {
+        isCustomReaderRef.current = false;
         refreshChapterPages();
+        setIsReaderOpen(true);
       }
-      setIsReaderOpen(true);
     };
     document.addEventListener('kites-open-chapter-reader', handleOpenReader);
     return () => document.removeEventListener('kites-open-chapter-reader', handleOpenReader);
@@ -1928,6 +2004,27 @@ function GlobalOverlay() {
       // Archive completed translation before requiring a DOM target; detached pages still enter the registry.
       const record = translatedRegistry.complete(originalUrl, bakedBase64, jobId, target ?? undefined);
 
+      if (!record) {
+        if (translatedRegistry.isLimitReached()) {
+          console.warn(`[Content Script] Result not retained: session image limit reached for: ${originalUrl}`);
+          setChapterPages((prev) => {
+            const next = prev.map((page) =>
+              page.url === originalUrl
+                ? {
+                    ...page,
+                    status: 'error' as const,
+                  }
+                : page
+            );
+            if (next.every((p) => p.isTranslated || p.status === 'error')) {
+              setIsTranslatingChapter(false);
+            }
+            return next;
+          });
+        }
+        return;
+      }
+
       // Reactively update chapter reader modal pages with the new translated image!
       setChapterPages((prev) => {
         const next = prev.map((page) =>
@@ -1935,19 +2032,19 @@ function GlobalOverlay() {
             ? {
                 ...page,
                 isTranslated: true,
-                translatedUrl: record?.translatedUrl || createSafeBlobUrlFromData(bakedBase64),
+                translatedUrl: record.translatedUrl,
                 status: 'completed' as const,
               }
             : page
         );
-        if (next.every((p) => p.isTranslated)) {
+        if (next.every((p) => p.isTranslated || p.status === 'error')) {
           setIsTranslatingChapter(false);
         }
         return next;
       });
 
       // Late results belong to the queued chapter, never a same-URL image in the new SPA chapter.
-      if (!record || record.sourcePage !== window.location.href || !target) {
+      if (record.sourcePage !== window.location.href || !target) {
         console.warn(`[Content Script] Target media element detached or chapter changed; translation archived when context is known: ${originalUrl}`);
         return;
       }
@@ -2272,11 +2369,24 @@ function GlobalOverlay() {
         isOpen={isReaderOpen}
         onClose={() => {
           setIsReaderOpen(false);
+          isCustomReaderRef.current = false;
           refreshChapterPages();
         }}
         pages={chapterPages}
         title={document.title}
-        onExportZip={() => void chapterExporter.exportChapter()}
+        onExportZip={async () => {
+          const translatedPages = chapterPages.filter((p) => p.isTranslated && p.translatedUrl);
+          if (translatedPages.length === 0) return;
+          const recordsToExport: ChapterImageRecord[] = translatedPages.map((page, idx) => ({
+            originalUrl: page.url,
+            translatedUrl: page.translatedUrl!,
+            sourcePage: window.location.href,
+            documentPath: null,
+            documentY: page.top,
+            sequence: idx + 1,
+          }));
+          await chapterExporter.exportChapter(recordsToExport);
+        }}
         onTranslateAll={handleTranslateChapter}
         isTranslatingChapter={isTranslatingChapter}
       />
@@ -2286,6 +2396,7 @@ function GlobalOverlay() {
         <ChapterReaderFloatingPill
           pageCount={chapterPages.length}
           onOpen={() => {
+            isCustomReaderRef.current = false;
             refreshChapterPages();
             setIsReaderOpen(true);
           }}

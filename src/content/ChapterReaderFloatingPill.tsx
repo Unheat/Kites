@@ -85,7 +85,7 @@ export default function ChapterReaderFloatingPill({
         title="Open Distraction-Free Chapter Reader"
       >
         <BookOpen size={14} color="#f4446d" />
-        <span>Read Chapter</span>
+        <span>Open Reader</span>
         <span
           className="kites-reader-pill-count"
           style={{

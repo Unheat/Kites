@@ -361,4 +361,48 @@ describe('PipelineOrchestrator', () => {
     blobSpy.mockRestore();
     ocrSpy.mockRestore();
   });
+
+  it('reports stage-aware model initialization events with model identities', async () => {
+    const mockImageRecord = {
+      id: 6,
+      jobId: 600,
+      rawImageBlob: new Blob(['fake image data'], { type: 'image/png' })
+    };
+    ((db.images as any).first as any).mockResolvedValue(mockImageRecord);
+
+    vi.spyOn(chrome.runtime, 'sendMessage').mockImplementation((_message: any, callback: any) => {
+      callback({ activeOcrId: 'v6-medium', activeInpaintId: 'lama-manga', activeEngineId: 'webllm-test', targetLang: 'en' });
+    });
+
+    const initEvents: Array<{ jobId: number; phase: string; stage?: string; modelName?: string }> = [];
+    const onInit = vi.fn((jobId, phase, stage, modelName) => {
+      initEvents.push({ jobId, phase, stage, modelName });
+    });
+
+    vi.mocked(InpaintCacheManager.isModelCached).mockResolvedValue(true);
+    const blobSpy = vi.spyOn(pipelineOrchestrator as any, 'blobToArrayBuffer').mockResolvedValue(new ArrayBuffer(8));
+    const ocrSpy = vi.spyOn((pipelineOrchestrator as any).ocrManager, 'processImage')
+      .mockImplementation(async (_buf: any, _tier: any, _opts: any, onLifecycle?: any) => {
+        onLifecycle?.('started');
+        onLifecycle?.('finished');
+        return { texts: ['Hello'], boxes: [{ x: 10, y: 10, w: 50, h: 20 }], polygons: [[[10, 10], [60, 10], [60, 30], [10, 30]]] };
+      });
+    const inpaintSpy = vi.spyOn((pipelineOrchestrator as any).inpaintManager, 'eraseText')
+      .mockImplementation(async (_buf: any, _polys: any, _tier: any, _rawMask: any, onLifecycle?: any) => {
+        onLifecycle?.('started');
+        onLifecycle?.('finished');
+        return new ArrayBuffer(8);
+      });
+
+    await pipelineOrchestrator.runPipeline(600, onInit);
+
+    expect(initEvents).toContainEqual({ jobId: 600, phase: 'started', stage: 'ocr', modelName: 'v6-medium' });
+    expect(initEvents).toContainEqual({ jobId: 600, phase: 'finished', stage: 'ocr', modelName: 'v6-medium' });
+    expect(initEvents).toContainEqual({ jobId: 600, phase: 'started', stage: 'inpaint', modelName: 'lama-manga' });
+    expect(initEvents).toContainEqual({ jobId: 600, phase: 'finished', stage: 'inpaint', modelName: 'lama-manga' });
+
+    blobSpy.mockRestore();
+    ocrSpy.mockRestore();
+    inpaintSpy.mockRestore();
+  });
 });

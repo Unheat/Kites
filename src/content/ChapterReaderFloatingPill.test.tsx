@@ -56,7 +56,7 @@ describe('ChapterReaderFloatingPill UI', () => {
       );
     });
 
-    expect(container.textContent).toContain('Read Chapter');
+    expect(container.textContent).toContain('Open Reader');
     expect(container.textContent).toContain('5');
 
     const openBtn = container.querySelector('button[title="Open Distraction-Free Chapter Reader"]') as HTMLButtonElement;

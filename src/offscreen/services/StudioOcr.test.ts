@@ -105,13 +105,14 @@ describe('Studio OCR independent optional steps', () => {
   });
 });
 
-describe('Studio OCR real result geometry and dual patch inputs', () => {
-  it('uses merged polygons for page-space objects and raw polygons only for cleaning', async () => {
-    const response = await runStudioOcr(payload, mocks.dependencies);
-    expect(response.textObjects).toEqual([{
-      id: expect.stringMatching(/^ocr-\d+-0$/), x: 210, y: 310, width: 55, height: 40,
-      text: 'Xin chào', originalText: 'こんにちは',
-    }]);
+  describe('Studio OCR real result geometry and dual patch inputs', () => {
+    it('uses merged polygons for page-space objects and raw polygons only for cleaning', async () => {
+      const response = await runStudioOcr(payload, mocks.dependencies);
+      expect(response.textObjects).toEqual([{
+        id: expect.stringMatching(/^ocr-\d+-0$/), x: 210, y: 310, width: 55, height: 40,
+        text: 'Xin chào', originalText: 'こんにちは',
+        fontSize: 14, isVertical: false,
+      }]);
     expect(mocks.eraseText).toHaveBeenCalledWith(originalBuffer, rawPolygons, 'telea');
     expect(mocks.eraseText.mock.calls[0]).toHaveLength(3); // No diagnostic raw canvas mask.
     expect(mocks.blobToBase64.mock.calls[0][0]).toBeInstanceOf(Blob);

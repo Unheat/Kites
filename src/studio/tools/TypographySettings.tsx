@@ -16,6 +16,7 @@ import {
   Image as ImageIcon,
   Plus,
   ClipboardPaste,
+  Sparkles,
 } from 'lucide-react';
 import { studioStore, useStudioStore, extractTypographyStyle } from '../state/studioStore';
 import { studioUndoStack } from '../state/undoStack';
@@ -89,7 +90,8 @@ export const TypographySettings: React.FC = () => {
       updated.fontFamily,
       updated.width,
       updated.height,
-      updated.fontSize
+      updated.fontSize,
+      updated.typesetMode
     );
     updated.lines = typeset.lines;
 
@@ -232,7 +234,8 @@ export const TypographySettings: React.FC = () => {
       obj.fontFamily || 'sans-serif',
       obj.width || 140,
       obj.height || 50,
-      obj.fontSize || 16
+      obj.fontSize || 16,
+      obj.typesetMode
     );
     const next = textObjects.map((t) =>
       t.id === obj.id
@@ -261,6 +264,58 @@ export const TypographySettings: React.FC = () => {
         });
       }
     }
+  };
+
+  const handleToggleTypesetMode = (newMode: 'balloon' | 'simple') => {
+    const prev = [...textObjects];
+    let next: TextObject[];
+
+    if (globalEditMode) {
+      // Global editing: apply newMode to ALL text objects on the page and recalculate each box
+      next = textObjects.map((t) => {
+        const typeset = recalculateBlockTypeset(
+          t.text || '',
+          t.fontFamily || 'sans-serif',
+          t.width || 140,
+          t.height || 50,
+          t.fontSize || 16,
+          newMode
+        );
+        return {
+          ...t,
+          typesetMode: newMode,
+          fontSize: newMode === 'balloon' ? typeset.fontSize : t.fontSize,
+          lines: typeset.lines,
+        };
+      });
+    } else if (selectedObj) {
+      // Local editing: apply newMode to ONLY the selected text object
+      const typeset = recalculateBlockTypeset(
+        selectedObj.text || '',
+        selectedObj.fontFamily || 'sans-serif',
+        selectedObj.width || 140,
+        selectedObj.height || 50,
+        selectedObj.fontSize || 16,
+        newMode
+      );
+      const updated: TextObject = {
+        ...selectedObj,
+        typesetMode: newMode,
+        fontSize: newMode === 'balloon' ? typeset.fontSize : selectedObj.fontSize,
+        lines: typeset.lines,
+      };
+      next = textObjects.map((t) => (t.id === selectedObj.id ? updated : t));
+    } else {
+      return;
+    }
+
+    studioStore.setState({ textObjects: next });
+    studioUndoStack.push({
+      id: `typeset-mode-${Date.now()}`,
+      timestamp: Date.now(),
+      description: `Switch Typesetting Mode to ${newMode === 'balloon' ? 'Auto Balloon' : 'Simple Wrap'}`,
+      textObjects: { before: prev, after: next },
+    });
   };
 
   const handleCopyOriginal = () => {
@@ -620,6 +675,44 @@ export const TypographySettings: React.FC = () => {
       {/* ======================================================== */}
       {/* 3. TYPOGRAPHY CONTROLS (Font, Size, Align, Color)        */}
       {/* ======================================================== */}
+
+      {/* Typesetting Mode Toggle */}
+      <div>
+        <div className="flex items-center justify-between mb-1">
+          <label className="block text-slate-400 font-medium">Typesetting Engine</label>
+          <span className="text-[10px] text-slate-500 font-mono">
+            {globalEditMode ? 'Global (All Bubbles)' : 'Local (Selected)'}
+          </span>
+        </div>
+        <div className="flex p-0.5 rounded-lg bg-[#090a0f] border border-[#282d3f] text-xs">
+          <button
+            type="button"
+            onClick={() => handleToggleTypesetMode('balloon')}
+            className={`flex-1 py-1.5 px-2 rounded-md font-semibold transition-all flex items-center justify-center gap-1.5 cursor-pointer text-[11px] ${
+              (obj.typesetMode || 'balloon') === 'balloon'
+                ? 'bg-[#1c1f2e] text-[#f4446d] shadow-xs'
+                : 'text-slate-400 hover:text-white'
+            }`}
+            title="Auto Balloon: Balances lines into speech bubble diamond envelopes and auto-fits font size (Pipeline typesystem)"
+          >
+            <Sparkles size={12} className={(obj.typesetMode || 'balloon') === 'balloon' ? 'text-[#f4446d]' : ''} />
+            <span>Auto Balloon</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => handleToggleTypesetMode('simple')}
+            className={`flex-1 py-1.5 px-2 rounded-md font-semibold transition-all flex items-center justify-center gap-1.5 cursor-pointer text-[11px] ${
+              obj.typesetMode === 'simple'
+                ? 'bg-[#1c1f2e] text-[#f4446d] shadow-xs'
+                : 'text-slate-400 hover:text-white'
+            }`}
+            title="Simple Wrap: Greedy line wrapping without auto font scaling (Torii simple mode)"
+          >
+            <AlignLeft size={12} className={obj.typesetMode === 'simple' ? 'text-[#f4446d]' : ''} />
+            <span>Simple Wrap</span>
+          </button>
+        </div>
+      </div>
 
       {/* Font Family */}
       <div>

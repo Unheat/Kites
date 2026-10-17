@@ -45,6 +45,22 @@ import type {
   TransformHandle,
 } from '../types';
 
+/**
+ * Coherent gesture record tracking an active text box transform or stationary click.
+ */
+interface ActiveTextGesture {
+  pointerId: number;
+  targetId: string;
+  handle: TransformHandle;
+  initialTransform: TextObject;
+  startClientPoint: Point; // in CSS screen pixels for deadzone
+  startImagePoint: Point;  // in image coordinates for geometry
+  latestDeltaX: number;
+  latestDeltaY: number;
+  latestShiftKey: boolean;
+  hasMoved: boolean;
+}
+
 export interface StudioCanvasProps {
   originalImage: HTMLImageElement | null;
   cleanedImage: HTMLImageElement | null;
@@ -82,6 +98,10 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
   const inlineTextareaRef = useRef<HTMLTextAreaElement>(null);
   const inlineInitialTextRef = useRef<TextObject[] | null>(null);
   const lastClickRef = useRef<{ time: number; id: string | null }>({ time: 0, id: null });
+  const activeGestureRef = useRef<ActiveTextGesture | null>(null);
+  const rafIdRef = useRef<number | null>(null);
+  const warpScratchCanvasRef = useRef<HTMLCanvasElement | null>(null);
+
   const [copiedOrigPill, setCopiedOrigPill] = useState(false);
   const [isPointerDown, setIsPointerDown] = useState(false);
   const [isSpacePanning, setIsSpacePanning] = useState(false);
@@ -89,8 +109,6 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
   const aiProcessingRef = useRef(false);
   const [ocrFeedback, setOcrFeedback] = useState<string | null>(null);
   const [activeHandle, setActiveHandle] = useState<TransformHandle | null>(null);
-  const [dragStartPoint, setDragStartPoint] = useState<Point | null>(null);
-  const [initialTransformState, setInitialTransformState] = useState<TextObject | null>(null);
   const [canvasCursor, setCanvasCursor] = useState<string>('default');
   const [inlineSelection, setInlineSelection] = useState<{ start: number; end: number } | null>(null);
   const [contextMenu, setContextMenu] = useState<{
@@ -140,8 +158,9 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
     const overlay = overlayCanvasRef.current;
     if (!overlay) return;
 
-    overlay.width = imageWidth;
-    overlay.height = imageHeight;
+    // Avoid reallocating GPU texture backing store unless dimensions changed
+    if (overlay.width !== imageWidth) overlay.width = imageWidth;
+    if (overlay.height !== imageHeight) overlay.height = imageHeight;
     const ctx = overlay.getContext('2d');
     if (!ctx) return;
 
@@ -180,11 +199,16 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       if (obj.isVisible === false) continue;
 
       if (obj.warpPreset && obj.warpPreset !== 'none' && obj.quadPoints) {
-        const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = obj.width;
-        tempCanvas.height = obj.height;
+        let tempCanvas = warpScratchCanvasRef.current;
+        if (!tempCanvas) {
+          tempCanvas = document.createElement('canvas');
+          warpScratchCanvasRef.current = tempCanvas;
+        }
+        if (tempCanvas.width !== obj.width) tempCanvas.width = obj.width;
+        if (tempCanvas.height !== obj.height) tempCanvas.height = obj.height;
         const tempCtx = tempCanvas.getContext('2d');
         if (tempCtx) {
+          tempCtx.clearRect(0, 0, obj.width, obj.height);
           TextRenderer.renderText(tempCtx, { ...obj, x: 0, y: 0, rotation: 0 });
           ctx.save();
           ctx.translate(obj.x, obj.y);
@@ -316,7 +340,8 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       updated.fontFamily,
       updated.width,
       updated.height,
-      updated.fontSize
+      updated.fontSize,
+      updated.typesetMode
     );
     updated.lines = typeset.lines;
 
@@ -611,6 +636,112 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
     );
   };
 
+  // Ensure any scheduled RAF is cancelled on component unmount
+  useEffect(() => {
+    return () => {
+      if (rafIdRef.current !== null) {
+        cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
+      }
+    };
+  }, []);
+
+  /**
+   * Computes the updated TextObject geometry and typeset reflow for an active gesture.
+   */
+  const computeUpdatedTextObject = (gesture: ActiveTextGesture): TextObject => {
+    const { initialTransform, handle, latestDeltaX, latestDeltaY, latestShiftKey } = gesture;
+    let updated = { ...initialTransform };
+
+    if (handle === 'rot') {
+      const centerX = initialTransform.x + initialTransform.width / 2;
+      const centerY = initialTransform.y + initialTransform.height / 2;
+      const initialMouseAngle = Math.atan2(gesture.startImagePoint.y - centerY, gesture.startImagePoint.x - centerX);
+      const currentPtX = gesture.startImagePoint.x + latestDeltaX;
+      const currentPtY = gesture.startImagePoint.y + latestDeltaY;
+      const currentMouseAngle = Math.atan2(currentPtY - centerY, currentPtX - centerX);
+      const deltaAngleDeg = ((currentMouseAngle - initialMouseAngle) * 180) / Math.PI;
+
+      let deg = Math.round((initialTransform.rotation || 0) + deltaAngleDeg);
+      deg = ((((deg % 360) + 540) % 360) - 180);
+
+      if (latestShiftKey) {
+        deg = Math.round(deg / 15) * 15;
+        if (deg === 180 || deg === -180) deg = 180;
+      } else {
+        if (Math.abs(deg) <= 5) deg = 0;
+        else if (Math.abs(deg - 90) <= 5) deg = 90;
+        else if (Math.abs(deg + 90) <= 5) deg = -90;
+        else if (Math.abs(Math.abs(deg) - 180) <= 5) deg = 180;
+      }
+      updated.rotation = deg;
+    } else if (handle === 'font-size') {
+      const rad = ((initialTransform.rotation || 0) * Math.PI) / 180;
+      const localDeltaX = latestDeltaX * Math.cos(rad) + latestDeltaY * Math.sin(rad);
+      const localDeltaY = -latestDeltaX * Math.sin(rad) + latestDeltaY * Math.cos(rad);
+      const scaleStep = Math.round((localDeltaX - localDeltaY) * 0.25);
+      const newFontSize = Math.max(6, Math.min(140, Math.round(initialTransform.fontSize + scaleStep)));
+      updated.fontSize = newFontSize;
+      const typeset = recalculateBlockTypeset(
+        updated.text,
+        updated.fontFamily,
+        updated.width,
+        updated.height,
+        newFontSize,
+        initialTransform.typesetMode
+      );
+      updated.lines = typeset.lines;
+    } else if (handle === 'wrap') {
+      const newBounds = computeRotatedBounds(initialTransform, 'e', latestDeltaX, latestDeltaY);
+      updated.x = newBounds.x;
+      updated.y = newBounds.y;
+      updated.width = newBounds.width;
+      updated.height = newBounds.height;
+      const typeset = recalculateBlockTypeset(
+        updated.text,
+        updated.fontFamily,
+        newBounds.width,
+        newBounds.height,
+        initialTransform.fontSize,
+        initialTransform.typesetMode
+      );
+      updated.lines = typeset.lines;
+    } else {
+      const newBounds = computeRotatedBounds(initialTransform, handle, latestDeltaX, latestDeltaY);
+      updated.x = newBounds.x;
+      updated.y = newBounds.y;
+      updated.width = newBounds.width;
+      updated.height = newBounds.height;
+
+      if (handle !== 'move') {
+        const typeset = recalculateBlockTypeset(
+          updated.text,
+          updated.fontFamily,
+          newBounds.width,
+          newBounds.height,
+          initialTransform.fontSize,
+          initialTransform.typesetMode
+        );
+        updated.fontSize = typeset.fontSize;
+        updated.lines = typeset.lines;
+      }
+    }
+
+    return updated;
+  };
+
+  /**
+   * Applies the latest transformed TextObject into the Zustand store on animation frames.
+   */
+  const applyTransformFrame = useCallback(() => {
+    const gesture = activeGestureRef.current;
+    if (!gesture || !gesture.hasMoved) return;
+    const updated = computeUpdatedTextObject(gesture);
+    studioStore.setState((state) => ({
+      textObjects: state.textObjects.map((t) => (t.id === updated.id ? updated : t)),
+    }));
+  }, []);
+
   // Pointer Down
   const handlePointerDown = (e: React.PointerEvent) => {
     if (e.button !== 0 || aiProcessingRef.current || isAiProcessing) return;
@@ -618,7 +749,6 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
     e.currentTarget.setPointerCapture(e.pointerId);
     const pt = getPointerImageCoords(e);
     setIsPointerDown(true);
-    setDragStartPoint(pt);
 
     if (isSpacePanning) {
       return;
@@ -697,51 +827,75 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
 
     // Select & Transform Tool
     if (activeTool === 'select' || activeTool === 'text') {
-      const selectedObj = textObjects.find((t) => t.id === selectedTextId);
+      const liveTexts = studioStore.getState().textObjects;
+      const selectedObj = liveTexts.find((t) => t.id === selectedTextId);
 
-      if (selectedObj && !hideBoxes) {
+      if (selectedObj && !hideBoxes && !selectedObj.isLocked) {
         const handle = CanvasFurniture.hitTestHandles(pt, selectedObj);
         if (handle) {
+          activeGestureRef.current = {
+            pointerId: e.pointerId,
+            targetId: selectedObj.id,
+            handle,
+            initialTransform: { ...selectedObj },
+            startClientPoint: { x: e.clientX, y: e.clientY },
+            startImagePoint: pt,
+            latestDeltaX: 0,
+            latestDeltaY: 0,
+            latestShiftKey: e.shiftKey,
+            hasMoved: false,
+          };
           setActiveHandle(handle);
-          setInitialTransformState({ ...selectedObj });
           return;
         }
       }
 
       let clickedObj: TextObject | null = null;
-      for (let i = textObjects.length - 1; i >= 0; i--) {
-        if (CanvasFurniture.hitTestBody(pt, textObjects[i])) {
-          clickedObj = textObjects[i];
+      for (let i = liveTexts.length - 1; i >= 0; i--) {
+        if (CanvasFurniture.hitTestBody(pt, liveTexts[i])) {
+          clickedObj = liveTexts[i];
           break;
         }
       }
 
       if (clickedObj) {
-        const now = Date.now();
-        const isDoubleClick =
-          lastClickRef.current.id === clickedObj.id && now - lastClickRef.current.time < 400;
-        lastClickRef.current = { time: now, id: clickedObj.id };
-
         // If clicking another object while editing, dismiss previous edit
         if (editingTextId && editingTextId !== clickedObj.id) {
           studioStore.setState({ editingTextId: null, selectedTextId: clickedObj.id });
-        } else {
+        } else if (selectedTextId !== clickedObj.id) {
           studioStore.setState({ selectedTextId: clickedObj.id });
         }
 
-        // Double-click directly activates inline text editing
-        if (isDoubleClick) {
-          studioStore.setState({ editingTextId: clickedObj.id });
+        // Locked text objects can be selected, but cannot be moved or transformed
+        if (clickedObj.isLocked) {
+          activeGestureRef.current = null;
           setActiveHandle(null);
           return;
         }
 
+        // Arm 'move' handle for dragging. Double-click to edit is deferred to pointerup
+        // when no movement occurs, so immediate or fast 2nd-click dragging never freezes!
+        activeGestureRef.current = {
+          pointerId: e.pointerId,
+          targetId: clickedObj.id,
+          handle: 'move',
+          initialTransform: { ...clickedObj },
+          startClientPoint: { x: e.clientX, y: e.clientY },
+          startImagePoint: pt,
+          latestDeltaX: 0,
+          latestDeltaY: 0,
+          latestShiftKey: e.shiftKey,
+          hasMoved: false,
+        };
         setActiveHandle('move');
-        setInitialTransformState({ ...clickedObj });
         return;
       }
 
       // Clicked outside text objects
+      activeGestureRef.current = null;
+      setActiveHandle(null);
+      lastClickRef.current = { time: 0, id: null };
+
       if (editingTextId) {
         studioStore.setState({ editingTextId: null, inlineSelection: null });
         setInlineSelection(null);
@@ -751,11 +905,9 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       if (selectedTextId) {
         studioStore.setState({ selectedTextId: null, inlineSelection: null });
         setInlineSelection(null);
-        setActiveHandle(null);
         return;
       }
 
-      setActiveHandle(null);
       return;
     }
   };
@@ -863,89 +1015,30 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
     }
 
     // Transform Selected Text Object
-    if ((activeTool === 'select' || activeTool === 'text') && activeHandle && dragStartPoint && initialTransformState) {
-      const deltaX = pt.x - dragStartPoint.x;
-      const deltaY = pt.y - dragStartPoint.y;
+    const gesture = activeGestureRef.current;
+    if ((activeTool === 'select' || activeTool === 'text') && gesture && gesture.pointerId === e.pointerId) {
+      const clientDx = e.clientX - gesture.startClientPoint.x;
+      const clientDy = e.clientY - gesture.startClientPoint.y;
 
-      let updated = { ...initialTransformState };
-
-      if (activeHandle === 'rot') {
-        const centerX = initialTransformState.x + initialTransformState.width / 2;
-        const centerY = initialTransformState.y + initialTransformState.height / 2;
-        const initialMouseAngle = Math.atan2(dragStartPoint.y - centerY, dragStartPoint.x - centerX);
-        const currentMouseAngle = Math.atan2(pt.y - centerY, pt.x - centerX);
-        const deltaAngleDeg = ((currentMouseAngle - initialMouseAngle) * 180) / Math.PI;
-
-        let deg = Math.round((initialTransformState.rotation || 0) + deltaAngleDeg);
-        deg = ((((deg % 360) + 540) % 360) - 180);
-
-        if (e.shiftKey) {
-          // Snap to 15-degree increments with Shift
-          deg = Math.round(deg / 15) * 15;
-          if (deg === 180 || deg === -180) deg = 180;
-        } else {
-          // Snap to cardinal angles if within 5 degrees
-          if (Math.abs(deg) <= 5) deg = 0;
-          else if (Math.abs(deg - 90) <= 5) deg = 90;
-          else if (Math.abs(deg + 90) <= 5) deg = -90;
-          else if (Math.abs(Math.abs(deg) - 180) <= 5) deg = 180;
+      // 3px deadzone threshold in CSS screen pixels
+      if (!gesture.hasMoved) {
+        if (Math.hypot(clientDx, clientDy) < 3) {
+          return;
         }
-        updated.rotation = deg;
-      } else if (activeHandle === 'font-size') {
-        // Direct font-size scaling along diagonal
-        const rad = ((initialTransformState.rotation || 0) * Math.PI) / 180;
-        const localDeltaX = deltaX * Math.cos(rad) + deltaY * Math.sin(rad);
-        const localDeltaY = -deltaX * Math.sin(rad) + deltaY * Math.cos(rad);
-        const scaleStep = Math.round((localDeltaX - localDeltaY) * 0.25);
-        const newFontSize = Math.max(6, Math.min(140, Math.round(initialTransformState.fontSize + scaleStep)));
-        updated.fontSize = newFontSize;
-        const typeset = recalculateBlockTypeset(
-          updated.text,
-          updated.fontFamily,
-          updated.width,
-          updated.height,
-          newFontSize
-        );
-        updated.lines = typeset.lines;
-      } else if (activeHandle === 'wrap') {
-        // Wrap handle adjusts width with LOCKED font size
-        const newBounds = computeRotatedBounds(initialTransformState, 'e', deltaX, deltaY);
-        updated.x = newBounds.x;
-        updated.y = newBounds.y;
-        updated.width = newBounds.width;
-        updated.height = newBounds.height;
-        const typeset = recalculateBlockTypeset(
-          updated.text,
-          updated.fontFamily,
-          newBounds.width,
-          newBounds.height,
-          initialTransformState.fontSize
-        );
-        updated.lines = typeset.lines;
-      } else {
-        const newBounds = computeRotatedBounds(initialTransformState, activeHandle, deltaX, deltaY);
-        updated.x = newBounds.x;
-        updated.y = newBounds.y;
-        updated.width = newBounds.width;
-        updated.height = newBounds.height;
-
-        if (activeHandle !== 'move') {
-          // Box size/aspect ratio changed — automatically reflow lines and fit font size!
-          const typeset = recalculateBlockTypeset(
-            updated.text,
-            updated.fontFamily,
-            newBounds.width,
-            newBounds.height,
-            initialTransformState.fontSize
-          );
-          updated.fontSize = typeset.fontSize;
-          updated.lines = typeset.lines;
-        }
+        gesture.hasMoved = true;
       }
 
-      studioStore.setState({
-        textObjects: textObjects.map((t) => (t.id === updated.id ? updated : t)),
-      });
+      gesture.latestDeltaX = pt.x - gesture.startImagePoint.x;
+      gesture.latestDeltaY = pt.y - gesture.startImagePoint.y;
+      gesture.latestShiftKey = e.shiftKey;
+
+      if (rafIdRef.current === null) {
+        rafIdRef.current = requestAnimationFrame(() => {
+          rafIdRef.current = null;
+          applyTransformFrame();
+        });
+      }
+      return;
     }
   };
 
@@ -953,8 +1046,11 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
   const handlePointerUp = async () => {
     if (!isPointerDown || aiProcessingRef.current) return;
     setIsPointerDown(false);
-    setActiveHandle(null);
-    setDragStartPoint(null);
+
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = null;
+    }
 
     const bgCanvas = bgCanvasRef.current;
     const bgCtx = bgCanvas?.getContext('2d', { willReadFrequently: true });
@@ -1138,50 +1234,96 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       return;
     }
 
-    // Transform Text Box Undo state
-    if (initialTransformState && selectedTextId) {
-      const currentList = studioStore.getState().textObjects;
-      const current = currentList.find((t) => t.id === selectedTextId);
-      if (current && JSON.stringify(current) !== JSON.stringify(initialTransformState)) {
-        const prev = currentList.map((t) => (t.id === initialTransformState.id ? initialTransformState : t));
-        const actionDesc =
-          activeHandle === 'move'
-            ? 'Move Text Box'
-            : activeHandle === 'rot'
-            ? 'Rotate Text Box'
-            : activeHandle === 'font-size'
-            ? 'Scale Font Size'
-            : activeHandle === 'wrap'
-            ? 'Wrap Text Lines'
-            : 'Resize & Reflow Text Box';
+    // Transform Text Box / Click / Double Click resolution
+    const gesture = activeGestureRef.current;
+    if ((activeTool === 'select' || activeTool === 'text') && gesture) {
+      if (gesture.hasMoved) {
+        // Synchronously commit final frame position
+        const finalUpdated = computeUpdatedTextObject(gesture);
+        const currentList = studioStore.getState().textObjects;
+        const nextList = currentList.map((t) => (t.id === finalUpdated.id ? finalUpdated : t));
+        studioStore.setState({ textObjects: nextList });
 
-        studioUndoStack.push({
-          id: `transform-${Date.now()}`,
-          timestamp: Date.now(),
-          description: actionDesc,
-          textObjects: { before: prev, after: currentList },
-        });
+        // Dragging invalidates double-click timer
+        lastClickRef.current = { time: 0, id: null };
+
+        if (JSON.stringify(finalUpdated) !== JSON.stringify(gesture.initialTransform)) {
+          const prev = nextList.map((t) => (t.id === gesture.initialTransform.id ? gesture.initialTransform : t));
+          const actionDesc =
+            gesture.handle === 'move'
+              ? 'Move Text Box'
+              : gesture.handle === 'rot'
+              ? 'Rotate Text Box'
+              : gesture.handle === 'font-size'
+              ? 'Scale Font Size'
+              : gesture.handle === 'wrap'
+              ? 'Wrap Text Lines'
+              : 'Resize & Reflow Text Box';
+
+          studioUndoStack.push({
+            id: `transform-${Date.now()}`,
+            timestamp: Date.now(),
+            description: actionDesc,
+            textObjects: { before: prev, after: nextList },
+          });
+        }
+      } else {
+        // Pointer did NOT move beyond 3px deadzone: it was a stationary click!
+        const now = Date.now();
+        const isDoubleClick =
+          lastClickRef.current.id === gesture.targetId && now - lastClickRef.current.time < 350;
+
+        if (isDoubleClick) {
+          lastClickRef.current = { time: 0, id: null };
+          studioStore.setState({
+            selectedTextId: gesture.targetId,
+            editingTextId: gesture.targetId,
+          });
+        } else {
+          lastClickRef.current = { time: now, id: gesture.targetId };
+          studioStore.setState({
+            selectedTextId: gesture.targetId,
+          });
+        }
       }
-      setInitialTransformState(null);
+
+      activeGestureRef.current = null;
+      setActiveHandle(null);
+      return;
     }
+
+    activeGestureRef.current = null;
+    setActiveHandle(null);
   };
 
   /**
-   * Double-click handler to directly activate inline text editing on hit-tested dialogue box.
+   * Cancels any active gesture, rolls back transform if moved, and resets pointer state.
+   */
+  const handlePointerCancel = () => {
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = null;
+    }
+    const gesture = activeGestureRef.current;
+    if (gesture && gesture.hasMoved) {
+      // Roll back store to initialTransform
+      studioStore.setState((state) => ({
+        textObjects: state.textObjects.map((t) =>
+          t.id === gesture.initialTransform.id ? gesture.initialTransform : t
+        ),
+      }));
+    }
+    activeGestureRef.current = null;
+    setIsPointerDown(false);
+    setActiveHandle(null);
+  };
+
+  /**
+   * Double-click handler to prevent default browser behavior.
+   * Double-click detection is safely handled in handlePointerUp when no drag movement occurred.
    */
   const handleDoubleClick = (e: React.MouseEvent) => {
-    if (activeTool !== 'select' && activeTool !== 'text') return;
-    const pt = getPointerImageCoords(e as unknown as React.PointerEvent);
-    for (let i = textObjects.length - 1; i >= 0; i--) {
-      if (CanvasFurniture.hitTestBody(pt, textObjects[i])) {
-        studioStore.setState({
-          selectedTextId: textObjects[i].id,
-          editingTextId: textObjects[i].id,
-        });
-        setActiveHandle(null);
-        return;
-      }
-    }
+    e.preventDefault();
   };
 
   // Focus inline textarea and place caret at end when inline editing mode activates
@@ -1359,7 +1501,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
-          onPointerCancel={handlePointerUp}
+          onPointerCancel={handlePointerCancel}
           onDoubleClick={handleDoubleClick}
           onContextMenu={handleContextMenu}
           style={{

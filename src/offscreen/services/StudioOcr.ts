@@ -31,6 +31,8 @@ export interface StudioOcrResponse {
     height: number;
     text: string;
     originalText: string;
+    fontSize?: number;
+    isVertical?: boolean;
   }>;
 }
 
@@ -68,7 +70,7 @@ function normalizeRegions(result: OcrResult) {
     if (!text.trim()) return [];
     const polygon = result.polygons![index];
     if (!isValidPolygon(polygon)) throw new Error(`Studio OCR returned invalid polygon at region ${index}.`);
-    return [{ text, polygon }];
+    return [{ text, polygon, index }];
   });
 }
 
@@ -145,11 +147,14 @@ export async function runStudioOcr(
   }
 
   const timestamp = Date.now();
-  const textObjects = regions.map(({ polygon, text: originalText }, index) => {
+  const textObjects = regions.map(({ polygon, text: originalText, index: origIndex }, index) => {
     const xs = polygon.map(point => point.x);
     const ys = polygon.map(point => point.y);
     const minX = Math.min(...xs);
     const minY = Math.min(...ys);
+    const resolvedIndex = origIndex ?? index;
+    const detectedFontSize = result.fontSizes?.[resolvedIndex];
+    const detectedDirection = result.directions?.[resolvedIndex];
     return {
       id: `ocr-${timestamp}-${index}`,
       x: payload.offsetX + minX,
@@ -158,6 +163,10 @@ export async function runStudioOcr(
       height: Math.max(MIN_TEXT_OBJECT_SIZE, Math.max(...ys) - minY),
       text: texts[index],
       originalText,
+      fontSize: typeof detectedFontSize === 'number' && Number.isFinite(detectedFontSize) && detectedFontSize > 0
+        ? Math.round(detectedFontSize)
+        : undefined,
+      isVertical: detectedDirection === 'v',
     };
   });
   return { inpaintedPatchBase64, textObjects };

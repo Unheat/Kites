@@ -401,6 +401,20 @@ function createNonHtmlImageTarget(element: Element): MediaTarget | null {
  */
 export function collectQueryRoots(root: ParentNode): ParentNode[] {
   const roots: ParentNode[] = [root];
+  const doc = (root as Node).ownerDocument || (root instanceof Document ? root : (typeof document !== 'undefined' ? document : null));
+  if (doc && typeof doc.createTreeWalker === 'function') {
+    const showElement = typeof NodeFilter !== 'undefined' ? NodeFilter.SHOW_ELEMENT : 1;
+    const walker = doc.createTreeWalker(root as Node, showElement);
+    let node = walker.nextNode();
+    while (node) {
+      const el = node as Element;
+      if (el.shadowRoot) {
+        roots.push(...collectQueryRoots(el.shadowRoot));
+      }
+      node = walker.nextNode();
+    }
+    return roots;
+  }
   for (const element of Array.from(root.querySelectorAll('*'))) {
     if (element.shadowRoot) roots.push(...collectQueryRoots(element.shadowRoot));
   }

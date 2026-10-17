@@ -95,17 +95,26 @@ export class TextRenderer {
     maxWidth: number,
     existingLines?: string[]
   ): string[] {
+    const safeWidth = Math.max(20, maxWidth - 8);
+
     if (existingLines && existingLines.length > 0) {
-      const normalizedExisting = existingLines.join(' ').replace(/\s+/g, ' ').trim();
-      const normalizedCurrent = text.replace(/\s+/g, ' ').trim();
-      if (normalizedExisting === normalizedCurrent) {
-        return existingLines;
+      // Only reuse existingLines if every line actually fits inside safeWidth!
+      // If the box was shrunk or stretched, lines must be re-wrapped.
+      const allLinesFit = existingLines.every((l) => ctx.measureText(l).width <= safeWidth + 2);
+      if (allLinesFit) {
+        const normalizedExisting = existingLines.join(' ').replace(/\s+/g, ' ').trim();
+        const normalizedCurrent = text.replace(/\s+/g, ' ').trim();
+        if (
+          normalizedExisting === normalizedCurrent ||
+          existingLines.join('').replace(/\s+/g, '') === text.replace(/\s+/g, '')
+        ) {
+          return existingLines;
+        }
       }
     }
 
     const paragraphs = text.split('\n');
     const resultLines: string[] = [];
-    const safeWidth = Math.max(20, maxWidth - 8);
 
     for (const para of paragraphs) {
       if (!para.trim()) {

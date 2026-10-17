@@ -246,10 +246,10 @@ export class TranslationManager {
     }
 
     const loadStart = performance.now();
-    const reportsColdInitialization = registryEntry?.engine === 'webllm' || engineId.endsWith('-MLC');
-    if (reportsColdInitialization && onInitialization) {
+    const isLocalModelEngine = registryEntry?.engine === 'webllm' || engineId.endsWith('-MLC');
+    if (isLocalModelEngine && onInitialization) {
       try {
-        onInitialization('started');
+        onInitialization('started', 'translation', engineId);
       } catch (callbackError) {
         console.error(`[TranslationManager] Engine ${engineId} initialization-start callback failed.`, callbackError);
       }
@@ -268,9 +268,9 @@ export class TranslationManager {
       }
       throw error;
     } finally {
-      if (reportsColdInitialization && onInitialization) {
+      if (isLocalModelEngine && onInitialization) {
         try {
-          onInitialization('finished');
+          onInitialization('finished', 'translation', engineId);
         } catch (callbackError) {
           console.error(`[TranslationManager] Engine ${engineId} initialization-finished callback failed.`, callbackError);
         }

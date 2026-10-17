@@ -142,26 +142,31 @@ export class CanvasFurniture {
     const right = obj.width;
     const bottom = obj.height;
 
-    // Rotation handle
+    // Rotation handle sits safely outside the box boundary
     if (this.dist(localX, localY, midX, -ROTATION_HANDLE_OFFSET) <= radius) return 'rot';
 
+    // Ensure perimeter handles never cover more than 28% of the box dimension,
+    // guaranteeing that narrow vertical or small bubbles retain interior body area for dragging.
+    const maxRadius = Math.max(3, Math.min(obj.width, obj.height) * 0.28);
+    const effectiveRadius = Math.min(radius, maxRadius);
+
     // Font-size handle (top-right corner nub)
-    if (this.dist(localX, localY, right, 0) <= radius) {
+    if (this.dist(localX, localY, right, 0) <= effectiveRadius) {
       return 'font-size';
     }
 
     // Wrap handle (right midpoint nub)
-    if (this.dist(localX, localY, right, midY) <= radius) {
+    if (this.dist(localX, localY, right, midY) <= effectiveRadius) {
       return 'wrap';
     }
 
     // Bounding corner and edge handles
-    if (this.dist(localX, localY, 0, 0) <= radius) return 'nw';
-    if (this.dist(localX, localY, midX, 0) <= radius) return 'n';
-    if (this.dist(localX, localY, right, bottom) <= radius) return 'se';
-    if (this.dist(localX, localY, midX, bottom) <= radius) return 's';
-    if (this.dist(localX, localY, 0, bottom) <= radius) return 'sw';
-    if (this.dist(localX, localY, 0, midY) <= radius) return 'w';
+    if (this.dist(localX, localY, 0, 0) <= effectiveRadius) return 'nw';
+    if (this.dist(localX, localY, midX, 0) <= effectiveRadius) return 'n';
+    if (this.dist(localX, localY, right, bottom) <= effectiveRadius) return 'se';
+    if (this.dist(localX, localY, midX, bottom) <= effectiveRadius) return 's';
+    if (this.dist(localX, localY, 0, bottom) <= effectiveRadius) return 'sw';
+    if (this.dist(localX, localY, 0, midY) <= effectiveRadius) return 'w';
 
     return null;
   }

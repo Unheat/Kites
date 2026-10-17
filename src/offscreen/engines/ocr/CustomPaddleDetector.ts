@@ -56,9 +56,27 @@ export class CustomPaddleDetector {
       : await platform.canvas.prepareCanvas(imageInput);
     const input = await detector.preprocessDetection(canvas);
 
-    // 2. Run inference (this executes on WebGPU if available, or WASM fallback)
+    // 2. Run inference with explicit input and output tensor disposal
     console.log(`[CustomPaddleDetector] Running ONNX inference (${input.width}x${input.height})...`);
-    const probabilityMap: Float32Array = await detector.runInference(input.tensor, input.width, input.height);
+    let inputTensor: any;
+    let results: any;
+    let probabilityMap: Float32Array | null = null;
+    try {
+      inputTensor = new platform.ort.Tensor('float32', input.tensor, [1, 3, input.height, input.width]);
+      results = await detector.session.run({ x: inputTensor });
+      const outKey = detector.session.outputNames?.[0] || 'sigmoid_0.tmp_0';
+      const outputTensor = results[outKey] || Object.values(results)[0];
+      if (outputTensor?.data) {
+        probabilityMap = new Float32Array(outputTensor.data);
+      }
+    } finally {
+      inputTensor?.dispose?.();
+      if (results) {
+        for (const t of Object.values(results) as any[]) {
+          t?.dispose?.();
+        }
+      }
+    }
 
     if (!probabilityMap) {
       console.warn('[CustomPaddleDetector] Probability map is null. No text found.');

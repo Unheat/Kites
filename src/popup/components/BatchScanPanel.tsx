@@ -11,6 +11,7 @@ import {
   Sparkles,
   Layers,
   History,
+  Archive,
 } from 'lucide-react';
 import type { ScannedPageImage } from '../../content/scanner';
 import type { ChapterReaderPage } from '../../content/ChapterReaderModal';
@@ -52,6 +53,7 @@ export default function BatchScanPanel() {
   const [isFastScanning, setIsFastScanning] = useState(false);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [isQueueing, setIsQueueing] = useState(false);
+  const [isExportingZip, setIsExportingZip] = useState(false);
   const [needsTabReload, setNeedsTabReload] = useState(false);
   const [activeJobs, setActiveJobs] = useState<Map<string, string>>(new Map());
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
@@ -352,16 +354,13 @@ export default function BatchScanPanel() {
     }
   };
 
-  // Opens Chapter Reader for selected pages, or all translated pages if none selected
+  // Opens Chapter Reader for selected pages, or all pages in view if none selected
   const handleOpenReaderForSelected = async () => {
     try {
       const tab = await getActiveTab();
       if (!tab?.id) return;
 
-      let targetItems = selectedList;
-      if (targetItems.length === 0) {
-        targetItems = currentViewItems.filter((item) => item.isTranslated);
-      }
+      const targetItems = selectedList.length > 0 ? selectedList : currentViewItems;
 
       if (targetItems.length === 0) {
         await chrome.tabs.sendMessage(
@@ -386,6 +385,7 @@ export default function BatchScanPanel() {
         top: idx * (item.height || 1200),
         isTranslated: item.isTranslated,
         translatedUrl: item.translatedUrl,
+        jobId: item.jobId,
         status: item.status === 'downloading' ? 'processing' : item.status,
       }));
 
@@ -403,6 +403,57 @@ export default function BatchScanPanel() {
       window.close();
     } catch (err) {
       console.warn('[Popup] Failed to open chapter reader from batch panel:', err);
+    }
+  };
+
+  // Exports selected or available translated pages as ZIP archive
+  const handleExportZipForSelected = async () => {
+    try {
+      const tab = await getActiveTab();
+      if (!tab?.id) return;
+
+      const targetItems = selectedList.length > 0 ? selectedList : currentViewItems;
+      const readyItems = targetItems.filter((item) => item.isTranslated && item.translatedUrl);
+
+      if (readyItems.length === 0) {
+        setStatusMessage('No translated pages ready to export.');
+        return;
+      }
+
+      setIsExportingZip(true);
+      setStatusMessage(`Preparing ${readyItems.length} pages for ZIP export…`);
+
+      const recordsToExport = readyItems.map((item, idx) => ({
+        originalUrl: item.url,
+        translatedUrl: item.translatedUrl!,
+        sourcePage: item.source === 'page' ? (tab.url || '') : 'history',
+        documentPath: null,
+        documentY: idx * 1000,
+        sequence: idx + 1,
+      }));
+
+      const res = await chrome.tabs.sendMessage(
+        tab.id,
+        {
+          type: 'EXPORT_CHAPTER_ZIP',
+          target: 'content',
+          source: 'popup',
+          request: true,
+          payload: { records: recordsToExport },
+        },
+        { frameId: 0 }
+      );
+
+      if (res?.phase === 'error') {
+        setStatusMessage(res.message || 'ZIP Export failed.');
+      } else {
+        setStatusMessage(`ZIP Download started (${readyItems.length} pages).`);
+      }
+    } catch (err: any) {
+      console.warn('[BatchScan] Export ZIP dispatch failed:', err);
+      setStatusMessage('Failed to trigger ZIP export on active tab.');
+    } finally {
+      if (mountedRef.current) setIsExportingZip(false);
     }
   };
 
@@ -428,6 +479,9 @@ export default function BatchScanPanel() {
 
   const selectedCountInView = currentViewItems.filter((item) => selectedMap.has(item.id)).length;
   const totalTranslatedInView = currentViewItems.filter((item) => item.isTranslated).length;
+  const readyToExportCount = selectedList.length > 0
+    ? selectedList.filter((item) => item.isTranslated && item.translatedUrl).length
+    : totalTranslatedInView;
 
   return (
     <div className="flex flex-col gap-2.5 text-xs">
@@ -704,20 +758,47 @@ export default function BatchScanPanel() {
           </span>
         </button>
 
-        {/* Selective Chapter Reader Launch Button */}
-        {(selectedList.length > 0 || totalTranslatedInView > 0) && (
+        {/* Secondary Action Row: Open Reader & Export ZIP (Permanent, Never Disappears) */}
+        <div className="grid grid-cols-2 gap-2">
           <button
             onClick={handleOpenReaderForSelected}
-            className="w-full py-1.5 bg-[var(--color-vellum)] text-[var(--color-ink)] border border-[var(--color-dust)] border-opacity-30 font-semibold rounded hover:border-[var(--color-editorial)] hover:text-[var(--color-editorial)] transition-colors flex items-center justify-center gap-1.5 text-xs cursor-pointer shadow-sm"
+            className="py-1.5 px-2 bg-[var(--color-vellum)] text-[var(--color-ink)] border border-[var(--color-dust)] border-opacity-30 font-semibold rounded hover:border-[var(--color-editorial)] hover:text-[var(--color-editorial)] transition-colors flex items-center justify-center gap-1.5 text-xs cursor-pointer shadow-sm truncate"
+            title={
+              selectedList.length > 0
+                ? `Open reader displaying ${selectedList.length} selected pages`
+                : `Open reader displaying all ${currentViewItems.length} pages`
+            }
           >
-            <BookOpen size={13} className="text-[var(--color-editorial)]" />
-            <span>
+            <BookOpen size={13} className="text-[var(--color-editorial)] shrink-0" />
+            <span className="truncate">
               {selectedList.length > 0
-                ? `Open Reader for ${selectedList.length} Selected`
-                : `Open in Chapter Reader (${totalTranslatedInView})`}
+                ? `Reader (${selectedList.length})`
+                : `Open Reader (${currentViewItems.length})`}
             </span>
           </button>
-        )}
+
+          <button
+            onClick={handleExportZipForSelected}
+            disabled={isExportingZip || readyToExportCount === 0}
+            className="py-1.5 px-2 bg-[var(--color-vellum)] text-[var(--color-ink)] border border-[var(--color-dust)] border-opacity-30 font-semibold rounded hover:border-[var(--color-editorial)] hover:text-[var(--color-editorial)] transition-colors flex items-center justify-center gap-1.5 text-xs cursor-pointer shadow-sm disabled:opacity-50 disabled:cursor-not-allowed truncate"
+            title={
+              readyToExportCount === 0
+                ? 'No translated pages ready to export yet'
+                : `Download ${readyToExportCount} translated page${readyToExportCount === 1 ? '' : 's'} as ZIP`
+            }
+          >
+            {isExportingZip ? (
+              <Loader size={13} className="animate-spin text-[var(--color-editorial)] shrink-0" />
+            ) : (
+              <Archive size={13} className="text-[var(--color-editorial)] shrink-0" />
+            )}
+            <span className="truncate">
+              {isExportingZip
+                ? 'Exporting…'
+                : `Export ZIP (${readyToExportCount})`}
+            </span>
+          </button>
+        </div>
       </div>
     </div>
   );

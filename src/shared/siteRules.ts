@@ -114,6 +114,40 @@ export function isValidCssSelector(selector: string): boolean {
 }
 
 /**
+ * Canonical chapter scope resolver.
+ * Single Source of Truth for ZIP export, Reader modal, and Stack selection panel.
+ * Normalizes webtoon chapter URLs, removes hash/pagination query parameters,
+ * and strips trailing page indices on paginated manga/gallery readers (e.g. nhentai /g/123/4/ -> /g/123/).
+ *
+ * @param rawUrl - Full page or image source URL.
+ * @returns Canonical chapter/gallery identifier URL.
+ */
+export function getChapterScopeId(rawUrl: string): string {
+  if (!rawUrl || typeof rawUrl !== 'string') return '';
+  try {
+    const url = new URL(rawUrl);
+
+    // 1. Paginated galleries (e.g. nhentai /g/677759/6/ -> /g/677759/)
+    if (/\/g\/\d+\/\d+\/?$/.test(url.pathname)) {
+      return `${url.origin}${url.pathname.replace(/\/\d+\/?$/, '/')}`;
+    }
+
+    // 2. Explicit page suffixes (e.g. /chapter-1/page-2/ or /ch1/p5 or /chapter-1/p-2/)
+    if (/\/(?:page|p)[-_]?\d+\/?$/i.test(url.pathname)) {
+      return `${url.origin}${url.pathname.replace(/\/(?:page|p)[-_]?\d+\/?$/i, '/')}`;
+    }
+
+    // 3. Webtoon / SPA chapter: remove page-specific query parameters while preserving chapter path/hash
+    url.searchParams.delete('page');
+    url.searchParams.delete('p');
+    return `${url.origin}${url.pathname}${url.search ? url.search : ''}${url.hash || ''}`;
+  } catch {
+    return rawUrl.split('?')[0].split('#')[0];
+  }
+}
+
+
+/**
  * Normalizes user-defined site selector rules.
  *
  * @param rawRules - Stored array or unknown input.

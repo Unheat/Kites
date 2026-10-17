@@ -159,7 +159,7 @@ export class InpaintManager {
       case 'none': engine = new NoneInpaintEngine(); break;
       default: throw new Error(`[InpaintManager] Unknown inpainting tier: ${tier}`);
     }
-    onInitialization?.('started');
+    onInitialization?.('started', 'inpaint', tier);
     try {
       await engine.init();
       return engine;
@@ -168,7 +168,7 @@ export class InpaintManager {
       await engine.destroy().catch(destroyError => console.error('[InpaintManager] Failed to destroy partial engine', destroyError));
       throw error;
     } finally {
-      onInitialization?.('finished');
+      onInitialization?.('finished', 'inpaint', tier);
     }
   }
 
