@@ -98,6 +98,9 @@ export class TextRenderer {
     const safeWidth = Math.max(20, maxWidth - 8);
 
     if (existingLines && existingLines.length > 0) {
+      // Authored or pipeline-fitted line breaks are already layout output. Resize and
+      // typography edits recalculate them through studioTypeset, not this paint path.
+      if (text === existingLines.join('\n')) return existingLines;
       // Only reuse existingLines if every line actually fits inside safeWidth!
       // If the box was shrunk or stretched, lines must be re-wrapped.
       const allLinesFit = existingLines.every((l) => ctx.measureText(l).width <= safeWidth + 2);

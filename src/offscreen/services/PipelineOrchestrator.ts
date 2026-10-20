@@ -7,7 +7,7 @@ import type { InpaintTier } from './InpaintManager';
 import type { Point2D } from '../engines/inpaint/BaseInpaintEngine';
 import { inpaintRegistry } from '../engines/inpaint/inpaintRegistry';
 import { InpaintCacheManager } from './InpaintCacheManager';
-import { renderTextBlocksBatch, measureBubbleLayoutFontSize, LANGUAGE_ORIENTATION_PRESETS, type TextBlockItem, type RenderedBlockInfo } from '../utils/canvasTypesetting';
+import { renderTextBlocksBatch, measureBubbleLayoutFontSize, getRenderedBlockGeometry, LANGUAGE_ORIENTATION_PRESETS, type TextBlockItem, type RenderedBlockInfo } from '../utils/canvasTypesetting';
 import { resolveRenderFontFamily } from '../../shared/renderFontPresets';
 import { bubbleManager } from './BubbleManager';
 import { acquireBubbleGeometry, resolveBubbleLayouts, type BubbleGeometry } from './BubbleLayoutService';
@@ -390,20 +390,23 @@ export class PipelineOrchestrator {
       // Map OCR results back to DB text blocks
       const textBlocksToSave = ocrResult.texts.map((text, i) => {
         const box = ocrResult.boxes[i];
-        const activeBox = (ocrResult.typesetBoxes && ocrResult.typesetBoxes[i])
-          ? ocrResult.typesetBoxes[i]
-          : box;
+        const renderInfo = renderInfoByOcrIndex.get(i);
+        // Renderer owns expansion, collision resolution and fitting. Persist its final
+        // layout, not the earlier OCR/typeset proposal; skipped blocks retain that fallback.
+        const activeBox = (renderInfo && getRenderedBlockGeometry(renderInfo.dstPoints))
+          || ocrResult.typesetBoxes?.[i]
+          || box;
         const translatedText = translatedTexts[i] || 'Error';
         const dir = (ocrResult.directions && ocrResult.directions[i]) ? ocrResult.directions[i] : 'h';
 
         // Persist the font size the renderer actually used (Cotrans block font size after
         // downscaling); fall back to the OCR-detected block font size if the block was skipped.
-        const fontSize = renderInfoByOcrIndex.get(i)?.fontSize
+        const fontSize = renderInfo?.fontSize
           ?? (ocrResult.fontSizes ? ocrResult.fontSizes[i] : undefined)
           ?? Math.max(9, Math.floor(Math.min(activeBox.w, activeBox.h)));
         // Persist the render-time colors (background-sampled) so the Studio overlay
         // matches the baked image instead of assuming black-on-white.
-        const renderColors = renderInfoByOcrIndex.get(i);
+        const renderColors = renderInfo;
 
         return {
           imageId: imageRecord.id!,
@@ -423,11 +426,12 @@ export class PipelineOrchestrator {
               : 'center',
           color: renderColors?.textColor ?? '#000000',
           strokeColor: popupState?.renderFontStrokeDisabled ? 'transparent' : (renderColors?.strokeColor ?? '#FFFFFF'),
-          direction: dir,
-          lines: renderInfoByOcrIndex.get(i)?.lines,
-          angle: (ocrResult.angles && ocrResult.angles[i] !== undefined)
+          direction: renderInfo?.direction ?? dir,
+          lines: renderInfo?.lines,
+          lineSpacing: renderInfo?.lineSpacing,
+          angle: renderInfo?.angle ?? ((ocrResult.angles && ocrResult.angles[i] !== undefined)
             ? Math.round(ocrResult.angles[i])
-            : undefined,
+            : undefined),
         };
       });
 

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { createCanvas } from 'canvas';
 import { calcHorizontal, compactSpecialSymbols, resizeRegionToFontSize, putTextLines, measureDefaultLayout, renderRegionDefault } from './cotransDefaultRenderer';
 import { fitFontSizeWithLines } from './typesetLayout';
@@ -133,7 +133,14 @@ describe('shared default layout measurement', () => {
     expect(measured).toEqual(expected);
     const metadata = region(140, 100, 20, '', text);
     const rendered = renderRegionDefault(ctx, metadata, metadata.polygon, 20, cap, family);
-    expect(rendered).toEqual({ fontSize: measured.size, lineCount: measured.lines.length, lines: measured.lines });
+    expect(rendered).toMatchObject({ fontSize: measured.size, lineCount: measured.lines.length, lines: measured.lines });
+    // Spacing must reproduce draw positions, not a rounded nominal multiplier.
+    const drawCtx = createCanvas(400, 200).getContext('2d');
+    const fillSpy = vi.spyOn(drawCtx, 'fillText');
+    const drawn = renderRegionDefault(drawCtx, metadata, metadata.polygon, 20, cap, family)!;
+    const draws = fillSpy.mock.calls;
+    expect(draws.length).toBeGreaterThan(1);
+    expect(draws[1][2] - draws[0][2]).toBeCloseTo(drawn.fontSize * drawn.lineSpacing);
   });
 });
 

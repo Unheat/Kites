@@ -81,6 +81,8 @@ export interface DefaultRenderResult {
   lineCount: number;
   /** Exact validated lines rendered onto the page. */
   lines: string[];
+  /** Actual baseline step divided by font size, for lossless layout persistence. */
+  lineSpacing: number;
 }
 
 type AnyCanvas = { getContext(type: '2d', options?: { willReadFrequently?: boolean }): any; width: number; height: number };
@@ -835,5 +837,5 @@ export function renderRegionDefault(
 
   ctx.restore();
 
-  return { fontSize: fitted.size, lineCount: fitted.lines.length, lines: fitted.lines };
+  return { fontSize: fitted.size, lineCount: drawableLines.length, lines: drawableLines, lineSpacing: lineStep / fitted.size };
 }

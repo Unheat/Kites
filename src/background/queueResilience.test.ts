@@ -1,4 +1,5 @@
 import 'fake-indexeddb/auto';
+import { Blob as NodeBlob } from 'node:buffer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Controllable chrome stubs shared between the hoisted block and the tests. The
@@ -115,6 +116,7 @@ import {
   sendMessageToOffscreen,
   processQueue,
   queueTranslation,
+  enqueueStudioJob,
 } from './index';
 import { db } from '../db';
 
@@ -140,6 +142,46 @@ beforeEach(async () => {
 afterEach(async () => {
   vi.useRealTimers();
   await clearDatabase();
+});
+
+describe('Studio upload queue routing', () => {
+  it('rejects invalid jobs and missing uploaded images', async () => {
+    await expect(enqueueStudioJob(NaN)).rejects.toThrow('Invalid Studio upload job ID');
+    await expect(enqueueStudioJob(99)).rejects.toThrow('Studio upload is not queued');
+    const jobId = await db.translationJobs.add({ timestamp: Date.now(), status: 'queued', srcUrl: 'page.png' });
+    await expect(enqueueStudioJob(jobId!)).rejects.toThrow('Studio upload has no image data');
+    expect(offscreenState.jobMessageCount).toBe(0);
+  });
+
+  it('dispatches a persisted upload through the existing offscreen pipeline without fetching its filename', async () => {
+    offscreenState.sendMessageBehavior = 'pong';
+    const jobId = await db.translationJobs.add({ timestamp: Date.now(), status: 'queued', srcUrl: 'local-page.png' });
+    await db.images.add({ jobId: jobId!, rawImageBlob: new NodeBlob(['image']) as unknown as Blob });
+    await enqueueStudioJob(jobId!);
+    expect(await waitForJobTerminalStatus(jobId!)).toBe('completed');
+    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'PROCESS_JOB', target: 'offscreen', source: 'background', request: true,
+      payload: { jobId },
+    }), expect.any(Function));
+    expect(offscreenState.jobMessageCount).toBe(1);
+  });
+
+  it('acknowledges an upload already claimed by another queue wake-up without double dispatch', async () => {
+    const jobId = await db.translationJobs.add({ timestamp: Date.now(), status: 'processing', srcUrl: 'page.png' });
+    await db.images.add({ jobId: jobId!, rawImageBlob: new NodeBlob(['image']) as unknown as Blob });
+    await enqueueStudioJob(jobId!);
+    expect((await db.translationJobs.get(jobId))?.status).toBe('processing');
+    expect(offscreenState.jobMessageCount).toBe(0);
+  });
+
+  it('leaves an uploaded page queued while a website translation owns the pipeline', async () => {
+    await db.translationJobs.add({ timestamp: Date.now(), status: 'processing', srcUrl: 'https://example.com/page.png' });
+    const jobId = await db.translationJobs.add({ timestamp: Date.now(), status: 'queued', srcUrl: 'page.png' });
+    await db.images.add({ jobId: jobId!, rawImageBlob: new NodeBlob(['image'], { type: 'image/png' }) as unknown as Blob });
+    await enqueueStudioJob(jobId!);
+    expect((await db.translationJobs.get(jobId))?.status).toBe('queued');
+    expect(offscreenState.jobMessageCount).toBe(0);
+  });
 });
 
 describe('sendMessageToOffscreen timeout', () => {

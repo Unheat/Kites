@@ -64,7 +64,13 @@ export interface StudioProps {
   jobTitle?: string;
   onSave?: (savedImageBlob: Blob, textObjects: TextObject[]) => Promise<void>;
   onBack?: () => void;
+  /** Queues an uploaded page through App's persisted full translation pipeline. */
+  onUploadPage?: (file: File) => Promise<void>;
+  isUploadingPage?: boolean;
 }
+
+// Stable fallback prevents resetting editor state on unrelated renders without initial objects.
+const EMPTY_TEXT_OBJECTS: TextObject[] = [];
 
 const TOOLS: { id: StudioTool; label: string; icon: React.ComponentType<{ className?: string }>; shortcut: string }[] = [
   { id: 'text', label: 'Text & Typography', icon: Type, shortcut: 'T' },
@@ -80,10 +86,12 @@ export const Studio: React.FC<StudioProps> = ({
   jobId,
   originalImage,
   cleanedImage,
-  initialTextObjects = [],
+  initialTextObjects = EMPTY_TEXT_OBJECTS,
   jobTitle = 'Manga Page',
   onSave,
   onBack,
+  onUploadPage,
+  isUploadingPage = false,
 }) => {
   const activeTool = useStudioStore((s) => s.activeTool);
   const isInfoPanelOpen = useStudioStore((s) => s.isInfoPanelOpen);
@@ -142,9 +150,8 @@ export const Studio: React.FC<StudioProps> = ({
 
   // Initialize text objects
   useEffect(() => {
-    if (initialTextObjects && initialTextObjects.length > 0) {
-      studioStore.setState({ textObjects: initialTextObjects });
-    }
+    // An uploaded page starts without blocks; clear the previous page's text too.
+    studioStore.setState({ textObjects: initialTextObjects });
   }, [initialTextObjects]);
 
   // Subscribe to undo stack updates
@@ -541,7 +548,7 @@ export const Studio: React.FC<StudioProps> = ({
                 {activeTool === 'ocr' && <OcrSettings />}
                 {(activeTool === 'text' || (activeTool as any) === 'select') && <TypographySettings />}
                 {activeTool === 'warp' && <WarpSettings />}
-                {activeTool === 'image' && <ImageLayerSettings />}
+                {activeTool === 'image' && <ImageLayerSettings onUploadPage={onUploadPage} isUploadingPage={isUploadingPage} />}
               </>
             )}
           </div>

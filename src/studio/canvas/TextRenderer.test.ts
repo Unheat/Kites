@@ -111,6 +111,30 @@ describe('TextRenderer Rich Text (charStyles)', () => {
     expect(lines).toBe(existingLines);
   });
 
+  it('paints exact pipeline lines without rewrapping against a second inset', () => {
+    const ctx = createMockContext();
+    const existingLines = ['ABCDEFGHIJKL', 'second'];
+    // Pipeline fitted a 96px line in a 100px box; the paint helper's 8px inset
+    // must not discard that measured layout or join its authored line breaks.
+    expect(TextRenderer.wrapTextLines(ctx, existingLines.join('\n'), 100, existingLines)).toBe(existingLines);
+    expect(ctx.measureText).not.toHaveBeenCalled();
+  });
+
+  it('keeps rendered CJK lines horizontal when the persisted layout says horizontal', () => {
+    const ctx = createMockContext();
+    TextRenderer.renderText(ctx, {
+      id: 'translated-cjk', x: 0, y: 0, width: 100, height: 80,
+      text: '这里不热吗\n我们走吧', lines: ['这里不热吗', '我们走吧'],
+      fontSize: 20, fontFamily: 'sans-serif', color: '#000',
+      isVertical: false, lineSpacing: 1.15,
+    });
+    expect(ctx.fillText).toHaveBeenCalledTimes(2);
+    const calls = vi.mocked(ctx.fillText).mock.calls;
+    expect(calls[0][0]).toBe('这里不热吗');
+    expect(calls[1][0]).toBe('我们走吧');
+    expect(calls[1][2] - calls[0][2]).toBeCloseTo(23);
+  });
+
   it('preserves Latin existingLines when text matches normalized spacing', () => {
     const ctx = createMockContext();
     const existingLines = ['Hello', 'World'];

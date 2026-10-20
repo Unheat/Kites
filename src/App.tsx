@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   cleanupOldJobs,
   db,
@@ -17,6 +17,8 @@ import {
 import './index.css';
 import { Studio } from './studio/Studio';
 import type { TextObject } from './studio/types';
+import { uploadStudioPage } from './shared/studioUpload';
+import { restoreTextObject } from './studio/state/persistedTextObjects';
 
 export type DragHandle = 'move' | 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
 
@@ -109,10 +111,15 @@ export default function App() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const activeBlobUrlsRef = useRef<string[]>([]);
+  const jobLoadVersionRef = useRef(0);
+  const uploadInFlightRef = useRef(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   // Revoke active Blob URLs on component unmount
   useEffect(() => {
     return () => {
+      jobLoadVersionRef.current += 1;
       activeBlobUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
       activeBlobUrlsRef.current = [];
     };
@@ -139,36 +146,38 @@ export default function App() {
     }
   }, []);
 
+  /**
+   * Loads one page, ignoring database/image callbacks superseded by another selection.
+   * @param jobIdToLoad Selected persisted job ID, or null to clear the viewport.
+   * @returns Resolves once the current page records have been read.
+   */
   const loadJobDetails = useCallback(async (jobIdToLoad: number | null) => {
-    if (!jobIdToLoad) {
-      setImageRecord(null);
-      setTextBlocks([]);
-      setOriginalImageEl(null);
-      setCleanedImageEl(null);
-      return;
-    }
+    const loadVersion = ++jobLoadVersionRef.current;
+    setImageRecord(null);
+    setTextBlocks([]);
+    setOriginalImageEl(null);
+    setCleanedImageEl(null);
+    // Revoke prior page Blob URLs to prevent memory accumulation across page switches
+    activeBlobUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+    activeBlobUrlsRef.current = [];
+    if (!jobIdToLoad) return;
 
     try {
-      // Revoke prior page Blob URLs to prevent memory accumulation across page switches
-      activeBlobUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
-      activeBlobUrlsRef.current = [];
-
       const img = await db.images.where({ jobId: jobIdToLoad }).first();
+      if (loadVersion !== jobLoadVersionRef.current) return;
+      const blocks = img?.id ? await db.textBlocks.where({ imageId: img.id }).toArray() : [];
+      if (loadVersion !== jobLoadVersionRef.current) return;
       setImageRecord(img || null);
-
-      if (img?.id) {
-        const blocks = await db.textBlocks.where({ imageId: img.id }).toArray();
-        setTextBlocks(blocks);
-      } else {
-        setTextBlocks([]);
-      }
+      setTextBlocks(blocks);
 
       // Load original image element
       if (img?.rawImageBlob) {
         const origUrl = URL.createObjectURL(img.rawImageBlob);
         activeBlobUrlsRef.current.push(origUrl);
         const origImg = new Image();
-        origImg.onload = () => setOriginalImageEl(origImg);
+        origImg.onload = () => {
+          if (loadVersion === jobLoadVersionRef.current) setOriginalImageEl(origImg);
+        };
         origImg.src = origUrl;
       } else {
         setOriginalImageEl(null);
@@ -179,7 +188,9 @@ export default function App() {
         const cleanUrl = URL.createObjectURL(img.translatedImageBlob);
         activeBlobUrlsRef.current.push(cleanUrl);
         const cleanImg = new Image();
-        cleanImg.onload = () => setCleanedImageEl(cleanImg);
+        cleanImg.onload = () => {
+          if (loadVersion === jobLoadVersionRef.current) setCleanedImageEl(cleanImg);
+        };
         cleanImg.src = cleanUrl;
       } else {
         setCleanedImageEl(null);
@@ -214,71 +225,42 @@ export default function App() {
     return () => chrome.runtime.onMessage.removeListener(handleRuntimeMessage);
   }, [activeJobId, loadJobs, loadJobDetails]);
 
-  // Map Dexie TextBlocks to Studio TextObjects
-  const studioTextObjects: TextObject[] = textBlocks.map((b) => {
-    const isCjk = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/.test(b.translatedText);
-    const textHasNewlines = (b.translatedText || '').includes('\n');
-    const formattedText = (!textHasNewlines && b.lines && b.lines.length > 1)
-      ? b.lines.join('\n')
-      : b.translatedText;
+  // Map Dexie TextBlocks to Studio TextObjects; keep identity stable during upload/UI updates.
+  const studioTextObjects = useMemo(() => textBlocks.map(restoreTextObject), [textBlocks]);
 
-    return {
-      id: String(b.id || `tb-${b.posX}-${b.posY}`),
-      x: b.posX,
-      y: b.posY,
-      width: b.width,
-      height: b.height,
-      text: formattedText,
-      lines: b.lines,
-      originalText: b.originalText,
-      fontSize: b.fontSize || 16,
-      fontFamily: b.fontFamily || 'WildWords, CCWildWords, sans-serif',
-      bold: b.bold ?? false,
-      italic: b.italic ?? false,
-      align: b.align || 'center',
-      color: b.color || '#000000',
-      strokeColor: b.strokeColor || '#ffffff',
-      strokeWidth: 2,
-      isVertical: b.direction === 'v' && isCjk,
-      isSkipped: b.isSkipped ?? false,
-      rotation: b.angle ?? 0,
-    };
-  });
-
-  const handleManualUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
+  /**
+   * Uploads a page from either the library or editor through the same persisted pipeline entry point.
+   * @param file User-selected image file; sticker uploads use their separate layer handler.
+   * @returns Resolves after queue acknowledgement and library refresh, or visible failure feedback.
+   */
+  const handlePageUpload = async (file: File): Promise<void> => {
+    if (uploadInFlightRef.current) return;
+    uploadInFlightRef.current = true;
+    setIsUploading(true);
+    setUploadError(null);
     try {
-      const jobId = await db.transaction('rw', db.translationJobs, db.images, async () => {
-        const newJobId = await db.translationJobs.add({
-          timestamp: Date.now(),
-          status: 'queued',
-          srcUrl: file.name,
-        });
-
-        await db.images.add({
-          jobId: newJobId as number,
-          rawImageBlob: file,
-        });
-
-        return newJobId as number;
-      });
-
+      const jobId = await uploadStudioPage(file);
       await loadJobs();
       setActiveJobId(jobId);
-
-      // Trigger background translation pipeline
-      chrome.runtime.sendMessage({
-        target: 'background',
-        source: 'dashboard',
-        request: true,
-        type: 'PROCESS_JOB',
-        payload: { jobId },
-      });
     } catch (err) {
       console.error('[Studio] Manual upload failed:', err);
+      setUploadError(err instanceof Error ? err.message : 'Could not upload and queue this page.');
+      await loadJobs();
+    } finally {
+      uploadInFlightRef.current = false;
+      setIsUploading(false);
     }
+  };
+
+  /**
+   * Reads and resets the library file input so the same file can be selected again.
+   * @param event Native file-input change event.
+   * @returns Resolves after the selected page upload completes.
+   */
+  const handleManualUpload = async (event: React.ChangeEvent<HTMLInputElement>): Promise<void> => {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = '';
+    if (file) await handlePageUpload(file);
   };
 
   const handleDeleteJob = async (jobId: number, e: React.MouseEvent) => {
@@ -319,6 +301,7 @@ export default function App() {
           strokeColor: obj.strokeColor,
           direction: obj.isVertical ? 'v' : 'h',
           lines: obj.lines,
+          lineSpacing: obj.lineSpacing,
           isSkipped: obj.isSkipped,
           angle: obj.rotation ?? 0,
         }));
@@ -335,6 +318,14 @@ export default function App() {
 
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-[#090a0f] text-slate-100 flex">
+      <input
+        type="file"
+        ref={fileInputRef}
+        accept="image/*"
+        onChange={handleManualUpload}
+        disabled={isUploading}
+        className="hidden"
+      />
       {/* Left Project Library Drawer */}
       {isLeftDrawerOpen && (
         <aside className="w-64 border-r border-[#282d3f] bg-[#12141c] flex flex-col z-40 shrink-0">
@@ -351,18 +342,12 @@ export default function App() {
           <div className="p-2 border-b border-[#282d3f]">
             <button
               onClick={() => fileInputRef.current?.click()}
+              disabled={isUploading}
               className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg border border-dashed border-[#282d3f] hover:border-indigo-500 bg-[#090a0f] text-xs text-indigo-300 font-medium transition"
             >
               <Upload className="w-3.5 h-3.5" />
-              Upload Image
+              {isUploading ? 'Queueing page…' : 'Upload Image'}
             </button>
-            <input
-              type="file"
-              ref={fileInputRef}
-              accept="image/*"
-              onChange={handleManualUpload}
-              className="hidden"
-            />
           </div>
 
           <div className="flex-1 overflow-y-auto p-2 space-y-1">
@@ -398,6 +383,11 @@ export default function App() {
 
       {/* Main Studio Viewport */}
       <div className="flex-1 flex flex-col overflow-hidden relative">
+        {uploadError && (
+          <div role="alert" className="px-3 py-2 text-xs text-red-300 bg-red-950/40 border-b border-red-900/50">
+            {uploadError}
+          </div>
+        )}
         {originalImageEl || cleanedImageEl ? (
           <Studio
             jobId={activeJobId ?? undefined}
@@ -405,6 +395,8 @@ export default function App() {
             cleanedImage={cleanedImageEl}
             initialTextObjects={studioTextObjects}
             jobTitle={activeJob?.srcUrl || `Manga Page #${activeJobId}`}
+            onUploadPage={handlePageUpload}
+            isUploadingPage={isUploading}
             onBack={() => setIsLeftDrawerOpen(true)}
             onSave={async (blob, objs) => handleSaveToDb(blob, objs)}
           />
@@ -419,18 +411,12 @@ export default function App() {
             </p>
             <button
               onClick={() => fileInputRef.current?.click()}
+              disabled={isUploading}
               className="mt-4 flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-500 transition shadow-lg shadow-indigo-900/30"
             >
               <Upload className="w-4 h-4" />
-              Upload Manga Page
+              {isUploading ? 'Queueing page…' : 'Upload Manga Page'}
             </button>
-            <input
-              type="file"
-              ref={fileInputRef}
-              accept="image/*"
-              onChange={handleManualUpload}
-              className="hidden"
-            />
           </div>
         )}
       </div>
