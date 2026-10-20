@@ -302,6 +302,7 @@ export default function App() {
           direction: obj.isVertical ? 'v' : 'h',
           lines: obj.lines,
           lineSpacing: obj.lineSpacing,
+          typesetMode: obj.typesetMode,
           isSkipped: obj.isSkipped,
           angle: obj.rotation ?? 0,
         }));

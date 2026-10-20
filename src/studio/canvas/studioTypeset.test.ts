@@ -1,5 +1,96 @@
-import { describe, it, expect } from 'vitest';
-import { recalculateBlockTypeset } from './studioTypeset';
+import { describe, it, expect, vi } from 'vitest';
+import { applyTextObjectUpdates, getTypesetDisplayText, getTypesetMeasureContext, prepareInitialTextObject, recalculateBlockTypeset } from './studioTypeset';
+import type { TextObject } from '../types';
+
+const object: TextObject = {
+  id: 'dialogue', x: 0, y: 0, width: 200, height: 150,
+  text: 'Hello world, this is dialogue with several words.',
+  lines: ['canonical', 'pipeline lines'], fontSize: 16, fontFamily: 'sans-serif', color: '#000',
+};
+
+describe('Studio layout ownership', () => {
+  it('retains canonical lines and fitted font on first display despite simple editing preference', () => {
+    const initial = { ...object, typesetMode: 'simple' as const };
+    expect(prepareInitialTextObject(initial)).toBe(initial);
+    expect(initial.lines).toBe(object.lines);
+    expect(initial.fontSize).toBe(16);
+  });
+
+  it('initializes missing layout with balloon, never simple preference', () => {
+    const initial = { ...object, lines: undefined, typesetMode: 'simple' as const };
+    const prepared = prepareInitialTextObject(initial);
+    expect(prepared).toMatchObject(recalculateBlockTypeset(
+      initial.text, initial.fontFamily, initial.width, initial.height, initial.fontSize, 'balloon'
+    ));
+    expect(prepared.typesetMode).toBe('simple');
+  });
+
+  it('does not reflow selection, paint, no-op edits, or engine changes', () => {
+    expect(applyTextObjectUpdates(object, {}, 'simple')).toBe(object);
+    expect(applyTextObjectUpdates(object, { text: object.text }, 'simple')).toBe(object);
+    for (const updates of [{ color: '#fff' }, { x: 50 }, { typesetMode: 'simple' as const }]) {
+      const updated = applyTextObjectUpdates(object, updates, 'simple');
+      expect(updated.lines).toBe(object.lines);
+      expect(updated.fontSize).toBe(object.fontSize);
+    }
+  });
+
+  it('uses explicit engine, then object preference, then global mode on actual edits', () => {
+    const text = 'New dialogue with enough words to wrap inside this box.';
+    const expectedSimple = recalculateBlockTypeset(text, object.fontFamily, object.width, object.height, 16, 'simple');
+    expect(applyTextObjectUpdates(object, { text }, 'simple')).toMatchObject(expectedSimple);
+    expect(applyTextObjectUpdates({ ...object, typesetMode: 'simple' }, { text }, 'balloon')).toMatchObject(expectedSimple);
+    const override = applyTextObjectUpdates({ ...object, typesetMode: 'simple' }, { text }, 'simple', 'balloon');
+    expect(override).toMatchObject(recalculateBlockTypeset(text, object.fontFamily, object.width, object.height, 16, 'balloon'));
+  });
+
+  it.each([
+    { fontFamily: 'serif' }, { fontSize: 20 }, { bold: true }, { italic: true },
+    { uppercase: true }, { lowercase: true }, { width: 180 }, { height: 120 },
+    { charStyles: [{ fontSize: 24 }] }, { lineSpacing: 1.5 }, { letterSpacing: 2 },
+    { text: 'New text' },
+  ])('invalidates measured lines for layout edit %j', (updates) => {
+    const updated = applyTextObjectUpdates(object, updates);
+    expect(updated.lines).not.toBe(object.lines);
+  });
+
+  it('does not reflow rich color/stroke-only edits, including null style slots', () => {
+    const charStyles = [{ color: '#fff', strokeColor: '#000', strokeWidth: 4 }, null];
+    expect(applyTextObjectUpdates(object, { charStyles }).lines).toBe(object.lines);
+    const bold = { ...object, charStyles: [{ bold: true }] };
+    expect(applyTextObjectUpdates(bold, { charStyles: [{ bold: true, color: '#fff' }] }).lines).toBe(object.lines);
+  });
+
+  it.each(['simple', 'balloon'] as const)('measures object-level bold, italic, and tracking in %s mode', (mode) => {
+    const ctx = getTypesetMeasureContext()!;
+    const fonts: string[] = [];
+    const tracking: string[] = [];
+    const measure = ctx.measureText.bind(ctx);
+    const spy = vi.spyOn(ctx, 'measureText').mockImplementation((text) => {
+      fonts.push(ctx.font);
+      tracking.push(ctx.letterSpacing);
+      return measure(text);
+    });
+    try {
+      recalculateBlockTypeset(object.text, 'sans-serif', 200, 150, 16, mode, {
+        bold: true, italic: true, letterSpacing: 2,
+      });
+      expect(fonts.length).toBeGreaterThan(0);
+      expect(fonts.every((font) => font.startsWith('italic bold '))).toBe(true);
+      expect(tracking.every((value) => value === '2px')).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('measures casing before layout and keeps object source text intact', () => {
+    const updated = applyTextObjectUpdates(object, { uppercase: true }, 'simple');
+    expect(updated.lines?.join(' ')).toBe(object.text.toUpperCase());
+    expect(updated.text).toBe(object.text);
+    expect(getTypesetDisplayText('MiXeD', { uppercase: true, lowercase: true })).toBe('MIXED');
+    expect(getTypesetDisplayText('MiXeD', { lowercase: true })).toBe('mixed');
+  });
+});
 
 describe('Studio Algorithmic Typeset & Line Reflow', () => {
   const sampleVietnamese =

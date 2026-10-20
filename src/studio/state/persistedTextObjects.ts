@@ -1,14 +1,15 @@
 import type { TextBlock } from '../../db';
 import type { TextObject } from '../types';
+import { prepareInitialTextObject } from '../canvas/studioTypeset';
 
 /**
- * Restores editable text from persisted renderer output without running another layout pass.
+ * Restores exact renderer output, initializing legacy records only when measured lines are absent.
  * @param block - Saved text block, including final measured lines and geometry when available.
  * @returns Studio text object preserving the pipeline's layout and lettering.
  */
 export function restoreTextObject(block: TextBlock): TextObject {
   const isCjk = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/.test(block.translatedText);
-  return {
+  return prepareInitialTextObject({
     id: String(block.id || `tb-${block.posX}-${block.posY}`),
     x: block.posX,
     y: block.posY,
@@ -17,6 +18,7 @@ export function restoreTextObject(block: TextBlock): TextObject {
     text: block.lines?.length ? block.lines.join('\n') : block.translatedText,
     lines: block.lines,
     lineSpacing: block.lineSpacing,
+    typesetMode: block.typesetMode,
     originalText: block.originalText,
     fontSize: block.fontSize || 16,
     fontFamily: block.fontFamily || 'WildWords, CCWildWords, sans-serif',
@@ -29,5 +31,5 @@ export function restoreTextObject(block: TextBlock): TextObject {
     isVertical: block.direction === 'v' && isCjk,
     isSkipped: block.isSkipped ?? false,
     rotation: block.angle ?? 0,
-  };
+  });
 }

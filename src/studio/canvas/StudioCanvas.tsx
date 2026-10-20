@@ -36,7 +36,7 @@ import { StudioSourceSampler } from './StudioSourceSampler';
 import { ToolViewModePolicy } from './tools/ToolViewModePolicy';
 import { requestStudioInpaint, requestStudioOcr } from '../bridge/offscreenStudioBridge';
 import { computeRotatedBounds, getHandleCursor } from './transformMath';
-import { recalculateBlockTypeset } from './studioTypeset';
+import { applyTextObjectUpdates, prepareInitialTextObject } from './studioTypeset';
 import { extractTypographyStyle } from '../state/studioStore';
 import type {
   BoundingBox,
@@ -334,16 +334,9 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
     const target = liveTexts.find((t) => t.id === selectedTextId);
     if (!target) return;
     const prev = [...liveTexts];
-    const updated = { ...target, ...clipboardStyle };
-    const typeset = recalculateBlockTypeset(
-      updated.text,
-      updated.fontFamily,
-      updated.width,
-      updated.height,
-      updated.fontSize,
-      updated.typesetMode
-    );
-    updated.lines = typeset.lines;
+    // Pasted styling must not replace the target's chosen editing engine.
+    const { typesetMode: _clipboardMode, ...style } = clipboardStyle;
+    const updated = applyTextObjectUpdates(target, style, studioStore.getState().globalTypesetMode);
 
     const next = liveTexts.map((t) => (t.id === selectedTextId ? updated : t));
     studioStore.setState({ textObjects: next });
@@ -367,7 +360,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       for (let i = inlineSelection.start; i < inlineSelection.end; i++) {
         charStyles[i] = { ...(charStyles[i] || {}), bold: nextBold };
       }
-      const updated = { ...selected, charStyles };
+      const updated = applyTextObjectUpdates(selected, { charStyles }, studioStore.getState().globalTypesetMode);
       const prev = [...liveTexts];
       const next = liveTexts.map((t) => (t.id === selected.id ? updated : t));
       studioStore.setState({ textObjects: next });
@@ -378,7 +371,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
         textObjects: { before: prev, after: next },
       });
     } else {
-      const updated = { ...selected, bold: !selected.bold };
+      const updated = applyTextObjectUpdates(selected, { bold: !selected.bold }, studioStore.getState().globalTypesetMode);
       const prev = [...liveTexts];
       const next = liveTexts.map((t) => (t.id === selected.id ? updated : t));
       studioStore.setState({ textObjects: next });
@@ -403,7 +396,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       for (let i = inlineSelection.start; i < inlineSelection.end; i++) {
         charStyles[i] = { ...(charStyles[i] || {}), italic: nextItalic };
       }
-      const updated = { ...selected, charStyles };
+      const updated = applyTextObjectUpdates(selected, { charStyles }, studioStore.getState().globalTypesetMode);
       const prev = [...liveTexts];
       const next = liveTexts.map((t) => (t.id === selected.id ? updated : t));
       studioStore.setState({ textObjects: next });
@@ -414,7 +407,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
         textObjects: { before: prev, after: next },
       });
     } else {
-      const updated = { ...selected, italic: !selected.italic };
+      const updated = applyTextObjectUpdates(selected, { italic: !selected.italic }, studioStore.getState().globalTypesetMode);
       const prev = [...liveTexts];
       const next = liveTexts.map((t) => (t.id === selected.id ? updated : t));
       studioStore.setState({ textObjects: next });
@@ -568,7 +561,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
   const handleContextAddBoxHere = () => {
     if (!contextMenu) return;
     const id = `bubble-${Date.now()}`;
-    const newObj: TextObject = {
+    const newObj = prepareInitialTextObject({
       id,
       x: Math.round(contextMenu.imageX - 70),
       y: Math.round(contextMenu.imageY - 25),
@@ -582,7 +575,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       strokeWidth: 2,
       align: 'center',
       isVertical: false,
-    };
+    });
     const prev = [...textObjects];
     const next = [...textObjects, newObj];
     studioStore.setState({ textObjects: next, selectedTextId: id, editingTextId: id });
@@ -648,10 +641,12 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
 
   /**
    * Computes the updated TextObject geometry and typeset reflow for an active gesture.
+   * @param gesture - Initial object, transform handle, and current pointer deltas.
+   * @returns Updated geometry, reflowed only when measured inputs changed.
    */
   const computeUpdatedTextObject = (gesture: ActiveTextGesture): TextObject => {
     const { initialTransform, handle, latestDeltaX, latestDeltaY, latestShiftKey } = gesture;
-    let updated = { ...initialTransform };
+    const updated = { ...initialTransform };
 
     if (handle === 'rot') {
       const centerX = initialTransform.x + initialTransform.width / 2;
@@ -682,52 +677,21 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       const scaleStep = Math.round((localDeltaX - localDeltaY) * 0.25);
       const newFontSize = Math.max(6, Math.min(140, Math.round(initialTransform.fontSize + scaleStep)));
       updated.fontSize = newFontSize;
-      const typeset = recalculateBlockTypeset(
-        updated.text,
-        updated.fontFamily,
-        updated.width,
-        updated.height,
-        newFontSize,
-        initialTransform.typesetMode
-      );
-      updated.lines = typeset.lines;
     } else if (handle === 'wrap') {
       const newBounds = computeRotatedBounds(initialTransform, 'e', latestDeltaX, latestDeltaY);
       updated.x = newBounds.x;
       updated.y = newBounds.y;
       updated.width = newBounds.width;
       updated.height = newBounds.height;
-      const typeset = recalculateBlockTypeset(
-        updated.text,
-        updated.fontFamily,
-        newBounds.width,
-        newBounds.height,
-        initialTransform.fontSize,
-        initialTransform.typesetMode
-      );
-      updated.lines = typeset.lines;
     } else {
       const newBounds = computeRotatedBounds(initialTransform, handle, latestDeltaX, latestDeltaY);
       updated.x = newBounds.x;
       updated.y = newBounds.y;
       updated.width = newBounds.width;
       updated.height = newBounds.height;
-
-      if (handle !== 'move') {
-        const typeset = recalculateBlockTypeset(
-          updated.text,
-          updated.fontFamily,
-          newBounds.width,
-          newBounds.height,
-          initialTransform.fontSize,
-          initialTransform.typesetMode
-        );
-        updated.fontSize = typeset.fontSize;
-        updated.lines = typeset.lines;
-      }
     }
 
-    return updated;
+    return applyTextObjectUpdates(initialTransform, updated, studioStore.getState().globalTypesetMode);
   };
 
   /**
@@ -1336,29 +1300,24 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
     }
   }, [editingTextId]);
 
+  /**
+   * Reflows an actual inline text edit using the object's mode or global editing default.
+   * @param newText - Changed textarea text; unchanged display text is ignored.
+   * @returns Nothing; updates the live text list and captures its undo baseline.
+   */
   const handleInlineTextChange = (newText: string) => {
     if (!editingTextId) return;
+    const { textObjects: liveTexts, globalTypesetMode } = studioStore.getState();
+    const currentObj = liveTexts.find((t) => t.id === editingTextId);
+    if (!currentObj) return;
+    const displayedText = !currentObj.text.includes('\n') && currentObj.lines && currentObj.lines.length > 1
+      ? currentObj.lines.join('\n') : currentObj.text;
+    if (newText === displayedText) return;
     if (!inlineInitialTextRef.current) {
-      inlineInitialTextRef.current = [...textObjects];
+      inlineInitialTextRef.current = [...liveTexts];
     }
-    const currentObj = textObjects.find((t) => t.id === editingTextId);
-    const typeset = recalculateBlockTypeset(
-      newText,
-      currentObj?.fontFamily || 'sans-serif',
-      currentObj?.width || 140,
-      currentObj?.height || 50,
-      currentObj?.fontSize || 16
-    );
-    const next = textObjects.map((t) =>
-      t.id === editingTextId
-        ? {
-            ...t,
-            text: newText,
-            fontSize: typeset.fontSize,
-            lines: typeset.lines,
-          }
-        : t
-    );
+    const updated = applyTextObjectUpdates(currentObj, { text: newText }, globalTypesetMode);
+    const next = liveTexts.map((t) => t.id === editingTextId ? updated : t);
     studioStore.setState({ textObjects: next });
   };
 
@@ -1389,7 +1348,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
   const handleAddNewEmptyTextBox = () => {
     const id = `bubble-${Date.now()}`;
     const selected = textObjects.find((t) => t.id === selectedTextId);
-    const newObj: TextObject = {
+    const newObj = prepareInitialTextObject({
       id,
       x: selected ? Math.round(selected.x + 30) : Math.round(imageWidth / 2 - 70),
       y: selected ? Math.round(selected.y + 30) : Math.round(imageHeight / 2 - 25),
@@ -1404,7 +1363,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       strokeWidth: 2,
       align: 'center',
       isVertical: false,
-    };
+    });
     const prev = [...textObjects];
     const next = [...textObjects, newObj];
     studioStore.setState({ textObjects: next, selectedTextId: id, editingTextId: null });
@@ -1567,7 +1526,13 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
                 onChange={(e) => handleInlineTextChange(e.target.value)}
                 onBlur={handleFinishInlineEdit}
                 onKeyDown={(e) => {
-                  if (e.key === 'Escape') {
+                  if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'b') {
+                    e.preventDefault();
+                    handleToggleBold();
+                  } else if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'i') {
+                    e.preventDefault();
+                    handleToggleItalic();
+                  } else if (e.key === 'Escape') {
                     handleFinishInlineEdit();
                   } else if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
                     handleFinishInlineEdit();

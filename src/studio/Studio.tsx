@@ -41,6 +41,7 @@ import {
   calculateFitWindow,
 } from './canvas/CanvasViewport';
 import { StudioCanvas } from './canvas/StudioCanvas';
+import { prepareInitialTextObject } from './canvas/studioTypeset';
 import { EraseSettings } from './tools/EraseSettings';
 import { PaintSettings } from './tools/PaintSettings';
 import { InpaintSettings } from './tools/InpaintSettings';
@@ -151,7 +152,8 @@ export const Studio: React.FC<StudioProps> = ({
   // Initialize text objects
   useEffect(() => {
     // An uploaded page starts without blocks; clear the previous page's text too.
-    studioStore.setState({ textObjects: initialTextObjects });
+    // Keep pipeline/persisted lines exact; only legacy objects missing layout need preparation.
+    studioStore.setState({ textObjects: initialTextObjects.map(prepareInitialTextObject) });
   }, [initialTextObjects]);
 
   // Subscribe to undo stack updates
