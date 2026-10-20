@@ -44,4 +44,20 @@ describe('persisted renderer layout restoration', () => {
     expect(restoreTextObject(block).text).toBe(block.translatedText);
     expect(restoreTextObject({ ...block, translatedText: '原文', direction: 'v' }).isVertical).toBe(true);
   });
+
+  it('un-hyphenates soft line-break syllables into clean words for future resizing while keeping initial lines intact', () => {
+    const hyphenatedBlock: TextBlock = {
+      imageId: 1, originalText: '夏',
+      translatedText: 'Summer at the community pool with my sisters',
+      lines: ['Summer at the', 'com-', 'munity pool with my', 'sisters'],
+      posX: 10, posY: 20, width: 140, height: 160,
+      fontSize: 16, fontFamily: 'sans-serif', color: '#000',
+    };
+    const restored = restoreTextObject(hyphenatedBlock);
+    // Initial lines preserve the exact pre-rendered hyphenation
+    expect(restored.lines).toEqual(['Summer at the', 'com-', 'munity pool with my', 'sisters']);
+    // Semantic text has rejoined "community" without line-break hyphen
+    expect(restored.text).toContain('community');
+    expect(restored.text).not.toContain('com-');
+  });
 });

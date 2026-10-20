@@ -9,13 +9,16 @@ import { prepareInitialTextObject } from '../canvas/studioTypeset';
  */
 export function restoreTextObject(block: TextBlock): TextObject {
   const isCjk = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/.test(block.translatedText);
+  const rawText = block.lines?.length ? block.lines.join('\n') : (block.translatedText || '');
+  // Un-hyphenate soft line-break hyphens so resizing boxes does not bake broken syllables
+  const unhyphenatedText = rawText.replace(/(\b[a-zA-Z]+)-\s*\r?\n\s*([a-z]+)/g, '$1$2');
   return prepareInitialTextObject({
     id: String(block.id || `tb-${block.posX}-${block.posY}`),
     x: block.posX,
     y: block.posY,
     width: block.width,
     height: block.height,
-    text: block.lines?.length ? block.lines.join('\n') : block.translatedText,
+    text: unhyphenatedText,
     lines: block.lines,
     lineSpacing: block.lineSpacing,
     typesetMode: block.typesetMode,

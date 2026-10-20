@@ -185,6 +185,25 @@ describe('typesetLayout', () => {
       fitFontSizeWithLines(countingCtx, text, 'sans-serif', 120, 160, 20, 28);
       expect(callCount).toBeLessThan(350);
     });
+
+    it('does not collapse CJK font size when horizontally expanded', () => {
+      const text = '也感谢您今天来到我们这里， BABYBOY';
+      const cjkCtx = {
+        font: '16px sans-serif',
+        measureText: (t: string) => {
+          const sz = parseInt(cjkCtx.font.match(/(\d+)px/)?.[1] || '16', 10);
+          let w = 0;
+          for (const ch of t) {
+            w += /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af]/.test(ch) ? sz : sz * 0.5;
+          }
+          return { width: w };
+        }
+      };
+
+      const narrow = fitFontSizeWithLines(cjkCtx, text, 'sans-serif', 190, 250, 24, 48);
+      const wider = fitFontSizeWithLines(cjkCtx, text, 'sans-serif', 210, 250, 24, 48);
+      expect(wider.size).toBeGreaterThanOrEqual(narrow.size);
+    });
   });
 
   describe('decollideBoxes', () => {

@@ -124,7 +124,8 @@ function wrapSimpleGreedy(
 ): string[] {
   ctx.font = `${style.italic ? 'italic ' : ''}${style.bold ? 'bold ' : ''}${fontSize}px ${fontFamily || 'sans-serif'}`;
   const safeWidth = Math.max(MIN_SIMPLE_WIDTH, width - SIMPLE_HORIZONTAL_PADDING);
-  const paragraphs = text.split('\n');
+  const cleanText = text.replace(/(\b[a-zA-Z]+)-\s*\r?\n\s*([a-z]+)/g, '$1$2');
+  const paragraphs = cleanText.split('\n');
   const resultLines: string[] = [];
 
   for (const para of paragraphs) {
@@ -194,9 +195,12 @@ export function recalculateBlockTypeset(
 
   // Auto Balloon Mode: full pipeline diamond envelopes, hyphenation, and auto font fitting
   const isList = /^\s*[-*•\d+.]/m.test(text);
-  const normalizedText = isList || text.includes('\n\n')
-    ? text
-    : text.replace(/\r?\n/g, ' ').replace(/\s+/g, ' ').trim();
+  // Rejoin soft line-break hyphens (e.g. "com-\nmunity" -> "community") so resizing
+  // does not permanently bake line-wrap syllable breaks into the dialogue text.
+  const unhyphenated = text.replace(/(\b[a-zA-Z]+)-\s*\r?\n\s*([a-z]+)/g, '$1$2');
+  const normalizedText = isList || unhyphenated.includes('\n\n')
+    ? unhyphenated
+    : unhyphenated.replace(/\r?\n/g, ' ').replace(/\s+/g, ' ').trim();
 
   // Shared fitter owns font-size probes; preserve italic in every probe rather than
   // setting it once on the canvas only to have the next fontSpec overwrite it.

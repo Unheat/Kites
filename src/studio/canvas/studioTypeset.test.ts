@@ -135,4 +135,20 @@ describe('Studio Algorithmic Typeset & Line Reflow', () => {
     expect(wide.lines.length).toBeLessThan(tall.lines.length);
     expect(wide.lines.length).toBeLessThanOrEqual(2);
   });
+
+  it('un-hyphenates soft line-break syllables when box is widened in Auto Balloon and Simple Wrap', () => {
+    const textWithHyphen = 'Summer at the\ncom-\nmunity pool with my\nsisters';
+    // Widened box (300 x 200) where "community" fits comfortably on one line
+    const balloonWide = recalculateBlockTypeset(textWithHyphen, 'sans-serif', 300, 200, 18, 'balloon');
+    const balloonJoined = balloonWide.lines.join(' ');
+    expect(balloonJoined).toContain('community');
+    expect(balloonJoined).not.toContain('com-munity');
+    expect(balloonJoined).not.toContain('com- munity');
+
+    const simpleWide = recalculateBlockTypeset(textWithHyphen, 'sans-serif', 300, 200, 18, 'simple');
+    const simpleJoined = simpleWide.lines.join(' ');
+    expect(simpleJoined).toContain('community');
+    expect(simpleJoined).not.toContain('com-munity');
+    expect(simpleJoined).not.toContain('com- munity');
+  });
 });

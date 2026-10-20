@@ -457,6 +457,9 @@ export function splitIntoLogicalParagraphs(text: string): string[] {
       if (isHardLineBreak(prevLine, line)) {
         paragraphs.push(current);
         current = line;
+      } else if (/(\b[a-zA-Z]+)-$/.test(prevLine) && /^[a-z]/.test(line)) {
+        // Soft line-break hyphen: stitch broken syllables back together across line wraps
+        current = `${current.slice(0, -1)}${line}`;
       } else {
         current = `${current} ${line}`;
       }
@@ -592,7 +595,10 @@ export function fitFontSizeWithLines(
     measureText: (t: string) => ({ width: cache.measure(t, ctx.font) }),
   };
 
-  const rawWords = text.split(/[\s\n]+/).filter(Boolean);
+  const isCjk = CJK_REGEX.test(text);
+  const rawWords = isCjk
+    ? (text.match(/[\u3040-\u30ff\u31f0-\u31ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af\u1100-\u11ff\u3130-\u318f\u0900-\u097f\u0e00-\u0e7f\u0400-\u04ff\uff01-\uffee\u3000-\u303f]|[a-zA-Z0-9'’-]+|[^\s]/g) || [])
+    : text.split(/[\s\n]+/).filter(Boolean);
   const words: string[] = [];
   for (const w of rawWords) {
     if (w.includes('-') && !w.startsWith('-') && !w.endsWith('-') && w.length >= 5) {
