@@ -1,4 +1,5 @@
 import type { TextObject } from '../types';
+import { getTypesetDisplayText } from './studioTypeset';
 
 /** Vertical punctuation rotation mappings for CJK manga typography. */
 const VERTICAL_ROTATION_MAP: Record<string, string> = {
@@ -26,7 +27,7 @@ export class TextRenderer {
    * @param obj - Text object containing typography and geometric layout.
    */
   public static renderText(ctx: CanvasRenderingContext2D, obj: TextObject): void {
-    if (!obj.text || obj.isVisible === false) return;
+    if ((!obj.text && !obj.lines?.length) || obj.isVisible === false) return;
 
     ctx.save();
     ctx.translate(obj.x, obj.y);
@@ -53,7 +54,12 @@ export class TextRenderer {
     ctx.font = fontStyle;
     ctx.textBaseline = 'middle';
 
-    const processedText = this.applyCasing(obj.text, obj.uppercase, obj.lowercase);
+    ctx.letterSpacing = `${obj.letterSpacing ?? 0}px`;
+    // Layout belongs to studioTypeset. Paint exact measured lines, even when a
+    // pipeline line overhangs the editor box or differs from raw translation text.
+    const lines = (obj.lines?.length ? obj.lines : obj.text.split('\n'))
+      .map((line) => getTypesetDisplayText(line, obj));
+    const processedText = lines.join('\n');
 
     // Only render single-column vertical CJK if text contains CJK glyphs or explicitly requested
     const hasCjk = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/.test(processedText);
@@ -62,7 +68,7 @@ export class TextRenderer {
     if (isVerticalMode) {
       this.renderVertical(ctx, processedText, obj);
     } else {
-      this.renderHorizontal(ctx, processedText, obj);
+      this.renderHorizontal(ctx, lines, obj);
     }
 
     ctx.restore();
@@ -87,70 +93,16 @@ export class TextRenderer {
   }
 
   /**
-   * Word-wraps text within the specified bounding box width.
+   * Paints measured horizontal lines without wrapping or validating their widths.
+   * @param ctx - Target context with base typography configured.
+   * @param lines - Canonical layout lines already transformed to display casing.
+   * @param obj - Object geometry and paint settings.
    */
-  public static wrapTextLines(
-    ctx: CanvasRenderingContext2D,
-    text: string,
-    maxWidth: number,
-    existingLines?: string[]
-  ): string[] {
-    const safeWidth = Math.max(20, maxWidth - 8);
-
-    if (existingLines && existingLines.length > 0) {
-      // Only reuse existingLines if every line actually fits inside safeWidth!
-      // If the box was shrunk or stretched, lines must be re-wrapped.
-      const allLinesFit = existingLines.every((l) => ctx.measureText(l).width <= safeWidth + 2);
-      if (allLinesFit) {
-        const normalizedExisting = existingLines.join(' ').replace(/\s+/g, ' ').trim();
-        const normalizedCurrent = text.replace(/\s+/g, ' ').trim();
-        if (
-          normalizedExisting === normalizedCurrent ||
-          existingLines.join('').replace(/\s+/g, '') === text.replace(/\s+/g, '')
-        ) {
-          return existingLines;
-        }
-      }
-    }
-
-    const paragraphs = text.split('\n');
-    const resultLines: string[] = [];
-
-    for (const para of paragraphs) {
-      if (!para.trim()) {
-        resultLines.push('');
-        continue;
-      }
-
-      const words = para.split(/\s+/);
-      let currentLine = '';
-
-      for (const word of words) {
-        const testLine = currentLine ? `${currentLine} ${word}` : word;
-        const testWidth = ctx.measureText(testLine).width;
-
-        if (testWidth <= safeWidth || !currentLine) {
-          currentLine = testLine;
-        } else {
-          resultLines.push(currentLine);
-          currentLine = word;
-        }
-      }
-
-      if (currentLine) {
-        resultLines.push(currentLine);
-      }
-    }
-
-    return resultLines.length > 0 ? resultLines : [text];
-  }
-
   private static renderHorizontal(
     ctx: CanvasRenderingContext2D,
-    text: string,
+    lines: string[],
     obj: TextObject
   ): void {
-    const lines = this.wrapTextLines(ctx, text, obj.width, obj.lines);
     const lineHeight = obj.fontSize * (obj.lineSpacing ?? 1.2);
     const align = obj.align ?? 'center';
 
@@ -385,9 +337,4 @@ export class TextRenderer {
     return grad;
   }
 
-  private static applyCasing(text: string, upper?: boolean, lower?: boolean): string {
-    if (upper) return text.toUpperCase();
-    if (lower) return text.toLowerCase();
-    return text;
-  }
 }

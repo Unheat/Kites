@@ -5,6 +5,7 @@ import { resizeRegionToFontSize, measureDefaultLayout } from './cotransDefaultRe
 import { decollideBoxes } from './typesetLayout';
 import {
   renderTextBlocksBatch,
+  getRenderedBlockGeometry,
   measureBubbleLayoutFontSize,
   type TextBlockItem,
   calculateOptimalFontSize,
@@ -126,6 +127,62 @@ describe('Canvas Typesetting', () => {
     expect(results[0]!.lineCount).toBeGreaterThan(0);
   });
 
+  it('reports horizontal legacy rows, final collision center, spacing and actual rotation', () => {
+    const ctx = createMockCtx();
+    const blocks = [
+      { text: '這是中文測試文字', polygon: quad(80, 80, 100, 60), direction: 'v' as const },
+      { text: '另一個中文對話', polygon: quad(80, 80, 100, 60), direction: 'v' as const },
+    ];
+    const results = renderTextBlocksBatch(ctx, blocks, 'zh', { width: 500, height: 500 });
+    results.forEach((info, index) => {
+      expect(info).not.toBeNull();
+      expect(info!.direction).toBe('h');
+      expect(info!.lineSpacing).toBeCloseTo(1.15);
+      const geometry = getRenderedBlockGeometry(info!.dstPoints)!;
+      const center = vi.mocked(ctx.translate).mock.calls[index];
+      expect(geometry.x + geometry.w / 2).toBeCloseTo(center[0]);
+      expect(geometry.y + geometry.h / 2).toBeCloseTo(center[1]);
+      expect(geometry.h).toBeCloseTo(info!.lines.length * info!.fontSize * info!.lineSpacing + info!.fontSize * 0.6);
+      expect(vi.mocked(ctx.rotate).mock.calls[index][0]).toBeCloseTo(info!.angle * Math.PI / 180);
+    });
+    expect(vi.mocked(ctx.translate).mock.calls[0]).not.toEqual(vi.mocked(ctx.translate).mock.calls[1]);
+  });
+
+  it('reports the legacy rotation actually applied instead of source-angle metadata', () => {
+    const ctx = createMockCtx();
+    const [info] = renderTextBlocksBatch(ctx, [{
+      text: '中文對話', direction: 'v', angle: 75,
+      polygon: [{ x: 100, y: 100 }, { x: 180, y: 160 }, { x: 150, y: 200 }, { x: 70, y: 140 }],
+    }], 'zh', { width: 500, height: 500 });
+    expect(info).not.toBeNull();
+    expect(info!.angle).not.toBe(75);
+    expect(vi.mocked(ctx.rotate).mock.calls[0][0]).toBeCloseTo(info!.angle * Math.PI / 180);
+    const top = info!.dstPoints[0];
+    const right = info!.dstPoints[1];
+    expect(Math.atan2(right.y - top.y, right.x - top.x) * 180 / Math.PI).toBeCloseTo(info!.angle);
+  });
+
+  it('converts rotated final geometry without inflating it to an AABB', () => {
+    // 90-degree clockwise rotation of a 120x40 rectangle around (200, 150).
+    const points = [{ x: 220, y: 90 }, { x: 220, y: 210 }, { x: 180, y: 210 }, { x: 180, y: 90 }];
+    expect(getRenderedBlockGeometry(points)).toEqual({ x: 140, y: 130, w: 120, h: 40 });
+    expect(getRenderedBlockGeometry(quad(10.25, 20.75, 30.5, 40.25))).toEqual({ x: 10.25, y: 20.75, w: 30.5, h: 40.25 });
+    expect(getRenderedBlockGeometry(points.slice(0, 3))).toBeNull();
+    expect(getRenderedBlockGeometry(quad(0, 0, 0, 10))).toBeNull();
+    expect(getRenderedBlockGeometry(quad(NaN, 0, 10, 10))).toBeNull();
+  });
+
+  it('reports exact default baseline spacing without refitting saved lines', () => {
+    const ctx = createMockCtx();
+    const [info] = renderTextBlocksBatch(ctx, [{ text: 'Several lines of dialogue text', polygon: quad(50, 50, 100, 100), fontSize: 20 }], 'en');
+    expect(info).not.toBeNull();
+    expect(info!.direction).toBe('h');
+    const draws = vi.mocked(ctx.fillText).mock.calls;
+    expect(draws.map(call => call[0])).toEqual(info!.lines);
+    expect(draws.length).toBeGreaterThan(1);
+    expect(draws[1][2] - draws[0][2]).toBeCloseTo(info!.fontSize * info!.lineSpacing);
+  });
+
   it('skips blocks with empty text or degenerate polygons', () => {
     const mockCtx = createMockCtx();
     const degenerate: Point2D[] = [{ x: 0, y: 0 }, { x: 1, y: 1 }];
@@ -243,6 +300,8 @@ describe('Canvas Typesetting', () => {
     boxes.forEach((box, i) => {
       expectQuad(quads[i], quad(box.x, box.y, box.w, box.h));
       expect(results[i]).not.toBeNull();
+      expect(results[i]!.angle).toBe(0);
+      expect(results[i]!.direction).toBe('h');
     });
     expect(blocks).toEqual(before);
   }, 15000);

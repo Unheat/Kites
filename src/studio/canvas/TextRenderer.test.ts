@@ -103,19 +103,63 @@ describe('TextRenderer Rich Text (charStyles)', () => {
     expect(ctx.fillText).toHaveBeenCalledWith('World', expect.any(Number), expect.any(Number));
   });
 
-  it('preserves CJK cached existingLines when text has no spaces', () => {
+  it('paints exact pipeline lines without width checks or a second layout pass', () => {
     const ctx = createMockContext();
-    const existingLines = ['こんにちは', '世界'];
-    const text = 'こんにちは世界';
-    const lines = TextRenderer.wrapTextLines(ctx, text, 100, existingLines);
-    expect(lines).toBe(existingLines);
+    const lines = ['ABCDEFGHIJKL', 'second'];
+    // Persisted lines intentionally differ from source text and exceed editor width.
+    // Paint owns neither line validity nor layout invalidation.
+    TextRenderer.renderText(ctx, {
+      id: 'pipeline', x: 0, y: 0, width: 30, height: 100,
+      text: 'raw translation', lines, fontSize: 16, fontFamily: 'sans-serif', color: '#000',
+    });
+    expect(vi.mocked(ctx.fillText).mock.calls.map((call) => call[0])).toEqual(lines);
+    expect(ctx.measureText).not.toHaveBeenCalled();
+    expect(lines).toEqual(['ABCDEFGHIJKL', 'second']);
   });
 
-  it('preserves Latin existingLines when text matches normalized spacing', () => {
+  it('keeps rendered CJK lines horizontal when the persisted layout says horizontal', () => {
     const ctx = createMockContext();
-    const existingLines = ['Hello', 'World'];
-    const text = 'Hello\nWorld';
-    const lines = TextRenderer.wrapTextLines(ctx, text, 100, existingLines);
-    expect(lines).toBe(existingLines);
+    TextRenderer.renderText(ctx, {
+      id: 'translated-cjk', x: 0, y: 0, width: 100, height: 80,
+      text: '这里不热吗\n我们走吧', lines: ['这里不热吗', '我们走吧'],
+      fontSize: 20, fontFamily: 'sans-serif', color: '#000',
+      isVertical: false, lineSpacing: 1.15,
+    });
+    expect(ctx.fillText).toHaveBeenCalledTimes(2);
+    const calls = vi.mocked(ctx.fillText).mock.calls;
+    expect(calls[0][0]).toBe('这里不热吗');
+    expect(calls[1][0]).toBe('我们走吧');
+    expect(calls[1][2] - calls[0][2]).toBeCloseTo(23);
+  });
+
+  it('applies casing to measured lines rather than painting stale original-case lines', () => {
+    const ctx = createMockContext();
+    TextRenderer.renderText(ctx, {
+      id: 'uppercase', x: 0, y: 0, width: 100, height: 100,
+      text: 'Hello World', lines: ['Hello', 'World'], uppercase: true,
+      fontSize: 16, fontFamily: 'sans-serif', color: '#000',
+    });
+    expect(vi.mocked(ctx.fillText).mock.calls.map((call) => call[0])).toEqual(['HELLO', 'WORLD']);
+    expect(ctx.measureText).not.toHaveBeenCalled();
+  });
+
+  it('does not greedily wrap unprepared text as a renderer fallback', () => {
+    const ctx = createMockContext();
+    TextRenderer.renderText(ctx, {
+      id: 'legacy', x: 0, y: 0, width: 10, height: 100,
+      text: 'Hello World\nsecond line', fontSize: 16, fontFamily: 'sans-serif', color: '#000',
+    });
+    expect(vi.mocked(ctx.fillText).mock.calls.map((call) => call[0])).toEqual(['Hello World', 'second line']);
+    expect(ctx.measureText).not.toHaveBeenCalled();
+  });
+
+  it('paints vertical columns from canonical lines too', () => {
+    const ctx = createMockContext();
+    TextRenderer.renderText(ctx, {
+      id: 'vertical', x: 0, y: 0, width: 100, height: 100,
+      text: 'raw', lines: ['原文', '文字'], isVertical: true,
+      fontSize: 16, fontFamily: 'sans-serif', color: '#000',
+    });
+    expect(vi.mocked(ctx.fillText).mock.calls.map((call) => call[0])).toEqual(['原', '文', '文', '字']);
   });
 });

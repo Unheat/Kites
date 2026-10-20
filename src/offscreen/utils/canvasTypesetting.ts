@@ -390,8 +390,33 @@ export interface RenderedBlockInfo {
   textColor: string;
   /** Stroke color actually used. */
   strokeColor: string;
-  /** Destination quad points ([tl, tr, br, bl]) used during rendering. */
-  dstPoints?: Point2D[];
+  /** Destination quad points ([tl, tr, br, bl]) after expansion and collision resolution. */
+  dstPoints: Point2D[];
+  /** Actual line orientation drawn, not the source OCR reading direction. */
+  direction: 'h' | 'v';
+  /** Clockwise rotation actually drawn, in degrees. */
+  angle: number;
+  /** Actual baseline step divided by font size. */
+  lineSpacing: number;
+}
+
+/**
+ * Converts a final render quad to the unrotated rectangle used by Studio's center rotation.
+ * A rotated AABB would enlarge the layout and then rotate it a second time. Dimensions
+ * instead use the same edge-midpoint distances as the default renderer, without refitting.
+ *
+ * @param dstPoints - Final destination corners in [tl, tr, br, bl] order.
+ * @returns Centered, unrotated page-space rectangle, or null for invalid geometry.
+ */
+export function getRenderedBlockGeometry(dstPoints: Point2D[]): { x: number; y: number; w: number; h: number } | null {
+  if (dstPoints.length !== 4 || !dstPoints.every(point => Number.isFinite(point.x) && Number.isFinite(point.y))) return null;
+  const [tl, tr, br, bl] = dstPoints;
+  const w = Math.hypot((tr.x + br.x - tl.x - bl.x) / 2, (tr.y + br.y - tl.y - bl.y) / 2);
+  const h = Math.hypot((bl.x + br.x - tl.x - tr.x) / 2, (bl.y + br.y - tl.y - tr.y) / 2);
+  if (w <= 0 || h <= 0) return null;
+  const centerX = (tl.x + tr.x + br.x + bl.x) / 4;
+  const centerY = (tl.y + tr.y + br.y + bl.y) / 4;
+  return { x: centerX - w / 2, y: centerY - h / 2, w, h };
 }
 
 /** Page dimensions used to derive the Cotrans font-size minimum. */
@@ -706,6 +731,9 @@ function renderTextBlocksDefault(
           textColor: plan.region.textColor,
           strokeColor: plan.region.strokeColor,
           dstPoints: plan.dstPoints,
+          direction: 'h',
+          angle: (calculateRotationAngle(plan.dstPoints) * 180) / Math.PI,
+          lineSpacing: info.lineSpacing,
         };
       }
     } catch (e) {
@@ -821,9 +849,10 @@ function renderTextBlocksLegacy(
     const newCenterX = (solved.x1 + solved.x2) / 2;
     const newCenterY = (solved.y1 + solved.y2) / 2;
 
+    const rotation = (meta.angle * Math.PI) / 180;
     ctx.save();
     ctx.translate(newCenterX, newCenterY);
-    ctx.rotate((meta.angle * Math.PI) / 180);
+    ctx.rotate(rotation);
 
     // Canvas-native bidi direction: lets the browser handle RTL alignment and
     // punctuation ordering (no manual string operations).
@@ -857,7 +886,32 @@ function renderTextBlocksLegacy(
     }
 
     ctx.restore();
-    results[meta.index] = { fontSize: meta.fontSize, lineCount: meta.lines.length, lines: meta.lines, textColor: meta.block.textColor || '#000000', strokeColor: meta.block.strokeColor || '#FFFFFF' };
+    // Preserve the collision-adjusted layout and the exact transform already drawn.
+    // Legacy currently draws horizontal rows even when OCR direction requests vertical
+    // punctuation; persisting that source direction would make Studio stack rows as columns.
+    const cos = Math.cos(rotation);
+    const sin = Math.sin(rotation);
+    const dstPoints = [
+      { x: solved.x1, y: solved.y1 },
+      { x: solved.x2, y: solved.y1 },
+      { x: solved.x2, y: solved.y2 },
+      { x: solved.x1, y: solved.y2 },
+    ].map(point => {
+      const dx = point.x - newCenterX;
+      const dy = point.y - newCenterY;
+      return { x: newCenterX + dx * cos - dy * sin, y: newCenterY + dx * sin + dy * cos };
+    });
+    results[meta.index] = {
+      fontSize: meta.fontSize,
+      lineCount: meta.lines.length,
+      lines: meta.lines,
+      textColor: meta.block.textColor || '#000000',
+      strokeColor: meta.block.strokeColor || '#FFFFFF',
+      dstPoints,
+      direction: 'h',
+      angle: meta.angle,
+      lineSpacing: meta.lineHeight / meta.fontSize,
+    };
   }
 
   return results;

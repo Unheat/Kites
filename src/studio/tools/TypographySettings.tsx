@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import { studioStore, useStudioStore, extractTypographyStyle } from '../state/studioStore';
 import { studioUndoStack } from '../state/undoStack';
-import { recalculateBlockTypeset } from '../canvas/studioTypeset';
+import { applyTextObjectUpdates, prepareInitialTextObject } from '../canvas/studioTypeset';
 import type { TextObject, CharStyleOverride } from '../types';
 
 const SELECTION_ELIGIBLE_KEYS: (keyof CharStyleOverride)[] = [
@@ -33,14 +33,47 @@ const SELECTION_ELIGIBLE_KEYS: (keyof CharStyleOverride)[] = [
   'strokeWidth',
 ];
 
+/**
+ * Applies box-wide typography fields, removing conflicting character overrides.
+ * @param object Existing text box and its per-character styling.
+ * @param partial Typography fields changed by the user.
+ * @param globalMode Editing default used when the box has no local mode.
+ * @returns Updated box, reflowed only when its layout-affecting values change.
+ */
+function applyBoxTypographyUpdate(
+  object: TextObject,
+  partial: Partial<TextObject>,
+  globalMode: 'balloon' | 'simple',
+): TextObject {
+  // Object-wide update: if changing a property box-wide, clear overrides for that property in charStyles
+  let updatedCharStyles = object.charStyles ? [...object.charStyles] : undefined;
+  if (updatedCharStyles?.some(Boolean)) {
+    updatedCharStyles = updatedCharStyles.map((style) => {
+      if (!style) return null;
+      const copy = { ...style };
+      for (const key of SELECTION_ELIGIBLE_KEYS) {
+        if (key in partial) delete copy[key];
+      }
+      return Object.keys(copy).length > 0 ? copy : null;
+    });
+    if (!updatedCharStyles.some(Boolean)) updatedCharStyles = undefined;
+  }
+  return applyTextObjectUpdates(object, { ...partial, charStyles: updatedCharStyles }, globalMode);
+}
+
+/** Renders typography controls; user edits reflow text, while mode choices only set editing intent. */
 export const TypographySettings: React.FC = () => {
   const textObjects = useStudioStore((s) => s.textObjects);
   const selectedTextId = useStudioStore((s) => s.selectedTextId);
   const globalEditMode = useStudioStore((s) => s.globalEditMode);
+  const globalTypesetMode = useStudioStore((s) => s.globalTypesetMode);
   const originalImage = useStudioStore((s) => s.originalImage);
   const inlineSelection = useStudioStore((s) => s.inlineSelection);
 
   const selectedObj = textObjects.find((t) => t.id === selectedTextId);
+  const effectiveTypesetMode = globalEditMode
+    ? globalTypesetMode
+    : selectedObj?.typesetMode ?? globalTypesetMode;
 
   const clipboardStyle = useStudioStore((s) => s.clipboardStyle);
   const [copiedOriginal, setCopiedOriginal] = useState(false);
@@ -81,19 +114,13 @@ export const TypographySettings: React.FC = () => {
     setTimeout(() => setCopiedStyle(false), 2000);
   };
 
+  /** Pastes clipboard appearance onto selected box using its editing mode; records one undo step. */
   const handlePasteStyle = () => {
     if (!clipboardStyle || !selectedObj) return;
     const prev = [...textObjects];
-    const updated = { ...selectedObj, ...clipboardStyle };
-    const typeset = recalculateBlockTypeset(
-      updated.text,
-      updated.fontFamily,
-      updated.width,
-      updated.height,
-      updated.fontSize,
-      updated.typesetMode
-    );
-    updated.lines = typeset.lines;
+    // A copied appearance must not replace the destination's chosen editing engine.
+    const { typesetMode: _copiedMode, ...style } = clipboardStyle;
+    const updated = applyBoxTypographyUpdate(selectedObj, style, globalTypesetMode);
 
     const next = textObjects.map((t) => (t.id === selectedObj.id ? updated : t));
     studioStore.setState({ textObjects: next });
@@ -133,12 +160,17 @@ export const TypographySettings: React.FC = () => {
     ctx.strokeRect(selectedObj.x - sx, selectedObj.y - sy, selectedObj.width, selectedObj.height);
   }, [originalImage, selectedObj, showCropPreview]);
 
+  /**
+   * Updates current selection or all boxes, reflowing only layout-affecting changes.
+   * @param partial Changed typography or paint fields.
+   * @returns Nothing; updates store and records one undo entry.
+   */
   const updateSelected = (partial: Partial<TextObject>) => {
     const prev = [...textObjects];
     let next: TextObject[];
 
     if (globalEditMode) {
-      next = textObjects.map((obj) => ({ ...obj, ...partial }));
+      next = textObjects.map((obj) => applyBoxTypographyUpdate(obj, partial, globalTypesetMode));
     } else if (selectedObj) {
       const liveSelection = studioStore.getState().inlineSelection;
       const hasActiveSel =
@@ -181,34 +213,13 @@ export const TypographySettings: React.FC = () => {
           }
         }
 
-        const updated: TextObject = {
-          ...selectedObj,
+        const updated = applyTextObjectUpdates(selectedObj, {
           ...nonSelectionPartial,
           charStyles: charStyles.some(Boolean) ? charStyles : undefined,
-        };
+        }, globalTypesetMode);
         next = textObjects.map((obj) => (obj.id === selectedObj.id ? updated : obj));
       } else {
-        // Object-wide update: if changing a property box-wide, clear overrides for that property in charStyles
-        let updatedCharStyles = selectedObj.charStyles ? [...selectedObj.charStyles] : undefined;
-        if (updatedCharStyles && updatedCharStyles.some(Boolean)) {
-          updatedCharStyles = updatedCharStyles.map((s) => {
-            if (!s) return null;
-            const copy = { ...s };
-            for (const key of SELECTION_ELIGIBLE_KEYS) {
-              if (key in partial) {
-                delete (copy as any)[key];
-              }
-            }
-            return Object.keys(copy).length > 0 ? copy : null;
-          });
-          if (!updatedCharStyles.some(Boolean)) updatedCharStyles = undefined;
-        }
-
-        const updated: TextObject = {
-          ...selectedObj,
-          ...partial,
-          charStyles: updatedCharStyles,
-        };
+        const updated = applyBoxTypographyUpdate(selectedObj, partial, globalTypesetMode);
         next = textObjects.map((obj) => (obj.id === selectedObj.id ? updated : obj));
       }
     } else {
@@ -224,28 +235,17 @@ export const TypographySettings: React.FC = () => {
     });
   };
 
-  // Dialogue text editing handlers with dynamic typeset & line reflow
+  /**
+   * Edits dialogue live with dynamic typeset and line reflow in its chosen mode.
+   * @param newText Replacement dialogue; the initial snapshot groups keystrokes for undo.
+   * @returns Nothing; writes updated dialogue layout to the store.
+   */
   const handleTextChange = (newText: string) => {
     if (!initialTextObjectsRef.current) {
       initialTextObjectsRef.current = [...textObjects];
     }
-    const typeset = recalculateBlockTypeset(
-      newText,
-      obj.fontFamily || 'sans-serif',
-      obj.width || 140,
-      obj.height || 50,
-      obj.fontSize || 16,
-      obj.typesetMode
-    );
     const next = textObjects.map((t) =>
-      t.id === obj.id
-        ? {
-            ...t,
-            text: newText,
-            fontSize: typeset.fontSize,
-            lines: typeset.lines,
-          }
-        : t
+      t.id === obj.id ? applyTextObjectUpdates(t, { text: newText }, globalTypesetMode) : t
     );
     studioStore.setState({ textObjects: next });
   };
@@ -266,50 +266,31 @@ export const TypographySettings: React.FC = () => {
     }
   };
 
+  /**
+   * Changes editing intent without recomputing any current layout.
+   * @param newMode Engine for subsequent edits in the active scope.
+   * @returns Nothing; global default is session-only and not part of document undo.
+   */
   const handleToggleTypesetMode = (newMode: 'balloon' | 'simple') => {
     const prev = [...textObjects];
     let next: TextObject[];
 
     if (globalEditMode) {
-      // Global editing: apply newMode to ALL text objects on the page and recalculate each box
-      next = textObjects.map((t) => {
-        const typeset = recalculateBlockTypeset(
-          t.text || '',
-          t.fontFamily || 'sans-serif',
-          t.width || 140,
-          t.height || 50,
-          t.fontSize || 16,
-          newMode
-        );
-        return {
-          ...t,
-          typesetMode: newMode,
-          fontSize: newMode === 'balloon' ? typeset.fontSize : t.fontSize,
-          lines: typeset.lines,
-        };
-      });
+      // Global editing: set every box's future editing mode, preserving its current pipeline layout.
+      next = textObjects.map((t) => applyTextObjectUpdates(t, { typesetMode: newMode }, globalTypesetMode));
     } else if (selectedObj) {
-      // Local editing: apply newMode to ONLY the selected text object
-      const typeset = recalculateBlockTypeset(
-        selectedObj.text || '',
-        selectedObj.fontFamily || 'sans-serif',
-        selectedObj.width || 140,
-        selectedObj.height || 50,
-        selectedObj.fontSize || 16,
-        newMode
-      );
-      const updated: TextObject = {
-        ...selectedObj,
-        typesetMode: newMode,
-        fontSize: newMode === 'balloon' ? typeset.fontSize : selectedObj.fontSize,
-        lines: typeset.lines,
-      };
-      next = textObjects.map((t) => (t.id === selectedObj.id ? updated : t));
+      // Local editing: set ONLY the selected box's future editing mode without fitting it now.
+      next = textObjects.map((t) => t.id === selectedObj.id
+        ? applyTextObjectUpdates(t, { typesetMode: newMode }, globalTypesetMode)
+        : t);
     } else {
       return;
     }
 
-    studioStore.setState({ textObjects: next });
+    studioStore.setState({
+      textObjects: next,
+      ...(globalEditMode ? { globalTypesetMode: newMode } : {}),
+    });
     studioUndoStack.push({
       id: `typeset-mode-${Date.now()}`,
       timestamp: Date.now(),
@@ -339,11 +320,12 @@ export const TypographySettings: React.FC = () => {
     });
   };
 
+  /** Restores original OCR dialogue using current editing mode and records the resulting layout for undo. */
   const handleRevertToOriginal = () => {
     if (!obj.originalText) return;
     const prev = [...textObjects];
     const next = textObjects.map((t) =>
-      t.id === obj.id ? { ...t, text: obj.originalText!, lines: undefined } : t
+      t.id === obj.id ? applyTextObjectUpdates(t, { text: obj.originalText! }, globalTypesetMode) : t
     );
     studioStore.setState({ textObjects: next });
     studioUndoStack.push({
@@ -354,10 +336,11 @@ export const TypographySettings: React.FC = () => {
     });
   };
 
+  /** Clears dialogue and its measured lines together, preserving the editing engine preference. */
   const handleClearText = () => {
     const prev = [...textObjects];
     const next = textObjects.map((t) =>
-      t.id === obj.id ? { ...t, text: '', lines: undefined } : t
+      t.id === obj.id ? applyTextObjectUpdates(t, { text: '' }, globalTypesetMode) : t
     );
     studioStore.setState({ textObjects: next });
     studioUndoStack.push({
@@ -368,11 +351,12 @@ export const TypographySettings: React.FC = () => {
     });
   };
 
+  /** Adds manual dialogue with initial Auto Balloon layout; later edits inherit the session default. */
   const handleAddNewEmptyTextBox = () => {
     const id = `bubble-${Date.now()}`;
     const imgW = studioStore.getState().originalImage?.naturalWidth || 800;
     const imgH = studioStore.getState().originalImage?.naturalHeight || 1200;
-    const newObj: TextObject = {
+    const newObj = prepareInitialTextObject({
       id,
       x: Math.round(imgW / 2 - 70),
       y: Math.round(imgH / 2 - 25),
@@ -387,7 +371,7 @@ export const TypographySettings: React.FC = () => {
       strokeWidth: 2,
       align: 'center',
       isVertical: false,
-    };
+    });
     const prev = [...textObjects];
     const next = [...textObjects, newObj];
     studioStore.setState({
@@ -689,29 +673,32 @@ export const TypographySettings: React.FC = () => {
             type="button"
             onClick={() => handleToggleTypesetMode('balloon')}
             className={`flex-1 py-1.5 px-2 rounded-md font-semibold transition-all flex items-center justify-center gap-1.5 cursor-pointer text-[11px] ${
-              (obj.typesetMode || 'balloon') === 'balloon'
+              effectiveTypesetMode === 'balloon'
                 ? 'bg-[#1c1f2e] text-[#f4446d] shadow-xs'
                 : 'text-slate-400 hover:text-white'
             }`}
             title="Auto Balloon: Balances lines into speech bubble diamond envelopes and auto-fits font size (Pipeline typesystem)"
           >
-            <Sparkles size={12} className={(obj.typesetMode || 'balloon') === 'balloon' ? 'text-[#f4446d]' : ''} />
+            <Sparkles size={12} className={effectiveTypesetMode === 'balloon' ? 'text-[#f4446d]' : ''} />
             <span>Auto Balloon</span>
           </button>
           <button
             type="button"
             onClick={() => handleToggleTypesetMode('simple')}
             className={`flex-1 py-1.5 px-2 rounded-md font-semibold transition-all flex items-center justify-center gap-1.5 cursor-pointer text-[11px] ${
-              obj.typesetMode === 'simple'
+              effectiveTypesetMode === 'simple'
                 ? 'bg-[#1c1f2e] text-[#f4446d] shadow-xs'
                 : 'text-slate-400 hover:text-white'
             }`}
-            title="Simple Wrap: Greedy line wrapping without auto font scaling (Torii simple mode)"
+            title="Simple Wrap: Greedy line wrapping without auto font scaling on subsequent edits"
           >
-            <AlignLeft size={12} className={obj.typesetMode === 'simple' ? 'text-[#f4446d]' : ''} />
+            <AlignLeft size={12} className={effectiveTypesetMode === 'simple' ? 'text-[#f4446d]' : ''} />
             <span>Simple Wrap</span>
           </button>
         </div>
+        <p className="mt-1 text-[10px] text-slate-500">
+          Applies when you edit text or typography. Existing layout stays unchanged until then.
+        </p>
       </div>
 
       {/* Font Family */}

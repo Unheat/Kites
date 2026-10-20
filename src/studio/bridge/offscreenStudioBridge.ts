@@ -1,4 +1,5 @@
 import type { BoundingBox, TextObject } from '../types';
+import { prepareInitialTextObject } from '../canvas/studioTypeset';
 
 /**
  * Dispatches a localized inpainting request to the local offscreen document via background.
@@ -89,6 +90,10 @@ export async function requestStudioOcr(
       originalText: string;
       fontSize?: number;
       isVertical?: boolean;
+      lines?: string[];
+      lineSpacing?: number;
+      fontFamily?: string;
+      typesetMode?: TextObject['typesetMode'];
     }>;
     error?: string;
   }>((resolve) => {
@@ -128,7 +133,9 @@ export async function requestStudioOcr(
 
   const inpaintedImage = await loadImageFromDataUrl(response.inpaintedPatchBase64);
 
-  const textObjects: TextObject[] = (response.textObjects || []).map((t) => ({
+  // OCR and full-page retranslation both bypass the persisted pipeline layout boundary.
+  // Prepare missing layout here before any paint-only renderer sees these objects.
+  const textObjects: TextObject[] = (response.textObjects || []).map((t) => prepareInitialTextObject({
     id: t.id,
     x: t.x,
     y: t.y,
@@ -139,7 +146,10 @@ export async function requestStudioOcr(
     fontSize: (t.fontSize && t.fontSize > 0)
       ? t.fontSize
       : Math.max(12, Math.min(32, Math.round(t.height * 0.4))),
-    fontFamily: 'WildWords, CCWildWords, sans-serif',
+    fontFamily: t.fontFamily || 'WildWords, CCWildWords, sans-serif',
+    lines: t.lines,
+    lineSpacing: t.lineSpacing,
+    typesetMode: t.typesetMode,
     color: '#000000',
     strokeColor: '#ffffff',
     strokeWidth: 2,

@@ -20,7 +20,8 @@ export type MessageType =
   | 'CAPTURE_TRANSLATED' // Background -> Content
   | 'CAPTURE_TRANSLATION_ERROR' // Background -> Content
   | 'STUDIO_INPAINT' // Studio -> Background -> Offscreen
-  | 'STUDIO_OCR'; // Studio -> Background -> Offscreen
+  | 'STUDIO_OCR' // Studio -> Background -> Offscreen
+  | 'ENQUEUE_STUDIO_JOB'; // Studio -> Background serialized queue
 
 export interface TranslateImageMessage {
   type: 'TRANSLATE_IMAGE';

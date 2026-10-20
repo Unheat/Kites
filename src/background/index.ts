@@ -309,6 +309,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === 'ENQUEUE_STUDIO_JOB' && message.target === 'background' && message.request === true) {
+    enqueueStudioJob(message.payload?.jobId)
+      .then(() => sendResponse({ status: 'queued' }))
+      .catch((error) => sendResponse({ status: 'error', error: error instanceof Error ? error.message : String(error) }));
+    return true;
+  }
+
   if (message.type === 'TRANSLATE_IMAGE') {
     const srcUrl = message.payload?.srcUrl || message.url || message.srcUrl;
     if (srcUrl) {
@@ -971,6 +978,27 @@ export async function reclaimStaleJobs(): Promise<void> {
     // Never let queue maintenance block actual work.
     console.error('[Background] Failed to reclaim stale jobs:', err);
   }
+}
+
+/**
+ * Schedules a Studio upload whose job and original image were atomically saved by the dashboard.
+ * Uses the same serialized queue as website translations instead of dispatching a second pipeline.
+ *
+ * @param jobId - Existing queued job containing an uploaded image.
+ * @returns Resolves when the job is validated and queue processing has been kicked off.
+ * @throws If the job is invalid, failed, or has no uploaded image.
+ */
+export async function enqueueStudioJob(jobId: number): Promise<void> {
+  if (!Number.isSafeInteger(jobId) || jobId <= 0) throw new Error('Invalid Studio upload job ID.');
+  const job = await db.translationJobs.get(jobId);
+  if (!job || job.status === 'error' || !job.status) throw new Error('Studio upload is not queued.');
+  const image = await db.images.where('jobId').equals(jobId).first();
+  if (!image?.rawImageBlob?.size) throw new Error('Studio upload has no image data.');
+  // Another queue wake-up can claim this record between the dashboard transaction
+  // and its message. Acknowledge it without dispatching the same job twice.
+  if (job.status !== 'queued') return;
+  console.log(`[Background] Scheduling Studio upload ${jobId} through the translation queue.`);
+  await processQueue();
 }
 
 export async function processQueue() {

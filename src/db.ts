@@ -64,6 +64,10 @@ export interface TextBlock {
   direction?: 'h' | 'v';
   /** Exact Canvas layout lines, persisted so Studio preview matches baked output. */
   lines?: string[];
+  /** Rendered line advance as a multiple of font size, shared with Studio. */
+  lineSpacing?: number;
+  /** Studio editing preference; never used to reinterpret saved layout on load. */
+  typesetMode?: 'balloon' | 'simple';
   bold?: boolean;
   italic?: boolean;
   align?: 'left' | 'center' | 'right';

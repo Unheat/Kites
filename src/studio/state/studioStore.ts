@@ -133,6 +133,8 @@ export interface StudioState {
   editingTextId: string | null;
   clipboardStyle: Partial<TextObject> | null;
   globalEditMode: boolean;
+  /** Default layout engine for future edits; never overrides a page's initial layout. */
+  globalTypesetMode: 'balloon' | 'simple';
   inlineSelection: { textId: string; start: number; end: number } | null;
   originalImage: HTMLImageElement | null;
 
@@ -214,6 +216,7 @@ const initialState: StudioState = {
   editingTextId: null,
   clipboardStyle: null,
   globalEditMode: false,
+  globalTypesetMode: 'balloon',
   inlineSelection: null,
   originalImage: null,
 

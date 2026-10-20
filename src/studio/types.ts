@@ -109,6 +109,7 @@ export interface TextObject {
   isLocked?: boolean;
   isVisible?: boolean;
   isSkipped?: boolean;
+  /** Preferred engine for future edits, independent of already measured lines. */
   typesetMode?: 'balloon' | 'simple';
 }
 

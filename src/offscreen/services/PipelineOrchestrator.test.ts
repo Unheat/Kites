@@ -288,9 +288,74 @@ describe('PipelineOrchestrator', () => {
     expect(fixed).toBeDefined();
     expect(fixed.w).toBeGreaterThan(20);
     expect(db.textBlocks.bulkAdd).toHaveBeenCalledWith(expect.arrayContaining([expect.objectContaining({
-      posX: fixed.x, posY: fixed.y, width: fixed.w, height: fixed.h
+      posX: fixed.x, posY: fixed.y, width: fixed.w, height: fixed.h, angle: 0, direction: 'h'
     })]));
     bitmapSpy.mockRestore(); blobSpy.mockRestore(); measureSpy.mockRestore(); renderSpy.mockRestore();
+  });
+
+  it('maps actual render metadata by OCR index and retains fallback only for skipped blocks', async () => {
+    ((db.images as any).first as any).mockResolvedValue({ id: 8, jobId: 800,
+      rawImageBlob: new Blob(['fake image data'], { type: 'image/png' }) });
+    vi.spyOn(chrome.runtime, 'sendMessage').mockImplementation((_message: any, callback: any) => {
+      callback?.({ activeInpaintId: 'none', bubbleMode: 'off', targetLang: 'en' });
+    });
+    processImageMock.mockResolvedValue({
+      texts: ['Skipped', 'Rendered'],
+      boxes: [{ x: 5, y: 6, w: 7, h: 8 }, { x: 10, y: 20, w: 30, h: 40 }],
+      typesetBoxes: [undefined, { x: 15, y: 25, w: 35, h: 45 }],
+      directions: ['v', 'v'], angles: [12, 37], fontSizes: [11, 18],
+      polygons: [undefined, [{ x: 10, y: 20 }, { x: 40, y: 20 }, { x: 40, y: 60 }, { x: 10, y: 60 }]],
+    });
+    const info: canvasTypesetting.RenderedBlockInfo = {
+      fontSize: 17, lines: ['Measured', 'layout'], lineCount: 2,
+      textColor: '#123456', strokeColor: '#abcdef', direction: 'h', angle: 0, lineSpacing: 1.2,
+      dstPoints: [{ x: 15, y: 25 }, { x: 50, y: 25 }, { x: 50, y: 70 }, { x: 15, y: 70 }],
+    };
+    const renderSpy = vi.spyOn(canvasTypesetting, 'renderTextBlocksBatch').mockReturnValue([info]);
+    const blobSpy = vi.spyOn(pipelineOrchestrator as any, 'blobToArrayBuffer').mockResolvedValue(new ArrayBuffer(8));
+    await pipelineOrchestrator.runPipeline(800);
+    const saved = vi.mocked(db.textBlocks.bulkAdd).mock.calls[0][0] as any[];
+    expect(saved[0]).toMatchObject({ posX: 5, posY: 6, width: 7, height: 8, direction: 'v', angle: 12, fontSize: 11 });
+    expect(saved[0].lines).toBeUndefined();
+    expect(saved[1]).toMatchObject({ posX: 15, posY: 25, width: 35, height: 45,
+      direction: 'h', angle: 0, fontSize: 17, lines: info.lines, lineSpacing: 1.2, color: '#123456', strokeColor: '#abcdef' });
+    renderSpy.mockRestore(); blobSpy.mockRestore();
+  });
+
+  it.each(['en', 'zh'])('persists final %s renderer geometry and layout instead of OCR proposals', async (targetLang) => {
+    ((db.images as any).first as any).mockResolvedValue({ id: 7, jobId: 700,
+      rawImageBlob: new Blob(['fake image data'], { type: 'image/png' }) });
+    vi.spyOn(chrome.runtime, 'sendMessage').mockImplementation((_message: any, callback: any) => {
+      callback?.({ activeInpaintId: 'none', bubbleMode: 'off', targetLang });
+    });
+    const bitmapSpy = vi.spyOn(global, 'createImageBitmap').mockResolvedValue(createCanvas(1000, 1000) as any);
+    processImageMock.mockResolvedValue({
+      texts: ['テスト', 'もう一つ'],
+      boxes: [{ x: 100, y: 100, w: 40, h: 60 }, { x: 125, y: 100, w: 40, h: 60 }],
+      directions: ['v', 'v'], fontSizes: [2, 2], angles: [37, 37],
+      polygons: [
+        [{ x: 100, y: 100 }, { x: 140, y: 100 }, { x: 140, y: 160 }, { x: 100, y: 160 }],
+        [{ x: 125, y: 100 }, { x: 165, y: 100 }, { x: 165, y: 160 }, { x: 125, y: 160 }],
+      ],
+    });
+    const blobSpy = vi.spyOn(pipelineOrchestrator as any, 'blobToArrayBuffer').mockResolvedValue(new ArrayBuffer(8));
+    const renderSpy = vi.spyOn(canvasTypesetting, 'renderTextBlocksBatch');
+    await pipelineOrchestrator.runPipeline(700);
+    const infos = renderSpy.mock.results[0].value as canvasTypesetting.RenderedBlockInfo[];
+    const saved = vi.mocked(db.textBlocks.bulkAdd).mock.calls[0][0] as any[];
+    expect(saved).toHaveLength(2);
+    saved.forEach((block, index) => {
+      const info = infos[index];
+      expect(info).not.toBeNull();
+      const final = canvasTypesetting.getRenderedBlockGeometry(info.dstPoints)!;
+      expect(block).toMatchObject({
+        posX: final.x, posY: final.y, width: final.w, height: final.h,
+        fontSize: info.fontSize, lines: info.lines, direction: 'h', angle: info.angle, lineSpacing: info.lineSpacing,
+      });
+      expect(block.width).not.toBe(40);
+      expect(block.angle).toBe(targetLang === 'en' ? 37 : 0);
+    });
+    bitmapSpy.mockRestore(); blobSpy.mockRestore(); renderSpy.mockRestore();
   });
 
   it('passes uncertain bubble fallback to renderer exactly like Disabled and preserves raw inpaint polygons', async () => {

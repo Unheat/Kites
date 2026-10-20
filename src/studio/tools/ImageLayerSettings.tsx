@@ -4,12 +4,27 @@ import { studioStore, useStudioStore } from '../state/studioStore';
 import { studioUndoStack } from '../state/undoStack';
 import type { ImageLayer } from '../types';
 
-export const ImageLayerSettings: React.FC = () => {
+interface ImageLayerSettingsProps {
+  onUploadPage?: (file: File) => Promise<void>;
+  isUploadingPage?: boolean;
+}
+
+/**
+ * Displays sticker-layer controls and a separate full-page upload action.
+ * @param props Page-upload callback and shared queue-loading state from App.
+ * @returns Existing sticker controls plus an explicitly labeled page translation control.
+ */
+export const ImageLayerSettings: React.FC<ImageLayerSettingsProps> = ({ onUploadPage, isUploadingPage = false }) => {
   const imageLayers = useStudioStore((s) => s.imageLayers);
   const selectedImageLayerId = useStudioStore((s) => s.selectedImageLayerId);
 
   const selectedLayer = imageLayers.find((l) => l.id === selectedImageLayerId);
 
+  /**
+   * Updates selected sticker and records undo history.
+   * @param partial Layer properties to replace.
+   * @returns Nothing; no-op when no sticker is selected.
+   */
   const updateSelected = (partial: Partial<ImageLayer>) => {
     if (!selectedLayer) return;
     const prev = [...imageLayers];
@@ -23,8 +38,14 @@ export const ImageLayerSettings: React.FC = () => {
     });
   };
 
+  /**
+   * Adds an image as a sticker, without running OCR or translating the page.
+   * @param e Sticker file-input change event.
+   * @returns Nothing; image decoding adds the layer asynchronously.
+   */
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+    const file = e.currentTarget.files?.[0];
+    e.currentTarget.value = '';
     if (!file) return;
 
     const url = URL.createObjectURL(file);
@@ -60,6 +81,21 @@ export const ImageLayerSettings: React.FC = () => {
     img.src = url;
   };
 
+  /**
+   * Passes a separate page upload to App and resets selection for repeat uploads.
+   * @param event Page file-input change event, never the sticker input.
+   * @returns Resolves after App handles persistence, queueing, and failure feedback.
+   */
+  const handlePageUpload = async (event: React.ChangeEvent<HTMLInputElement>): Promise<void> => {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = '';
+    if (file && onUploadPage && !isUploadingPage) await onUploadPage(file);
+  };
+
+  /**
+   * Removes selected sticker and records undo history.
+   * @returns Nothing; no-op when no sticker is selected.
+   */
   const handleDelete = () => {
     if (!selectedLayer) return;
     const prev = [...imageLayers];
@@ -93,6 +129,17 @@ export const ImageLayerSettings: React.FC = () => {
           <input type="file" accept="image/*" onChange={handleFileUpload} className="hidden" />
         </label>
       </div>
+
+      {onUploadPage && (
+        <div className="pt-3 border-t border-[#282d3f]">
+          <label className={`flex flex-col items-center justify-center p-4 rounded-xl border-2 border-dashed border-[#282d3f] bg-[#090a0f] transition ${isUploadingPage ? 'opacity-50 cursor-wait' : 'hover:border-indigo-500 hover:bg-[#12141c] cursor-pointer'}`}>
+            <Upload className="w-5 h-5 text-indigo-400 mb-1" />
+            <span className="font-medium text-slate-200">{isUploadingPage ? 'Queueing page…' : 'Upload & translate page'}</span>
+            <span className="text-[11px] text-slate-500">New page · full translation pipeline, not a sticker</span>
+            <input type="file" accept="image/*" aria-label="Upload and translate page" onChange={handlePageUpload} disabled={isUploadingPage} className="hidden" />
+          </label>
+        </div>
+      )}
 
       {selectedLayer ? (
         <div className="space-y-3 pt-2 border-t border-[#282d3f]">

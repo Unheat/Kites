@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Search, Replace, X, Check } from 'lucide-react';
 import { studioStore, useStudioStore } from '../state/studioStore';
 import { studioUndoStack } from '../state/undoStack';
+import { applyTextObjectUpdates } from '../canvas/studioTypeset';
 
 export interface FindReplaceModalProps {
   onClose: () => void;
@@ -51,10 +52,9 @@ export const FindReplaceModal: React.FC<FindReplaceModalProps> = ({ onClose }) =
         ? new RegExp(`\\b${escapeRegExp(searchTerm)}\\b`, flags)
         : new RegExp(escapeRegExp(searchTerm), flags);
 
-      return {
-        ...obj,
+      return applyTextObjectUpdates(obj, {
         text: obj.text.replace(pattern, replaceTerm),
-      };
+      }, studioStore.getState().globalTypesetMode);
     });
 
     studioStore.setState({ textObjects: updatedObjects });
