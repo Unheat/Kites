@@ -29,7 +29,7 @@ function ocrResult(): OcrResult {
   return {
     texts: ['こんにちは'], polygons: [polygon], rawPolygons,
     boxes: [{ x: 0, y: 0, w: 100, h: 80 }], scores: [0.95],
-    directions: ['h'], fontSizes: [14], angles: [0], lineCounts: [2],
+    directions: ['h'], fontSizes: [14], angles: [-5.710593137499643], lineCounts: [2],
     maskRawCanvas: { diagnosticOnly: true },
   };
 }
@@ -108,15 +108,38 @@ describe('Studio OCR independent optional steps', () => {
   describe('Studio OCR real result geometry and dual patch inputs', () => {
     it('uses merged polygons for page-space objects and raw polygons only for cleaning', async () => {
       const response = await runStudioOcr(payload, mocks.dependencies);
-      expect(response.textObjects).toEqual([{
-        id: expect.stringMatching(/^ocr-\d+-0$/), x: 210, y: 310, width: 55, height: 40,
+      const object = response.textObjects[0];
+      expect(object).toMatchObject({
+        id: expect.stringMatching(/^ocr-\d+-0$/),
         text: 'Xin chào', originalText: 'こんにちは',
         fontSize: 14, isVertical: false,
-      }]);
+      });
+      // Centered unrotated rectangle (edge-midpoint dimensions), not the rotated AABB.
+      expect(object.x).toBeCloseTo(212.3753, 4);
+      expect(object.y).toBeCloseTo(312.3223, 4);
+      expect(object.width).toBeCloseTo(50.2494, 4);
+      expect(object.height).toBeCloseTo(35.3553, 4);
+      expect(object.rotation).toBeCloseTo(-5.710593137499643, 10);
     expect(mocks.eraseText).toHaveBeenCalledWith(originalBuffer, rawPolygons, 'telea');
     expect(mocks.eraseText.mock.calls[0]).toHaveLength(3); // No diagnostic raw canvas mask.
     expect(mocks.blobToBase64.mock.calls[0][0]).toBeInstanceOf(Blob);
     expect(await mocks.blobToBase64.mock.calls[0][0].arrayBuffer()).toEqual(cleanedBuffer);
+  });
+
+  it('falls back to the polygon top edge when OCR angles are absent', async () => {
+    mocks.processImage.mockResolvedValue({ ...ocrResult(), angles: undefined });
+    const response = await runStudioOcr(payload, mocks.dependencies);
+    expect(response.textObjects[0].rotation).toBeCloseTo(-5.710593137499643, 10);
+  });
+
+  it('keeps rotation independent from vertical reading direction', async () => {
+    const rotatedVertical = [{ x: 53, y: 9 }, { x: 73, y: 14 }, { x: 47, y: 111 }, { x: 27, y: 106 }];
+    mocks.processImage.mockResolvedValue({
+      ...ocrResult(), polygons: [rotatedVertical], rawPolygons: [rotatedVertical],
+      directions: ['v'], angles: [15],
+    });
+    const response = await runStudioOcr(payload, mocks.dependencies);
+    expect(response.textObjects[0]).toMatchObject({ isVertical: true, rotation: 15 });
   });
 
   it('recognizes pristine artwork but inpaints current edited raster at patch-local coordinates', async () => {
@@ -156,7 +179,10 @@ describe('Studio OCR independent optional steps', () => {
     const response = await runStudioOcr(payload, mocks.dependencies);
     expect(mocks.processTranslation.mock.calls[0][0]).toEqual(['keep']);
     expect(mocks.eraseText).toHaveBeenCalledWith(originalBuffer, [secondPolygon], 'telea');
-    expect(response.textObjects[0]).toMatchObject({ originalText: 'keep', text: 'translated', x: 230, y: 315 });
+    const object = response.textObjects[0];
+    expect(object).toMatchObject({ originalText: 'keep', text: 'translated' });
+    expect(object.x).toBeCloseTo(232.3753, 4);
+    expect(object.y).toBeCloseTo(317.3223, 4);
   });
 });
 

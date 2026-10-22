@@ -1,10 +1,12 @@
 import type { PopupState, StudioOcrPayload } from '../../shared/types';
+import { calculateRotationAngle } from '../../shared/utils/geometry';
 import type { Point2D } from '../engines/inpaint/BaseInpaintEngine';
 import type { OcrResult } from '../engines/ocr/BaseOcrEngine';
 import type { OcrManager } from './OcrManager';
 import type { InpaintManager, InpaintTier } from './InpaintManager';
 import type { TranslationManager } from './TranslationManager';
 import { SUPPORTED_INPAINT_IDS } from '../../shared/inpaintTiers';
+import { getRenderedBlockGeometry } from '../utils/canvasTypesetting';
 
 // Preserve Studio's minimum editable text-handle dimensions.
 const MIN_TEXT_OBJECT_SIZE = 20;
@@ -33,6 +35,8 @@ export interface StudioOcrResponse {
     originalText: string;
     fontSize?: number;
     isVertical?: boolean;
+    /** OCR block rotation in degrees; Studio rotates the unrotated box around its center. */
+    rotation: number;
   }>;
 }
 
@@ -155,18 +159,34 @@ export async function runStudioOcr(
     const resolvedIndex = origIndex ?? index;
     const detectedFontSize = result.fontSizes?.[resolvedIndex];
     const detectedDirection = result.directions?.[resolvedIndex];
+    // Studio stores a centered, unrotated rectangle plus an angle. An AABB of a rotated
+    // region would be larger and then rotated a second time, so derive the same
+    // edge-midpoint rectangle the pipeline renderer persists for Studio.
+    const geometry = getRenderedBlockGeometry(polygon) ?? {
+      x: minX,
+      y: minY,
+      w: Math.max(...xs) - minX,
+      h: Math.max(...ys) - minY,
+    };
+    // Prefer OcrManager's snapped block angle; older/partial engine results fall back to
+    // the source polygon's top-edge rotation. Missing angle must stay an upright block.
+    const detectedAngle = result.angles?.[resolvedIndex];
+    const rotation = typeof detectedAngle === 'number' && Number.isFinite(detectedAngle)
+      ? detectedAngle
+      : (calculateRotationAngle(polygon) * 180) / Math.PI;
     return {
       id: `ocr-${timestamp}-${index}`,
-      x: payload.offsetX + minX,
-      y: payload.offsetY + minY,
-      width: Math.max(MIN_TEXT_OBJECT_SIZE, Math.max(...xs) - minX),
-      height: Math.max(MIN_TEXT_OBJECT_SIZE, Math.max(...ys) - minY),
+      x: payload.offsetX + geometry.x,
+      y: payload.offsetY + geometry.y,
+      width: Math.max(MIN_TEXT_OBJECT_SIZE, geometry.w),
+      height: Math.max(MIN_TEXT_OBJECT_SIZE, geometry.h),
       text: texts[index],
       originalText,
       fontSize: typeof detectedFontSize === 'number' && Number.isFinite(detectedFontSize) && detectedFontSize > 0
         ? Math.round(detectedFontSize)
         : undefined,
       isVertical: detectedDirection === 'v',
+      rotation,
     };
   });
   return { inpaintedPatchBase64, textObjects };

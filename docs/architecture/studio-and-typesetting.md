@@ -99,7 +99,7 @@ $$X_{\text{natural}} = \frac{X_{\text{pointer}} - X_{\text{pan}}}{\text{Scale}}$
 $$Y_{\text{natural}} = \frac{Y_{\text{pointer}} - Y_{\text{pan}}}{\text{Scale}}$$
 
 ### 3. Rotated Transforms & Curved Handle Snapping
-- **Angle Persistence:** Persists OCR detected orientation angles (`angle`) on text blocks.
+- **Angle Persistence:** Persists OCR detected orientation angles (`angle`) on text blocks. Studio re-OCR and full-page retranslate derive the centered, unrotated rectangle from the merged polygon and carry OcrManager's snapped block angle into the new object, so editing does not flatten tilted lettering.
 - **Rotation Slider & Handle:** Features a rotation slider and curved rotation handle with angular snapping (snaps to multiples of $45^\circ$ within a $3^\circ$ threshold).
 - **Affine Matrix Transformation:** Bounding box furniture, selection outlines, and text lines rotate synchronously around the box centroid using 2D canvas transforms.
 

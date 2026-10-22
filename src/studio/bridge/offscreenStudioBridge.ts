@@ -90,6 +90,7 @@ export async function requestStudioOcr(
       originalText: string;
       fontSize?: number;
       isVertical?: boolean;
+      rotation?: number;
       lines?: string[];
       lineSpacing?: number;
       fontFamily?: string;
@@ -155,6 +156,7 @@ export async function requestStudioOcr(
     strokeWidth: 2,
     align: 'center',
     isVertical: t.isVertical ?? false,
+    rotation: t.rotation ?? 0,
   }));
 
   return { inpaintedImage, textObjects };

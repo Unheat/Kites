@@ -452,6 +452,10 @@ export const Studio: React.FC<StudioProps> = ({
               strokeColor: obj.strokeColor || '#ffffff',
               direction: (obj.isVertical ? 'v' : 'h') as 'v' | 'h',
               lines: obj.lines,
+              lineSpacing: obj.lineSpacing,
+              typesetMode: obj.typesetMode,
+              isSkipped: obj.isSkipped,
+              angle: obj.rotation ?? 0,
             }));
             await db.textBlocks.bulkAdd(blocksToSave);
           }
