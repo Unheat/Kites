@@ -2,6 +2,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createMediaTarget,
+  createStyleRevealedTarget,
+  discoverAddedMediaTargets,
   discoverMediaTargets,
   getBackgroundUrls,
   reapplyMediaTargetStyles,
@@ -420,5 +422,84 @@ describe('hover media resolution', () => {
     expect(second).not.toBeNull();
     expect(second?.srcUrl).toBe('data:image/png;base64,mockedCanvasData');
     expect(toDataUrlSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('incremental mutation scan helpers', () => {
+  it('discovers a bare img added without a wrapper element (self inclusion)', () => {
+    const img = document.createElement('img');
+    img.src = '/bare-page.jpg';
+    setRect(img, LARGE_RECT);
+
+    const targets = discoverAddedMediaTargets(img);
+
+    expect(targets).toHaveLength(1);
+    expect(targets[0]).toMatchObject({ imgElement: img, surfaceElement: img });
+  });
+
+  it('discovers descendants of an inserted container and deduplicates shared surfaces', () => {
+    const container = document.createElement('article');
+    const surface = document.createElement('div');
+    surface.style.backgroundImage = 'url("/wrapped.jpg")';
+    setRect(surface, LARGE_RECT);
+    const img = document.createElement('img');
+    img.src = '/wrapped.jpg';
+    img.style.opacity = '0';
+    setRect(img, SMALL_RECT);
+    surface.append(img);
+    container.append(surface);
+
+    const targets = discoverAddedMediaTargets(container);
+
+    expect(targets).toHaveLength(1);
+    expect(targets[0]).toMatchObject({ kind: 'img', surfaceElement: surface, hiddenBacking: true });
+  });
+
+  it('honors custom selector overrides inside inserted subtrees', () => {
+    const container = document.createElement('div');
+    const custom = document.createElement('div');
+    custom.setAttribute('data-page', 'true');
+    custom.style.backgroundImage = 'url("/custom-rule.jpg")';
+    setRect(custom, LARGE_RECT);
+    container.append(custom);
+
+    const targets = discoverAddedMediaTargets(container, '[data-page="true"]');
+
+    expect(targets).toHaveLength(1);
+    expect(targets[0]).toMatchObject({ kind: 'background', sourceElement: custom });
+  });
+
+  it('resolves a style mutation that reveals a background image on the element itself', () => {
+    const surface = document.createElement('div');
+    surface.style.backgroundImage = 'url("/style-revealed.jpg")';
+    setRect(surface, LARGE_RECT);
+
+    expect(createStyleRevealedTarget(surface)).toMatchObject({
+      kind: 'background',
+      sourceElement: surface,
+      surfaceElement: surface,
+    });
+  });
+
+  it('never triggers canvas toDataURL from a style mutation', () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 400;
+    canvas.height = 300;
+    setRect(canvas, LARGE_RECT);
+    const toDataUrlSpy = vi.spyOn(canvas, 'toDataURL').mockReturnValue('data:image/png;base64,unused');
+
+    expect(createStyleRevealedTarget(canvas)).toBeNull();
+    expect(toDataUrlSpy).not.toHaveBeenCalled();
+  });
+
+  it('ignores style mutations on images and plain elements without backgrounds', () => {
+    const img = document.createElement('img');
+    img.src = '/plain.jpg';
+    setRect(img, LARGE_RECT);
+    const plain = document.createElement('div');
+    setRect(plain, LARGE_RECT);
+
+    expect(createStyleRevealedTarget(img)).toBeNull();
+    expect(createStyleRevealedTarget(plain)).toBeNull();
   });
 });

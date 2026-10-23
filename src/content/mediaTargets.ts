@@ -513,6 +513,59 @@ export function discoverMediaTargets(root: ParentNode = document, customSelector
 }
 
 /**
+ * Discovers media targets within a freshly inserted DOM subtree, checking the node
+ * itself in addition to its descendants. Used by incremental MutationObserver scans
+ * so a bare `<img>` added without a wrapper element is not missed (querySelectorAll
+ * never matches the query root itself).
+ *
+ * @param node - Element that was just inserted into the document.
+ * @param customSelector - Optional custom CSS selector override matching image elements.
+ * @returns Unique validated media targets inside the subtree (including the node itself).
+ */
+export function discoverAddedMediaTargets(node: Element, customSelector?: string): MediaTarget[] {
+  const seenSurfaces = new Set<HTMLElement>();
+  const targets: MediaTarget[] = [];
+  const candidates: Element[] = [node, ...node.querySelectorAll('img, picture img, svg image')];
+  for (const element of candidates) {
+    if (isElementInNoiseContainer(element)) continue;
+    const target = element instanceof HTMLImageElement ? createMediaTarget(element) : createNonHtmlImageTarget(element);
+    if (!target || seenSurfaces.has(target.surfaceElement)) continue;
+    seenSurfaces.add(target.surfaceElement);
+    targets.push(target);
+  }
+  if (customSelector) {
+    try {
+      for (const element of Array.from(node.querySelectorAll(customSelector))) {
+        const target = element instanceof HTMLImageElement ? createMediaTarget(element) : createNonHtmlImageTarget(element);
+        if (!target || seenSurfaces.has(target.surfaceElement)) continue;
+        seenSurfaces.add(target.surfaceElement);
+        targets.push(target);
+      }
+    } catch (err) {
+      console.warn('[MediaTargets] Custom selector query failed:', err);
+    }
+  }
+  return targets;
+}
+
+/**
+ * Checks whether a style mutation on an existing element revealed a new background
+ * image target, examining only the element itself (never its subtree) so style
+ * storms on large containers stay O(1) per element.
+ *
+ * @param element - Element whose style attribute just changed.
+ * @returns Validated background target, or null when the element carries no new image.
+ */
+export function createStyleRevealedTarget(element: Element): MediaTarget | null {
+  // Canvases paint from their bitmap and SVG images from href attributes — neither is
+  // revealed by a style mutation, and resolving them here would trigger canvas
+  // toDataURL GPU stalls during style storms.
+  if (element instanceof HTMLImageElement || element instanceof HTMLCanvasElement || element instanceof SVGElement) return null;
+  if (isElementInNoiseContainer(element)) return null;
+  return createNonHtmlImageTarget(element);
+}
+
+/**
  * Tests whether a media target satisfies selector overrides, noise filtering, and pointer containment.
  *
  * @param target - Candidate media target.
