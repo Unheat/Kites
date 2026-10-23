@@ -4,6 +4,7 @@ import { DEFAULT_POPUP_STATE } from '../shared/types';
 import { CLOUDFLARE_QUOTA_DEFAULT_ENDPOINT, STORAGE_KEYS } from '../shared/constants';
 import modelsRegistryData from '../shared/models-registry.json';
 import { normalizeCustomApiConfig } from '../shared/customApi';
+import { blobToDataUrl } from '../shared/utils/blobDataUrl';
 import { SUPPORTED_INPAINT_IDS } from '../shared/inpaintTiers';
 import { resolveOcrTier } from '../offscreen/engines/ocr/ocrRegistry';
 import { normalizeRenderFontPresetId } from '../shared/renderFontPresets';
@@ -294,15 +295,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         sendResponse({ status: 'error', error: 'No image data available' });
         return;
       }
-      const buffer = await blob.arrayBuffer();
-      const bytes = new Uint8Array(buffer);
-      let binary = '';
-      for (let i = 0; i < bytes.byteLength; i++) {
-        binary += String.fromCharCode(bytes[i]);
-      }
-      const base64 = btoa(binary);
-      const mime = blob.type || 'image/png';
-      sendResponse({ status: 'success', dataUrl: `data:${mime};base64,${base64}` });
+      // Native FileReader encoding instead of a per-byte string loop: chapter reader
+      // startup resolves every history page through this handler in parallel, and the
+      // manual loop built megabyte-scale intermediate strings on the worker thread.
+      const dataUrl = await blobToDataUrl(blob);
+      sendResponse({ status: 'success', dataUrl });
     }).catch((err) => {
       sendResponse({ status: 'error', error: String(err) });
     });
@@ -1086,7 +1083,13 @@ async function fetchImageWithReferer(url: string, pageUrl?: string): Promise<Res
   };
 
   try {
+    // Clear any stale session rule left under this ID by an earlier service-worker
+    // lifetime before registering: the module-level counter restarts at 20000 on every
+    // SW respawn, and a rule whose cleanup missed (SW died between add and remove)
+    // survives the restart, making addRules fail with a duplicate-ID error that would
+    // break every subsequent CDN fetch until browser restart.
     await chrome.declarativeNetRequest.updateSessionRules({
+      removeRuleIds: [ruleId],
       addRules: [rule],
     });
     return await fetch(url);
