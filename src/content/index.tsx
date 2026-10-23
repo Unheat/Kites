@@ -27,6 +27,8 @@ import {
 } from './captureArea';
 import {
   collectQueryRoots,
+  createStyleRevealedTarget,
+  discoverAddedMediaTargets,
   discoverMediaTargets,
   isPlaceholderSource,
   normalizeMediaUrl,
@@ -39,6 +41,12 @@ import {
 
 // Minimum rendered dimensions prevent controls and thumbnails from entering the pipeline.
 const IMAGE_SCAN_DEBOUNCE_MS = 300;
+/**
+ * Cap on pending incremental scan roots per mutation flush. Bursts beyond this size are
+ * streaming content that is still settling; excess entries are dropped and stable
+ * content is picked up by the next flush instead of walking the whole document.
+ */
+const MAX_MUTATION_BATCH_ROOTS = 48;
 const HOVER_LEAVE_DELAY_MS = 150;
 const SELF_MUTATION_RESET_DELAY_MS = 50;
 const CHAPTER_SCAN_INTERVAL_MS = 6000;
@@ -78,6 +86,27 @@ const LAZY_LOAD_ATTRIBUTES = [
 
 // In-memory registry mapping original/base image URLs to live DOM media targets
 const mediaTargetRegistry = new Map<string, MediaTarget>();
+
+/**
+ * Registry size that triggers a detached-entry sweep on the next registration. Entries
+ * whose source element left the DOM are dead weight (target resolution falls back to a
+ * live document scan anyway), so dropping them keeps long feed sessions from pinning
+ * recycled DOM subtrees in memory forever.
+ */
+const MAX_MEDIA_TARGET_REGISTRY_SIZE = 96;
+
+/**
+ * Removes registry entries whose source element is no longer attached to the document.
+ *
+ * @returns Nothing.
+ */
+function pruneDetachedMediaTargets(): void {
+  for (const [key, target] of mediaTargetRegistry) {
+    if (!target.sourceElement.isConnected) {
+      mediaTargetRegistry.delete(key);
+    }
+  }
+}
 
 // Track created same-origin Blob URLs to prevent memory leaks and allow eventual revocation
 const activeObjectUrls = new Set<string>();
@@ -137,6 +166,11 @@ function registerMediaTarget(target: MediaTarget): string {
   if (!kitesId) {
     kitesId = `kites-${Math.random().toString(36).substring(2, 11)}`;
     sourceElement.setAttribute('data-kites-id', kitesId);
+  }
+  // Opportunistic sweep: prune detached entries once the registry grows past its cap so
+  // scrolling long feeds cannot accumulate every scrolled-past media target forever.
+  if (mediaTargetRegistry.size >= MAX_MEDIA_TARGET_REGISTRY_SIZE) {
+    pruneDetachedMediaTargets();
   }
   mediaTargetRegistry.set(srcUrl, target);
   const normalized = getNormalizedBaseUrl(srcUrl);
@@ -1517,6 +1551,11 @@ function GlobalOverlay() {
   const [chapterPages, setChapterPages] = useState<ChapterReaderPage[]>([]);
   const [isTranslatingChapter, setIsTranslatingChapter] = useState<boolean>(false);
   const isCustomReaderRef = useRef<boolean>(false);
+  // Latest chapter page count for interval callbacks, so the recurring chapter scan does
+  // not need chapterPages.length in its dependency array (which would recreate the
+  // interval and scroll listener every time a new page is detected).
+  const chapterPagesCountRef = useRef(chapterPages.length);
+  chapterPagesCountRef.current = chapterPages.length;
 
   const activeImgRef = useRef(activeImg);
   const translatingUrlsRef = useRef(translatingUrls);
@@ -1566,12 +1605,14 @@ function GlobalOverlay() {
 
     // Only run recurring scans on recognized manga reader pages (custom rule, reader container,
     // or already detected >= 2 chapter pages). Non-reader sites like X.com/Twitter are skipped to prevent idle lag.
+    // The page count is read through a ref so a growing chapter does not tear down and
+    // recreate the interval and scroll listener on every detected page.
     const interval = setInterval(() => {
       if (typeof document !== 'undefined' && document.hidden) return;
       if (isReaderOpen || isCustomReaderRef.current) return;
       const isReaderSite = Boolean(getActiveCustomSelector())
         || hasMangaReaderContainer(document)
-        || chapterPages.length >= 2;
+        || chapterPagesCountRef.current >= 2;
       if (isReaderSite) {
         refreshChapterPages();
       }
@@ -1582,7 +1623,7 @@ function GlobalOverlay() {
       window.removeEventListener('scroll', handleScroll);
       if (scrollTimeoutId !== null) window.clearTimeout(scrollTimeoutId);
     };
-  }, [isEnabled, isReaderOpen, refreshChapterPages, chapterPages.length]);
+  }, [isEnabled, isReaderOpen, refreshChapterPages]);
 
   const handleTranslateChapter = useCallback(async (urls: string[]) => {
     if (urls.length === 0) return;
@@ -2126,7 +2167,12 @@ function GlobalOverlay() {
     const observedSurfaces = new WeakSet<HTMLElement>();
     const targetsBySurface = new WeakMap<HTMLElement, MediaTarget>();
     const observedMutationRoots = new WeakSet<Node>();
-    let timeoutId: number | null = null;
+    let rescanTimeoutId: number | null = null;
+    let flushTimeoutId: number | null = null;
+    // Pending incremental scan work gathered from MutationObserver batches. Unlike a full
+    // document rescan, each flush only touches the subtrees that actually changed.
+    const pendingAddedRoots = new Set<Element>();
+    const pendingStyleTargets = new Set<Element>();
 
     const queueVisibleImage = (target: MediaTarget) => {
       const { sourceElement, srcUrl } = target;
@@ -2152,13 +2198,74 @@ function GlobalOverlay() {
       }
     });
 
+    const observeTarget = (target: MediaTarget): void => {
+      if (observedSurfaces.has(target.surfaceElement)) return;
+      observedSurfaces.add(target.surfaceElement);
+      targetsBySurface.set(target.surfaceElement, target);
+      intersectionObserver.observe(target.surfaceElement);
+    };
+
+    /**
+     * Registers shadow roots nested inside an inserted subtree for mutation observation.
+     * Light-DOM nodes are already covered by the body observer's `subtree: true`; only
+     * shadow roots fall outside it and need explicit attachment.
+     *
+     * @param root - Inserted subtree whose nested shadow roots should be observed.
+     * @returns Nothing.
+     */
+    const observeShadowRootsWithin = (root: Element): void => {
+      for (const subRoot of collectQueryRoots(root)) {
+        if (subRoot === root || subRoot === document || observedMutationRoots.has(subRoot)) continue;
+        observedMutationRoots.add(subRoot);
+        mutationObserver.observe(subRoot, { childList: true, subtree: true, attributes: true, attributeFilter: ['src', 'srcset', 'style', 'href'] });
+      }
+    };
+
+    /**
+     * Processes one incremental scan batch. Added subtrees are scanned locally (node
+     * itself plus descendants) and style mutations are checked against the mutated
+     * element only, so flush cost stays proportional to changed content rather than
+     * document size.
+     *
+     * @returns Nothing.
+     */
+    const flushPendingMutations = (): void => {
+      flushTimeoutId = null;
+      // Excess entries beyond the cap are dropped: bursts larger than this arrive with
+      // the elements still streaming in, and the next flush picks up stable content.
+      const addedRoots = Array.from(pendingAddedRoots).slice(0, MAX_MUTATION_BATCH_ROOTS);
+      pendingAddedRoots.clear();
+      const styleTargets = Array.from(pendingStyleTargets).slice(0, MAX_MUTATION_BATCH_ROOTS);
+      pendingStyleTargets.clear();
+
+      for (const element of addedRoots) {
+        if (isSelfMutating) return;
+        for (const target of discoverAddedMediaTargets(element, getActiveCustomSelector())) {
+          observeTarget(target);
+        }
+        observeShadowRootsWithin(element);
+      }
+      for (const element of styleTargets) {
+        if (isSelfMutating) return;
+        const target = createStyleRevealedTarget(element);
+        if (target) observeTarget(target);
+      }
+    };
+
+    /**
+     * Schedules a flush without resetting a pending deadline, so continuous mutation
+     * storms (animations, virtualized feeds) cannot postpone incremental scans forever.
+     *
+     * @returns Nothing.
+     */
+    const scheduleFlush = (): void => {
+      if (flushTimeoutId !== null) return;
+      flushTimeoutId = window.setTimeout(flushPendingMutations, IMAGE_SCAN_DEBOUNCE_MS);
+    };
+
     const observeImages = () => {
       for (const target of discoverMediaTargets(document, getActiveCustomSelector())) {
-        if (!observedSurfaces.has(target.surfaceElement)) {
-          observedSurfaces.add(target.surfaceElement);
-          targetsBySurface.set(target.surfaceElement, target);
-          intersectionObserver.observe(target.surfaceElement);
-        }
+        observeTarget(target);
       }
       for (const root of collectQueryRoots(document)) {
         if (root === document || observedMutationRoots.has(root)) continue;
@@ -2168,21 +2275,36 @@ function GlobalOverlay() {
     };
 
     const scheduleObserve = () => {
-      if (timeoutId !== null) window.clearTimeout(timeoutId);
-      timeoutId = window.setTimeout(observeImages, IMAGE_SCAN_DEBOUNCE_MS);
+      // Non-resetting: a pending full rescan keeps its deadline even while mutations keep
+      // arriving, bounding worst-case rescan latency to one debounce interval.
+      if (rescanTimeoutId !== null) return;
+      rescanTimeoutId = window.setTimeout(() => {
+        rescanTimeoutId = null;
+        observeImages();
+      }, IMAGE_SCAN_DEBOUNCE_MS);
     };
 
     const mutationObserver = new MutationObserver((mutations) => {
       if (isSelfMutating) return;
       for (const mutation of mutations) {
-        if (mutation.type === 'attributes' && mutation.target instanceof HTMLImageElement && mutation.attributeName === 'src') {
+        if (mutation.type === 'attributes') {
           const target = mutation.target;
-          if (target.getAttribute('data-kites-translated') === 'true' || target.src.startsWith('blob:') || target.src.startsWith('data:')) {
-            translatedSources.add(target);
+          if (target instanceof HTMLImageElement && mutation.attributeName === 'src') {
+            if (target.getAttribute('data-kites-translated') === 'true' || target.src.startsWith('blob:') || target.src.startsWith('data:')) {
+              translatedSources.add(target);
+            }
+          }
+          if (target instanceof Element) {
+            if (mutation.attributeName === 'style') pendingStyleTargets.add(target);
+            else pendingAddedRoots.add(target);
+          }
+        } else {
+          for (const node of mutation.addedNodes) {
+            if (node instanceof Element) pendingAddedRoots.add(node);
           }
         }
       }
-      scheduleObserve();
+      scheduleFlush();
     });
 
     observeImages();
@@ -2193,7 +2315,8 @@ function GlobalOverlay() {
       mutationObserver.disconnect();
       intersectionObserver.disconnect();
       window.removeEventListener('resize', scheduleObserve);
-      if (timeoutId !== null) window.clearTimeout(timeoutId);
+      if (rescanTimeoutId !== null) window.clearTimeout(rescanTimeoutId);
+      if (flushTimeoutId !== null) window.clearTimeout(flushTimeoutId);
     };
   }, [isEnabled, autoTranslate]);
 
@@ -2216,8 +2339,13 @@ function GlobalOverlay() {
       }
     };
     const scheduleUpdate = () => {
-      if (timeoutId !== null) window.clearTimeout(timeoutId);
-      timeoutId = window.setTimeout(updateImages, IMAGE_SCAN_DEBOUNCE_MS);
+      // Non-resetting: a pending refresh keeps its deadline so streaming feeds cannot
+      // postpone persistent-mode button creation indefinitely.
+      if (timeoutId !== null) return;
+      timeoutId = window.setTimeout(() => {
+        timeoutId = null;
+        updateImages();
+      }, IMAGE_SCAN_DEBOUNCE_MS);
     };
     const observer = new MutationObserver(scheduleUpdate);
 
