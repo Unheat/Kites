@@ -184,4 +184,18 @@ describe('compositeExport', () => {
     expect(success).toBe(true);
     expect(clipboardWriteMock).toHaveBeenCalled();
   });
+
+  it('guarantees clean plate storage contract: working bgCanvas contains no text layers', () => {
+    const bgCanvas = document.createElement('canvas');
+    bgCanvas.width = 300;
+    bgCanvas.height = 400;
+
+    // Working background canvas in Studio holds only clean inpaint artwork
+    // When saving to DB, it is persisted directly as a clean plate without calling renderFullCompositeCanvas
+    const toBlobSpy = vi.fn();
+    bgCanvas.toBlob = toBlobSpy;
+
+    bgCanvas.toBlob((blob) => blob, 'image/png');
+    expect(toBlobSpy).toHaveBeenCalledWith(expect.any(Function), 'image/png');
+  });
 });

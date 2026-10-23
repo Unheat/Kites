@@ -309,7 +309,8 @@ export default function App() {
         await db.textBlocks.bulkAdd(newBlocks);
       });
 
-      await loadJobDetails(activeJobId);
+      // Synchronize in-memory record without triggering loadJobDetails unmount/flicker
+      setImageRecord((prev) => (prev ? { ...prev, translatedImageBlob: savedImageBlob } : prev));
     } catch (err) {
       console.error('[Studio] Failed saving to database:', err);
     }

@@ -324,18 +324,25 @@ export const Studio: React.FC<StudioProps> = ({
     if (!onSave) return;
     setIsSaving(true);
     try {
-      const bgCanvas = getWorkingCanvas();
-      const exportCanvas = renderFullCompositeCanvas(
-        imageWidth,
-        imageHeight,
-        bgCanvas,
-        originalImage,
-        viewMode,
-        imageLayers,
-        textObjects
-      );
+      let bgCanvas = getWorkingCanvas();
+      if (!bgCanvas) {
+        const fallback = document.createElement('canvas');
+        fallback.width = imageWidth;
+        fallback.height = imageHeight;
+        const ctx = fallback.getContext('2d');
+        if (ctx) {
+          if (cleanedImage && cleanedImage.complete) {
+            ctx.drawImage(cleanedImage, 0, 0);
+          } else if (originalImage && originalImage.complete) {
+            ctx.drawImage(originalImage, 0, 0);
+          }
+        }
+        bgCanvas = fallback;
+      }
 
-      exportCanvas.toBlob(async (blob) => {
+      // ADR-005 Clean Plate: Save the clean raster artwork without baked typography.
+      // Text objects are persisted separately as structured records in db.textBlocks.
+      bgCanvas.toBlob(async (blob) => {
         if (blob) {
           await onSave(blob, textObjects);
         }

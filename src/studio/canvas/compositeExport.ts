@@ -3,8 +3,9 @@ import { WarpMesh } from './WarpMesh';
 import type { ImageLayer, StudioViewMode, TextObject } from '../types';
 
 /**
- * Renders the full multi-layer Studio scene into an off-DOM Canvas for export or database persistence.
+ * Renders the full multi-layer Studio scene into an off-DOM Canvas for export or clipboard sharing.
  * Accurately merges background raster artwork, sticker image layers, and vector/warped dialogue bubbles.
+ * Note: IndexedDB persistence (ADR-005) uses clean plate background directly; never bake text on DB save.
  *
  * @param imageWidth - Width of the composite image in pixels.
  * @param imageHeight - Height of the composite image in pixels.
