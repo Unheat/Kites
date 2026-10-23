@@ -297,4 +297,128 @@ describe('hover media resolution', () => {
     Object.defineProperty(document, 'elementsFromPoint', { configurable: true, value: vi.fn(() => [adImg]) });
     expect(resolveHoverMediaTarget(createHoverEvent(adImg, [adImg, aside, document.body, document]))).toBeNull();
   });
+
+  it('resolves images behind anti-scrape overlays via elementsFromPoint without querying outer feed containers (X.com pattern)', () => {
+    // Mimic X.com (Twitter) timeline structure:
+    // div#react-root -> main -> div[data-testid="primaryColumn"] -> article[data-testid="tweet"] -> overlay + img
+    const reactRoot = document.createElement('div');
+    reactRoot.id = 'react-root';
+    const main = document.createElement('main');
+    const primaryColumn = document.createElement('div');
+    primaryColumn.setAttribute('data-testid', 'primaryColumn');
+    const tweet = document.createElement('article');
+    tweet.setAttribute('data-testid', 'tweet');
+
+    const photoWrapper = document.createElement('div');
+    photoWrapper.setAttribute('data-testid', 'tweetPhoto');
+
+    const img = document.createElement('img');
+    img.src = 'https://pbs.twimg.com/media/tweet_image.jpg';
+    setRect(img, LARGE_RECT);
+
+    // X.com transparent overlay that sits on top of the image to intercept pointer events
+    const overlay = document.createElement('div');
+    overlay.className = 'css-175oi2r transparent-overlay';
+    setRect(overlay, LARGE_RECT);
+
+    photoWrapper.append(img, overlay);
+    tweet.append(photoWrapper);
+    primaryColumn.append(tweet);
+    main.append(primaryColumn);
+    reactRoot.append(main);
+    document.body.append(reactRoot);
+
+    // Spy on high-level feed containers to guarantee no feed-wide querySelectorAll thrashing
+    const mainQuerySpy = vi.spyOn(main, 'querySelectorAll');
+    const rootQuerySpy = vi.spyOn(reactRoot, 'querySelectorAll');
+    const columnQuerySpy = vi.spyOn(primaryColumn, 'querySelectorAll');
+
+    // Native C++ elementsFromPoint returns the overlay on top and the image beneath it
+    Object.defineProperty(document, 'elementsFromPoint', {
+      configurable: true,
+      value: vi.fn(() => [overlay, photoWrapper, img, tweet, primaryColumn, main, reactRoot, document.body]),
+    });
+
+    const event = createHoverEvent(overlay, [
+      overlay,
+      photoWrapper,
+      tweet,
+      primaryColumn,
+      main,
+      reactRoot,
+      document.body,
+      document,
+    ]);
+
+    const target = resolveHoverMediaTarget(event);
+
+    expect(target).not.toBeNull();
+    expect(target?.imgElement).toBe(img);
+    expect(target?.srcUrl).toBe('https://pbs.twimg.com/media/tweet_image.jpg');
+
+    // High-level feed containers must NOT be queried on hover
+    expect(mainQuerySpy).not.toHaveBeenCalled();
+    expect(rootQuerySpy).not.toHaveBeenCalled();
+    expect(columnQuerySpy).not.toHaveBeenCalled();
+  });
+
+  it('stops descendant query traversal at card container boundaries during fallback search', () => {
+    const feed = document.createElement('div');
+    feed.id = 'feed-column';
+
+    const card = document.createElement('article');
+    card.setAttribute('role', 'article');
+
+    const wrapper = document.createElement('div');
+    const img = document.createElement('img');
+    img.src = '/card-image.jpg';
+    setRect(img, LARGE_RECT);
+    wrapper.append(img);
+    card.append(wrapper);
+    feed.append(card);
+    document.body.append(feed);
+
+    const feedQuerySpy = vi.spyOn(feed, 'querySelectorAll');
+
+    // Simulate elementsFromPoint returning only the wrapper (fallback search needed)
+    Object.defineProperty(document, 'elementsFromPoint', {
+      configurable: true,
+      value: vi.fn(() => [wrapper]),
+    });
+
+    const event = createHoverEvent(wrapper, [wrapper, card, feed, document.body, document]);
+    const target = resolveHoverMediaTarget(event);
+
+    expect(target).not.toBeNull();
+    expect(target?.imgElement).toBe(img);
+    // Boundary guard: the query must never bubble past the article boundary to query the entire feed
+    expect(feedQuerySpy).not.toHaveBeenCalled();
+  });
+
+  it('caches canvas dataURL across repeated hover checks to avoid synchronous toDataURL GPU stalls', () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 400;
+    canvas.height = 300;
+    setRect(canvas, LARGE_RECT);
+    document.body.append(canvas);
+
+    const toDataUrlSpy = vi.spyOn(canvas, 'toDataURL').mockReturnValue('data:image/png;base64,mockedCanvasData');
+    Object.defineProperty(document, 'elementsFromPoint', {
+      configurable: true,
+      value: vi.fn(() => [canvas]),
+    });
+
+    const event = createHoverEvent(canvas, [canvas, document.body, document]);
+
+    const first = resolveHoverMediaTarget(event);
+    expect(first).not.toBeNull();
+    expect(first?.kind).toBe('canvas');
+    expect(toDataUrlSpy).toHaveBeenCalledTimes(1);
+
+    // Second hover immediately after must use the cached data URL
+    const second = resolveHoverMediaTarget(event);
+    expect(second).not.toBeNull();
+    expect(second?.srcUrl).toBe('data:image/png;base64,mockedCanvasData');
+    expect(toDataUrlSpy).toHaveBeenCalledTimes(1);
+  });
 });

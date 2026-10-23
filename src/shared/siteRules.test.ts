@@ -8,6 +8,7 @@ import {
   findMatchingSiteRule,
   MANGA_READER_CONTAINER_SELECTORS,
   getChapterScopeId,
+  hasMangaReaderContainer,
 } from './siteRules';
 
 describe('siteRules utilities', () => {
@@ -129,6 +130,16 @@ describe('siteRules utilities', () => {
       expect(MANGA_READER_CONTAINER_SELECTORS).toContain('#readerarea');
       expect(MANGA_READER_CONTAINER_SELECTORS).toContain('div[class*="reading-content"]');
       expect(MANGA_READER_CONTAINER_SELECTORS).toContain('div[class*="wt_viewer"]');
+    });
+
+    it('detects manga reader container elements in DOM subtrees', () => {
+      const container = document.createElement('div');
+      expect(hasMangaReaderContainer(container)).toBe(false);
+
+      const readerDiv = document.createElement('div');
+      readerDiv.id = 'readerarea';
+      container.appendChild(readerDiv);
+      expect(hasMangaReaderContainer(container)).toBe(true);
     });
   });
 

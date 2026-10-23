@@ -14,6 +14,23 @@ const PLACEHOLDER_SOURCE = /(?:blank|placeholder|spacer|spinner|loading|shimmer|
 const MEDIA_SELECTOR = 'img, svg image, canvas';
 const CSS_IMAGE_URL = /url\(["']?([^"')]+)["']?\)/g;
 
+/** Maximum ancestor depth when searching for hidden/wrapped images during hover fallback. */
+const MAX_HOVER_ANCESTOR_DEPTH = 2;
+/** Maximum media candidate count to inspect within a single container to prevent feed-wide thrashing. */
+const MAX_CONTAINER_MEDIA_ELEMENTS = 12;
+/** Selector matching post/card containers that bound individual feed items (e.g. tweets, list items). */
+const CARD_CONTAINER_SELECTOR = 'article, [role="article"], li, [data-testid*="cell"], [data-testid*="tweet"]';
+/** Canvas DataURL cache TTL in milliseconds to prevent synchronous GPU stalls during hover/scan. */
+const CANVAS_DATA_URL_CACHE_TTL_MS = 2000;
+
+interface CanvasCacheEntry {
+  url: string;
+  width: number;
+  height: number;
+  timestamp: number;
+}
+const canvasCache = new WeakMap<HTMLCanvasElement, CanvasCacheEntry>();
+
 export type MediaTargetKind = 'img' | 'background' | 'svg-image' | 'canvas';
 
 export interface MediaTarget {
@@ -351,11 +368,23 @@ function createNonHtmlImageTarget(element: Element): MediaTarget | null {
   if (!hasEligibleRect(element) || !isVisibleElement(element)) return null;
 
   if (element instanceof HTMLCanvasElement) {
+    const now = Date.now();
+    const cached = canvasCache.get(element);
     let srcUrl = '';
-    try {
-      srcUrl = element.toDataURL('image/png');
-    } catch {
-      srcUrl = '';
+    if (cached && cached.width === element.width && cached.height === element.height && (now - cached.timestamp) < CANVAS_DATA_URL_CACHE_TTL_MS) {
+      srcUrl = cached.url;
+    } else {
+      try {
+        srcUrl = element.toDataURL('image/png');
+        canvasCache.set(element, {
+          url: srcUrl,
+          width: element.width,
+          height: element.height,
+          timestamp: now,
+        });
+      } catch {
+        srcUrl = '';
+      }
     }
     const anchorElement = resolveAnchorElement(element);
     if (!srcUrl || !anchorElement) return null;
@@ -484,75 +513,145 @@ export function discoverMediaTargets(root: ParentNode = document, customSelector
 }
 
 /**
- * Builds media targets from candidate elements, deduplicates by surface, keeps only
- * targets containing the point, filters noise containers or custom selectors, and
- * returns the largest by rendered area.
+ * Tests whether a media target satisfies selector overrides, noise filtering, and pointer containment.
  *
- * @param elements - Candidate elements (event targets, composed path, elementsFromPoint hits).
+ * @param target - Candidate media target.
  * @param clientX - Horizontal viewport coordinate.
  * @param clientY - Vertical viewport coordinate.
- * @param customSelector - Optional custom CSS selector override matching chapter images.
- * @returns Largest matching media target, or null.
+ * @param customSelector - Optional custom selector override.
+ * @returns Whether the target is valid and contains the pointer.
  */
-function pickLargestTargetFromElements(
-  elements: Iterable<Element>,
+function isValidHoverTarget(
+  target: MediaTarget,
   clientX: number,
   clientY: number,
   customSelector?: string
-): MediaTarget | null {
-  const targets: MediaTarget[] = [];
-  for (const element of elements) {
-    const directTarget = element instanceof HTMLImageElement
-      ? createMediaTarget(element)
-      : createNonHtmlImageTarget(element);
-    if (directTarget) targets.push(directTarget);
-    if (element !== document.body && element !== document.documentElement) {
-      for (const child of Array.from(element.querySelectorAll(MEDIA_SELECTOR))) {
-        const childTarget = child instanceof HTMLImageElement ? createMediaTarget(child) : createNonHtmlImageTarget(child);
-        if (childTarget) targets.push(childTarget);
-      }
+): boolean {
+  if (customSelector) {
+    try {
+      const matches = Boolean(
+        target.surfaceElement.closest(customSelector) ||
+        target.sourceElement.closest(customSelector) ||
+        target.imgElement?.closest(customSelector)
+      );
+      if (!matches) return false;
+    } catch {
+      return false;
+    }
+  } else {
+    if (isElementInNoiseContainer(target.surfaceElement) || isElementInNoiseContainer(target.sourceElement)) {
+      return false;
     }
   }
+  return surfaceContainsPoint(target.surfaceElement, clientX, clientY);
+}
 
-  return targets
-    .filter((target, index) => targets.findIndex((candidate) => candidate.surfaceElement === target.surfaceElement) === index)
-    .filter((target) => {
-      if (customSelector) {
-        try {
-          return Boolean(
-            target.surfaceElement.closest(customSelector) ||
-            target.sourceElement.closest(customSelector) ||
-            target.imgElement?.closest(customSelector)
-          );
-        } catch {
-          return false;
-        }
-      }
-      return !isElementInNoiseContainer(target.surfaceElement) && !isElementInNoiseContainer(target.sourceElement);
-    })
-    .filter((target) => surfaceContainsPoint(target.surfaceElement, clientX, clientY))
-    .sort((first, second) => {
-      const firstRect = first.surfaceElement.getBoundingClientRect();
-      const secondRect = second.surfaceElement.getBoundingClientRect();
-      return secondRect.width * secondRect.height - firstRect.width * firstRect.height;
-    })[0] || null;
+/**
+ * Deduplicates candidate media targets by surface and selects the largest by rendered area.
+ *
+ * @param targets - Validated media target candidates.
+ * @returns Largest media target by rendered area, or null.
+ */
+function selectLargestTarget(targets: MediaTarget[]): MediaTarget | null {
+  if (targets.length === 0) return null;
+  const uniqueTargets = targets.filter(
+    (target, index) => targets.findIndex((candidate) => candidate.surfaceElement === target.surfaceElement) === index
+  );
+  if (uniqueTargets.length <= 1) return uniqueTargets[0] || null;
+
+  return uniqueTargets.sort((first, second) => {
+    const firstRect = first.surfaceElement.getBoundingClientRect();
+    const secondRect = second.surfaceElement.getBoundingClientRect();
+    return secondRect.width * secondRect.height - firstRect.width * firstRect.height;
+  })[0] || null;
 }
 
 /**
  * Resolves hover media using composed paths, point hit-testing, descendants, and CSS backgrounds.
  * Prioritizes customSelector when configured, and excludes noise containers when unconfigured.
  *
+ * FAST-PATH: [Penetrates anti-scrape wrappers without tree traversal] -> On sites like X.com or Pixiv,
+ * transparent overlay divs or link wrappers sit on top of the image. elementsFromPoint already lists
+ * all layers under the pointer in native C++ order. Direct point inspection resolves the <img> or
+ * background surface in sub-millisecond time. A shallow descendant fallback is only invoked if the
+ * direct hit test returns no valid media.
+ *
  * @param event - Mouse event used for target and pointer information.
  * @param customSelector - Optional custom CSS selector override.
  * @returns Largest matching media target, or null.
  */
 export function resolveHoverMediaTarget(event: MouseEvent, customSelector?: string): MediaTarget | null {
-  const elements = new Set<Element>();
-  if (event.target instanceof Element) elements.add(event.target);
-  for (const node of event.composedPath()) if (node instanceof Element) elements.add(node);
-  for (const element of document.elementsFromPoint?.(event.clientX, event.clientY) || []) elements.add(element);
+  const clientX = event.clientX;
+  const clientY = event.clientY;
 
-  return pickLargestTargetFromElements(elements, event.clientX, event.clientY, customSelector);
+  // Phase 1 (Fast-Path): Direct point hit-testing on elements physically under the cursor.
+  const pointElements: Element[] = [];
+  const path = typeof event.composedPath === 'function' ? event.composedPath() : [];
+  for (const node of path) {
+    if (node instanceof Element) {
+      pointElements.push(node);
+      break;
+    }
+  }
+  if (event.target instanceof Element && !pointElements.includes(event.target)) {
+    pointElements.push(event.target);
+  }
+  if (typeof document.elementsFromPoint === 'function') {
+    const hits = document.elementsFromPoint(clientX, clientY);
+    if (hits) {
+      for (const el of hits) {
+        if (!pointElements.includes(el)) pointElements.push(el);
+      }
+    }
+  }
+
+  const directTargets: MediaTarget[] = [];
+  for (const element of pointElements) {
+    const target = element instanceof HTMLImageElement
+      ? createMediaTarget(element)
+      : createNonHtmlImageTarget(element);
+    if (target && isValidHoverTarget(target, clientX, clientY, customSelector)) {
+      directTargets.push(target);
+    }
+  }
+
+  const directHit = selectLargestTarget(directTargets);
+  if (directHit) return directHit;
+
+  // Phase 2 (Fallback): Shallow descendant search on the hovered element and its immediate ancestors.
+  // Handles cases where pointer-events: none on the image prevents direct point hits, or where the
+  // event target is an image container wrapper with margins/padding.
+  const fallbackTargets: MediaTarget[] = [];
+  const startElement = event.target instanceof Element ? event.target : pointElements[0];
+  if (!startElement) return null;
+
+  let current: Element | null = startElement;
+  let depth = 0;
+  while (current && depth <= MAX_HOVER_ANCESTOR_DEPTH) {
+    if (current === document.body || current === document.documentElement) break;
+
+    const isCardBoundary = depth > 0 && Boolean(current.matches?.(CARD_CONTAINER_SELECTOR));
+
+    try {
+      const mediaElements = Array.from(current.querySelectorAll(MEDIA_SELECTOR));
+      if (mediaElements.length <= MAX_CONTAINER_MEDIA_ELEMENTS) {
+        for (const child of mediaElements) {
+          const childTarget = child instanceof HTMLImageElement
+            ? createMediaTarget(child)
+            : createNonHtmlImageTarget(child);
+          if (childTarget && isValidHoverTarget(childTarget, clientX, clientY, customSelector)) {
+            fallbackTargets.push(childTarget);
+          }
+        }
+      }
+    } catch {}
+
+    if (fallbackTargets.length > 0 || isCardBoundary) break;
+    current = current.parentElement;
+    depth++;
+  }
+
+  return selectLargestTarget(fallbackTargets);
 }
 
 /**
@@ -572,5 +671,40 @@ export function resolveHoverMediaTarget(event: MouseEvent, customSelector?: stri
  */
 export function resolveMediaTargetAtPoint(clientX: number, clientY: number, customSelector?: string): MediaTarget | null {
   if (typeof document.elementsFromPoint !== 'function') return null;
-  return pickLargestTargetFromElements(document.elementsFromPoint(clientX, clientY), clientX, clientY, customSelector);
+  const elements = document.elementsFromPoint(clientX, clientY) || [];
+
+  // Phase 1 (Fast-Path): Direct point hit-testing
+  const directTargets: MediaTarget[] = [];
+  for (const element of elements) {
+    const target = element instanceof HTMLImageElement
+      ? createMediaTarget(element)
+      : createNonHtmlImageTarget(element);
+    if (target && isValidHoverTarget(target, clientX, clientY, customSelector)) {
+      directTargets.push(target);
+    }
+  }
+
+  const directHit = selectLargestTarget(directTargets);
+  if (directHit) return directHit;
+
+  // Phase 2 (Fallback): Shallow descendant search on the top hit element
+  const topElement = elements[0];
+  if (!topElement || topElement === document.body || topElement === document.documentElement) return null;
+
+  const fallbackTargets: MediaTarget[] = [];
+  try {
+    const children = Array.from(topElement.querySelectorAll(MEDIA_SELECTOR));
+    if (children.length <= MAX_CONTAINER_MEDIA_ELEMENTS) {
+      for (const child of children) {
+        const childTarget = child instanceof HTMLImageElement
+          ? createMediaTarget(child)
+          : createNonHtmlImageTarget(child);
+        if (childTarget && isValidHoverTarget(childTarget, clientX, clientY, customSelector)) {
+          fallbackTargets.push(childTarget);
+        }
+      }
+    }
+  } catch {}
+
+  return selectLargestTarget(fallbackTargets);
 }

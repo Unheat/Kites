@@ -205,3 +205,23 @@ export function findMatchingSiteRule(
     return target === ruleDomain;
   });
 }
+
+/**
+ * Detects whether a document or query root contains any known manga reader containers.
+ *
+ * @param root - Query root to inspect (defaults to document when available).
+ * @returns Whether a recognized manga reader container exists in the subtree.
+ */
+export function hasMangaReaderContainer(root?: ParentNode | null): boolean {
+  const targetRoot = root || (typeof document !== 'undefined' ? document : null);
+  if (!targetRoot || typeof targetRoot.querySelector !== 'function') return false;
+  for (const selector of MANGA_READER_CONTAINER_SELECTORS) {
+    try {
+      if (targetRoot.querySelector(selector)) return true;
+    } catch {
+      // Ignore invalid or unsupported CSS selectors in host environment
+    }
+  }
+  return false;
+}
+

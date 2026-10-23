@@ -4,7 +4,7 @@ import './content.css';
 import { Languages, Eye, EyeOff, ExternalLink, X, Crop, RotateCcw, Download } from 'lucide-react';
 import type { PopupState, CropOverlayItem, ViewportSelection, SiteSelectorRule } from '../shared/types';
 import { STORAGE_KEYS } from '../shared/constants';
-import { isDomainDisabled, findMatchingSiteRule } from '../shared/siteRules';
+import { isDomainDisabled, findMatchingSiteRule, hasMangaReaderContainer } from '../shared/siteRules';
 import {
   createChapterTranslationRegistry,
   createChapterExporter,
@@ -41,6 +41,8 @@ import {
 const IMAGE_SCAN_DEBOUNCE_MS = 300;
 const HOVER_LEAVE_DELAY_MS = 150;
 const SELF_MUTATION_RESET_DELAY_MS = 50;
+const CHAPTER_SCAN_INTERVAL_MS = 6000;
+const CHAPTER_SCROLL_SCAN_DEBOUNCE_MS = 1500;
 const MAX_PARENT_BG_SEARCH_DEPTH = 2;
 const REVEALED_BACKING_OPACITY = '1';
 const REVEALED_BACKING_Z_INDEX = '1';
@@ -1549,11 +1551,38 @@ function GlobalOverlay() {
     if (!isReaderOpen && !isCustomReaderRef.current) {
       refreshChapterPages();
     }
+
+    let scrollTimeoutId: number | null = null;
+    const handleScroll = () => {
+      if (isReaderOpen || isCustomReaderRef.current) return;
+      if (scrollTimeoutId !== null) window.clearTimeout(scrollTimeoutId);
+      scrollTimeoutId = window.setTimeout(() => {
+        scrollTimeoutId = null;
+        if (!isReaderOpen && !isCustomReaderRef.current) refreshChapterPages();
+      }, CHAPTER_SCROLL_SCAN_DEBOUNCE_MS);
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+
+    // Only run recurring scans on recognized manga reader pages (custom rule, reader container,
+    // or already detected >= 2 chapter pages). Non-reader sites like X.com/Twitter are skipped to prevent idle lag.
     const interval = setInterval(() => {
-      if (!isReaderOpen && !isCustomReaderRef.current) refreshChapterPages();
-    }, 4000);
-    return () => clearInterval(interval);
-  }, [isEnabled, isReaderOpen, refreshChapterPages]);
+      if (typeof document !== 'undefined' && document.hidden) return;
+      if (isReaderOpen || isCustomReaderRef.current) return;
+      const isReaderSite = Boolean(getActiveCustomSelector())
+        || hasMangaReaderContainer(document)
+        || chapterPages.length >= 2;
+      if (isReaderSite) {
+        refreshChapterPages();
+      }
+    }, CHAPTER_SCAN_INTERVAL_MS);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('scroll', handleScroll);
+      if (scrollTimeoutId !== null) window.clearTimeout(scrollTimeoutId);
+    };
+  }, [isEnabled, isReaderOpen, refreshChapterPages, chapterPages.length]);
 
   const handleTranslateChapter = useCallback(async (urls: string[]) => {
     if (urls.length === 0) return;
@@ -2252,32 +2281,63 @@ function GlobalOverlay() {
         }, HOVER_LEAVE_DELAY_MS);
       }
     };
+    let hoverRafId: number | null = null;
+    let pendingHoverEvent: MouseEvent | null = null;
+
+    const cancelHoverRaf = () => {
+      if (hoverRafId !== null) {
+        if (typeof cancelAnimationFrame === 'function') {
+          cancelAnimationFrame(hoverRafId);
+        } else {
+          window.clearTimeout(hoverRafId);
+        }
+        hoverRafId = null;
+      }
+      pendingHoverEvent = null;
+    };
+
     const handleMouseOver = (event: MouseEvent) => {
       lastCursorPositionRef.current = { x: event.clientX, y: event.clientY };
       const target = event.target as HTMLElement;
       if (activeImgRef.current && (target === activeImgRef.current.surfaceElement || activeImgRef.current.surfaceElement.contains(target) || target.closest(TRANSLATE_CONTROL_SELECTOR))) {
         cancelHide();
+        cancelHoverRaf();
         return;
       }
-      const mediaTarget = resolveHoverMediaTarget(event, getActiveCustomSelector());
-      if (!mediaTarget) return;
-      // WORKAROUND: [Tolerance halo cancels hide on exit] -> surfaceContainsPoint forgives
-      // up to POINTER_TOLERANCE_PX (3px), so a cursor that just LEFT the image can still
-      // resolve to it via a container's img descendant. Slow exits emit a mouseover inside
-      // that halo which cancels the pending hide (button never hides); fast exits skip past
-      // the halo between coalesced events (button hides) — the reported speed-dependence.
-      // When the resolver returns the SAME surface but the cursor is strictly outside its
-      // rect, treat it as a genuine leave and let the pending hide run.
-      if (activeImgRef.current && mediaTarget.surfaceElement === activeImgRef.current.surfaceElement) {
-        const rect = mediaTarget.surfaceElement.getBoundingClientRect();
-        const strictlyOutside = event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom;
-        if (strictlyOutside) return;
-      }
-      cancelHide();
-      registerMediaTarget(mediaTarget);
-      setActiveImg({ ...mediaTarget, anchorName: getAnchorName(mediaTarget.surfaceElement) });
+      pendingHoverEvent = event;
+      if (hoverRafId !== null) return;
+
+      const schedule = typeof requestAnimationFrame === 'function'
+        ? requestAnimationFrame
+        : (cb: FrameRequestCallback) => window.setTimeout(cb, 16);
+
+      hoverRafId = schedule(() => {
+        hoverRafId = null;
+        const currentEvent = pendingHoverEvent;
+        pendingHoverEvent = null;
+        if (!currentEvent) return;
+
+        const mediaTarget = resolveHoverMediaTarget(currentEvent, getActiveCustomSelector());
+        if (!mediaTarget) return;
+        // WORKAROUND: [Tolerance halo cancels hide on exit] -> surfaceContainsPoint forgives
+        // up to POINTER_TOLERANCE_PX (3px), so a cursor that just LEFT the image can still
+        // resolve to it via a container's img descendant. Slow exits emit a mouseover inside
+        // that halo which cancels the pending hide (button never hides); fast exits skip past
+        // the halo between coalesced events (button hides) — the reported speed-dependence.
+        // When the resolver returns the SAME surface but the cursor is strictly outside its
+        // rect, treat it as a genuine leave and let the pending hide run.
+        if (activeImgRef.current && mediaTarget.surfaceElement === activeImgRef.current.surfaceElement) {
+          const rect = mediaTarget.surfaceElement.getBoundingClientRect();
+          const strictlyOutside = currentEvent.clientX < rect.left || currentEvent.clientX > rect.right || currentEvent.clientY < rect.top || currentEvent.clientY > rect.bottom;
+          if (strictlyOutside) return;
+        }
+        cancelHide();
+        registerMediaTarget(mediaTarget);
+        setActiveImg({ ...mediaTarget, anchorName: getAnchorName(mediaTarget.surfaceElement) });
+      });
     };
     const handleMouseOut = (event: MouseEvent) => {
+      cancelHoverRaf();
       // WORKAROUND: [Document-exit coordinates resurrect cleared pointer] -> a mouseout with
       // no relatedTarget means the pointer left the window entirely. Reading shortcuts rely
       // on lastCursorPositionRef being null at that moment to reject Alt+Shift+Z/F with no
@@ -2344,6 +2404,7 @@ function GlobalOverlay() {
     window.addEventListener('scroll', handleScroll, { passive: true, capture: true });
     return () => {
       cancelHide();
+      cancelHoverRaf();
       if (scrollResolveTimeoutId !== null) window.clearTimeout(scrollResolveTimeoutId);
       document.removeEventListener('mouseover', handleMouseOver);
       document.removeEventListener('mouseout', handleMouseOut);
