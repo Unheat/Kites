@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createCanvas } from 'canvas';
-import { calcHorizontal, compactSpecialSymbols, resizeRegionToFontSize, putTextLines, measureDefaultLayout, renderRegionDefault } from './cotransDefaultRenderer';
+import { calcHorizontal, compactSpecialSymbols, resizeRegionToFontSize, measureDefaultLayout, renderRegionDefault } from './cotransDefaultRenderer';
 import { fitFontSizeWithLines } from './typesetLayout';
 import { sanitizeTypesetText } from '../../shared/utils/textCleaning';
 
@@ -152,13 +152,14 @@ describe('font family propagation', () => {
     expect(ctx.font).toContain(customFont);
   });
 
-  it('renders lines with custom fontFamily and CJK fontSpec fallback', () => {
-    const canvas = createCanvas(400, 200);
-    const ctx = canvas.getContext('2d');
-    const customFont = 'Georgia, "Times New Roman", serif';
-    const result = putTextLines(ctx, 16, ['日本語', 'テスト'], 'center', '#000000', '#ffffff', customFont);
-    expect(result).not.toBeNull();
-    expect(ctx.font).toContain(customFont);
-    expect(ctx.font).toContain('Microsoft YaHei');
+  it('applies comic lettering casing when a comic font family is passed', () => {
+    const ctx = mockCtx();
+    const comicFont = '"Anime Ace 2.0 BB", "Wild Words", sans-serif';
+    const text = "I'm sorry, did you see him?";
+    const measured = measureDefaultLayout(ctx, text, 300, 200, 16, undefined, comicFont);
+    // Personal pronoun I has crossbar 'I', internal words have lowercase 'i'
+    const fullText = measured.lines.join(' ');
+    expect(fullText).toContain("I'M");
+    expect(fullText).toContain("DiD"); // internal I becomes lowercase i
   });
 });

@@ -1,7 +1,12 @@
 import type { Point2D } from '../../shared/utils/geometry';
 import { syllables } from './hyphenation';
 import { fitFontSizeWithLines, fontSpec, type MeasureCache } from './typesetLayout';
-import { sanitizeTypesetText, compactSpecialSymbols } from '../../shared/utils/textCleaning';
+import {
+  sanitizeTypesetText,
+  compactSpecialSymbols,
+  isComicLetteringFont,
+  formatComicLetteringCasing,
+} from '../../shared/utils/textCleaning';
 import { getFontSizeMinimumBase } from '../engines/ocr/tallStripTiling';
 
 export { compactSpecialSymbols };
@@ -691,9 +696,13 @@ export function measureDefaultLayout(
   isBold: boolean = false,
   measureCache?: MeasureCache
 ): ReturnType<typeof fitFontSizeWithLines> {
+  let cleaned = sanitizeTypesetText(compactSpecialSymbols(text));
+  if (isComicLetteringFont(fontFamily)) {
+    cleaned = formatComicLetteringCasing(cleaned, true);
+  }
   return fitFontSizeWithLines(
     ctx,
-    sanitizeTypesetText(compactSpecialSymbols(text)),
+    cleaned,
     fontFamily,
     width,
     height,

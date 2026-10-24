@@ -1,5 +1,6 @@
 import type { ITranslationEngine, TranslationOptions } from '../engines/translation/BaseEngine';
 import { getEnabledGlossary } from '../../shared/glossary';
+import { normalizeSourceCasingForMt, normalizeTargetCasing } from '../../shared/utils/casingNormalization';
 import { WebLLMEngine } from '../engines/translation/WebLLMEngine';
 import { GoogleTranslateEngine } from '../engines/translation/GoogleTranslateEngine';
 import { CustomApiEngine } from '../engines/translation/CustomApiEngine';
@@ -95,6 +96,10 @@ export class TranslationManager {
 
     console.log('[TranslationManager] Engine waterfall sequence:', engineSequence);
 
+    // Pre-MT normalization: normalize all-caps comic dialogue across bicameral sources
+    // to prevent NMT casing projection glitches downstream.
+    const normalizedTexts = texts.map((text) => normalizeSourceCasingForMt(text, sourceLang));
+
     for (let i = 0; i < engineSequence.length; i++) {
       const engineId = engineSequence[i];
       let lease: EngineLease | null = null;
@@ -107,7 +112,9 @@ export class TranslationManager {
         const loadMs = import.meta.env.DEV ? performance.now() - loadStart : 0;
 
         const inferStart = import.meta.env.DEV ? performance.now() : 0;
-        const results = await lease.engine.translate(texts, sourceLang, targetLang, options);
+        const rawResults = await lease.engine.translate(normalizedTexts, sourceLang, targetLang, options);
+        // Post-MT normalization: heal any Frankenstein casing produced by NMT casing transfer.
+        const results = rawResults.map((result) => normalizeTargetCasing(result, targetLang));
         if (import.meta.env.DEV) {
           const inferMs = performance.now() - inferStart;
           console.log(

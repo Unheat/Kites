@@ -177,6 +177,7 @@ describe('BaseLlmTranslationEngine Keyed JSON Protocol', () => {
     expect(msgs[0].role).toBe('system');
     expect(msgs[0].content).toContain('Return only one JSON object matching the required schema');
     expect(msgs[0].content).toContain('Keep every output key exactly as required (e.g. b0, b1)');
+    expect(msgs[0].content).toContain('natural sentence capitalization');
     expect(msgs[1].role).toBe('user');
     expect(msgs[1].content).toContain('"b0":"One"');
     expect(msgs[1].content).toContain('"b1":"Two"');

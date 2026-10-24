@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   destroyedIds: [] as string[],
   initProgressCallbacks: [] as Array<unknown>,
   translateArguments: [] as Array<[string[], string, string, unknown?]>,
+  customTranslateReturn: null as string[] | null,
 }));
 
 const mockChromeSendMessage = vi.spyOn(chrome.runtime, 'sendMessage');
@@ -68,7 +69,9 @@ function createMockEngine(id: string) {
       await mocks.translateGates.get(id);
       if (mocks.failAllTranslate) throw new Error('Fatal API Error');
       if (mocks.failFirstTranslate && instanceNumber === 1) throw new Error('Crash');
-      return instanceNumber === 1 ? ['Mock translated text'] : ['Mock translated from fallback'];
+      return instanceNumber === 1
+        ? (mocks.customTranslateReturn ?? ['Mock translated text'])
+        : ['Mock translated from fallback'];
     }),
     destroy: vi.fn(async () => {
       mocks.destroyedIds.push(id);
@@ -143,6 +146,7 @@ describe('TranslationManager Waterfall Logic', () => {
     mocks.translateStartedSignals.clear();
     mocks.initProgressCallbacks = [];
     mocks.translateArguments = [];
+    mocks.customTranslateReturn = null;
   });
 
   /**
@@ -254,6 +258,25 @@ describe('TranslationManager Waterfall Logic', () => {
       });
     },
   );
+
+  it('normalizes all-caps comic source text before dispatching to engine translate', async () => {
+    respondWith('gg-translate', []);
+    const input = ['LOOKS LIKE MOM HIT FINGERNAILS INTO HEAD HUH?'];
+
+    await manager.processTranslation(input, 'en', 'vi');
+
+    expect(mocks.translateArguments).toHaveLength(1);
+    expect(mocks.translateArguments[0][0]).toEqual(['Looks like mom hit fingernails into head huh?']);
+  });
+
+  it('normalizes Frankenstein mixed-case translation engine results', async () => {
+    respondWith('gg-translate', []);
+    mocks.customTranslateReturn = ['A-ARA-ARA, Trông NHƯ MẸ ĐÁNH MÓNG TAY VÀO ĐẦU HẢ?'];
+
+    const result = await manager.processTranslation(['Look'], 'en', 'vi');
+
+    expect(result).toEqual(['A-ARA-ARA, Trông như mẹ đánh móng tay vào đầu hả?']);
+  });
 
   it('keeps one deeply immutable snapshot across initialization and fallback awaits', async () => {
     const gate = createDeferred<void>();

@@ -352,6 +352,7 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
           `- Keep every output key exactly as required (e.g. b0, b1).\n` +
           `- Never omit, add, merge, split, rename, or renumber a key.\n` +
           `- Use surrounding values for dialogue context, natural tone, and pronouns.\n` +
+          `- Write translations using natural sentence capitalization (capitalize only sentence starts and proper nouns). Never mimic all-caps source dialogue unless the text is an onomatopoeia or shout.\n` +
           `- If a value is empty, punctuation-only, an ellipsis, or cannot be usefully translated, copy it unchanged.\n` +
           `- Do not add explanations, labels, markdown, apologies, or introductory text.\n` +
           `- Do not add quotation marks around a translation. JSON string quotes are syntax only.\n` +

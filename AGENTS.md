@@ -71,8 +71,8 @@ The developer of this project is a beginner learning full-stack, web extension, 
 *   Always active /caveman and /ponytail
 *   activate /frontend-design when implement/change/fixing front-end/UI code
 
-## 8. Cotrans/or Xianscan Porting Strategy
-When adapting code or logic from Cotrans (Python) or XianScan (Rust) to this project (TypeScript), you MUST ALWAYS look at the actual Cotrans/ Xianscan codebase before making any changes or proposing solutions. Do not invent your own math or logic if Cotrans already solves it.
+## 8. Cotrans/or Xianscan/or Koharu Porting Strategy
+When adapting code or logic from Cotrans (Python) or XianScan (Rust) or Koharu to this project (TypeScript), you MUST ALWAYS look at the actual Cotrans/ Xianscan/ Koharu codebase before making any changes or proposing solutions. Do not invent your own math or logic if Cotrans already solves it.
 both Donors repo leave in reference folder
 
 Always use scratches/reference/cotrans-2023 (pinned to commit 39fb606) as the primary ground truth to match cotrans.touhou.ai. Do not use scratches/reference/cotrans (upstream main), as its 2025 updates (e.g., resize_regions_to_font_size) cause font-size inflation bugs. Only fall back to cotrans for logic missing in the 2023 tree, and explicitly flag it when you do. If cotrans-2023 is missing, recreate it with:
