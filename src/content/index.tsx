@@ -27,6 +27,7 @@ import {
 } from './captureArea';
 import {
   collectQueryRoots,
+  createMediaTarget,
   createStyleRevealedTarget,
   discoverAddedMediaTargets,
   discoverMediaTargets,
@@ -432,10 +433,9 @@ function TranslateButton({
       }
 
       setIsTranslated(isElementTranslated());
-      setShowOriginal(
-        reg?.showOriginal ??
-        (anchorElement.getAttribute('data-kites-show-original') === 'true')
-      );
+      const domShowOriginal = anchorElement.getAttribute('data-kites-show-original') === 'true' ||
+        (anchorElement instanceof HTMLImageElement ? false : anchorElement.querySelector('img')?.getAttribute('data-kites-show-original') === 'true');
+      setShowOriginal(reg ? Boolean(reg.showOriginal) : domShowOriginal);
       const regJobId = reg?.jobId;
       const attr = anchorElement.getAttribute('data-kites-job-id');
       setJobId(regJobId ?? (attr ? Number(attr) : null));
@@ -468,7 +468,12 @@ function TranslateButton({
      */
     const handleDisplayChange = (event: Event): void => {
       const detail = (event as CustomEvent<{ srcUrl: string; showOriginal: boolean }>).detail;
-      if (detail?.srcUrl === srcUrl) setShowOriginal(detail.showOriginal);
+      if (
+        detail?.srcUrl === srcUrl ||
+        (detail?.srcUrl && normalizeMediaUrl(detail.srcUrl) === normalizeMediaUrl(srcUrl))
+      ) {
+        setShowOriginal(detail.showOriginal);
+      }
     };
     document.addEventListener(IMAGE_DISPLAY_CHANGED_EVENT, handleDisplayChange);
     return () => document.removeEventListener(IMAGE_DISPLAY_CHANGED_EVENT, handleDisplayChange);
@@ -480,12 +485,19 @@ function TranslateButton({
       e.stopPropagation();
     }
     const nextShowOriginal = !showOriginal;
-    setShowOriginal(nextShowOriginal);
-    const target = resolveTargetMedia(srcUrl);
-    if (target) {
-      toggleImageDisplay(target, nextShowOriginal);
+    const record = translatedRegistry.get(srcUrl);
+    if (record) {
+      record.showOriginal = nextShowOriginal;
     }
-  }, [showOriginal, srcUrl]);
+    setShowOriginal(nextShowOriginal);
+    const target = resolveTargetMedia(srcUrl) ||
+      (anchorElement instanceof HTMLImageElement
+        ? createMediaTarget(anchorElement)
+        : (anchorElement.querySelector('img') ? createMediaTarget(anchorElement.querySelector('img')!) : null));
+    if (target) {
+      toggleImageDisplay(target, nextShowOriginal, record);
+    }
+  }, [showOriginal, srcUrl, anchorElement]);
 
   const handleDownload = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -1605,7 +1617,13 @@ function GlobalOverlay() {
       hasTranslation: (target) => Boolean(translatedRegistry.get(target.srcUrl)),
       toggleOriginal: (target) => {
         const record = translatedRegistry.get(target.srcUrl);
-        if (record) toggleImageDisplay(target, !record.showOriginal);
+        if (record) {
+          const nextShowOriginal = !record.showOriginal;
+          record.showOriginal = nextShowOriginal;
+          toggleImageDisplay(target, nextShowOriginal, record);
+        } else {
+          toggleImageDisplay(target, true);
+        }
       },
       translate: (target) => requestTranslation(target.srcUrl, {
         ...target,

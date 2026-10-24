@@ -169,6 +169,44 @@ describe('real content reading shortcut wiring', () => {
     await act(async () => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', bubbles: true, cancelable: true })); });
     expect(target.imgElement!.src).toBe(target.srcUrl);
     expect(document.querySelector('[data-kites-toggle-btn]')?.getAttribute('aria-label')).toBe('Show Translated Image');
+
+    // Press 'f' again to toggle back to translated
+    await act(async () => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', bubbles: true, cancelable: true })); });
+    expect(target.imgElement!.src).toBe('blob:translated');
+    expect(document.querySelector('[data-kites-toggle-btn]')?.getAttribute('aria-label')).toBe('Show Original Image');
+  });
+
+  it('toggles repeatedly between original and translated presentation when clicking the eye button', async () => {
+    const target = image('https://example.com/page.png');
+    media.targets = [target];
+    media.underPointer = target;
+    await mount();
+    finish(target);
+    await deliver({ type: 'IMAGE_TRANSLATED', payload: { originalUrl: target.srcUrl, bakedBase64: 'data:image/png;base64,AA==', jobId: 7 } });
+    move();
+
+    const toggleBtn = document.querySelector<HTMLButtonElement>('[data-kites-toggle-btn]');
+    expect(toggleBtn).not.toBeNull();
+    expect(toggleBtn?.getAttribute('aria-label')).toBe('Show Original Image');
+    expect(target.imgElement!.src).toBe('blob:translated');
+
+    // First click: switch to original
+    await act(async () => { toggleBtn!.click(); });
+    expect(target.imgElement!.src).toBe(target.srcUrl);
+    expect(target.sourceElement.getAttribute('data-kites-show-original')).toBe('true');
+    expect(toggleBtn?.getAttribute('aria-label')).toBe('Show Translated Image');
+
+    // Second click: switch back to translated
+    await act(async () => { toggleBtn!.click(); });
+    expect(target.imgElement!.src).toBe('blob:translated');
+    expect(target.sourceElement.getAttribute('data-kites-show-original')).toBeNull();
+    expect(toggleBtn?.getAttribute('aria-label')).toBe('Show Original Image');
+
+    // Third click: switch to original again
+    await act(async () => { toggleBtn!.click(); });
+    expect(target.imgElement!.src).toBe(target.srcUrl);
+    expect(target.sourceElement.getAttribute('data-kites-show-original')).toBe('true');
+    expect(toggleBtn?.getAttribute('aria-label')).toBe('Show Translated Image');
   });
 
   it('clears persistent target when the pointer leaves the document', async () => {

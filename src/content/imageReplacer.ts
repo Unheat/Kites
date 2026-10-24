@@ -183,7 +183,10 @@ export function attachReversionShield(img: HTMLImageElement, safeUrl: string, su
           if (!currentSrc || currentSrc === appliedSrc) continue;
 
           // If user is previewing original image, do not revert back to translated
-          if (img.getAttribute('data-kites-show-original') === 'true') {
+          if (
+            img.getAttribute('data-kites-show-original') === 'true' ||
+            surfaceElement.getAttribute('data-kites-show-original') === 'true'
+          ) {
             continue;
           }
 
@@ -274,6 +277,8 @@ export function replaceImageWithTranslation(target: MediaTarget, record: Chapter
     surfaceElement.setAttribute('data-kites-translated', 'true');
     if (targetImg) {
       sanitizeImageAttributes(targetImg);
+      targetImg.setAttribute('data-kites-applied-src', safeUrl);
+      targetImg.setAttribute('data-kites-translated', 'true');
       targetImg.src = safeUrl;
       targetImg.style.display = '';
       targetImg.style.filter = 'none';
@@ -320,6 +325,7 @@ export function toggleImageDisplay(target: MediaTarget, showOriginal: boolean, r
       surfaceElement.setAttribute('data-kites-show-original', 'true');
 
       if (targetImg) {
+        targetImg.setAttribute('data-kites-show-original', 'true');
         const origSrc = targetImg.getAttribute('data-kites-orig-src') || target.srcUrl;
         const origSrcset = targetImg.getAttribute('data-kites-orig-srcset');
         targetImg.src = origSrc;
@@ -341,14 +347,22 @@ export function toggleImageDisplay(target: MediaTarget, showOriginal: boolean, r
     } else {
       sourceElement.removeAttribute('data-kites-show-original');
       surfaceElement.removeAttribute('data-kites-show-original');
+      if (targetImg) {
+        targetImg.removeAttribute('data-kites-show-original');
+      }
 
-      const appliedSrc = sourceElement.getAttribute('data-kites-applied-src') || record?.translatedUrl;
+      const appliedSrc =
+        sourceElement.getAttribute('data-kites-applied-src') ||
+        targetImg?.getAttribute('data-kites-applied-src') ||
+        surfaceElement.getAttribute('data-kites-applied-src') ||
+        record?.translatedUrl;
       if (appliedSrc) {
         if (targetImg) {
           targetImg.src = appliedSrc;
           targetImg.srcset = '';
           targetImg.removeAttribute('srcset');
           suppressParentBackgroundImage(targetImg, surfaceElement);
+          reapplyMediaTargetStyles(targetImg, surfaceElement);
         } else if (kind === 'background') {
           surfaceElement.style.backgroundImage = `url("${appliedSrc}")`;
         } else {
