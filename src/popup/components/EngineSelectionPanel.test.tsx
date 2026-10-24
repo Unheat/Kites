@@ -55,6 +55,33 @@ describe('orderChangedCatalog', () => {
     ]);
     expect(engines.map(engine => engine.id)).toEqual(['pending', 'downloaded-z', 'default', 'downloaded-a']);
   });
+
+  it('orders translation catalog: gg-translate -> cloudflare -> custom -> best-of-size -> other models', () => {
+    const engines: Engine[] = [
+      { id: 'gemma-2-2b-it-q4f16_1-MLC', name: 'gemma-2-2b', type: 'local', isDownloaded: false },
+      { id: 'Qwen3.5-9B-q4f16_1-MLC', name: 'Qwen3.5-9B', type: 'local', isDownloaded: false },
+      { id: 'custom-gpt', name: 'openai/gpt-4o', type: 'custom', isDownloaded: true },
+      { id: 'cloudflare-translate', name: 'Cloud Shared Pool', type: 'api', isDownloaded: true },
+      { id: 'Qwen3.5-0.8B-q4f16_1-MLC', name: 'Qwen3.5-0.8B', type: 'local', isDownloaded: false },
+      { id: 'gg-translate', name: 'Google Translate', type: 'api', isDownloaded: true },
+      { id: 'Llama-3.1-70B-Instruct-q3f16_1-MLC', name: 'Llama-3.1-70B', type: 'local', isDownloaded: false },
+      { id: 'Qwen3.5-4B-q4f16_1-MLC', name: 'Qwen3.5-4B', type: 'local', isDownloaded: false },
+      { id: 'Qwen3.5-2B-q4f16_1-MLC', name: 'Qwen3.5-2B', type: 'local', isDownloaded: false },
+    ];
+
+    const ordered = orderChangedCatalog(engines, 'gg-translate');
+    expect(ordered.map(e => e.id)).toEqual([
+      'gg-translate',
+      'cloudflare-translate',
+      'custom-gpt',
+      'Qwen3.5-0.8B-q4f16_1-MLC',
+      'Qwen3.5-2B-q4f16_1-MLC',
+      'Qwen3.5-4B-q4f16_1-MLC',
+      'Qwen3.5-9B-q4f16_1-MLC',
+      'Llama-3.1-70B-Instruct-q3f16_1-MLC',
+      'gemma-2-2b-it-q4f16_1-MLC',
+    ]);
+  });
 });
 
 describe('WebLLM download control', () => {
