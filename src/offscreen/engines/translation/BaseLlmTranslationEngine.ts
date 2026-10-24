@@ -42,6 +42,27 @@ export function countCodePoints(text: string): number {
 }
 
 /**
+ * Estimates token count for multilingual text across CJK and Latin scripts.
+ * - CJK (Hanzi, Kanji, Kana, Hangul): ~1.8 tokens per character in modern BPE tokenizers.
+ * - Latin / Western / numeric: ~0.35 tokens per character (~3-4 chars per token).
+ *
+ * @param text - Input text string.
+ * @returns Conservative upper-bound estimated token count.
+ */
+export function estimateTokenCount(text: string): number {
+  if (!text) return 0;
+  const trimmed = text.trim();
+  if (!trimmed) return 0;
+
+  // CJK Unified Ideographs, Hiragana, Katakana, Hangul, and CJK punctuation
+  const cjkMatches = trimmed.match(/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\u3000-\u303F\uFF00-\uFFEF]/gu);
+  const cjkCount = cjkMatches ? cjkMatches.length : 0;
+  const nonCjkCount = [...trimmed].length - cjkCount;
+
+  return Math.ceil(cjkCount * 1.8 + nonCjkCount * 0.35);
+}
+
+/**
  * Computes dynamic token safety bound for a batch of source strings based on
  * number of bubbles and total Unicode code points.
  * Formula: Math.min(1024, Math.max(64, 32 + 16 * N + Math.ceil(2.5 * C)))
@@ -164,6 +185,13 @@ export function stripMarkdownFormatting(text: string): string {
 export const DEFAULT_LLM_BATCH_SIZE = 15;
 
 /**
+ * Default maximum estimated input tokens per translation prompt.
+ * Remote APIs (Cloudflare, OpenAI, Claude) use a generous budget (4000).
+ * WebLLM overrides this to 550 to protect its strict 1024 context window.
+ */
+export const DEFAULT_LLM_MAX_INPUT_TOKENS = 4000;
+
+/**
  * Abstract base class for all LLM-based translation engines (WebLLM, CustomApi, Cloudflare).
  * Encapsulates blank line pre-filtering, deterministic passthrough, batching, prompt assembly,
  * Keyed JSON Protocol parsing, index alignment protection, and markdown stripping.
@@ -173,6 +201,11 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
    * Maximum segments per translation prompt.
    */
   protected batchSize = DEFAULT_LLM_BATCH_SIZE;
+
+  /**
+   * Maximum estimated input tokens per translation prompt.
+   */
+  protected maxInputTokens = DEFAULT_LLM_MAX_INPUT_TOKENS;
 
   /**
    * Whether to throw an Error when the response line count does not match the chunk length.
@@ -229,9 +262,11 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
     // Snapshot before awaiting inference so edits cannot alter later batches of this request.
     const glossary = getEnabledGlossary(options);
 
-    // 2. Process remaining meaningful segments in bounded batches
-    for (let offset = 0; offset < toTranslate.length; offset += this.batchSize) {
-      const chunk = toTranslate.slice(offset, offset + this.batchSize);
+    // 2. Process remaining meaningful segments in bounded batches respecting both
+    // bubble count (batchSize) and token budget (maxInputTokens)
+    const chunks = this.partitionIntoChunks(toTranslate);
+
+    for (const chunk of chunks) {
       const prompt = this.buildPrompt(chunk, sourceLang, targetLang, glossary);
       const messages = this.buildJsonMessages(chunk, sourceLang, targetLang, glossary);
       const schema = buildSchema(chunk.length);
@@ -313,9 +348,79 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
 
     return (
       `Translate SOURCE from ${sourceLang} to ${targetLang}.\n\n` +
-      `Return only one JSON object matching the required schema.` +
+      `Return only one JSON object mapping each input key (e.g. b0, b1) to its translation.` +
       (glossary.length > 0 ? GLOSSARY_PROMPT_RULES : '') + '\n\n' +
       `SOURCE:\n${JSON.stringify(sourceObj)}` + buildGlossaryPrompt(glossary)
+    );
+  }
+
+  /**
+   * Partitions segments into batches constrained by both maximum block count (batchSize)
+   * and maximum estimated input token budget (maxInputTokens), whichever hits first.
+   *
+   * @param segments - Meaningful segments to partition.
+   * @param systemOverheadTokens - Fixed tokens for system prompt and prompt template framing.
+   * @returns Array of segmented chunks safe for model context limits.
+   */
+  partitionIntoChunks(
+    segments: LlmTranslationSegment[],
+    systemOverheadTokens = 75
+  ): LlmTranslationSegment[][] {
+    if (segments.length === 0) return [];
+
+    const chunks: LlmTranslationSegment[][] = [];
+    let currentChunk: LlmTranslationSegment[] = [];
+    let currentTokens = systemOverheadTokens;
+
+    for (const segment of segments) {
+      // Per-item token cost: text tokens + ~6 tokens syntax overhead ("b0": "...",\n)
+      const itemTokens = estimateTokenCount(segment.text) + 6;
+
+      const exceedsCount = currentChunk.length >= this.batchSize;
+      const exceedsTokens = currentTokens + itemTokens > this.maxInputTokens;
+
+      if (currentChunk.length > 0 && (exceedsCount || exceedsTokens)) {
+        chunks.push(currentChunk);
+        currentChunk = [];
+        currentTokens = systemOverheadTokens;
+      }
+
+      currentChunk.push(segment);
+      currentTokens += itemTokens;
+    }
+
+    if (currentChunk.length > 0) {
+      chunks.push(currentChunk);
+    }
+
+    return chunks;
+  }
+
+  /**
+   * Constructs high-signal, compact system instructions for manga dialogue translation.
+   * Aligns with XGrammar constrained decoding for local WebLLMs while providing
+   * unambiguous schema, casing, and anti-markdown directives for remote APIs.
+   *
+   * @param sourceLang - Resolved source language name.
+   * @param targetLang - Resolved target language name.
+   * @param glossary - Immutable literal terminology mappings for this request.
+   * @returns Clean system prompt string (~55 tokens).
+   */
+  protected buildSystemPrompt(
+    sourceLang: string,
+    targetLang: string,
+    glossary: readonly GlossaryEntry[] = []
+  ): string {
+    return (
+      `You translate manga/comic OCR text from ${sourceLang} into natural ${targetLang}.\n\n` +
+      `Return only one JSON object matching the required schema.\n\n` +
+      `Rules:\n` +
+      `- Write translations using natural sentence capitalization (capitalize only sentence starts and proper nouns).\n` +
+      `- Keep every output key exactly as required (e.g. b0, b1).\n` +
+      `- Use surrounding values for dialogue context, natural tone, and pronouns.\n` +
+      `- If a value is empty, punctuation-only, an ellipsis, or cannot be usefully translated, copy it unchanged.\n` +
+      `- Output raw JSON only. Do not add markdown code fences, explanations, or commentary.` +
+      (glossary.length > 0 ? GLOSSARY_PROMPT_RULES : '')
     );
   }
 
@@ -344,19 +449,7 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
     return [
       {
         role: 'system',
-        content:
-          `You translate manga/comic OCR text into natural ${targetLang}.\n\n` +
-          `Return only one JSON object matching the required schema.\n\n` +
-          `Rules:\n` +
-          `- Translate only the values in SOURCE.\n` +
-          `- Keep every output key exactly as required (e.g. b0, b1).\n` +
-          `- Never omit, add, merge, split, rename, or renumber a key.\n` +
-          `- Use surrounding values for dialogue context, natural tone, and pronouns.\n` +
-          `- Write translations using natural sentence capitalization (capitalize only sentence starts and proper nouns). Never mimic all-caps source dialogue unless the text is an onomatopoeia or shout.\n` +
-          `- If a value is empty, punctuation-only, an ellipsis, or cannot be usefully translated, copy it unchanged.\n` +
-          `- Do not add explanations, labels, markdown, apologies, or introductory text.\n` +
-          `- Do not add quotation marks around a translation. JSON string quotes are syntax only.\n` +
-          `- Output raw JSON only.` + (glossary.length > 0 ? GLOSSARY_PROMPT_RULES : ''),
+        content: this.buildSystemPrompt(sourceLang, targetLang, glossary),
       },
       {
         role: 'user',

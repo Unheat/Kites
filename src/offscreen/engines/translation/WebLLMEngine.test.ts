@@ -168,4 +168,9 @@ describe('WebLLMEngine Keyed JSON Protocol', () => {
       expect.stringContaining('hit max_tokens limit')
     );
   });
+
+  it('configures bounded batch size and strict input token budget for 1k WebGPU context', () => {
+    expect((engine as any).batchSize).toBe(8);
+    expect((engine as any).maxInputTokens).toBe(550);
+  });
 });

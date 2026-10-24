@@ -7,8 +7,11 @@ import {
 import { checkWebGPUAvailability } from '../../utils/hardware';
 import type { TranslationOptions } from './BaseEngine';
 
-/** Default segment batch size for on-device WebLLM inference (fits full page in 1 pass) */
-const DEFAULT_WEBLLM_BATCH_SIZE = 15;
+/** Default segment batch size for on-device WebLLM inference (bounds keys to avoid small model attention degradation) */
+export const DEFAULT_WEBLLM_BATCH_SIZE = 8;
+
+/** Maximum input tokens reserved for WebLLM prompt within its strict 1024-token WebGPU context window */
+export const DEFAULT_WEBLLM_MAX_INPUT_TOKENS = 550;
 
 /** Greedy sampling temperature for deterministic translation */
 const WEBLLM_TEMPERATURE = 0;
@@ -35,6 +38,7 @@ export class WebLLMEngine extends BaseLlmTranslationEngine {
     super();
     this.modelId = modelId;
     this.batchSize = DEFAULT_WEBLLM_BATCH_SIZE;
+    this.maxInputTokens = DEFAULT_WEBLLM_MAX_INPUT_TOKENS;
     this.throwOnCountMismatch = false;
     this.allowPartialMissingLines = true;
   }

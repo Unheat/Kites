@@ -3,10 +3,12 @@ import {
   BaseLlmTranslationEngine,
   isDeterministicPassthrough,
   countCodePoints,
+  estimateTokenCount,
   maxTokensForBatch,
   buildSchema,
   stripMarkdownFormatting,
   cleanTranslatedLine,
+  DEFAULT_LLM_MAX_INPUT_TOKENS,
   type LlmChatMessage,
 } from './BaseLlmTranslationEngine';
 
@@ -75,6 +77,55 @@ describe('maxTokensForBatch and countCodePoints', () => {
     const longBatch = new Array(6).fill('This is a longer manga text bubble with many words.');
     const tokensLong = maxTokensForBatch(longBatch);
     expect(tokensLong).toBeLessThanOrEqual(1024);
+  });
+
+  it('estimates token counts appropriately for CJK vs Latin text', () => {
+    // 5 CJK characters: 5 * 1.8 = 9 tokens
+    expect(estimateTokenCount('行こうよ！')).toBe(9);
+    // 10 Latin characters: 10 * 0.35 = 3.5 -> 4 tokens
+    expect(estimateTokenCount('Hello guys')).toBe(4);
+    // Empty text
+    expect(estimateTokenCount('')).toBe(0);
+    expect(estimateTokenCount('   ')).toBe(0);
+  });
+});
+
+describe('partitionIntoChunks dual-budget window', () => {
+  it('splits on batchSize count when tokens are within budget', () => {
+    const engine = new MockLlmEngine(3);
+    expect((engine as any).maxInputTokens).toBe(DEFAULT_LLM_MAX_INPUT_TOKENS);
+    const segments = [
+      { originalIndex: 0, text: 'One' },
+      { originalIndex: 1, text: 'Two' },
+      { originalIndex: 2, text: 'Three' },
+      { originalIndex: 3, text: 'Four' },
+    ];
+    const chunks = engine.partitionIntoChunks(segments);
+    expect(chunks).toHaveLength(2);
+    expect(chunks[0]).toHaveLength(3);
+    expect(chunks[1]).toHaveLength(1);
+  });
+
+  it('splits earlier on token budget when dense text would exceed maxInputTokens', () => {
+    const engine = new MockLlmEngine(15);
+    // Set a tight input token budget (e.g. 120 tokens, system overhead is 75)
+    (engine as any).maxInputTokens = 150;
+
+    // Each segment has ~30 CJK characters: ~54 text tokens + 6 syntax tokens = ~60 tokens each
+    const denseSegmentText = 'あ'.repeat(30);
+    const segments = [
+      { originalIndex: 0, text: denseSegmentText },
+      { originalIndex: 1, text: denseSegmentText },
+      { originalIndex: 2, text: denseSegmentText },
+    ];
+
+    // Budget: 75 overhead + 60 (seg 0) = 135 <= 150.
+    // Adding seg 1: 135 + 60 = 195 > 150 -> splits after seg 0!
+    const chunks = engine.partitionIntoChunks(segments);
+    expect(chunks.length).toBe(3);
+    expect(chunks[0]).toEqual([segments[0]]);
+    expect(chunks[1]).toEqual([segments[1]]);
+    expect(chunks[2]).toEqual([segments[2]]);
   });
 });
 
