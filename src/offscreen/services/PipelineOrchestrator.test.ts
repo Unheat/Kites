@@ -470,4 +470,23 @@ describe('PipelineOrchestrator', () => {
     ocrSpy.mockRestore();
     inpaintSpy.mockRestore();
   });
+
+  it('supports constructor dependency injection for test isolation', () => {
+    const mockOcr = { processImage: vi.fn() } as any;
+    const mockInpaint = { eraseText: vi.fn() } as any;
+    const mockTranslation = { processTranslation: vi.fn() } as any;
+    const mockBubble = { acquireEngine: vi.fn(), destroy: vi.fn() } as any;
+
+    const custom = new (pipelineOrchestrator.constructor as any)({
+      ocrManager: mockOcr,
+      inpaintManager: mockInpaint,
+      translationManager: mockTranslation,
+      bubbleManager: mockBubble,
+    });
+
+    expect(custom.getOcrManager()).toBe(mockOcr);
+    expect(custom.getInpaintManager()).toBe(mockInpaint);
+    expect(custom.getTranslationManager()).toBe(mockTranslation);
+    expect(custom.getBubbleManager()).toBe(mockBubble);
+  });
 });

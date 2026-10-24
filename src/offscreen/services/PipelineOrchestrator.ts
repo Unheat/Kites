@@ -1,7 +1,7 @@
 import { db } from '../../db';
 import type { PopupState, ModelInitializationStage } from '../../shared/types';
 import { OcrManager, type InitializationLifecycleCallback, type OcrTier } from './OcrManager';
-import { translationManager } from './TranslationManager';
+import { TranslationManager, translationManager as defaultTranslationManager } from './TranslationManager';
 import { InpaintManager } from './InpaintManager';
 import type { InpaintTier } from './InpaintManager';
 import type { Point2D } from '../engines/inpaint/BaseInpaintEngine';
@@ -9,24 +9,52 @@ import { inpaintRegistry } from '../engines/inpaint/inpaintRegistry';
 import { InpaintCacheManager } from './InpaintCacheManager';
 import { renderTextBlocksBatch, measureBubbleLayoutFontSize, getRenderedBlockGeometry, LANGUAGE_ORIENTATION_PRESETS, type TextBlockItem, type RenderedBlockInfo } from '../utils/canvasTypesetting';
 import { resolveRenderFontFamily } from '../../shared/renderFontPresets';
-import { bubbleManager } from './BubbleManager';
+import { isBubbleGpuAvailable } from '../../shared/utils/hardwareUtils';
+import type { BubbleEngineOptions } from '../engines/bubble/BaseBubbleEngine';
+import { BubbleManager, bubbleManager as defaultBubbleManager } from './BubbleManager';
 import { acquireBubbleGeometry, resolveBubbleLayouts, type BubbleGeometry } from './BubbleLayoutService';
 
-export class PipelineOrchestrator {
-  private ocrManager: OcrManager;
-  private inpaintManager: InpaintManager;
+export interface PipelineServices {
+  ocrManager: OcrManager;
+  inpaintManager: InpaintManager;
+  translationManager: TranslationManager;
+  bubbleManager: BubbleManager;
+}
 
-  constructor() {
-    this.ocrManager = new OcrManager();
-    this.inpaintManager = new InpaintManager();
+export class PipelineOrchestrator {
+  private services: PipelineServices;
+
+  constructor(services?: Partial<PipelineServices>) {
+    this.services = {
+      ocrManager: services?.ocrManager ?? new OcrManager(),
+      inpaintManager: services?.inpaintManager ?? new InpaintManager(),
+      translationManager: services?.translationManager ?? defaultTranslationManager,
+      bubbleManager: services?.bubbleManager ?? defaultBubbleManager,
+    };
+  }
+
+  public get inpaintManager(): InpaintManager {
+    return this.services.inpaintManager;
+  }
+
+  public get ocrManager(): OcrManager {
+    return this.services.ocrManager;
   }
 
   public getInpaintManager(): InpaintManager {
-    return this.inpaintManager;
+    return this.services.inpaintManager;
   }
 
   public getOcrManager(): OcrManager {
-    return this.ocrManager;
+    return this.services.ocrManager;
+  }
+
+  public getTranslationManager(): TranslationManager {
+    return this.services.translationManager;
+  }
+
+  public getBubbleManager(): BubbleManager {
+    return this.services.bubbleManager;
   }
 
   /**
@@ -145,7 +173,7 @@ export class PipelineOrchestrator {
       // 3. OCR Detection. OcrManager owns lazy model initialization and cache lifecycle.
       const ocrStart = import.meta.env.DEV ? performance.now() : 0;
       console.log(`[PipelineOrchestrator] Running OCR with ${ocrTier}...`);
-      const ocrResult = await this.ocrManager.processImage(imageBuffer, ocrTier, {
+      const ocrResult = await this.services.ocrManager.processImage(imageBuffer, ocrTier, {
         sourceLang: sourceLang !== 'auto' ? sourceLang : undefined,
         pageWidth,
         pageHeight
@@ -178,7 +206,7 @@ export class PipelineOrchestrator {
       const bubbleMode = popupState?.bubbleMode ?? 'heuristic';
       // Cleanly evict cached bubble engine if mode is disabled
       if (bubbleMode === 'off') {
-        void bubbleManager.destroy();
+        void this.services.bubbleManager.destroy();
       }
       // Legacy CJK/RTL rendering does not honor fixed bubble rectangles.
       const supportsBubbleLayout = (LANGUAGE_ORIENTATION_PRESETS[targetLang.toLowerCase().trim()] ?? 'h') === 'h';
@@ -198,11 +226,15 @@ export class PipelineOrchestrator {
                 tempBitmap.close();
               }
               // Acquire engine through BubbleManager (OOP lifecycle & clean eviction)
-              const { engine, release } = await bubbleManager.acquireEngine(bubbleMode, popupState, makeLifecycle('bubble', bubbleMode));
+              const { engine, release } = await this.services.bubbleManager.acquireEngine(bubbleMode, popupState, makeLifecycle('bubble', bubbleMode));
               try {
                 const isNeuralMode = bubbleMode === 'neural' || bubbleMode === 'neural-mask';
+                const bubbleOptions: BubbleEngineOptions = {
+                  preferGpu: popupState ? isBubbleGpuAvailable(popupState) : false,
+                  mode: bubbleMode === 'neural-mask' ? 'mask' : 'box',
+                };
                 const neuralResult = isNeuralMode && engine
-                  ? await engine.detect(rawCanvas, ocrResult.boxes, popupState)
+                  ? await engine.detect(rawCanvas, ocrResult.boxes, bubbleOptions)
                   : undefined;
                 bubbleGeometry = acquireBubbleGeometry(
                   rawCtx.getImageData(0, 0, rawWidth, rawHeight),
@@ -232,7 +264,7 @@ export class PipelineOrchestrator {
         console.log(`[PipelineOrchestrator] Running translation and inpainting in parallel (tier: ${inpaintTier}).`);
         
         const activeTranslationEngineId = popupState?.activeEngineId || 'cloudflare-translate';
-        const translationPromise = translationManager
+        const translationPromise = this.services.translationManager
           .processTranslation(ocrResult.texts, sourceLang, targetLang, makeLifecycle('translation', activeTranslationEngineId), popupState)
           .then((r) => {
             if (import.meta.env.DEV) {
@@ -244,7 +276,7 @@ export class PipelineOrchestrator {
             console.warn(`[PipelineOrchestrator] Translation branch failed; preserving original source texts so pipeline does not stop:`, err);
             return ocrResult.texts;
           });
-        const inpaintPromise = this.inpaintManager.eraseText(imageBuffer, inpaintPolygons, inpaintTier as InpaintTier, ocrResult.maskRawCanvas, makeLifecycle('inpaint', inpaintTier)).then((r) => {
+        const inpaintPromise = this.services.inpaintManager.eraseText(imageBuffer, inpaintPolygons, inpaintTier as InpaintTier, ocrResult.maskRawCanvas, makeLifecycle('inpaint', inpaintTier)).then((r) => {
           if (import.meta.env.DEV) {
             console.log(`[PipelineOrchestrator] Inpaint branch (${inpaintTier}) finished in ${(performance.now() - stage2Start).toFixed(2)}ms.`);
           }
@@ -264,7 +296,7 @@ export class PipelineOrchestrator {
         console.log(`[PipelineOrchestrator] Translating ${ocrResult.texts.length} text blocks (no inpainting)...`);
         const activeTranslationEngineId = popupState?.activeEngineId || 'cloudflare-translate';
         try {
-          translatedTexts = await translationManager.processTranslation(ocrResult.texts, sourceLang, targetLang, makeLifecycle('translation', activeTranslationEngineId), popupState);
+          translatedTexts = await this.services.translationManager.processTranslation(ocrResult.texts, sourceLang, targetLang, makeLifecycle('translation', activeTranslationEngineId), popupState);
         } catch (err) {
           console.warn(`[PipelineOrchestrator] Translation failed; preserving original source texts so pipeline does not stop:`, err);
           translatedTexts = ocrResult.texts;

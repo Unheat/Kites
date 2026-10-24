@@ -89,4 +89,17 @@ describe('InpaintManager lifecycle', () => {
     expect(engines).toHaveLength(2);
     expect(engines[0].destroy).toHaveBeenCalledTimes(1);
   });
+
+  it('recreates engine when isProviderCurrent reports false', async () => {
+    const manager = new InpaintManager();
+    await manager.eraseText(new ArrayBuffer(1), [[{ x: 0, y: 0 }]], 'lama-manga');
+    expect(engines).toHaveLength(1);
+
+    (engines[0] as any).isProviderCurrent = vi.fn().mockResolvedValue(false);
+
+    await manager.eraseText(new ArrayBuffer(1), [[{ x: 0, y: 0 }]], 'lama-manga');
+    expect(engines).toHaveLength(2);
+    expect(engines[0].destroy).toHaveBeenCalledOnce();
+    expect(engines[1].init).toHaveBeenCalledOnce();
+  });
 });

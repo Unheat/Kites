@@ -1,5 +1,6 @@
-import type { Point2D } from './BaseInpaintEngine';
-import { LamaBaseInpaintEngine } from './LamaBaseInpaintEngine';
+import type { IInpaintEngine, Point2D } from './BaseInpaintEngine';
+import { OnnxInpaintRuntime } from './OnnxInpaintRuntime';
+import { createInpaintCanvas, inpaintCanvasToArrayBuffer } from '../../utils/inpaintCanvasUtils';
 
 /** Source-image context retained around each AOT text component. */
 const AOT_PATCH_CONTEXT = 24;
@@ -37,23 +38,83 @@ interface BoundingBox {
  * to fill each bucket with real source-image context before accepting unavoidable transparent
  * padding on pages smaller than a bucket.
  */
-export class AotInpaintEngine extends LamaBaseInpaintEngine {
-  /**
-   * Returns the unique model identifier for the AOT-GAN inpainting model.
-   *
-   * @returns The model registry key 'aotgan'.
-   */
-  protected getModelId(): string {
-    return 'aotgan';
+export class AotInpaintEngine implements IInpaintEngine {
+  protected platform: any;
+  protected runtime: OnnxInpaintRuntime;
+
+  constructor(platform: any) {
+    this.platform = platform;
+    this.runtime = new OnnxInpaintRuntime({
+      modelId: 'aotgan',
+      modelPath: 'src/test/models/aot/aotgan.onnx',
+      logTag: '[AotInpaintEngine]',
+    });
+  }
+
+  get session(): any {
+    return this.runtime.sessionInstance;
+  }
+
+  set session(val: any) {
+    this.runtime.sessionInstance = val;
+  }
+
+  get ort(): any {
+    return this.runtime.ortInstance;
+  }
+
+  set ort(val: any) {
+    this.runtime.ortInstance = val;
+  }
+
+  get activeProvider(): string | null {
+    return this.runtime.activeProviderName;
+  }
+
+  set activeProvider(val: any) {
+    this.runtime.activeProviderName = val;
   }
 
   /**
-   * Returns the local filesystem path to the AOT-GAN ONNX model file (used in Node.js test environment).
-   *
-   * @returns The relative path to the ONNX model binary.
+   * Initializes the ONNX Runtime session for AOT-GAN.
    */
-  protected getModelPath(): string {
-    return 'src/test/models/aot/aotgan.onnx';
+  async init(): Promise<void> {
+    await this.runtime.init();
+  }
+
+  /**
+   * Destroys runtime session and frees VRAM/WASM resources.
+   */
+  async destroy(): Promise<void> {
+    await this.runtime.destroy();
+  }
+
+  /**
+   * Checks whether the active provider matches user hardware settings.
+   */
+  async isProviderCurrent(): Promise<boolean> {
+    return this.runtime.isProviderCurrent();
+  }
+
+  /**
+   * Runs one patch through the composed ONNX session.
+   */
+  protected async runPatch(feeds: Record<string, any>): Promise<any> {
+    return this.runtime.runPatch(feeds);
+  }
+
+  /**
+   * Creates an in-memory canvas.
+   */
+  protected async createCanvas(width: number, height: number): Promise<any> {
+    return createInpaintCanvas(width, height);
+  }
+
+  /**
+   * Converts a canvas into an encoded ArrayBuffer.
+   */
+  protected async canvasToArrayBuffer(canvas: any): Promise<ArrayBuffer> {
+    return inpaintCanvasToArrayBuffer(canvas);
   }
 
   /**

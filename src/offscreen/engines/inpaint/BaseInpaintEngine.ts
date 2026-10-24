@@ -34,4 +34,12 @@ export interface IInpaintEngine {
    * @returns A promise that resolves when destruction is complete.
    */
   destroy(): Promise<void>;
+
+  /**
+   * Optional capability check: returns true if the engine's active execution provider
+   * matches the user's current hardware and preference settings. Used for cache invalidation.
+   *
+   * @returns A promise resolving to true if cached session is still current.
+   */
+  isProviderCurrent?(): Promise<boolean>;
 }

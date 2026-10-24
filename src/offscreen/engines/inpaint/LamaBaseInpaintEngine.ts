@@ -114,6 +114,16 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
   }
 
   /**
+   * Checks whether the active provider matches the currently requested user hardware setting.
+   *
+   * @returns True when the cached session provider remains current.
+   */
+  async isProviderCurrent(): Promise<boolean> {
+    const requestedProvider = await this.getRequestedProvider();
+    return this.activeProvider === requestedProvider;
+  }
+
+  /**
    * Creates a browser inference session for one explicit execution provider.
    *
    * @param provider - WebGPU or WASM provider to activate.

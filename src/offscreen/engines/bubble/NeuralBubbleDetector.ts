@@ -1,5 +1,6 @@
 import type { BoxRect } from '../../utils/bubbleExpansion';
 import type { PopupState } from '../../../shared/types';
+import type { BubbleEngineOptions } from './BaseBubbleEngine';
 import { isBubbleGpuAvailable } from '../../../shared/utils/hardwareUtils';
 import { bubbleRegistry } from './bubbleRegistry';
 import { BubbleCacheManager } from '../../services/BubbleCacheManager';
@@ -362,19 +363,28 @@ export class NeuralBubbleDetector {
    * @returns Detailed detection result with bubble boxes and optional decoded prototype masks, or null if model unavailable.
    */
   /**
+   * Resolves whether GPU execution is preferred from either dedicated options or legacy popup state.
+   */
+  private static resolvePreferGpu(options?: BubbleEngineOptions | PopupState): boolean {
+    if (!options) return false;
+    if ('preferGpu' in options) return Boolean(options.preferGpu);
+    return isBubbleGpuAvailable(options as PopupState);
+  }
+
+  /**
    * Bootstraps and caches the ONNX Runtime session for the YOLO bubble detector if cached weights exist.
    *
-   * @param popupState - Extension settings state to read GPU acceleration overrides.
+   * @param options - Execution options or extension settings state to read GPU acceleration overrides.
    * @returns True if session is ready for inference, false if model is uninstalled/uncached.
    */
-  static async ensureSession(popupState?: PopupState): Promise<boolean> {
+  static async ensureSession(options?: BubbleEngineOptions | PopupState): Promise<boolean> {
     const entry = bubbleRegistry['bubble-yolo'];
     if (!entry) return false;
 
     const isCached = await BubbleCacheManager.isModelCached(entry.onnxUrl);
     if (!isCached) return false;
 
-    const wantGpu = popupState ? isBubbleGpuAvailable(popupState) : false;
+    const wantGpu = this.resolvePreferGpu(options);
     const requestedProvider = wantGpu ? 'webgpu' : 'wasm';
 
     if (!this.session || this.activeProvider !== requestedProvider) {
@@ -415,13 +425,13 @@ export class NeuralBubbleDetector {
 
   static async detectFull(
     canvas: OffscreenCanvas | HTMLCanvasElement,
-    popupState?: PopupState
+    options?: BubbleEngineOptions | PopupState
   ): Promise<NeuralBubbleDetectionResult | null> {
     const entry = bubbleRegistry['bubble-yolo'];
     if (!entry) return null;
 
     try {
-      const ready = await this.ensureSession(popupState);
+      const ready = await this.ensureSession(options);
       if (!ready || !this.session) {
         console.log('[NeuralBubbleDetector] Model not cached on disk. Skipping neural detection.');
         return null;
@@ -499,14 +509,14 @@ export class NeuralBubbleDetector {
    * Executes neural bubble detection on an image canvas, returning bubble proposals.
    *
    * @param canvas - The source image canvas.
-   * @param popupState - Extension settings state to read GPU acceleration overrides.
+   * @param options - Execution options or settings state to read GPU acceleration overrides.
    * @returns Detected speech bubble boxes across the image, or null if model unavailable.
    */
   static async detect(
     canvas: OffscreenCanvas | HTMLCanvasElement,
-    popupState?: PopupState
+    options?: BubbleEngineOptions | PopupState
   ): Promise<BoxRect[] | null> {
-    const res = await this.detectFull(canvas, popupState);
+    const res = await this.detectFull(canvas, options);
     return res ? res.bubbles : null;
   }
 }

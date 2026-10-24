@@ -1,6 +1,5 @@
 import type { BoxRect } from '../../utils/bubbleExpansion';
-import type { PopupState } from '../../../shared/types';
-import type { IBubbleEngine, BubbleDetectionResult } from './BaseBubbleEngine';
+import type { IBubbleEngine, BubbleDetectionResult, BubbleEngineOptions } from './BaseBubbleEngine';
 import { NeuralBubbleDetector } from './NeuralBubbleDetector';
 import { HeuristicBubbleExtractor, type BubbleShapeEvidence } from './HeuristicBubbleExtractor';
 
@@ -12,10 +11,10 @@ export class NeuralBubbleEngine implements IBubbleEngine {
   /**
    * Initializes the neural engine runtime and session.
    *
-   * @param popupState - Settings state for WebGPU overrides.
+   * @param options - Execution options (preferGpu).
    */
-  async init(popupState?: PopupState): Promise<void> {
-    await NeuralBubbleDetector.ensureSession(popupState);
+  async init(options?: BubbleEngineOptions): Promise<void> {
+    await NeuralBubbleDetector.ensureSession(options);
   }
 
   /**
@@ -24,24 +23,24 @@ export class NeuralBubbleEngine implements IBubbleEngine {
    *
    * @param canvas - Source image canvas.
    * @param textBoxes - Optional array of detected OCR text boxes.
-   * @param popupState - Settings state for WebGPU overrides and bubbleMode.
+   * @param options - Runtime detection options (mode, preferGpu).
    * @returns Detection result with bubble proposals and optional severed chamber shapes.
    */
   async detect(
     canvas: OffscreenCanvas | HTMLCanvasElement,
     textBoxes?: BoxRect[],
-    popupState?: PopupState
+    options?: BubbleEngineOptions
   ): Promise<BubbleDetectionResult | null> {
-    const isMaskMode = popupState?.bubbleMode === 'neural-mask';
+    const isMaskMode = options?.mode === 'mask';
 
     // In fast box mode or when no text boxes are supplied, query detect directly
     if (!isMaskMode || !textBoxes || textBoxes.length === 0) {
-      const bubbles = await NeuralBubbleDetector.detect(canvas, popupState);
+      const bubbles = await NeuralBubbleDetector.detect(canvas, options);
       if (!bubbles) return null;
       return { bubbles };
     }
 
-    const detectionResult = await NeuralBubbleDetector.detectFull(canvas, popupState);
+    const detectionResult = await NeuralBubbleDetector.detectFull(canvas, options);
     if (!detectionResult) return null;
 
     const { bubbles, scores, items } = detectionResult;

@@ -1,9 +1,10 @@
 import type { BubbleDetectionMode, PopupState } from '../../shared/types';
 import type { BoxRect } from '../utils/bubbleExpansion';
-import type { IBubbleEngine, BubbleDetectionResult } from '../engines/bubble/BaseBubbleEngine';
+import type { IBubbleEngine, BubbleDetectionResult, BubbleEngineOptions } from '../engines/bubble/BaseBubbleEngine';
 import type { InitializationLifecycleCallback } from './OcrManager';
 import { HeuristicBubbleEngine } from '../engines/bubble/HeuristicBubbleEngine';
 import { NeuralBubbleEngine } from '../engines/bubble/NeuralBubbleEngine';
+import { isBubbleGpuAvailable } from '../../shared/utils/hardwareUtils';
 
 /**
  * Bubble Subsystem Lifecycle Manager.
@@ -50,6 +51,20 @@ export class BubbleManager {
   }
 
   /**
+   * Translates application settings into decoupled engine options.
+   *
+   * @param mode - Requested bubble detection mode.
+   * @param popupState - Extension settings state.
+   * @returns Decoupled options for the bubble engine.
+   */
+  private resolveEngineOptions(mode: BubbleDetectionMode, popupState?: PopupState): BubbleEngineOptions {
+    return {
+      preferGpu: popupState ? isBubbleGpuAvailable(popupState) : false,
+      mode: mode === 'neural-mask' ? 'mask' : 'box',
+    };
+  }
+
+  /**
    * Acquires a lease on the bubble engine for the requested mode.
    * Disposes the previous engine if the mode changed across families (e.g. neural <-> heuristic).
    *
@@ -83,7 +98,8 @@ export class BubbleManager {
               onInitialization?.('started', 'bubble', mode);
             }
             try {
-              await newEngine.init(popupState);
+              const options = this.resolveEngineOptions(mode, popupState);
+              await newEngine.init(options);
             } finally {
               if (isNeural) {
                 onInitialization?.('finished', 'bubble', mode);
@@ -132,7 +148,8 @@ export class BubbleManager {
       return null;
     }
     try {
-      return await engine.detect(canvas, textBoxes, popupState);
+      const options = this.resolveEngineOptions(mode, popupState);
+      return await engine.detect(canvas, textBoxes, options);
     } finally {
       release();
     }

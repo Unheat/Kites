@@ -1,5 +1,5 @@
 import type { BoxRect } from '../../utils/bubbleExpansion';
-import type { IBubbleEngine, BubbleDetectionResult } from './BaseBubbleEngine';
+import type { IBubbleEngine, BubbleDetectionResult, BubbleEngineOptions } from './BaseBubbleEngine';
 import { HeuristicBubbleExtractor, type BubbleShapeEvidence } from './HeuristicBubbleExtractor';
 
 /**
@@ -9,8 +9,10 @@ import { HeuristicBubbleExtractor, type BubbleShapeEvidence } from './HeuristicB
 export class HeuristicBubbleEngine implements IBubbleEngine {
   /**
    * Initializes the heuristic engine. Zero network downloads required.
+   *
+   * @param _options - Unused options for CPU heuristic morphology.
    */
-  async init(): Promise<void> {
+  async init(_options?: BubbleEngineOptions): Promise<void> {
     // No-op for CPU heuristic morphology
   }
 
@@ -19,11 +21,13 @@ export class HeuristicBubbleEngine implements IBubbleEngine {
    *
    * @param canvas - Source image canvas.
    * @param textBoxes - OCR text boxes to extract bubbles around.
+   * @param _options - Unused options for CPU heuristic morphology.
    * @returns Detection result with per-box carrier boxes and shape evidence.
    */
   async detect(
     canvas: OffscreenCanvas | HTMLCanvasElement,
-    textBoxes?: BoxRect[]
+    textBoxes?: BoxRect[],
+    _options?: BubbleEngineOptions
   ): Promise<BubbleDetectionResult | null> {
     if (!textBoxes || textBoxes.length === 0) {
       return { bubbles: [] };

@@ -4,7 +4,6 @@ import { StrokeFillInpaintEngine } from '../engines/inpaint/StrokeFillInpaintEng
 import { TeleaInpaintEngine } from '../engines/inpaint/TeleaInpaintEngine';
 import { AotInpaintEngine } from '../engines/inpaint/AotInpaintEngine';
 import { LamaMangaInpaintEngine } from '../engines/inpaint/LamaMangaInpaintEngine';
-import { LamaBaseInpaintEngine } from '../engines/inpaint/LamaBaseInpaintEngine';
 import { NoneInpaintEngine } from '../engines/inpaint/NoneInpaintEngine';
 import type { InitializationLifecycleCallback } from './OcrManager';
 
@@ -180,17 +179,17 @@ export class InpaintManager {
    */
   private async canReuseActiveEngine(tier: CanonicalInpaintTier): Promise<boolean> {
     if (!this.activeEngine || this.activeTier !== tier) return false;
-    // WORKAROUND: LaMa sessions bind their execution provider at initialization. Reusing
+    // WORKAROUND: ONNX inpaint sessions bind their execution provider at initialization. Reusing
     // a tier-only cache after GPU settings change leaves a WASM session permanently active
-    // even when the popup later reports WebGPU ON. Include provider intent in cache reuse.
-    if (this.activeEngine instanceof LamaBaseInpaintEngine) {
-      const requestedProvider = await this.activeEngine.getRequestedProvider();
-      console.log('[InpaintManager] LaMa cache decision:', {
+    // even when the popup later reports WebGPU ON. Include provider intent in cache reuse via
+    // polymorphic capability check without downcasting.
+    if (typeof this.activeEngine.isProviderCurrent === 'function') {
+      const isCurrent = await this.activeEngine.isProviderCurrent();
+      console.log('[InpaintManager] Hardware provider cache decision:', {
         tier,
-        requestedProvider,
-        activeProvider: this.activeEngine.getActiveProvider(),
+        isCurrent,
       });
-      return this.activeEngine.getActiveProvider() === requestedProvider;
+      return isCurrent;
     }
     return true;
   }
