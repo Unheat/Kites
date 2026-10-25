@@ -1,12 +1,14 @@
 import { measureDefaultLayout } from '../../offscreen/utils/cotransDefaultRenderer';
+import { wrapTextEllipse, unwrapWrappedText } from '../../offscreen/utils/ellipseTypeset';
+import type { TypesetMode } from '../../shared/constants';
 import type { TextObject } from '../types';
 
-export type StudioTypesetMode = NonNullable<TextObject['typesetMode']>;
+export type StudioTypesetMode = TypesetMode;
 
-type TypesetStyle = Pick<TextObject, 'bold' | 'italic' | 'letterSpacing' | 'lineSpacing'>;
+type TypesetStyle = Pick<TextObject, 'bold' | 'italic' | 'letterSpacing' | 'lineSpacing' | 'borderRadius'>;
 
 /** Small boxes cannot reliably run the fitting engine. */
-const MIN_LAYOUT_DIMENSION = 15;
+export const MIN_LAYOUT_DIMENSION = 15;
 /** Existing simple-wrap horizontal padding and minimum usable width. */
 const SIMPLE_HORIZONTAL_PADDING = 8;
 const MIN_SIMPLE_WIDTH = 20;
@@ -77,6 +79,12 @@ export function applyTextObjectUpdates(
   return reflowTextObject(updated, chosenMode ?? updated.typesetMode ?? globalMode);
 }
 
+export interface BlockTypesetResult {
+  fontSize: number;
+  lines: string[];
+  height?: number;
+}
+
 /**
  * Runs the chosen existing layout engine on an object's display text.
  * @param object - Complete text object with current geometry and style.
@@ -88,7 +96,12 @@ function reflowTextObject(object: TextObject, mode: StudioTypesetMode): TextObje
     getTypesetDisplayText(object.text, object), object.fontFamily,
     object.width, object.height, object.fontSize, mode, object
   );
-  return { ...object, ...layout };
+  // Auto-snap height to hug measured text lines ("upper limit" bounds)
+  const lineSpacingMultiplier = object.lineSpacing ? object.lineSpacing / 100 : 1.25;
+  const measuredHeight = layout.height ?? (layout.lines.length * layout.fontSize * lineSpacingMultiplier);
+  const nextHeight = Math.max(MIN_LAYOUT_DIMENSION, Math.round(measuredHeight));
+
+  return { ...object, fontSize: layout.fontSize, lines: layout.lines, height: nextHeight };
 }
 
 let sharedMeasureCanvas: HTMLCanvasElement | null = null;
@@ -177,7 +190,7 @@ export function recalculateBlockTypeset(
   fallbackSize: number = 16,
   mode: StudioTypesetMode = 'balloon',
   style: TypesetStyle = {}
-): { fontSize: number; lines: string[] } {
+): BlockTypesetResult {
   const ctx = getTypesetMeasureContext();
   if (!ctx || !text || !text.trim() || width <= MIN_LAYOUT_DIMENSION || height <= MIN_LAYOUT_DIMENSION) {
     return { fontSize: fallbackSize, lines: text ? [text] : [] };
@@ -187,14 +200,36 @@ export function recalculateBlockTypeset(
   const previousLetterSpacing = ctx.letterSpacing;
   ctx.letterSpacing = `${style.letterSpacing ?? 0}px`;
   try {
-  // Simple Mode: Greedy rectangular wrap without auto font scaling or diamond reflow.
-  if (mode === 'simple') {
-    const lines = wrapSimpleGreedy(ctx, text, width, fallbackSize, fontFamily, style);
-    return { fontSize: fallbackSize, lines };
-  }
+    // Simple Mode: Greedy rectangular wrap without auto font scaling or diamond reflow.
+    if (mode === 'simple') {
+      const lines = wrapSimpleGreedy(ctx, text, width, fallbackSize, fontFamily, style);
+      return { fontSize: fallbackSize, lines };
+    }
 
-  // Auto Balloon Mode: full pipeline diamond envelopes, hyphenation, and auto font fitting
-  const isList = /^\s*[-*•\d+.]/m.test(text);
+    // Ellipse Mode: Dynamic programming chord profile, soft hyphenation, and upper-limit bounds
+    if (mode === 'ellipse') {
+      const unhyphenated = unwrapWrappedText(text);
+      const rMax = Math.min(width / 2, height / 2);
+      const radius = style.borderRadius !== undefined ? style.borderRadius : rMax;
+      const strength = rMax > 0 ? Math.min(1.0, radius / rMax) : 1.0;
+      const result = wrapTextEllipse(
+        unhyphenated,
+        width,
+        height,
+        fallbackSize,
+        fontFamily || 'sans-serif',
+        strength,
+        ctx
+      );
+      return {
+        fontSize: result.fontSize,
+        lines: result.lines && result.lines.length > 0 ? result.lines : [unhyphenated],
+        height: result.height,
+      };
+    }
+
+    // Auto Balloon Mode: full pipeline diamond envelopes, hyphenation, and auto font fitting
+    const isList = /^\s*[-*•\d+.]/m.test(text);
   // Rejoin soft line-break hyphens (e.g. "com-\nmunity" -> "community") so resizing
   // does not permanently bake line-wrap syllable breaks into the dialogue text.
   const unhyphenated = text.replace(/(\b[a-zA-Z]+)-\s*\r?\n\s*([a-z]+)/g, '$1$2');

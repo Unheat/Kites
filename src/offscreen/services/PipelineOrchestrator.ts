@@ -1,4 +1,5 @@
 import { db } from '../../db';
+import type { TypesetMode } from '../../shared/constants';
 import type { PopupState, ModelInitializationStage } from '../../shared/types';
 import { OcrManager, type InitializationLifecycleCallback, type OcrTier } from './OcrManager';
 import { TranslationManager, translationManager as defaultTranslationManager } from './TranslationManager';
@@ -382,7 +383,15 @@ export class PipelineOrchestrator {
           onDiagnostics: (counts) => console.log('[PipelineOrchestrator] Bubble layouts:', counts)
         });
         itemOcrIndices.forEach((index, position) => {
-          textBlockItems[position].typesetBox = ocrResult.typesetBoxes?.[index];
+          const typesetBox = ocrResult.typesetBoxes?.[index];
+          textBlockItems[position].typesetBox = typesetBox;
+          if (typesetBox) {
+            const curv = bubbleGeometry.curvatures?.[index];
+            if (curv) {
+              textBlockItems[position].isRounded = curv.isRounded;
+              textBlockItems[position].borderRadius = curv.borderRadius;
+            }
+          }
         });
       }
       const renderInfos = renderTextBlocksBatch(
@@ -439,6 +448,13 @@ export class PipelineOrchestrator {
         // Persist the render-time colors (background-sampled) so the Studio overlay
         // matches the baked image instead of assuming black-on-white.
         const renderColors = renderInfo;
+        const curvature = bubbleGeometry?.curvatures?.[i];
+        const hasBubbleBox = Boolean(bubbleGeometry && ocrResult.typesetBoxes?.[i]);
+        const typesetMode: TypesetMode = hasBubbleBox
+          ? (curvature?.isRounded ? 'ellipse' : 'simple')
+          : 'balloon';
+        const borderRadius = hasBubbleBox ? (curvature?.borderRadius ?? 0) : 0;
+        const isRounded = hasBubbleBox ? Boolean(curvature?.isRounded) : false;
 
         return {
           imageId: imageRecord.id!,
@@ -461,6 +477,9 @@ export class PipelineOrchestrator {
           direction: renderInfo?.direction ?? dir,
           lines: renderInfo?.lines,
           lineSpacing: renderInfo?.lineSpacing,
+          typesetMode,
+          borderRadius,
+          isRounded,
           angle: renderInfo?.angle ?? ((ocrResult.angles && ocrResult.angles[i] !== undefined)
             ? Math.round(ocrResult.angles[i])
             : undefined),

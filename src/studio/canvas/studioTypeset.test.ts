@@ -150,5 +150,24 @@ describe('Studio Algorithmic Typeset & Line Reflow', () => {
     expect(simpleJoined).toContain('community');
     expect(simpleJoined).not.toContain('com-munity');
     expect(simpleJoined).not.toContain('com- munity');
+
+    const ellipseWide = recalculateBlockTypeset(textWithHyphen, 'sans-serif', 300, 200, 18, 'ellipse');
+    const ellipseJoined = ellipseWide.lines.join(' ');
+    expect(ellipseJoined).toContain('community');
+  });
+
+  it('auto-snaps box height to hug reflowed lines when width changes (upper-limit bounds)', () => {
+    const multiLineObject: TextObject = {
+      ...object,
+      width: 100,
+      height: 200,
+      text: 'This is a long sentence that occupies multiple lines inside a narrow speech bubble container.',
+      typesetMode: 'ellipse',
+    };
+    // Widening from 100 to 400 reduces line count and auto-snaps height smaller
+    const widened = applyTextObjectUpdates(multiLineObject, { width: 400 });
+    expect(widened.width).toBe(400);
+    expect(widened.height).toBeLessThan(multiLineObject.height);
+    expect(widened.lines?.length).toBeLessThan(recalculateBlockTypeset(multiLineObject.text, multiLineObject.fontFamily, 100, 200, 16, 'ellipse').lines.length);
   });
 });

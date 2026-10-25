@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { acquireBubbleGeometry, MIN_SHARED_FONT_RATIO, resolveBubbleLayouts, type BubbleLayoutInput } from './BubbleLayoutService';
+import { acquireBubbleGeometry, computeMaskCurvature, MIN_SHARED_FONT_RATIO, resolveBubbleLayouts, type BubbleLayoutInput } from './BubbleLayoutService';
 import { computeTypesetBox, type BoxRect } from '../utils/bubbleExpansion';
 import type { BubbleShapeEvidence } from '../engines/bubble/HeuristicBubbleExtractor';
 
@@ -110,6 +110,49 @@ describe('conservative bubble layouts', () => {
     const before = structuredClone(input.boxes);
     expect(resolveBubbleLayouts(input)).toEqual([undefined, undefined]);
     expect(input.boxes).toEqual(before);
+  });
+
+  describe('computeMaskCurvature', () => {
+    it('detects sharp rectangular boxes with fill ratio >= 88%', () => {
+      const width = 100, height = 50;
+      const interior = new Uint8Array(width * height).fill(1); // 100% full rectangle
+      const shape: BubbleShapeEvidence = {
+        x: 0, y: 0, scale: 1, width, height, interior, observedInterior: interior, eroded: interior,
+      };
+      const carrierBox = { x: 0, y: 0, w: width, h: height };
+      const curvature = computeMaskCurvature(shape, carrierBox);
+      expect(curvature.isRounded).toBe(false);
+      expect(curvature.borderRadius).toBe(0);
+    });
+
+    it('detects rounded speech bubbles when corners are empty', () => {
+      const width = 100, height = 100;
+      const interior = new Uint8Array(width * height);
+      // Inscribe a circle of radius 50 in 100x100
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const dx = x - 50;
+          const dy = y - 50;
+          if (dx * dx + dy * dy <= 50 * 50) {
+            interior[y * width + x] = 1;
+          }
+        }
+      }
+      const shape: BubbleShapeEvidence = {
+        x: 0, y: 0, scale: 1, width, height, interior, observedInterior: interior, eroded: interior,
+      };
+      const carrierBox = { x: 0, y: 0, w: width, h: height };
+      const curvature = computeMaskCurvature(shape, carrierBox);
+      expect(curvature.isRounded).toBe(true);
+      expect(curvature.borderRadius).toBeGreaterThanOrEqual(40);
+    });
+
+    it('defaults to speech bubble oval curvature when no interior mask is available', () => {
+      const carrierBox = { x: 0, y: 0, w: 200, h: 100 };
+      const curvature = computeMaskCurvature(undefined, carrierBox);
+      expect(curvature.isRounded).toBe(true);
+      expect(curvature.borderRadius).toBe(50); // min(200/2, 100/2)
+    });
   });
 
   it('rejects disconnected lobes, open mask components, and proposals outside safe interior', () => {

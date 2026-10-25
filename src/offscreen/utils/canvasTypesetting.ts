@@ -345,6 +345,10 @@ export interface TextBlockItem {
   alignment?: 'left' | 'center' | 'right';
   /** When true, block was filtered by bubble mode or user and should not be drawn onto the page. */
   isSkipped?: boolean;
+  /** Whether the block is enclosed in an oval speech bubble. */
+  isRounded?: boolean;
+  /** Mathematical bubble corner radius in pixels. */
+  borderRadius?: number;
 }
 
 /**

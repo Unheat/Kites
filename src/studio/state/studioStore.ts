@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import { STORAGE_KEYS } from '../../shared/constants';
+import { STORAGE_KEYS, type TypesetMode, DEFAULT_TYPESET_MODE } from '../../shared/constants';
 import type {
   BrushShape,
   EditorAppearanceSettings,
@@ -134,7 +134,7 @@ export interface StudioState {
   clipboardStyle: Partial<TextObject> | null;
   globalEditMode: boolean;
   /** Default layout engine for future edits; never overrides a page's initial layout. */
-  globalTypesetMode: 'balloon' | 'simple';
+  globalTypesetMode: TypesetMode;
   inlineSelection: { textId: string; start: number; end: number } | null;
   originalImage: HTMLImageElement | null;
 
@@ -216,7 +216,7 @@ const initialState: StudioState = {
   editingTextId: null,
   clipboardStyle: null,
   globalEditMode: false,
-  globalTypesetMode: 'balloon',
+  globalTypesetMode: DEFAULT_TYPESET_MODE,
   inlineSelection: null,
   originalImage: null,
 
