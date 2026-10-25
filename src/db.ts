@@ -20,6 +20,8 @@ export interface TranslationJob {
   srcUrl?: string;
   mockTranslatedBlocks?: any[];
   folderId?: number; // Optional reference to a ProjectFolder
+  projectOrder?: number; // Page ordering sequence inside a ProjectFolder
+  pageName?: string; // Optional user or chapter page label
   tabId?: number; // Tracks which tab requested this job for the Pub/Sub response
   ocrEngineId?: string;
   inpaintTier?: string;
@@ -38,6 +40,10 @@ export interface ProjectFolder {
   title: string;
   timestamp: number;
   isFavorite: boolean;
+  updatedAt?: number;
+  coverJobId?: number;
+  customOrder?: number[];
+  description?: string;
 }
 
 export interface ImageRecord {
@@ -86,6 +92,13 @@ const db = new Dexie('KitesDatabase') as Dexie & {
 db.version(4).stores({
   translationJobs: '++id, timestamp, status, folderId, srcUrl',
   projectFolders: '++id, title, timestamp, isFavorite',
+  images: '++id, jobId',
+  textBlocks: '++id, imageId'
+});
+
+db.version(5).stores({
+  translationJobs: '++id, timestamp, status, folderId, srcUrl, projectOrder',
+  projectFolders: '++id, title, timestamp, updatedAt, isFavorite',
   images: '++id, jobId',
   textBlocks: '++id, imageId'
 });

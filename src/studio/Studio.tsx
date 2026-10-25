@@ -11,6 +11,7 @@ import {
   Palette,
   Save,
   ChevronDown,
+  ChevronLeft,
   Eye,
   EyeOff,
   Sparkles,
@@ -18,6 +19,8 @@ import {
   Brush,
   ScanText,
   Maximize2,
+  StretchHorizontal,
+  StretchVertical,
   Image as ImageIcon,
   RotateCcw,
   Loader,
@@ -35,11 +38,6 @@ import {
   downloadCanvasAsFile,
   copyCanvasToClipboard,
 } from './canvas/compositeExport';
-import {
-  calculateFitWidth,
-  calculateFitHeight,
-  calculateFitWindow,
-} from './canvas/CanvasViewport';
 import { StudioCanvas } from './canvas/StudioCanvas';
 import { prepareInitialTextObject } from './canvas/studioTypeset';
 import { EraseSettings } from './tools/EraseSettings';
@@ -50,6 +48,7 @@ import { TypographySettings } from './tools/TypographySettings';
 import { WarpSettings } from './tools/WarpSettings';
 import { ImageLayerSettings } from './tools/ImageLayerSettings';
 import { PageInfoSettings } from './tools/PageInfoSettings';
+import { PageRail } from './projects/PageRail';
 import { FindReplaceModal } from './modals/FindReplaceModal';
 import { ExportTranscriptModal } from './modals/ExportTranscriptModal';
 import { ShortcutsModal } from './modals/ShortcutsModal';
@@ -68,6 +67,12 @@ export interface StudioProps {
   /** Queues an uploaded page through App's persisted full translation pipeline. */
   onUploadPage?: (file: File) => Promise<void>;
   isUploadingPage?: boolean;
+  /** Active project folder context for multi-page workflow. */
+  projectId?: number;
+  projectName?: string;
+  onBackToProjects?: () => void;
+  onSelectPage?: (jobId: number) => void;
+  onOpenAddFromLibrary?: () => void;
 }
 
 // Stable fallback prevents resetting editor state on unrelated renders without initial objects.
@@ -93,6 +98,11 @@ export const Studio: React.FC<StudioProps> = ({
   onBack,
   onUploadPage,
   isUploadingPage = false,
+  projectId,
+  projectName,
+  onBackToProjects,
+  onSelectPage,
+  onOpenAddFromLibrary,
 }) => {
   const activeTool = useStudioStore((s) => s.activeTool);
   const isInfoPanelOpen = useStudioStore((s) => s.isInfoPanelOpen);
@@ -261,17 +271,26 @@ export const Studio: React.FC<StudioProps> = ({
 
   const handleZoomPreset = (preset: '100%' | 'fitWidth' | 'fitHeight' | 'fitWindow') => {
     setZoomDropdownOpen(false);
-    const winW = window.innerWidth - 380;
-    const winH = window.innerHeight - 80;
+    const container = document.querySelector('[data-studio-canvas-container]') as HTMLElement | null;
+    const containerW = container ? container.clientWidth : (window.innerWidth - 380);
+    const containerH = container ? container.clientHeight : (window.innerHeight - 80);
+
+    // Padding in StudioCanvas is p-4 (16px left + 16px right = 32px) + safe margin (8px) = 40px
+    const safePad = 40;
+    const availW = Math.max(100, containerW - safePad);
+    const availH = Math.max(100, containerH - safePad);
 
     if (preset === '100%') {
       studioStore.setState({ zoom: 1.0 });
     } else if (preset === 'fitWidth') {
-      studioStore.setState({ zoom: calculateFitWidth(winW, imageWidth) });
+      const scale = availW / imageWidth;
+      studioStore.setState({ zoom: Math.max(0.05, Math.min(8.0, scale)) });
     } else if (preset === 'fitHeight') {
-      studioStore.setState({ zoom: calculateFitHeight(winH, imageHeight) });
+      const scale = availH / imageHeight;
+      studioStore.setState({ zoom: Math.max(0.05, Math.min(8.0, scale)) });
     } else if (preset === 'fitWindow') {
-      studioStore.setState({ zoom: calculateFitWindow(winW, winH, imageWidth, imageHeight) });
+      const scale = Math.min(availW / imageWidth, availH / imageHeight);
+      studioStore.setState({ zoom: Math.max(0.05, Math.min(8.0, scale)) });
     }
   };
 
@@ -486,6 +505,16 @@ export const Studio: React.FC<StudioProps> = ({
 
   return (
     <div className="flex flex-row gap-3 p-3 w-screen h-screen overflow-hidden bg-[#090a0f] text-slate-100 select-none">
+      {/* 0. MULTI-PAGE CHAPTER RAIL (When viewing within an active Project) */}
+      {projectId && onSelectPage && (
+        <PageRail
+          projectId={projectId}
+          activeJobId={jobId}
+          onSelectPage={onSelectPage}
+          onOpenAddFromLibrary={onOpenAddFromLibrary || (() => {})}
+        />
+      )}
+
       {/* ======================================================== */}
       {/* 1. LEFT SIDE PANEL: DUAL CARD TOOL ARCHITECTURE          */}
       {/* ======================================================== */}
@@ -655,6 +684,24 @@ export const Studio: React.FC<StudioProps> = ({
         {/* Canvas Top Bar */}
         <div className="w-full h-9 bg-[#141724] border-b border-[#262a3b] px-3 flex items-center justify-between text-xs text-slate-300 shrink-0 select-none z-30">
           <div className="flex items-center gap-2">
+            {/* Breadcrumb back to Projects Dashboard */}
+            {onBackToProjects && (
+              <button
+                type="button"
+                onClick={onBackToProjects}
+                className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#090a0f] border border-[#262a3b] text-slate-300 hover:text-white hover:bg-[#1c1f2e] text-xs font-semibold transition cursor-pointer"
+                title="Back to Projects Dashboard"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" />
+                <span>Projects</span>
+              </button>
+            )}
+            {projectName && (
+              <span className="text-xs font-semibold text-slate-400 truncate max-w-[120px]" title={projectName}>
+                / {projectName}
+              </span>
+            )}
+
             {/* 3-Way Presentation View Mode Segmented Control */}
             <div className="flex items-center p-0.5 rounded-lg bg-[#090a0f] border border-[#262a3b]">
               <button
@@ -720,10 +767,38 @@ export const Studio: React.FC<StudioProps> = ({
             </span>
 
             <div className="flex items-center gap-1">
+              {/* Direct Stretch / Snap Quick Buttons */}
+              <div className="flex items-center p-0.5 rounded-lg bg-[#090a0f] border border-[#262a3b] gap-0.5">
+                <button
+                  type="button"
+                  onClick={() => handleZoomPreset('fitWidth')}
+                  title="Fit Width / Stretch Horizontal (Snap to 100% visible width)"
+                  className="p-1 rounded-md text-slate-400 hover:text-white hover:bg-[#1c1f2e] transition cursor-pointer"
+                >
+                  <StretchHorizontal className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleZoomPreset('fitHeight')}
+                  title="Fit Height / Stretch Vertical (Snap to 100% visible height)"
+                  className="p-1 rounded-md text-slate-400 hover:text-white hover:bg-[#1c1f2e] transition cursor-pointer"
+                >
+                  <StretchVertical className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleZoomPreset('fitWindow')}
+                  title="Auto Snap / Fit Window (Best Fit)"
+                  className="p-1 rounded-md text-slate-400 hover:text-white hover:bg-[#1c1f2e] transition cursor-pointer"
+                >
+                  <Maximize2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
               <button
                 onClick={() => studioStore.setClampedZoom(zoom * 0.85)}
                 title="Zoom Out"
-                className="p-1 rounded-md text-slate-400 hover:text-white hover:bg-[#1c1f2e] transition"
+                className="p-1 rounded-md text-slate-400 hover:text-white hover:bg-[#1c1f2e] transition cursor-pointer"
               >
                 <ZoomOut className="w-3.5 h-3.5" />
               </button>

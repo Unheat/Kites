@@ -16,7 +16,10 @@ import {
 } from 'lucide-react';
 import './index.css';
 import { Studio } from './studio/Studio';
+import { ProjectsDashboard } from './studio/projects/ProjectsDashboard';
+import { AddFromLibraryModal } from './studio/modals/AddFromLibraryModal';
 import type { TextObject } from './studio/types';
+import type { ProjectFolder } from './db';
 import { uploadStudioPage } from './shared/studioUpload';
 import { restoreTextObject } from './studio/state/persistedTextObjects';
 
@@ -108,6 +111,32 @@ export default function App() {
 
   const [originalImageEl, setOriginalImageEl] = useState<HTMLImageElement | null>(null);
   const [cleanedImageEl, setCleanedImageEl] = useState<HTMLImageElement | null>(null);
+
+  const [currentProjectId, setCurrentProjectId] = useState<number | null>(null);
+  const [activeProject, setActiveProject] = useState<ProjectFolder | null>(null);
+  const [isAddFromLibraryOpen, setIsAddFromLibraryOpen] = useState(false);
+  const [addFromLibraryProjectId, setAddFromLibraryProjectId] = useState<number | null>(null);
+
+  // Studio editor is the default workspace; Projects dashboard is an optional library manager
+  const [appMode, setAppMode] = useState<'dashboard' | 'editor'>('editor');
+
+  const handleOpenProject = async (projectId: number) => {
+    setCurrentProjectId(projectId);
+    const proj = await db.projectFolders.get(projectId);
+    setActiveProject(proj || null);
+
+    const memberJobs = await db.translationJobs
+      .where('folderId')
+      .equals(projectId)
+      .sortBy('projectOrder');
+
+    if (memberJobs.length > 0 && memberJobs[0].id) {
+      setActiveJobId(memberJobs[0].id);
+    } else {
+      setActiveJobId(null);
+    }
+    setAppMode('editor');
+  };
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const activeBlobUrlsRef = useRef<string[]>([]);
@@ -328,100 +357,152 @@ export default function App() {
         disabled={isUploading}
         className="hidden"
       />
-      {/* Left Project Library Drawer */}
-      {isLeftDrawerOpen && (
-        <aside className="w-64 border-r border-[#282d3f] bg-[#12141c] flex flex-col z-40 shrink-0">
-          <div className="flex items-center justify-between p-3 border-b border-[#282d3f]">
-            <span className="font-semibold text-xs text-slate-200">Library & Pages ({jobs.length})</span>
-            <button
-              onClick={() => setIsLeftDrawerOpen(false)}
-              className="p-1 rounded-md text-slate-400 hover:text-white hover:bg-[#1c1f2e] transition"
-            >
-              <PanelLeftClose className="w-4 h-4" />
-            </button>
-          </div>
 
-          <div className="p-2 border-b border-[#282d3f]">
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isUploading}
-              className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg border border-dashed border-[#282d3f] hover:border-indigo-500 bg-[#090a0f] text-xs text-indigo-300 font-medium transition"
-            >
-              <Upload className="w-3.5 h-3.5" />
-              {isUploading ? 'Queueing page…' : 'Upload Image'}
-            </button>
-          </div>
+      {/* Global Add from Library Modal */}
+      <AddFromLibraryModal
+        isOpen={isAddFromLibraryOpen}
+        projectId={addFromLibraryProjectId}
+        onClose={() => setIsAddFromLibraryOpen(false)}
+        onJobsAdded={() => {
+          void loadJobs();
+          if (activeJobId) void loadJobDetails(activeJobId);
+        }}
+      />
 
-          <div className="flex-1 overflow-y-auto p-2 space-y-1">
-            {jobs.map((job) => {
-              const isActive = job.id === activeJobId;
-              return (
-                <div
-                  key={job.id}
-                  onClick={() => setActiveJobId(job.id!)}
-                  className={`flex items-center justify-between p-2 rounded-lg cursor-pointer text-xs transition ${
-                    isActive
-                      ? 'bg-indigo-600/20 border border-indigo-500/50 text-indigo-200'
-                      : 'hover:bg-[#1c1f2e] text-slate-300 border border-transparent'
-                  }`}
+      {/* MODE 1: PROJECTS DASHBOARD */}
+      {appMode === 'dashboard' ? (
+        <ProjectsDashboard
+          onOpenProject={handleOpenProject}
+          onBackToEditor={() => setAppMode('editor')}
+          onOpenAddFromLibrary={(projId) => {
+            setAddFromLibraryProjectId(projId);
+            setIsAddFromLibraryOpen(true);
+          }}
+        />
+      ) : (
+        /* MODE 2: CANVAS EDITOR VIEW */
+        <>
+          {/* Left Project Library Drawer */}
+          {isLeftDrawerOpen && (
+            <aside className="w-64 border-r border-[#282d3f] bg-[#12141c] flex flex-col z-40 shrink-0">
+              <div className="flex items-center justify-between p-3 border-b border-[#282d3f]">
+                <span className="font-semibold text-xs text-slate-200">Library & Pages ({jobs.length})</span>
+                <button
+                  onClick={() => setIsLeftDrawerOpen(false)}
+                  className="p-1 rounded-md text-slate-400 hover:text-white hover:bg-[#1c1f2e] transition"
                 >
-                  <div className="flex items-center gap-2 truncate">
-                    <FileImage className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                    <span className="truncate">{job.srcUrl || `Page #${job.id}`}</span>
-                  </div>
+                  <PanelLeftClose className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="p-2 border-b border-[#282d3f] flex flex-col gap-1.5">
+                <button
+                  onClick={() => setAppMode('dashboard')}
+                  className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg border border-[#f4446d]/40 bg-[#f4446d]/10 hover:bg-[#f4446d]/20 text-xs text-[#f4446d] font-semibold transition"
+                >
+                  <Layers className="w-3.5 h-3.5" />
+                  <span>Manga Projects Hub</span>
+                </button>
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isUploading}
+                  className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg border border-dashed border-[#282d3f] hover:border-slate-500 bg-[#090a0f] text-xs text-slate-300 font-medium transition"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  {isUploading ? 'Queueing page…' : 'Upload Image'}
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-2 space-y-1">
+                {jobs.map((job) => {
+                  const isActive = job.id === activeJobId;
+                  return (
+                    <div
+                      key={job.id}
+                      onClick={() => setActiveJobId(job.id!)}
+                      className={`flex items-center justify-between p-2 rounded-lg cursor-pointer text-xs transition ${
+                        isActive
+                          ? 'bg-indigo-600/20 border border-indigo-500/50 text-indigo-200'
+                          : 'hover:bg-[#1c1f2e] text-slate-300 border border-transparent'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 truncate">
+                        <FileImage className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                        <span className="truncate">{job.srcUrl || `Page #${job.id}`}</span>
+                      </div>
+                      <button
+                        onClick={(e) => handleDeleteJob(job.id!, e)}
+                        className="p-1 rounded text-slate-500 hover:text-red-400 transition"
+                        title="Delete page"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </aside>
+          )}
+
+          {/* Main Studio Viewport */}
+          <div className="flex-1 flex flex-col overflow-hidden relative">
+            {uploadError && (
+              <div role="alert" className="px-3 py-2 text-xs text-red-300 bg-red-950/40 border-b border-red-900/50">
+                {uploadError}
+              </div>
+            )}
+            {originalImageEl || cleanedImageEl ? (
+              <Studio
+                jobId={activeJobId ?? undefined}
+                originalImage={originalImageEl}
+                cleanedImage={cleanedImageEl}
+                initialTextObjects={studioTextObjects}
+                jobTitle={activeJob?.srcUrl || `Manga Page #${activeJobId}`}
+                onUploadPage={handlePageUpload}
+                isUploadingPage={isUploading}
+                projectId={currentProjectId ?? undefined}
+                projectName={activeProject?.title}
+                onBackToProjects={() => setAppMode('dashboard')}
+                onSelectPage={(jobId) => setActiveJobId(jobId)}
+                onOpenAddFromLibrary={() => {
+                  if (currentProjectId) {
+                    setAddFromLibraryProjectId(currentProjectId);
+                    setIsAddFromLibraryOpen(true);
+                  }
+                }}
+                onBack={() => setIsLeftDrawerOpen(true)}
+                onSave={async (blob, objs) => handleSaveToDb(blob, objs)}
+              />
+            ) : (
+              <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
+                <div className="w-16 h-16 rounded-2xl border border-[#282d3f] bg-[#12141c] flex items-center justify-center mb-4 shadow-xl">
+                  <Layers className="w-8 h-8 text-indigo-400" />
+                </div>
+                <h2 className="text-base font-semibold text-slate-100">Kites Manga Studio</h2>
+                <p className="text-xs text-slate-400 max-w-sm mt-1">
+                  Upload a comic or manga page to edit inpainting, restore artwork, tweak CJK typography, or run local WebGPU translations.
+                </p>
+                <div className="flex items-center gap-3 mt-4">
                   <button
-                    onClick={(e) => handleDeleteJob(job.id!, e)}
-                    className="p-1 rounded text-slate-500 hover:text-red-400 transition"
-                    title="Delete page"
+                    onClick={() => setAppMode('dashboard')}
+                    className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#181a26] hover:bg-[#282d3f] border border-[#282d3f] text-slate-200 text-xs font-semibold transition"
                   >
-                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>View Projects</span>
+                  </button>
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isUploading}
+                    className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-500 transition shadow-lg shadow-indigo-900/30"
+                  >
+                    <Upload className="w-4 h-4" />
+                    <span>{isUploading ? 'Queueing page…' : 'Upload Manga Page'}</span>
                   </button>
                 </div>
-              );
-            })}
+              </div>
+            )}
           </div>
-        </aside>
+        </>
       )}
-
-      {/* Main Studio Viewport */}
-      <div className="flex-1 flex flex-col overflow-hidden relative">
-        {uploadError && (
-          <div role="alert" className="px-3 py-2 text-xs text-red-300 bg-red-950/40 border-b border-red-900/50">
-            {uploadError}
-          </div>
-        )}
-        {originalImageEl || cleanedImageEl ? (
-          <Studio
-            jobId={activeJobId ?? undefined}
-            originalImage={originalImageEl}
-            cleanedImage={cleanedImageEl}
-            initialTextObjects={studioTextObjects}
-            jobTitle={activeJob?.srcUrl || `Manga Page #${activeJobId}`}
-            onUploadPage={handlePageUpload}
-            isUploadingPage={isUploading}
-            onBack={() => setIsLeftDrawerOpen(true)}
-            onSave={async (blob, objs) => handleSaveToDb(blob, objs)}
-          />
-        ) : (
-          <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
-            <div className="w-16 h-16 rounded-2xl border border-[#282d3f] bg-[#12141c] flex items-center justify-center mb-4 shadow-xl">
-              <Layers className="w-8 h-8 text-indigo-400" />
-            </div>
-            <h2 className="text-base font-semibold text-slate-100">Kites Manga Studio</h2>
-            <p className="text-xs text-slate-400 max-w-sm mt-1">
-              Upload a comic or manga page to edit inpainting, restore artwork, tweak CJK typography, or run local WebGPU translations.
-            </p>
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isUploading}
-              className="mt-4 flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-500 transition shadow-lg shadow-indigo-900/30"
-            >
-              <Upload className="w-4 h-4" />
-              {isUploading ? 'Queueing page…' : 'Upload Manga Page'}
-            </button>
-          </div>
-        )}
-      </div>
     </div>
   );
 }
