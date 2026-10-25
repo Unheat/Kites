@@ -152,15 +152,14 @@ describe('font family propagation', () => {
     expect(ctx.font).toContain(customFont);
   });
 
-  it('applies comic lettering casing when a comic font family is passed', () => {
+  it('preserves verbatim casing when rendering with any font family (no forced uppercase)', () => {
     const ctx = mockCtx();
     const comicFont = '"Anime Ace 2.0 BB", "Wild Words", sans-serif';
     const text = "I'm sorry, did you see him?";
     const measured = measureDefaultLayout(ctx, text, 300, 200, 16, undefined, comicFont);
-    // Personal pronoun I has crossbar 'I', internal words have lowercase 'i'
     const fullText = measured.lines.join(' ');
-    expect(fullText).toContain("I'M");
-    expect(fullText).toContain("DiD"); // internal I becomes lowercase i
+    expect(fullText).toContain("I'm sorry");
+    expect(fullText).toContain("did you see him?");
   });
 
   it('renders rotated speech bubble with ellipse typesetting and rigid affine transform', () => {

@@ -13,8 +13,6 @@ import { getFontSizeMinimumBase } from '../engines/ocr/tallStripTiling';
 import {
   sanitizeTypesetText,
   compactSpecialSymbols,
-  isComicLetteringFont,
-  formatComicLetteringCasing,
 } from '../../shared/utils/textCleaning';
 
 /**
@@ -677,10 +675,7 @@ function renderTextBlocksDefault(
         const normV = Math.hypot((bl.x + br.x) / 2 - (tl.x + tr.x) / 2, (bl.y + br.y) / 2 - (tl.y + tr.y) / 2);
         // Keep the Disabled/free-box baseline unchanged. Fixed layouts use the exact
         // renderer normalization shared with the layout solver's measurement callback.
-        let sanitizedTranslation = sanitizeTypesetText(compactSpecialSymbols(translation));
-        if (isComicLetteringFont(fontFamily)) {
-          sanitizedTranslation = formatComicLetteringCasing(sanitizedTranslation, true);
-        }
+        const sanitizedTranslation = sanitizeTypesetText(compactSpecialSymbols(translation));
         const fitted = fixed
           ? measureDefaultLayout(ctx, sanitizedTranslation, normH, normV, targetFontSize, undefined, fontFamily, isBold, pageMeasureCache, targetLang)
           : fitFontSizeWithLines(ctx, sanitizedTranslation, fontFamily, normH, normV, targetFontSize, Math.max(targetFontSize, 48), 0.05, undefined, isBold, pageMeasureCache, targetLang);

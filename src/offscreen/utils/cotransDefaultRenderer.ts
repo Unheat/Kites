@@ -5,8 +5,6 @@ import { wrapTextEllipse, unwrapWrappedText } from './ellipseTypeset';
 import {
   sanitizeTypesetText,
   compactSpecialSymbols,
-  isComicLetteringFont,
-  formatComicLetteringCasing,
 } from '../../shared/utils/textCleaning';
 import { getFontSizeMinimumBase } from '../engines/ocr/tallStripTiling';
 
@@ -703,13 +701,9 @@ export function measureDefaultLayout(
   measureCache?: MeasureCache,
   targetLang: string = 'en'
 ): ReturnType<typeof fitFontSizeWithLines> {
-  let cleaned = sanitizeTypesetText(compactSpecialSymbols(text));
-  if (isComicLetteringFont(fontFamily)) {
-    cleaned = formatComicLetteringCasing(cleaned, true);
-  }
   return fitFontSizeWithLines(
     ctx,
-    cleaned,
+    sanitizeTypesetText(compactSpecialSymbols(text)),
     fontFamily,
     width,
     height,
