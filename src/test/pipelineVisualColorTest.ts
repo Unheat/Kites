@@ -49,8 +49,8 @@ export async function runPipelineVisualColorTest() {
     const pageWidth = probeImage.width;
     const pageHeight = probeImage.height;
 
-    // 1. OCR Detection
-    console.log('[ColorTest] 1. Running OCR detection...');
+    // 1. OCR Detection (Runs on original high-contrast B&W image)
+    console.log('[ColorTest] 1. Running OCR detection on B&W image...');
     const sourceLang = testFile === 'image8.png' ? undefined : 'ja';
     const ocrResult = await ocrManager.processImage(arrayBuffer, 'v6-small', { sourceLang, pageWidth, pageHeight });
     const polygons = (ocrResult.polygons || []) as Point2D[][];
@@ -62,21 +62,12 @@ export async function runPipelineVisualColorTest() {
     }
     console.log(`[ColorTest] Detected ${polygons.length} text blocks.`);
 
-    // 2. Inpainting (erasing Japanese text)
-    console.log('[ColorTest] 2. Erasing text with inpainting (simple)...');
-    const inpaintPolygons = ocrResult.rawPolygons || polygons;
-    const cleanedBuffer = await inpaintManager.eraseText(arrayBuffer, inpaintPolygons, 'simple');
-
-    const cleanImgPath = path.join(resultBaseDir, `${path.parse(testFile).name}_clean.png`);
-    fs.writeFileSync(cleanImgPath, Buffer.from(cleanedBuffer));
-    console.log(`[ColorTest] Saved cleaned image to: ${cleanImgPath}`);
-
-    // 3. Manga Colorization with CIELAB L* lineart preservation & bubble shielding
-    console.log('[ColorTest] 3. Running Neural Manga Colorization (manga-colorization-v2)...');
+    // 2. Manga Colorization (Runs on raw B&W image BEFORE inpainting)
+    console.log('[ColorTest] 2. Running Neural Manga Colorization on raw image (manga-colorization-v2)...');
     const colorStart = performance.now();
     const colorizedBuffer = await colorManager.colorize(
-      cleanedBuffer,
-      inpaintPolygons,
+      arrayBuffer,
+      undefined,
       'manga-colorization-v2',
       undefined,
       { targetSize: 576 }
@@ -86,7 +77,16 @@ export async function runPipelineVisualColorTest() {
 
     const colorImgPath = path.join(resultBaseDir, `${path.parse(testFile).name}_colorized.png`);
     fs.writeFileSync(colorImgPath, Buffer.from(colorizedBuffer));
-    console.log(`[ColorTest] Saved colorized background to: ${colorImgPath}`);
+    console.log(`[ColorTest] Saved colorized image to: ${colorImgPath}`);
+
+    // 3. Inpainting (erasing Japanese text ON the colorized image)
+    console.log('[ColorTest] 3. Erasing text with inpainting (sampling colored background)...');
+    const inpaintPolygons = ocrResult.rawPolygons || polygons;
+    const cleanedBuffer = await inpaintManager.eraseText(colorizedBuffer, inpaintPolygons, 'simple');
+
+    const cleanImgPath = path.join(resultBaseDir, `${path.parse(testFile).name}_clean.png`);
+    fs.writeFileSync(cleanImgPath, Buffer.from(cleanedBuffer));
+    console.log(`[ColorTest] Saved cleaned inpainted image to: ${cleanImgPath}`);
 
     // 4. Translation
     console.log('[ColorTest] 4. Translating text to English...');
@@ -98,12 +98,12 @@ export async function runPipelineVisualColorTest() {
       translatedTexts = texts;
     }
 
-    // 5. Typesetting onto colorized canvas
+    // 5. Typesetting onto clean inpainted color canvas
     console.log('[ColorTest] 5. Typesetting translated text onto colorized canvas...');
-    const colorImg = await loadImage(Buffer.from(colorizedBuffer));
-    const canvas = createCanvas(colorImg.width, colorImg.height);
+    const cleanImg = await loadImage(Buffer.from(cleanedBuffer));
+    const canvas = createCanvas(cleanImg.width, cleanImg.height);
     const ctx = canvas.getContext('2d');
-    ctx.drawImage(colorImg, 0, 0);
+    ctx.drawImage(cleanImg, 0, 0);
 
     const textBlockItems: TextBlockItem[] = [];
     for (let i = 0; i < translatedTexts.length; i++) {
@@ -127,7 +127,7 @@ export async function runPipelineVisualColorTest() {
       ctx as any,
       textBlockItems,
       'en',
-      { width: colorImg.width, height: colorImg.height },
+      { width: cleanImg.width, height: cleanImg.height },
       'Wild Words, CC Wild Words, Anime Ace, sans-serif',
       false
     );

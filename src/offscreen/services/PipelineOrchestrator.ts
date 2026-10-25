@@ -288,69 +288,27 @@ export class PipelineOrchestrator {
         }
       }
 
-      // 4 + 5. Translation and Inpainting run concurrently.
+      // 4. Kick off Translation immediately in background (runs in parallel over network)
       const inpaintPolygons = (ocrResult.rawPolygons || ocrResult.polygons || []) as Point2D[][];
       const shouldInpaint = inpaintTier !== 'none' && inpaintPolygons.length > 0;
-
-      let translatedTexts: string[];
-      let cleanedImageBuffer: ArrayBuffer = imageBuffer;
-
+      const activeTranslationEngineId = popupState?.activeEngineId || 'cloudflare-translate';
       const stage2Start = import.meta.env.DEV ? performance.now() : 0;
-      if (shouldInpaint) {
-        console.log(`[PipelineOrchestrator] Running translation and inpainting in parallel (tier: ${inpaintTier}).`);
-        
-        const activeTranslationEngineId = popupState?.activeEngineId || 'cloudflare-translate';
-        const translationPromise = this.services.translationManager
-          .processTranslation(ocrResult.texts, sourceLang, targetLang, makeLifecycle('translation', activeTranslationEngineId), popupState)
-          .then((r) => {
-            if (import.meta.env.DEV) {
-              console.log(`[PipelineOrchestrator] Translation branch finished in ${(performance.now() - stage2Start).toFixed(2)}ms.`);
-            }
-            return r;
-          })
-          .catch((err) => {
-            console.warn(`[PipelineOrchestrator] Translation branch failed; preserving original source texts so pipeline does not stop:`, err);
-            return ocrResult.texts;
-          });
-        const inpaintPromise = this.services.inpaintManager.eraseText(imageBuffer, inpaintPolygons, inpaintTier as InpaintTier, ocrResult.maskRawCanvas, makeLifecycle('inpaint', inpaintTier)).then((r) => {
+
+      const translationPromise = this.services.translationManager
+        .processTranslation(ocrResult.texts, sourceLang, targetLang, makeLifecycle('translation', activeTranslationEngineId), popupState)
+        .then((r) => {
           if (import.meta.env.DEV) {
-            console.log(`[PipelineOrchestrator] Inpaint branch (${inpaintTier}) finished in ${(performance.now() - stage2Start).toFixed(2)}ms.`);
+            console.log(`[PipelineOrchestrator] Translation branch finished in ${(performance.now() - stage2Start).toFixed(2)}ms.`);
           }
           return r;
-        }).catch(err => {
-          console.warn(`[PipelineOrchestrator] Inpainting failed (likely WebGPU shape mismatch). Falling back to original image. Error:`, err);
-          return imageBuffer; // Fallback to original image
+        })
+        .catch((err) => {
+          console.warn(`[PipelineOrchestrator] Translation branch failed; preserving original source texts so pipeline does not stop:`, err);
+          return ocrResult.texts;
         });
 
-        [translatedTexts, cleanedImageBuffer] = await Promise.all([translationPromise, inpaintPromise]);
-        if (import.meta.env.DEV) {
-          const stage2Duration = (performance.now() - stage2Start).toFixed(2);
-          console.log(`[PipelineOrchestrator] Parallel Inpainting (${inpaintTier}) & Translation complete in ${stage2Duration}ms (= the slower of the two branches above).`);
-        }
-      } else {
-        // No inpainting — just translate
-        console.log(`[PipelineOrchestrator] Translating ${ocrResult.texts.length} text blocks (no inpainting)...`);
-        const activeTranslationEngineId = popupState?.activeEngineId || 'cloudflare-translate';
-        try {
-          translatedTexts = await this.services.translationManager.processTranslation(ocrResult.texts, sourceLang, targetLang, makeLifecycle('translation', activeTranslationEngineId), popupState);
-        } catch (err) {
-          console.warn(`[PipelineOrchestrator] Translation failed; preserving original source texts so pipeline does not stop:`, err);
-          translatedTexts = ocrResult.texts;
-        }
-        if (import.meta.env.DEV) {
-          const stage2Duration = (performance.now() - stage2Start).toFixed(2);
-          console.log(`[PipelineOrchestrator] Translation complete in ${stage2Duration}ms.`);
-        }
-      }
-
-      if (import.meta.env.DEV) {
-        console.log(`[PipelineOrchestrator] Translation pairs (source -> translated):`);
-        for (let i = 0; i < ocrResult.texts.length; i++) {
-          console.log(`  [${i}] "${ocrResult.texts[i]}" -> "${translatedTexts[i] ?? ''}"`);
-        }
-      }
-
-      // 5.5 Optional Manga Colorization Stage
+      // 5. Optional Manga Colorization Stage (Runs on original B&W image BEFORE inpainting)
+      let baseImageForInpaint: ArrayBuffer = imageBuffer;
       const requestedColorTier = (popupState?.activeColorId as ColorTierId) || 'none';
       if (requestedColorTier === 'none') {
         void this.services.colorManager.destroy();
@@ -358,14 +316,14 @@ export class PipelineOrchestrator {
         const colorTier = await this.resolveInstalledColorTier(requestedColorTier);
         if (colorTier !== 'none') {
           const colorStart = import.meta.env.DEV ? performance.now() : 0;
-          console.log(`[PipelineOrchestrator] Running manga colorization with ${colorTier}...`);
+          console.log(`[PipelineOrchestrator] Running manga colorization with ${colorTier} before inpainting...`);
           try {
             const colorOptions: ColorEngineOptions = {
               preferGpu: popupState ? isColorGpuAvailable(popupState) : false,
             };
-            cleanedImageBuffer = await this.services.colorManager.colorize(
-              cleanedImageBuffer,
-              inpaintPolygons,
+            baseImageForInpaint = await this.services.colorManager.colorize(
+              imageBuffer,
+              undefined,
               colorTier,
               makeLifecycle('color', colorTier),
               colorOptions
@@ -376,11 +334,42 @@ export class PipelineOrchestrator {
             }
           } catch (err) {
             console.warn('[PipelineOrchestrator] Colorization failed; continuing with uncolored image:', err);
+            baseImageForInpaint = imageBuffer;
           }
         }
       }
 
-      // 6. Bake the translated text into the image for the Live Web return
+      // 6. Inpainting: Erase text regions on the COLORIZED (or original) image
+      let cleanedImageBuffer: ArrayBuffer = baseImageForInpaint;
+      if (shouldInpaint) {
+        console.log(`[PipelineOrchestrator] Running inpainting on colorized/raw image (tier: ${inpaintTier})...`);
+        const inpaintPromise = this.services.inpaintManager
+          .eraseText(baseImageForInpaint, inpaintPolygons, inpaintTier as InpaintTier, ocrResult.maskRawCanvas, makeLifecycle('inpaint', inpaintTier))
+          .then((r) => {
+            if (import.meta.env.DEV) {
+              console.log(`[PipelineOrchestrator] Inpaint branch (${inpaintTier}) finished in ${(performance.now() - stage2Start).toFixed(2)}ms.`);
+            }
+            return r;
+          })
+          .catch((err) => {
+            console.warn(`[PipelineOrchestrator] Inpainting failed (likely WebGPU shape mismatch). Falling back to base image. Error:`, err);
+            return baseImageForInpaint;
+          });
+
+        cleanedImageBuffer = await inpaintPromise;
+      }
+
+      // Await translation results
+      const translatedTexts = await translationPromise;
+
+      if (import.meta.env.DEV) {
+        console.log(`[PipelineOrchestrator] Translation pairs (source -> translated):`);
+        for (let i = 0; i < ocrResult.texts.length; i++) {
+          console.log(`  [${i}] "${ocrResult.texts[i]}" -> "${translatedTexts[i] ?? ''}"`);
+        }
+      }
+
+      // 7. Bake the translated text into the image for the Live Web return
       console.log(`[PipelineOrchestrator] Baking translated text into Canvas for Live Web...`);
 
       // Ensure all custom @font-face rules are loaded before canvas text measurements.

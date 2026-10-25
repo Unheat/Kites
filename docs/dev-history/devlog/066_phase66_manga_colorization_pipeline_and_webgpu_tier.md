@@ -51,9 +51,9 @@ Introduce an optional client-side manga colorization subsystem to transform blac
 
 ### 4. Roadblocks & Decisions
 
-1. **Pipeline Ordering Decision (After Inpaint vs End of Pipeline)**:
-   - *Problem*: Running colorization at the very end would blur translated vector fonts and colorize text glyphs. Running it before inpaint produces chromatic halos around text when inpainting multi-hued backgrounds.
-   - *Decision*: Placed colorization strictly between inpainting and canvas typesetting. The neural network sees clean text-free artwork, and typography is drawn on the finished colored background with accurate background luminance sampling.
+1. **Pipeline Ordering Evolution (OCR -> Colorize -> Inpaint -> Typeset)**:
+   - *Problem*: Initially placing colorization after inpainting caused stark white rectangular boxes inside tinted dialogue bubbles (e.g., a cream/pink bubble having pure white square patches where text was). Inpainting on B&W bleached the text box white with $L^* = 100$, and colorizing afterwards could not blend the patch naturally.
+   - *Decision*: Shifted pipeline order to **OCR -> Colorize -> Inpaint -> Typeset** (matching reference donor tool `cotrans` `manga_translator.py:440` where `_run_colorizer` precedes `_run_inpainting`). OCR still runs on the original B&W image for maximum contrast and detection accuracy. Colorize then tints the entire page evenly. Inpaint (`SimpleInpaintEngine` / `Telea`) now samples the colored background paper around the glyphs, completely eliminating white box artifacts and blending text erasure seamlessly into tinted bubbles, wood textures, or colored skies.
 
 2. **Linework Softening / Screentone Degradation**:
    - *Problem*: Neural upsampling from 576px slightly softens sharp ink lines and screentone dots.

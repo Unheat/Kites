@@ -42,7 +42,7 @@ export class MangaColorizeEngine implements IColorEngine {
    */
   async colorize(
     imageBuffer: ArrayBuffer,
-    bubblePolygons?: Point2D[][],
+    _bubblePolygons?: Point2D[][],
     options?: ColorEngineOptions
   ): Promise<ArrayBuffer> {
     await this.runtime.init();
@@ -144,24 +144,7 @@ export class MangaColorizeEngine implements IColorEngine {
       fuseLightnessChannel(origImageData, finalImageData);
       finalCtx.putImageData(finalImageData, 0, 0);
 
-      // 9. Speech Bubble Shielding: Keep bubble interiors pure white (#FFFFFF)
-      if (bubblePolygons && bubblePolygons.length > 0) {
-        finalCtx.save();
-        finalCtx.fillStyle = '#FFFFFF';
-        for (const poly of bubblePolygons) {
-          if (poly.length < 3) continue;
-          finalCtx.beginPath();
-          finalCtx.moveTo(poly[0].x, poly[0].y);
-          for (let p = 1; p < poly.length; p++) {
-            finalCtx.lineTo(poly[p].x, poly[p].y);
-          }
-          finalCtx.closePath();
-          finalCtx.fill();
-        }
-        finalCtx.restore();
-      }
-
-      // 10. Convert final canvas to ArrayBuffer
+      // 9. Convert final canvas to ArrayBuffer
       return await this.canvasToArrayBuffer(finalCanvas);
     } finally {
       // 11. Free intermediate tensors to prevent VRAM / WebGPU leaks
