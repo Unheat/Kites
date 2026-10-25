@@ -6,6 +6,7 @@ import modelsRegistryData from '../shared/models-registry.json';
 import { normalizeCustomApiConfig } from '../shared/customApi';
 import { blobToDataUrl } from '../shared/utils/blobDataUrl';
 import { SUPPORTED_INPAINT_IDS } from '../shared/inpaintTiers';
+import { SUPPORTED_COLOR_IDS } from '../shared/colorTiers';
 import { resolveOcrTier } from '../offscreen/engines/ocr/ocrRegistry';
 import { normalizeRenderFontPresetId } from '../shared/renderFontPresets';
 import { normalizeGlossaryEntries } from '../shared/glossary';
@@ -100,6 +101,10 @@ export function normalizePopupState(popupState: Partial<PopupState> | undefined)
   const activeInpaintId = SUPPORTED_INPAINT_IDS.has(rawInpaintId)
     ? rawInpaintId
     : DEFAULT_POPUP_STATE.activeInpaintId;
+  const rawColorId = completedState.activeColorId;
+  const activeColorId = rawColorId && SUPPORTED_COLOR_IDS.has(rawColorId)
+    ? rawColorId
+    : DEFAULT_POPUP_STATE.activeColorId;
   const activeOcrId = resolveOcrTier(completedState.activeOcrId);
   const renderFontPresetId = normalizeRenderFontPresetId(completedState.renderFontPresetId);
   const bubbleMode: BubbleDetectionMode =
@@ -120,6 +125,7 @@ export function normalizePopupState(popupState: Partial<PopupState> | undefined)
     customApis: uniqueCustomApis,
     activeEngineId,
     activeInpaintId,
+    activeColorId,
     activeOcrId,
     renderFontPresetId,
     renderFontBold: completedState.renderFontBold === true,

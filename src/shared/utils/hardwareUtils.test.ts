@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isWebLlmModel, isLlmGpuAvailable, isInpaintGpuAvailable, isOcrGpuAvailable, isBubbleGpuAvailable } from './hardwareUtils';
+import { isWebLlmModel, isLlmGpuAvailable, isInpaintGpuAvailable, isOcrGpuAvailable, isBubbleGpuAvailable, isColorGpuAvailable } from './hardwareUtils';
 import type { PopupState } from '../types';
 import { DEFAULT_POPUP_STATE } from '../types';
 
@@ -21,7 +21,7 @@ describe('hardwareUtils', () => {
         ...DEFAULT_POPUP_STATE,
         webgpuSupported: true,
         webgpuMaster: true,
-        webgpuOverrides: { llm: true, inpaint: true, ocr: true, bubble: true }
+        webgpuOverrides: { llm: true, inpaint: true, ocr: true, bubble: true, color: true }
       };
       expect(isLlmGpuAvailable(state)).toBe(true);
 
@@ -37,22 +37,28 @@ describe('hardwareUtils', () => {
     });
   });
 
-  describe('isInpaintGpuAvailable & isOcrGpuAvailable & isBubbleGpuAvailable', () => {
-    it('evaluates inpaint, ocr, and bubble GPU readiness', () => {
+  describe('isInpaintGpuAvailable & isOcrGpuAvailable & isBubbleGpuAvailable & isColorGpuAvailable', () => {
+    it('evaluates inpaint, ocr, bubble, and color GPU readiness', () => {
       const state: PopupState = {
         ...DEFAULT_POPUP_STATE,
         webgpuSupported: true,
         webgpuMaster: true,
-        webgpuOverrides: { llm: true, inpaint: false, ocr: true, bubble: false }
+        webgpuOverrides: { llm: true, inpaint: false, ocr: true, bubble: false, color: true }
       };
       expect(isInpaintGpuAvailable(state)).toBe(false);
       expect(isOcrGpuAvailable(state)).toBe(true);
       expect(isBubbleGpuAvailable(state)).toBe(false);
+      expect(isColorGpuAvailable(state)).toBe(true);
 
       expect(isBubbleGpuAvailable({
         ...state,
         webgpuOverrides: { ...state.webgpuOverrides, bubble: true }
       })).toBe(true);
+
+      expect(isColorGpuAvailable({
+        ...state,
+        webgpuOverrides: { ...state.webgpuOverrides, color: false }
+      })).toBe(false);
     });
   });
 });

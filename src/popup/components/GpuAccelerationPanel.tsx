@@ -200,6 +200,22 @@ export default function GpuAccelerationPanel({ state, updateState }: GpuAccelera
               </button>
             </div>
 
+            <div className="flex items-center justify-between p-2.5 rounded-md hover:bg-[var(--color-paper)] transition-colors">
+              <div className="flex flex-col text-left">
+                <span className="font-medium text-sm text-[var(--color-ink)]">Colorization</span>
+                <span className="text-[10px] text-[var(--color-dust)] font-medium truncate max-w-[180px]">
+                  {state.activeColorId === 'manga-colorization-v2' ? 'Manga Colorizer • ~150 MB' : 'Disabled • 0 MB'}
+                </span>
+              </div>
+              <button 
+                onClick={() => updateState({ webgpuOverrides: { ...state.webgpuOverrides, color: !(state.webgpuOverrides?.color !== false) }})}
+                className="kites-switch kites-switch-sm"
+                data-state={state.webgpuOverrides?.color !== false ? 'checked' : 'unchecked'}
+              >
+                <span className="kites-switch-thumb" />
+              </button>
+            </div>
+
           </div>
         )}
       </div>

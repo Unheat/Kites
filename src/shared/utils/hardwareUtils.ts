@@ -67,3 +67,18 @@ export function isBubbleGpuAvailable(state: PopupState): boolean {
   );
 }
 
+/**
+ * Checks if GPU acceleration is enabled and ready for WebGPU Colorization models.
+ * 
+ * @param state - The current PopupState.
+ * @returns True if WebGPU is available for colorization.
+ */
+export function isColorGpuAvailable(state: PopupState): boolean {
+  return Boolean(
+    state.webgpuSupported === true &&
+    state.webgpuMaster === true &&
+    state.webgpuOverrides?.color !== false
+  );
+}
+
+

@@ -50,9 +50,20 @@ describe('normalizePopupState', () => {
     });
 
     expect(result.changed).toBe(true);
-    expect(result.state.webgpuOverrides).toEqual({ llm: true, inpaint: false, ocr: true, bubble: true });
+    expect(result.state.webgpuOverrides).toEqual({ llm: true, inpaint: false, ocr: true, bubble: true, color: true });
     expect(result.state.activeOcrId).toBe(DEFAULT_POPUP_STATE.activeOcrId);
     expect(result.state.customApis).toEqual([]);
+  });
+
+  it('normalizes missing or invalid activeColorId to none', () => {
+    const invalidState = {
+      ...DEFAULT_POPUP_STATE,
+      activeColorId: 'invalid-color' as any,
+    } as PopupState;
+
+    const result = normalizePopupState(invalidState);
+    expect(result.changed).toBe(true);
+    expect(result.state.activeColorId).toBe('none');
   });
 
   it('preserves valid renderFontPresetId without flagging changed', () => {

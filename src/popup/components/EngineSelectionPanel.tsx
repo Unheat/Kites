@@ -7,6 +7,7 @@ import { ModelRegistry } from '../services/ModelRegistry';
 import { isLlmGpuAvailable } from '../../shared/utils/hardwareUtils';
 import { RENDER_FONT_PRESETS, normalizeRenderFontPresetId } from '../../shared/renderFontPresets';
 import { INPAINT_TIER_CATALOG } from '../../shared/inpaintTiers';
+import { COLOR_TIER_CATALOG } from '../../shared/colorTiers';
 import HelpTooltip from './HelpTooltip';
 
 export interface BubbleModeOption {
@@ -118,6 +119,7 @@ export function orderChangedCatalog(engines: readonly Engine[], defaultId: strin
 export default function EngineSelectionPanel({ state, updateState }: EngineSelectionPanelProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [isOpenInpaint, setIsOpenInpaint] = useState(false);
+  const [isOpenColor, setIsOpenColor] = useState(false);
   const [isOpenOcr, setIsOpenOcr] = useState(false);
   const [isOpenRenderFont, setIsOpenRenderFont] = useState(false);
   const [isOpenFontOptions, setIsOpenFontOptions] = useState(false);
@@ -142,7 +144,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
    * @param category - Model subsystem that owns the download.
    * @returns A promise resolved after background/offscreen acknowledgement.
    */
-  const requestDownload = async (modelId: string, category: 'translation' | 'inpaint' | 'ocr' | 'bubble'): Promise<void> => {
+  const requestDownload = async (modelId: string, category: 'translation' | 'inpaint' | 'ocr' | 'bubble' | 'color'): Promise<void> => {
     if (pendingDownloadIds.has(modelId) || downloads[modelId]?.status === 'Queued') return;
     setPendingDownloadIds(prev => new Set(prev).add(modelId));
     setDownloads(prev => ({ ...prev, [modelId]: { progress: 0, status: 'Queued' } }));
@@ -218,6 +220,13 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
             )
             : prev
           );
+          setColorBaseEngines(prev => prev.some(engine => engine.id === message.payload.modelId)
+            ? orderChangedCatalog(
+              prev.map(engine => engine.id === message.payload.modelId ? { ...engine, isDownloaded: true } : engine),
+              'none'
+            )
+            : prev
+          );
           setOcrBaseEngines(prev => prev.some(engine => engine.id === message.payload.modelId)
             ? orderChangedCatalog(
               prev.map(engine => engine.id === message.payload.modelId ? { ...engine, isDownloaded: true } : engine),
@@ -257,6 +266,15 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
     })),
   );
 
+  const [colorBaseEngines, setColorBaseEngines] = useState<Engine[]>(() =>
+    COLOR_TIER_CATALOG.map((tier) => ({
+      id: tier.id,
+      name: tier.name,
+      type: 'local' as const,
+      isDownloaded: Boolean(tier.isBuiltin),
+    })),
+  );
+
   const [ocrBaseEngines, setOcrBaseEngines] = useState<Engine[]>([
     { id: 'v6-small', name: 'PaddleOCR v6 Small (Default)', type: 'local', isDownloaded: false },
     { id: 'v6-medium', name: 'PaddleOCR v6 Medium', type: 'local', isDownloaded: false },
@@ -273,6 +291,8 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
   const [baseEngines, setBaseEngines] = useState<Engine[]>([]);
   const inpaintBaseEnginesRef = useRef(inpaintBaseEngines);
   inpaintBaseEnginesRef.current = inpaintBaseEngines;
+  const colorBaseEnginesRef = useRef(colorBaseEngines);
+  colorBaseEnginesRef.current = colorBaseEngines;
   const ocrBaseEnginesRef = useRef(ocrBaseEngines);
   ocrBaseEnginesRef.current = ocrBaseEngines;
 
@@ -296,6 +316,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
       const modelIds = [
         ...engines.filter(engine => engine.hardware === 'WebGPU').map(engine => engine.id),
         ...inpaintBaseEnginesRef.current.map(engine => engine.id),
+        ...colorBaseEnginesRef.current.map(engine => engine.id),
         ...ocrBaseEnginesRef.current.map(engine => engine.id),
         'bubble-yolo',
       ];
@@ -314,9 +335,11 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
         }));
         const hydratedTranslation = hydrate(engines);
         const hydratedInpaint = hydrate(inpaintBaseEnginesRef.current);
+        const hydratedColor = hydrate(colorBaseEnginesRef.current);
         const hydratedOcr = hydrate(ocrBaseEnginesRef.current);
         setBaseEngines(hydratedTranslation);
         setInpaintBaseEngines(hydratedInpaint);
+        setColorBaseEngines(hydratedColor);
         setOcrBaseEngines(hydratedOcr);
 
         const currentState = stateRef.current;
@@ -324,15 +347,18 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
         const translationUnavailable = selectedTranslation?.type === 'local' && !selectedTranslation.isDownloaded;
         const selectedInpaint = hydratedInpaint.find((engine) => engine.id === currentState.activeInpaintId);
         const inpaintUnavailable = Boolean(selectedInpaint && !selectedInpaint.isDownloaded);
+        const selectedColor = hydratedColor.find((engine) => engine.id === (currentState.activeColorId || 'none'));
+        const colorUnavailable = Boolean(selectedColor && !selectedColor.isDownloaded);
         const selectedOcr = hydratedOcr.find((engine) => engine.id === (currentState.activeOcrId || 'v6-small'));
         const ocrUnavailable = Boolean(selectedOcr && !selectedOcr.isDownloaded);
         const isNeuralActive = currentState.bubbleMode === 'neural' || currentState.bubbleMode === 'neural-mask';
         const bubbleUnavailable = isNeuralActive && !isBubbleYoloReady;
         const repairs: Partial<PopupState> = {};
-        if (translationUnavailable) repairs.activeEngineId = 'gg-translate';
-        if (inpaintUnavailable) repairs.activeInpaintId = 'simple';
-        if (ocrUnavailable) repairs.activeOcrId = 'v6-small';
-        if (bubbleUnavailable) repairs.bubbleMode = 'off';
+        if (translationUnavailable && currentState.activeEngineId !== 'gg-translate') repairs.activeEngineId = 'gg-translate';
+        if (inpaintUnavailable && currentState.activeInpaintId !== 'simple') repairs.activeInpaintId = 'simple';
+        if (colorUnavailable && currentState.activeColorId !== 'none') repairs.activeColorId = 'none';
+        if (ocrUnavailable && currentState.activeOcrId && currentState.activeOcrId !== 'v6-small') repairs.activeOcrId = 'v6-small';
+        if (bubbleUnavailable && currentState.bubbleMode !== 'off') repairs.bubbleMode = 'off';
         if (Object.keys(repairs).length > 0) {
           console.warn('[EngineSelectionPanel] Resetting unavailable local model selections.', repairs);
           updateStateRef.current(repairs);
@@ -669,6 +695,104 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                               // once MODEL_DOWNLOAD_PROGRESS confirms it's actually ready —
                               // the user then clicks the row itself to select it.
                               void requestDownload(engine.id, 'inpaint');
+                            }}
+                            className="p-1 -mr-1 rounded hover:bg-[var(--color-vellum)] transition-colors cursor-pointer text-[var(--color-ink)] opacity-100"
+                            title="Download model"
+                          >
+                            <Download size={14} />
+                          </div>
+                        ) : null}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Manga Colorization Selector */}
+      <div className="flex flex-col gap-1.5">
+        <div className="flex items-center gap-1.5 mb-1">
+          <h2 className="text-sm font-medium">Manga Colorization</h2>
+          <HelpTooltip
+            size="md"
+            content="Colorizes black-and-white manga pages using neural SEResNeXt U-Net with CIELAB line preservation."
+          />
+        </div>
+
+        <div className="relative flex flex-col">
+          <button 
+            onClick={() => setIsOpenColor(!isOpenColor)}
+            className="w-full flex items-center justify-between p-3 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md hover:border-[var(--color-ink)] transition-colors cursor-pointer"
+          >
+            <span className="font-medium truncate pr-2">
+              {colorBaseEngines.find((engine) => engine.id === (state.activeColorId || 'none') && engine.isDownloaded)?.name
+                || colorBaseEngines.find((engine) => engine.id === 'none')?.name
+                || 'Disabled'}
+            </span>
+            <ChevronDown size={16} className={`text-[var(--color-dust)] transition-transform ${isOpenColor ? 'rotate-180' : ''}`} />
+          </button>
+
+          {/* Inline progress bar for color model download */}
+          {(() => {
+            const downloadingColor = colorBaseEngines.find(e => downloads[e.id] && downloads[e.id].progress < 1);
+            if (!downloadingColor) return null;
+            const dl = downloads[downloadingColor.id];
+            return (
+              <div className="mt-2 p-2 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md animate-in fade-in duration-200">
+                <div className="flex justify-between items-end mb-1.5">
+                  <span className="text-[10px] font-medium text-[var(--color-dust)] uppercase tracking-wider truncate max-w-[80%]">
+                    {downloadingColor.name}: {dl.status}
+                  </span>
+                  <span className="text-xs font-bold text-[var(--color-ink)]">
+                    {Math.round(dl.progress * 100)}%
+                  </span>
+                </div>
+                <div className="h-1.5 w-full bg-[var(--color-paper)] rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-[var(--color-editorial)] transition-all duration-300 ease-out" 
+                    style={{ width: `${dl.progress * 100}%` }}
+                  />
+                </div>
+              </div>
+            );
+          })()}
+
+          {isOpenColor && (
+            <div className="mt-1 bg-[var(--color-paper)] border border-[var(--color-dust)] rounded-md shadow-sm overflow-hidden flex flex-col max-h-[350px] z-50">
+              <div className="overflow-y-auto flex-1 p-1 custom-scrollbar">
+                {colorBaseEngines.map((engine) => {
+                  const isUninstalled = !engine.isDownloaded;
+                  const isActive = (state.activeColorId || 'none') === engine.id && !isUninstalled;
+                  return (
+                    <button
+                      key={engine.id}
+                      onClick={() => {
+                        if (isUninstalled) return;
+                        updateState({ activeColorId: engine.id });
+                        setIsOpenColor(false);
+                      }}
+                      className={`w-full flex items-center justify-between p-2 text-left rounded-sm transition-colors ${
+                        isActive
+                          ? 'bg-[var(--color-vellum)] text-[var(--color-editorial)] font-semibold cursor-pointer'
+                          : isUninstalled
+                            ? 'text-[var(--color-dust)] opacity-50 cursor-not-allowed'
+                            : 'hover:bg-[var(--color-vellum)] cursor-pointer'
+                      }`}
+                    >
+                      <div className="flex flex-col overflow-hidden">
+                        <span className="truncate pr-2 text-sm">{engine.name}</span>
+                      </div>
+                      <div className="flex-shrink-0 ml-2">
+                        {isActive ? (
+                          <Check size={14} className="text-[var(--color-editorial)]" />
+                        ) : isUninstalled ? (
+                          <div 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void requestDownload(engine.id, 'color');
                             }}
                             className="p-1 -mr-1 rounded hover:bg-[var(--color-vellum)] transition-colors cursor-pointer text-[var(--color-ink)] opacity-100"
                             title="Download model"

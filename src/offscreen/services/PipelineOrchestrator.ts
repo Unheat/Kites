@@ -10,17 +10,23 @@ import { inpaintRegistry } from '../engines/inpaint/inpaintRegistry';
 import { InpaintCacheManager } from './InpaintCacheManager';
 import { renderTextBlocksBatch, measureBubbleLayoutFontSize, getRenderedBlockGeometry, LANGUAGE_ORIENTATION_PRESETS, type TextBlockItem, type RenderedBlockInfo } from '../utils/canvasTypesetting';
 import { resolveRenderFontFamily } from '../../shared/renderFontPresets';
-import { isBubbleGpuAvailable } from '../../shared/utils/hardwareUtils';
+import { isBubbleGpuAvailable, isColorGpuAvailable } from '../../shared/utils/hardwareUtils';
 import type { BubbleEngineOptions } from '../engines/bubble/BaseBubbleEngine';
 import { BubbleManager, bubbleManager as defaultBubbleManager } from './BubbleManager';
 import { acquireBubbleGeometry, resolveBubbleLayouts, type BubbleGeometry } from './BubbleLayoutService';
 import { loadHyphenationLanguage } from '../utils/hyphenation';
+import type { ColorTierId } from '../../shared/colorTiers';
+import { ColorManager } from './ColorManager';
+import { ColorCacheManager } from './ColorCacheManager';
+import { colorRegistry } from '../engines/color/colorRegistry';
+import type { ColorEngineOptions } from '../engines/color/BaseColorEngine';
 
 export interface PipelineServices {
   ocrManager: OcrManager;
   inpaintManager: InpaintManager;
   translationManager: TranslationManager;
   bubbleManager: BubbleManager;
+  colorManager: ColorManager;
 }
 
 export class PipelineOrchestrator {
@@ -32,6 +38,7 @@ export class PipelineOrchestrator {
       inpaintManager: services?.inpaintManager ?? new InpaintManager(),
       translationManager: services?.translationManager ?? defaultTranslationManager,
       bubbleManager: services?.bubbleManager ?? defaultBubbleManager,
+      colorManager: services?.colorManager ?? new ColorManager(),
     };
   }
 
@@ -41,6 +48,10 @@ export class PipelineOrchestrator {
 
   public get ocrManager(): OcrManager {
     return this.services.ocrManager;
+  }
+
+  public get colorManager(): ColorManager {
+    return this.services.colorManager;
   }
 
   public getInpaintManager(): InpaintManager {
@@ -57,6 +68,10 @@ export class PipelineOrchestrator {
 
   public getBubbleManager(): BubbleManager {
     return this.services.bubbleManager;
+  }
+
+  public getColorManager(): ColorManager {
+    return this.services.colorManager;
   }
 
   /**
@@ -76,6 +91,24 @@ export class PipelineOrchestrator {
 
     console.warn(`[PipelineOrchestrator] Selected inpaint model ${canonicalTier} is not installed; using Simple Fill.`);
     return 'simple';
+  }
+
+  /**
+   * Resolves color tier, falling back to 'none' if model is not downloaded.
+   *
+   * @param requestedTier - Color tier ID requested in popup settings.
+   * @returns Supported and cached color tier or 'none'.
+   */
+  private async resolveInstalledColorTier(requestedTier?: string): Promise<ColorTierId> {
+    if (!requestedTier || requestedTier === 'none') return 'none';
+    const entry = colorRegistry[requestedTier];
+    if (!entry) return 'none';
+
+    const isCached = await ColorCacheManager.isModelCached(entry.onnxUrl);
+    if (isCached) return requestedTier as ColorTierId;
+
+    console.warn(`[PipelineOrchestrator] Selected color model ${requestedTier} is not installed; disabling colorization.`);
+    return 'none';
   }
 
   /**
@@ -314,6 +347,36 @@ export class PipelineOrchestrator {
         console.log(`[PipelineOrchestrator] Translation pairs (source -> translated):`);
         for (let i = 0; i < ocrResult.texts.length; i++) {
           console.log(`  [${i}] "${ocrResult.texts[i]}" -> "${translatedTexts[i] ?? ''}"`);
+        }
+      }
+
+      // 5.5 Optional Manga Colorization Stage
+      const requestedColorTier = (popupState?.activeColorId as ColorTierId) || 'none';
+      if (requestedColorTier === 'none') {
+        void this.services.colorManager.destroy();
+      } else {
+        const colorTier = await this.resolveInstalledColorTier(requestedColorTier);
+        if (colorTier !== 'none') {
+          const colorStart = import.meta.env.DEV ? performance.now() : 0;
+          console.log(`[PipelineOrchestrator] Running manga colorization with ${colorTier}...`);
+          try {
+            const colorOptions: ColorEngineOptions = {
+              preferGpu: popupState ? isColorGpuAvailable(popupState) : false,
+            };
+            cleanedImageBuffer = await this.services.colorManager.colorize(
+              cleanedImageBuffer,
+              inpaintPolygons,
+              colorTier,
+              makeLifecycle('color', colorTier),
+              colorOptions
+            );
+            if (import.meta.env.DEV) {
+              const colorDuration = (performance.now() - colorStart).toFixed(2);
+              console.log(`[PipelineOrchestrator] Colorization complete in ${colorDuration}ms.`);
+            }
+          } catch (err) {
+            console.warn('[PipelineOrchestrator] Colorization failed; continuing with uncolored image:', err);
+          }
         }
       }
 

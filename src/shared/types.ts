@@ -36,7 +36,7 @@ export interface ProcessJobMessage {
 }
 
 export type ModelInitializationPhase = 'started' | 'finished';
-export type ModelInitializationStage = 'ocr' | 'inpaint' | 'translation' | 'bubble';
+export type ModelInitializationStage = 'ocr' | 'inpaint' | 'translation' | 'bubble' | 'color';
 
 export interface ModelInitializationMessage {
   type: 'MODEL_INITIALIZATION';
@@ -189,6 +189,7 @@ export interface UserAccountInfo {
 
 import type { RenderFontPresetId } from './renderFontPresets';
 import type { GlossaryEntry } from './glossary';
+import type { ColorTierId } from './colorTiers';
 
 export type BubbleDetectionMode = 'off' | 'heuristic' | 'neural' | 'neural-mask';
 export type HistoryRetentionPeriod = '1day' | '1week' | '1month' | 'never';
@@ -210,6 +211,7 @@ export interface PopupState {
   targetLang: string;
   activeEngineId: string;
   activeInpaintId: string;
+  activeColorId?: ColorTierId | string;
   activeOcrId: string;
   renderFontPresetId: RenderFontPresetId;
   renderFontBold: boolean;
@@ -232,6 +234,7 @@ export interface PopupState {
     inpaint: boolean;
     ocr: boolean;
     bubble: boolean;
+    color: boolean;
   };
   userAccount?: UserAccountInfo;
 }
@@ -246,6 +249,7 @@ export const DEFAULT_POPUP_STATE: PopupState = {
   targetLang: 'en',
   activeEngineId: 'gg-translate',
   activeInpaintId: 'simple',
+  activeColorId: 'none',
   activeOcrId: 'v6-small',
   renderFontPresetId: 'standard',
   renderFontBold: false,
@@ -268,5 +272,6 @@ export const DEFAULT_POPUP_STATE: PopupState = {
     inpaint: true,
     ocr: true,
     bubble: true,
+    color: true,
   }
 };

@@ -14,9 +14,12 @@ import { runStudioOcr, type StudioOcrResponse } from './services/StudioOcr';
 import { CustomApiEngine } from './engines/translation/CustomApiEngine';
 import { inpaintRegistry } from './engines/inpaint/inpaintRegistry';
 import { BUILTIN_INPAINT_IDS } from '../shared/inpaintTiers';
+import { colorRegistry } from './engines/color/colorRegistry';
+import { BUILTIN_COLOR_IDS } from '../shared/colorTiers';
 import { ocrRegistry, resolveOcrTier } from './engines/ocr/ocrRegistry';
 import { bubbleRegistry } from './engines/bubble/bubbleRegistry';
 import { InpaintCacheManager } from './services/InpaintCacheManager';
+import { ColorCacheManager } from './services/ColorCacheManager';
 import { OcrCacheManager } from './services/OcrCacheManager';
 import { BubbleCacheManager } from './services/BubbleCacheManager';
 import { hasModelInCache } from '@mlc-ai/web-llm';
@@ -404,6 +407,31 @@ async function handleStartDownload(modelId: string, category?: string) {
     return;
   }
 
+  if (category === 'color' || modelId === 'manga-colorization-v2') {
+    const entry = colorRegistry['manga-colorization-v2'];
+    if (!entry) throw new Error(`Unknown color engine: ${modelId}`);
+
+    activeDownloads[modelId] = {
+      files: {},
+      maxProgress: 0,
+      status: 'Downloading color weights...'
+    };
+
+    await ColorCacheManager.downloadModelWithProgress(entry.onnxUrl, progressCallback);
+
+    if (activeDownloads[modelId]) {
+      activeDownloads[modelId].maxProgress = 1;
+      activeDownloads[modelId].status = 'ready';
+    }
+
+    chrome.runtime.sendMessage({
+      type: 'MODEL_DOWNLOAD_PROGRESS',
+      payload: { modelId, progress: 1, status: 'ready' }
+    }).catch(() => {});
+
+    return;
+  }
+
   activeDownloads[modelId] = {
     files: {},
     maxProgress: 0,
@@ -429,8 +457,8 @@ async function handleStartDownload(modelId: string, category?: string) {
 
 async function handleCheckStatus(modelId: string): Promise<boolean> {
   modelId = modelId === 'aot' ? 'aotgan' : modelId;
-  // Built-in inpaint and bubble algorithms require no downloaded model files
-  if (BUILTIN_INPAINT_IDS.has(modelId) || modelId === 'heuristic' || modelId === 'off') {
+  // Built-in inpaint, color and bubble algorithms require no downloaded model files
+  if (BUILTIN_COLOR_IDS.has(modelId) || BUILTIN_INPAINT_IDS.has(modelId) || modelId === 'heuristic' || modelId === 'off') {
     return true;
   }
 
@@ -454,6 +482,11 @@ async function handleCheckStatus(modelId: string): Promise<boolean> {
         return isCached && isDataCached;
       }
       return isCached;
+    }
+
+    if (colorRegistry[modelId]) {
+      const entry = colorRegistry[modelId];
+      return await ColorCacheManager.isModelCached(entry.onnxUrl);
     }
 
     return await hasModelInCache(modelId);

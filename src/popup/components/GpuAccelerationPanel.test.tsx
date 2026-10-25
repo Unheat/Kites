@@ -52,7 +52,7 @@ describe('GpuAccelerationPanel', () => {
 
     // Find all switches in granular config
     const switches = Array.from(container.querySelectorAll<HTMLButtonElement>('.kites-switch-sm'));
-    expect(switches.length).toBe(4); // Translation, Image Cleaning, Text Detection, Bubble Detection
+    expect(switches.length).toBe(5); // Translation, Image Cleaning, Text Detection, Bubble Detection, Colorization
 
     const bubbleSwitch = switches[3];
     await act(async () => {
@@ -62,6 +62,17 @@ describe('GpuAccelerationPanel', () => {
     expect(updateState).toHaveBeenCalledWith({
       webgpuOverrides: expect.objectContaining({
         bubble: false,
+      }),
+    });
+
+    const colorSwitch = switches[4];
+    await act(async () => {
+      colorSwitch.click();
+    });
+
+    expect(updateState).toHaveBeenCalledWith({
+      webgpuOverrides: expect.objectContaining({
+        color: false,
       }),
     });
 

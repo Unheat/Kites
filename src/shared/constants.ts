@@ -16,6 +16,7 @@ export const STORAGE_KEYS = {
   AUTH_TOKEN: 'kites_oauth_auth_token',
   AUTH_EXPIRES_AT: 'kites_oauth_token_expires_at',
   WEBGPU_SUPPORTED: 'hardware_webgpu_supported',
+  ACTIVE_COLOR_ID: 'activeColorId',
 } as const;
 
 export type StorageKey = (typeof STORAGE_KEYS)[keyof typeof STORAGE_KEYS];

@@ -157,7 +157,8 @@ describe('WebLLM download control', () => {
       bubbleButton?.click();
     });
 
-    const offButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('Disabled'));
+    const bubbleDropdown = bubbleButton?.closest('.relative');
+    const offButton = Array.from(bubbleDropdown?.querySelectorAll('button') || []).find((b) => b.textContent?.includes('Disabled'));
     expect(offButton).toBeDefined();
 
     await act(async () => {
@@ -239,6 +240,57 @@ describe('WebLLM download control', () => {
     const yoloBtn = buttons.find((b) => b.textContent?.includes('YOLO (AI)'));
 
     expect(yoloBtn).toBeDefined();
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  it('renders Manga Colorization selector and queues download when uninstalled', async () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const updateState = vi.fn();
+
+    const state: PopupState = {
+      ...DEFAULT_POPUP_STATE,
+      activeColorId: 'none',
+    };
+
+    await act(async () => {
+      root.render(<EngineSelectionPanel state={state} updateState={updateState} />);
+    });
+
+    const colorHeading = Array.from(container.querySelectorAll('h2')).find(h => h.textContent === 'Manga Colorization');
+    expect(colorHeading).toBeDefined();
+
+    const colorContainer = colorHeading?.closest('.flex.flex-col');
+    const colorDropdownButton = colorContainer?.querySelector<HTMLButtonElement>('button');
+    expect(colorDropdownButton).not.toBeNull();
+    expect(colorDropdownButton?.textContent).toContain('Disabled');
+
+    await act(async () => {
+      colorDropdownButton?.click();
+    });
+
+    const menu = colorContainer?.querySelector('.shadow-sm');
+    const colorButtons = Array.from(menu?.querySelectorAll('button') || []);
+    const neuralColorBtn = colorButtons.find((b) => b.textContent?.includes('Manga Colorizer (AI)'));
+    expect(neuralColorBtn).toBeDefined();
+
+    const downloadIcon = neuralColorBtn?.querySelector('svg');
+    const downloadButton = downloadIcon?.closest('div');
+    expect(downloadButton).not.toBeNull();
+
+    await act(async () => {
+      downloadButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    const downloadCalls = (chrome.runtime.sendMessage as any).mock.calls.filter(([message]: [any]) => message.type === 'START_MODEL_DOWNLOAD');
+    expect(downloadCalls.some(([message]: [any]) =>
+      message.payload?.modelId === 'manga-colorization-v2' && message.payload?.category === 'color'
+    )).toBe(true);
 
     await act(async () => {
       root.unmount();
