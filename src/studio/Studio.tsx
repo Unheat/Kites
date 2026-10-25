@@ -11,6 +11,7 @@ import {
   Palette,
   Save,
   ChevronDown,
+  ChevronLeft,
   Eye,
   EyeOff,
   Sparkles,
@@ -50,6 +51,7 @@ import { TypographySettings } from './tools/TypographySettings';
 import { WarpSettings } from './tools/WarpSettings';
 import { ImageLayerSettings } from './tools/ImageLayerSettings';
 import { PageInfoSettings } from './tools/PageInfoSettings';
+import { PageRail } from './projects/PageRail';
 import { FindReplaceModal } from './modals/FindReplaceModal';
 import { ExportTranscriptModal } from './modals/ExportTranscriptModal';
 import { ShortcutsModal } from './modals/ShortcutsModal';
@@ -68,6 +70,12 @@ export interface StudioProps {
   /** Queues an uploaded page through App's persisted full translation pipeline. */
   onUploadPage?: (file: File) => Promise<void>;
   isUploadingPage?: boolean;
+  /** Active project folder context for multi-page workflow. */
+  projectId?: number;
+  projectName?: string;
+  onBackToProjects?: () => void;
+  onSelectPage?: (jobId: number) => void;
+  onOpenAddFromLibrary?: () => void;
 }
 
 // Stable fallback prevents resetting editor state on unrelated renders without initial objects.
@@ -93,6 +101,11 @@ export const Studio: React.FC<StudioProps> = ({
   onBack,
   onUploadPage,
   isUploadingPage = false,
+  projectId,
+  projectName,
+  onBackToProjects,
+  onSelectPage,
+  onOpenAddFromLibrary,
 }) => {
   const activeTool = useStudioStore((s) => s.activeTool);
   const isInfoPanelOpen = useStudioStore((s) => s.isInfoPanelOpen);
@@ -486,6 +499,16 @@ export const Studio: React.FC<StudioProps> = ({
 
   return (
     <div className="flex flex-row gap-3 p-3 w-screen h-screen overflow-hidden bg-[#090a0f] text-slate-100 select-none">
+      {/* 0. MULTI-PAGE CHAPTER RAIL (When viewing within an active Project) */}
+      {projectId && onSelectPage && (
+        <PageRail
+          projectId={projectId}
+          activeJobId={jobId}
+          onSelectPage={onSelectPage}
+          onOpenAddFromLibrary={onOpenAddFromLibrary || (() => {})}
+        />
+      )}
+
       {/* ======================================================== */}
       {/* 1. LEFT SIDE PANEL: DUAL CARD TOOL ARCHITECTURE          */}
       {/* ======================================================== */}
@@ -655,6 +678,24 @@ export const Studio: React.FC<StudioProps> = ({
         {/* Canvas Top Bar */}
         <div className="w-full h-9 bg-[#141724] border-b border-[#262a3b] px-3 flex items-center justify-between text-xs text-slate-300 shrink-0 select-none z-30">
           <div className="flex items-center gap-2">
+            {/* Breadcrumb back to Projects Dashboard */}
+            {onBackToProjects && (
+              <button
+                type="button"
+                onClick={onBackToProjects}
+                className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#090a0f] border border-[#262a3b] text-slate-300 hover:text-white hover:bg-[#1c1f2e] text-xs font-semibold transition cursor-pointer"
+                title="Back to Projects Dashboard"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" />
+                <span>Projects</span>
+              </button>
+            )}
+            {projectName && (
+              <span className="text-xs font-semibold text-slate-400 truncate max-w-[120px]" title={projectName}>
+                / {projectName}
+              </span>
+            )}
+
             {/* 3-Way Presentation View Mode Segmented Control */}
             <div className="flex items-center p-0.5 rounded-lg bg-[#090a0f] border border-[#262a3b]">
               <button

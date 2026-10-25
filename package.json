@@ -31,6 +31,7 @@
     "@ai-sdk/google": "^3.0.122",
     "@ai-sdk/openai": "^3.0.112",
     "@mlc-ai/web-llm": "^0.2.86",
+    "ag-psd": "^33.0.0",
     "ai": "^6.0.280",
     "clipper-lib": "^6.4.2",
     "dexie": "^4.4.4",
