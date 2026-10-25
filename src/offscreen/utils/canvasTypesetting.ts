@@ -660,6 +660,8 @@ function renderTextBlocksDefault(
       strokeColor: b.strokeColor || '#FFFFFF',
       alignment: b.alignment || 'center',
       sourceDirection: b.direction || 'h',
+      isRounded: b.isRounded,
+      borderRadius: b.borderRadius,
     };
 
     try {

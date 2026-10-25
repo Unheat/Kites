@@ -60,7 +60,7 @@ export class BubbleManager {
   private resolveEngineOptions(mode: BubbleDetectionMode, popupState?: PopupState): BubbleEngineOptions {
     return {
       preferGpu: popupState ? isBubbleGpuAvailable(popupState) : false,
-      mode: mode === 'neural-mask' ? 'mask' : 'box',
+      mode: mode === 'neural' || mode === 'neural-mask' ? 'mask' : 'box',
     };
   }
 
