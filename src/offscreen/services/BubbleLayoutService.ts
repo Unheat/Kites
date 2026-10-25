@@ -13,6 +13,8 @@ export interface BubbleGeometry {
   /** Object identity is the neural proposal identity, not rectangle overlap. */
   proposals: (BoxRect | null)[];
   shapes: (BubbleShapeEvidence | undefined)[];
+  /** Calculated corner curvature radius and roundness per box. */
+  curvatures?: { isRounded: boolean; borderRadius: number }[];
 }
 
 export interface BubbleLayoutInput extends BubbleGeometry {
@@ -25,6 +27,53 @@ export interface BubbleLayoutInput extends BubbleGeometry {
   accept: (index: number, proposed: BoxRect, minimumFontRatio?: number) => boolean;
   /** Optional concise production/harness diagnostics; counts reflect final post-rollback results. */
   onDiagnostics?: (counts: { single: number; xy: number; fallback: number }) => void;
+}
+
+/**
+ * Calculates corner curvature radius and roundness from carrier mask evidence.
+ * Uses the exact 2D corner-area formula: R = sqrt(max(0, W*H - maskArea) / (4 - pi)).
+ *
+ * @param shape - Local morphology shape evidence if available.
+ * @param carrier - Computed carrier bounding box.
+ * @returns Object with isRounded flag and calculated borderRadius in pixels.
+ */
+export function computeMaskCurvature(
+  shape: BubbleShapeEvidence | undefined,
+  carrier: BoxRect | null
+): { isRounded: boolean; borderRadius: number } {
+  if (!carrier || carrier.w <= 0 || carrier.h <= 0) {
+    return { isRounded: false, borderRadius: 0 };
+  }
+
+  // If no interior mask is available (e.g. raw bbox without shape), default to oval speech bubble
+  if (!shape || !shape.interior || shape.width <= 0 || shape.height <= 0) {
+    const rMax = Math.min(carrier.w / 2, carrier.h / 2);
+    return { isRounded: true, borderRadius: Math.round(rMax) };
+  }
+
+  // Count active mask pixels
+  let maskArea = 0;
+  const totalPixels = shape.width * shape.height;
+  for (let i = 0; i < totalPixels; i++) {
+    if (shape.interior[i] > 0) maskArea++;
+  }
+
+  const fillRatio = maskArea / totalPixels;
+  // If fill ratio >= 0.88, the mask fills almost the entire bounding box including all corners (caption/narration box)
+  if (fillRatio >= 0.88) {
+    return { isRounded: false, borderRadius: 0 };
+  }
+
+  // Corner-area formula: (4 - pi) * R^2 = W*H - maskArea
+  const diffArea = Math.max(0, (carrier.w * carrier.h) * (1 - fillRatio));
+  const rawRadius = Math.sqrt(diffArea / (4 - Math.PI));
+  const rMax = Math.min(carrier.w / 2, carrier.h / 2);
+  const borderRadius = Math.max(0, Math.min(rMax, Math.round(rawRadius)));
+
+  return {
+    isRounded: borderRadius > 2,
+    borderRadius,
+  };
 }
 
 /**
@@ -44,6 +93,7 @@ export function acquireBubbleGeometry(
   const carriers: (BoxRect | null)[] = [];
   const proposals: (BoxRect | null)[] = [];
   const shapes: (BubbleShapeEvidence | undefined)[] = [];
+  const curvatures: { isRounded: boolean; borderRadius: number }[] = [];
   boxes.forEach((box, index) => {
     const proposal = NeuralBubbleDetector.matchBubble(box, neuralProposals ?? [], BUBBLE_MATCH_COVERAGE);
     proposals[index] = proposal;
@@ -57,8 +107,9 @@ export function acquireBubbleGeometry(
       });
       carriers[index] = proposal ?? heuristic;
     }
+    curvatures[index] = computeMaskCurvature(shapes[index], carriers[index]);
   });
-  return { pageWidth: image.width, carriers, proposals, shapes };
+  return { pageWidth: image.width, carriers, proposals, shapes, curvatures };
 }
 
 /** @param a - Outer rectangle. @param b - Inner rectangle. @returns Whether all inner edges are contained. */

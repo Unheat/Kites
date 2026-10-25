@@ -17,7 +17,9 @@ import {
   Plus,
   ClipboardPaste,
   Sparkles,
+  CircleDot,
 } from 'lucide-react';
+import type { TypesetMode } from '../../shared/constants';
 import { studioStore, useStudioStore, extractTypographyStyle } from '../state/studioStore';
 import { studioUndoStack } from '../state/undoStack';
 import { applyTextObjectUpdates, prepareInitialTextObject } from '../canvas/studioTypeset';
@@ -43,7 +45,7 @@ const SELECTION_ELIGIBLE_KEYS: (keyof CharStyleOverride)[] = [
 function applyBoxTypographyUpdate(
   object: TextObject,
   partial: Partial<TextObject>,
-  globalMode: 'balloon' | 'simple',
+  globalMode: TypesetMode,
 ): TextObject {
   // Object-wide update: if changing a property box-wide, clear overrides for that property in charStyles
   let updatedCharStyles = object.charStyles ? [...object.charStyles] : undefined;
@@ -271,7 +273,7 @@ export const TypographySettings: React.FC = () => {
    * @param newMode Engine for subsequent edits in the active scope.
    * @returns Nothing; global default is session-only and not part of document undo.
    */
-  const handleToggleTypesetMode = (newMode: 'balloon' | 'simple') => {
+  const handleToggleTypesetMode = (newMode: TypesetMode) => {
     const prev = [...textObjects];
     let next: TextObject[];
 
@@ -291,10 +293,15 @@ export const TypographySettings: React.FC = () => {
       textObjects: next,
       ...(globalEditMode ? { globalTypesetMode: newMode } : {}),
     });
+    const modeLabels: Record<TypesetMode, string> = {
+      ellipse: 'Bubble Ellipse',
+      balloon: 'Auto Balloon',
+      simple: 'Simple Wrap',
+    };
     studioUndoStack.push({
       id: `typeset-mode-${Date.now()}`,
       timestamp: Date.now(),
-      description: `Switch Typesetting Mode to ${newMode === 'balloon' ? 'Auto Balloon' : 'Simple Wrap'}`,
+      description: `Switch Typesetting Mode to ${modeLabels[newMode]}`,
       textObjects: { before: prev, after: next },
     });
   };
@@ -671,8 +678,21 @@ export const TypographySettings: React.FC = () => {
         <div className="flex p-0.5 rounded-lg bg-[#090a0f] border border-[#282d3f] text-xs">
           <button
             type="button"
+            onClick={() => handleToggleTypesetMode('ellipse')}
+            className={`flex-1 py-1.5 px-1.5 rounded-md font-semibold transition-all flex items-center justify-center gap-1 cursor-pointer text-[11px] ${
+              effectiveTypesetMode === 'ellipse'
+                ? 'bg-[#1c1f2e] text-[#f4446d] shadow-xs'
+                : 'text-slate-400 hover:text-white'
+            }`}
+            title="Bubble Ellipse: Dynamic programming chord profile fitted to speech bubble curves with auto-snapping height"
+          >
+            <CircleDot size={12} className={effectiveTypesetMode === 'ellipse' ? 'text-[#f4446d]' : ''} />
+            <span className="truncate">Bubble Ellipse</span>
+          </button>
+          <button
+            type="button"
             onClick={() => handleToggleTypesetMode('balloon')}
-            className={`flex-1 py-1.5 px-2 rounded-md font-semibold transition-all flex items-center justify-center gap-1.5 cursor-pointer text-[11px] ${
+            className={`flex-1 py-1.5 px-1.5 rounded-md font-semibold transition-all flex items-center justify-center gap-1 cursor-pointer text-[11px] ${
               effectiveTypesetMode === 'balloon'
                 ? 'bg-[#1c1f2e] text-[#f4446d] shadow-xs'
                 : 'text-slate-400 hover:text-white'
@@ -680,12 +700,12 @@ export const TypographySettings: React.FC = () => {
             title="Auto Balloon: Balances lines into speech bubble diamond envelopes and auto-fits font size (Pipeline typesystem)"
           >
             <Sparkles size={12} className={effectiveTypesetMode === 'balloon' ? 'text-[#f4446d]' : ''} />
-            <span>Auto Balloon</span>
+            <span className="truncate">Auto Balloon</span>
           </button>
           <button
             type="button"
             onClick={() => handleToggleTypesetMode('simple')}
-            className={`flex-1 py-1.5 px-2 rounded-md font-semibold transition-all flex items-center justify-center gap-1.5 cursor-pointer text-[11px] ${
+            className={`flex-1 py-1.5 px-1.5 rounded-md font-semibold transition-all flex items-center justify-center gap-1 cursor-pointer text-[11px] ${
               effectiveTypesetMode === 'simple'
                 ? 'bg-[#1c1f2e] text-[#f4446d] shadow-xs'
                 : 'text-slate-400 hover:text-white'
@@ -693,7 +713,7 @@ export const TypographySettings: React.FC = () => {
             title="Simple Wrap: Greedy line wrapping without auto font scaling on subsequent edits"
           >
             <AlignLeft size={12} className={effectiveTypesetMode === 'simple' ? 'text-[#f4446d]' : ''} />
-            <span>Simple Wrap</span>
+            <span className="truncate">Simple Wrap</span>
           </button>
         </div>
         <p className="mt-1 text-[10px] text-slate-500">

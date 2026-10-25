@@ -22,6 +22,8 @@ export function restoreTextObject(block: TextBlock): TextObject {
     lines: block.lines,
     lineSpacing: block.lineSpacing,
     typesetMode: block.typesetMode,
+    borderRadius: block.borderRadius,
+    isRounded: block.isRounded,
     originalText: block.originalText,
     fontSize: block.fontSize || 16,
     fontFamily: block.fontFamily || 'WildWords, CCWildWords, sans-serif',

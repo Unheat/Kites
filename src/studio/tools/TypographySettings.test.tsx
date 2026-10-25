@@ -87,6 +87,16 @@ describe('TypographySettings editing intent and reflow', () => {
     expect(simple?.className).toContain('text-[#f4446d]');
   });
 
+  it('switches mode to Bubble Ellipse without immediate reflow until edit', async () => {
+    const original = studioStore.getState().textObjects;
+    await render();
+    await click('Bubble Ellipse');
+    const toggled = studioStore.getState().textObjects;
+    expect(toggled[0].typesetMode).toBe('ellipse');
+    expect(toggled[0].lines).toBe(original[0].lines);
+    expect(toggled[0].fontSize).toBe(18);
+  });
+
   it('changes only selected mode without touching lines or font size, then reflows its edit', async () => {
     const original = studioStore.getState().textObjects;
     await render();

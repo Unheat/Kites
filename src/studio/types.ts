@@ -1,3 +1,5 @@
+import type { TypesetMode } from '../shared/constants';
+
 /**
  * Core type definitions for Kites Studio V2.
  * Comprehensive model for 2D viewport, raster brushes, typography,
@@ -110,7 +112,11 @@ export interface TextObject {
   isVisible?: boolean;
   isSkipped?: boolean;
   /** Preferred engine for future edits, independent of already measured lines. */
-  typesetMode?: 'balloon' | 'simple';
+  typesetMode?: TypesetMode;
+  /** Mathematical bubble corner radius in image pixels (0 = rectangle, >0 = oval/ellipse curvature). */
+  borderRadius?: number;
+  /** Whether this text object is positioned inside a curved bubble or a rectangular box. */
+  isRounded?: boolean;
 }
 
 export interface ImageLayer {
@@ -127,7 +133,7 @@ export interface ImageLayer {
   flipV: boolean;
   isLocked?: boolean;
   isVisible?: boolean;
-  typesetMode?: 'balloon' | 'simple';
+  typesetMode?: TypesetMode;
 }
 
 export interface BoundedDirtyRectPatch {

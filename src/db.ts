@@ -1,4 +1,5 @@
 import Dexie, { type EntityTable } from 'dexie';
+import type { TypesetMode } from './shared/constants';
 import type { HistoryRetentionPeriod } from './shared/types';
 import { STORAGE_KEYS } from './shared/constants';
 
@@ -73,7 +74,11 @@ export interface TextBlock {
   /** Rendered line advance as a multiple of font size, shared with Studio. */
   lineSpacing?: number;
   /** Studio editing preference; never used to reinterpret saved layout on load. */
-  typesetMode?: 'balloon' | 'simple';
+  typesetMode?: TypesetMode;
+  /** Mathematical bubble corner radius in image pixels (0 = rectangle, >0 = oval/ellipse curvature). */
+  borderRadius?: number;
+  /** Whether this text block was fitted to a rounded speech bubble. */
+  isRounded?: boolean;
   bold?: boolean;
   italic?: boolean;
   align?: 'left' | 'center' | 'right';
