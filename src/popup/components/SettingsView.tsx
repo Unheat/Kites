@@ -55,10 +55,9 @@ export default function SettingsView({ state, updateState }: SettingsViewProps) 
         }}
       />
 
-      {/* Section 1: AI Engines & Acceleration */}
+      {/* Section 1: AI Engines */}
       <div className="flex flex-col gap-3">
         <EngineSelectionPanel state={state} updateState={updateState} />
-        <GpuAccelerationPanel state={state} updateState={updateState} />
       </div>
 
       {/* Section 2: Reading & Interaction */}
@@ -158,6 +157,8 @@ export default function SettingsView({ state, updateState }: SettingsViewProps) 
         <h3 className="text-xs font-semibold tracking-wider uppercase text-[var(--color-dust)]">
           Advanced & Integrations
         </h3>
+
+        <GpuAccelerationPanel state={state} updateState={updateState} />
 
         <div className="flex flex-col gap-2">
           {!showApiManager ? (
