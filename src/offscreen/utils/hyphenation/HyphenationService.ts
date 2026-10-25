@@ -20,13 +20,29 @@ import { getIndicSyllablePoints, getVowelSyllablePoints } from './RuleBasedEngin
 export class HyphenationService {
   private static instance: HyphenationService | null = null;
 
+  /** Maximum entries retained in the word hyphenation points cache. */
+  private static readonly MAX_WORD_POINTS_CACHE = 2000;
+
+  /** Custom loader hook for testing/node environments to avoid bundling Node built-ins. */
+  private static customLoader?: (dictName: string) => Promise<string | null | undefined>;
+
   /** Cache of parsed Liang pattern collections keyed by dictionary name (e.g. 'en_US', 'de_DE'). */
   private patternsCache = new Map<string, ParsedPatterns>();
 
   /** Active load promises to prevent redundant simultaneous fetches for the same dictionary. */
   private pendingLoads = new Map<string, Promise<void>>();
 
+  /** Word-level memoization cache for hyphenation points: key = `${targetLang}:${word}:${minSide}` */
+  private wordPointsCache = new Map<string, number[]>();
+
   private constructor() {}
+
+  /**
+   * Registers a custom pattern file loader (e.g. test environment filesystem reader).
+   */
+  public static setCustomLoader(loader: ((dictName: string) => Promise<string | null | undefined>) | undefined): void {
+    HyphenationService.customLoader = loader;
+  }
 
   /**
    * Returns the shared singleton instance of HyphenationService.
@@ -45,6 +61,7 @@ export class HyphenationService {
     if (HyphenationService.instance) {
       HyphenationService.instance.patternsCache.clear();
       HyphenationService.instance.pendingLoads.clear();
+      HyphenationService.instance.wordPointsCache.clear();
       HyphenationService.instance = null;
     }
   }
@@ -114,27 +131,19 @@ export class HyphenationService {
   }
 
   /**
-   * Internal loader that fetches pattern text from extension assets or filesystem fallback.
+   * Internal loader that fetches pattern text from extension assets or custom loader fallback.
    */
   private async fetchAndParseDictionary(dictName: string): Promise<void> {
-    // 1. Try Node.js filesystem read if in test / runner environment
-    if (typeof process !== 'undefined' && process.versions?.node) {
+    // 1. Try registered custom loader (e.g. test environment Node reader)
+    if (HyphenationService.customLoader) {
       try {
-        const fs = await import('fs');
-        const path = await import('path');
-        const candidatePaths = [
-          path.resolve(process.cwd(), 'public/assets/hyphenation', `${dictName}.txt`),
-          path.resolve(process.cwd(), 'dist/assets/hyphenation', `${dictName}.txt`),
-        ];
-        for (const p of candidatePaths) {
-          if (fs.existsSync(p)) {
-            const content = fs.readFileSync(p, 'utf-8');
-            this.patternsCache.set(dictName, parseHyphenationPatterns(content));
-            return;
-          }
+        const customContent = await HyphenationService.customLoader(dictName);
+        if (customContent) {
+          this.patternsCache.set(dictName, parseHyphenationPatterns(customContent));
+          return;
         }
       } catch {
-        // Fall through to standard fetch
+        // Fall through to runtime fetch
       }
     }
 
@@ -170,27 +179,34 @@ export class HyphenationService {
     minSide: number = HYPHEN_MIN_SIDE
   ): number[] {
     const baseLang = (targetLang || 'en').split('-')[0].toLowerCase();
+    const cacheKey = `${baseLang}:${word}:${minSide}`;
+    const cached = this.wordPointsCache.get(cacheKey);
+    if (cached) return cached;
+
+    let points: number[] = [];
 
     // 1. Indic scripts (Devanagari, Bengali, Tamil, etc.)
     if (INDIC_SYLLABLE_LANGS.has(baseLang)) {
-      return getIndicSyllablePoints(word, minSide);
-    }
-
-    // 2. Vowel-syllabic languages (Turkish, Finnish, Azerbaijani)
-    if (VOWEL_SYLLABLE_LANGS.has(baseLang)) {
-      return getVowelSyllablePoints(word, baseLang, minSide);
-    }
-
-    // 3. Dictionary-backed Liang engine
-    const dictName = this.resolveDictionaryName(targetLang);
-    if (dictName) {
-      const patterns = this.patternsCache.get(dictName);
-      if (patterns) {
-        return hyphenationPoints(word, patterns, minSide);
+      points = getIndicSyllablePoints(word, minSide);
+    } else if (VOWEL_SYLLABLE_LANGS.has(baseLang)) {
+      // 2. Vowel-syllabic languages (Turkish, Finnish, Azerbaijani)
+      points = getVowelSyllablePoints(word, baseLang, minSide);
+    } else {
+      // 3. Dictionary-backed Liang engine
+      const dictName = this.resolveDictionaryName(targetLang);
+      if (dictName) {
+        const patterns = this.patternsCache.get(dictName);
+        if (patterns) {
+          points = hyphenationPoints(word, patterns, minSide);
+        }
       }
     }
 
-    return [];
+    if (this.wordPointsCache.size >= HyphenationService.MAX_WORD_POINTS_CACHE) {
+      this.wordPointsCache.clear();
+    }
+    this.wordPointsCache.set(cacheKey, points);
+    return points;
   }
 
   /**

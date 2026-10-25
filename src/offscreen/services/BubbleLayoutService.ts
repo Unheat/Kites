@@ -41,7 +41,7 @@ export function computeMaskCurvature(
   shape: BubbleShapeEvidence | undefined,
   carrier: BoxRect | null
 ): { isRounded: boolean; borderRadius: number } {
-  if (!carrier || carrier.w <= 0 || carrier.h <= 0) {
+  if (!carrier || !Number.isFinite(carrier.w) || !Number.isFinite(carrier.h) || carrier.w <= 0 || carrier.h <= 0) {
     return { isRounded: false, borderRadius: 0 };
   }
 

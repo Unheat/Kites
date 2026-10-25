@@ -1,4 +1,21 @@
 import { vi } from 'vitest';
+import * as fs from 'fs';
+import * as path from 'path';
+import { HyphenationService } from './src/offscreen/utils/hyphenation/HyphenationService';
+
+// Provide filesystem dictionary loader for Vitest Node runner without polluting browser bundle
+HyphenationService.setCustomLoader(async (dictName: string) => {
+  const candidatePaths = [
+    path.resolve(process.cwd(), 'public/assets/hyphenation', `${dictName}.txt`),
+    path.resolve(process.cwd(), 'dist/assets/hyphenation', `${dictName}.txt`),
+  ];
+  for (const p of candidatePaths) {
+    if (fs.existsSync(p)) {
+      return fs.readFileSync(p, 'utf-8');
+    }
+  }
+  return null;
+});
 
 vi.stubGlobal('chrome', {
   runtime: {

@@ -247,36 +247,44 @@ export function layoutEllipseLines(
 export function wrapRectangular(
   words: string[],
   targetWidth: number,
-  measure: (str: string) => number
+  measure: (str: string) => number,
+  targetLang: string = 'en'
 ): string[] {
   const lines: string[] = [];
   let currentLine = '';
 
-  for (const word of words) {
-    const testLine = currentLine ? `${currentLine} ${word}` : word;
-    if (measure(testLine) <= targetWidth || !currentLine) {
-      currentLine = testLine;
-    } else {
-      // Try syllable hyphenation if a single word exceeds the box width
-      if (!currentLine && word.length > 5) {
-        const syls = syllables(word);
-        if (syls.length > 1) {
-          let accum = '';
-          for (let s = 0; s < syls.length; s++) {
-            const candidate = accum + syls[s] + (s < syls.length - 1 ? INSERTED_HYPHEN : '');
-            if (measure(candidate) <= targetWidth || !accum) {
-              accum += syls[s];
-            } else {
-              lines.push(accum + INSERTED_HYPHEN);
-              accum = syls[s];
-            }
+  const pushWordWithHyphenation = (word: string): void => {
+    if (measure(word) > targetWidth && word.length > 5) {
+      const syls = syllables(word, targetLang);
+      if (syls.length > 1) {
+        let accum = '';
+        for (let s = 0; s < syls.length; s++) {
+          const candidate = accum + syls[s] + (s < syls.length - 1 ? INSERTED_HYPHEN : '');
+          if (measure(candidate) <= targetWidth || !accum) {
+            accum += syls[s];
+          } else {
+            lines.push(accum + INSERTED_HYPHEN);
+            accum = syls[s];
           }
-          currentLine = accum;
-          continue;
         }
+        currentLine = accum;
+        return;
       }
-      lines.push(currentLine);
-      currentLine = word;
+    }
+    currentLine = word;
+  };
+
+  for (const word of words) {
+    if (!currentLine) {
+      pushWordWithHyphenation(word);
+    } else {
+      const testLine = `${currentLine} ${word}`;
+      if (measure(testLine) <= targetWidth) {
+        currentLine = testLine;
+      } else {
+        lines.push(currentLine);
+        pushWordWithHyphenation(word);
+      }
     }
   }
 
@@ -313,7 +321,8 @@ export function wrapTextEllipse(
   initialFontSize: number,
   fontFamily: string,
   strength: number,
-  ctx: CanvasRenderingContext2D
+  ctx: CanvasRenderingContext2D,
+  targetLang: string = 'en'
 ): WrapEllipseResult {
   const clean = unwrapWrappedText(text);
   if (!clean) {
@@ -328,7 +337,7 @@ export function wrapTextEllipse(
   if (strength <= 0) {
     ctx.font = `${initialFontSize}px ${fontFamily || 'sans-serif'}`;
     const measure = (s: string) => ctx.measureText(s).width;
-    const lines = wrapRectangular(words, safeWidth, measure);
+    const lines = wrapRectangular(words, safeWidth, measure, targetLang);
     const lineHeight = initialFontSize * 1.25;
     return {
       lines,

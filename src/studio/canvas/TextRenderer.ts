@@ -279,12 +279,14 @@ export class TextRenderer {
 
     ctx.textAlign = 'center';
 
+    const maxColLength = Math.max(...columns.map((col) => col.length), 1);
+    const maxColHeight = maxColLength * charHeight;
+    const startY = (obj.height - maxColHeight) / 2 + charHeight / 2;
+
     for (let colIdx = 0; colIdx < columns.length; colIdx++) {
       const col = columns[colIdx];
       const colX = startX - colIdx * colWidth;
-      const colHeight = col.length * charHeight;
-
-      let charY = (obj.height - colHeight) / 2 + charHeight / 2;
+      let charY = startY;
 
       for (const char of col) {
         const mapped = VERTICAL_ROTATION_MAP[char] || char;

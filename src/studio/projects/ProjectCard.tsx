@@ -68,8 +68,10 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
       const urls: string[] = [];
 
       for (const job of previewJobs) {
+        if (isCancelled) break;
         if (!job.id) continue;
         const img = await db.images.where({ jobId: job.id }).first();
+        if (isCancelled) break;
         if (img) {
           const blob = img.translatedImageBlob || img.rawImageBlob;
           if (blob) {

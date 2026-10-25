@@ -52,9 +52,11 @@ export const PageRail: React.FC<PageRailProps> = ({
 
       const items: PageItem[] = [];
       for (const job of jobs) {
+        if (isCancelled) break;
         let thumbUrl: string | null = null;
         if (job.id) {
           const img = await db.images.where({ jobId: job.id }).first();
+          if (isCancelled) break;
           if (img) {
             const blob = img.translatedImageBlob || img.rawImageBlob;
             if (blob) {
@@ -77,7 +79,7 @@ export const PageRail: React.FC<PageRailProps> = ({
       isCancelled = true;
       activeUrls.forEach((url) => URL.revokeObjectURL(url));
     };
-  }, [projectId, activeJobId]);
+  }, [projectId]);
 
   const handleExport = async (format: BatchExportFormat) => {
     setExportMenuOpen(false);

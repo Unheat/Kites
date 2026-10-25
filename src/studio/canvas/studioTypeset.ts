@@ -108,7 +108,9 @@ function reflowTextObject(object: TextObject, mode: StudioTypesetMode): TextObje
     object.width, object.height, object.fontSize, mode, object
   );
   // Auto-snap height to hug measured text lines ("upper limit" bounds)
-  const lineSpacingMultiplier = object.lineSpacing ? object.lineSpacing / 100 : 1.25;
+  const lineSpacingMultiplier = object.lineSpacing
+    ? (object.lineSpacing > 10 ? object.lineSpacing / 100 : object.lineSpacing)
+    : 1.25;
   const measuredHeight = layout.height ?? (layout.lines.length * layout.fontSize * lineSpacingMultiplier);
   const nextHeight = Math.max(MIN_LAYOUT_DIMENSION, Math.round(measuredHeight));
 

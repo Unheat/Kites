@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import { loadHyphenationLanguage } from './hyphenation';
 import {
   unwrapWrappedText,
   ellipseProfile,
@@ -101,6 +102,15 @@ describe('ellipseTypeset module', () => {
       const words = tokenizeDialogue('Short test dialogue that needs multiple lines');
       const lines = wrapRectangular(words, 80, (s) => s.length * 8);
       expect(lines.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('hyphenates overflowing long words via syllables in wrapRectangular', async () => {
+      await loadHyphenationLanguage('en');
+      const words = ['extraordinary'];
+      // Width 50px allows ~6 chars (6 * 8 = 48px), so extraordinary (13 chars) must break into syllables
+      const lines = wrapRectangular(words, 50, (s) => s.length * 8, 'en');
+      expect(lines.length).toBeGreaterThan(1);
+      expect(lines.some((l) => l.includes('-'))).toBe(true);
     });
 
     it('wraps with ellipse profile when strength is 1.0', () => {

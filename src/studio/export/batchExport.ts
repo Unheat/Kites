@@ -1,6 +1,4 @@
-import JSZip from 'jszip';
 import { db } from '../../db';
-import { exportPageToPsdBlob } from './psdExport';
 
 /** Supported batch archive export variants. */
 export type BatchExportFormat = 'images' | 'cbz' | 'psd';
@@ -76,6 +74,11 @@ export async function exportProjectBundle(
   if (jobs.length === 0) {
     throw new Error('Project contains no pages to export.');
   }
+
+  const [{ default: JSZip }, { exportPageToPsdBlob }] = await Promise.all([
+    import('jszip'),
+    import('./psdExport'),
+  ]);
 
   const zip = new JSZip();
   const total = jobs.length;

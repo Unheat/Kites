@@ -39,9 +39,11 @@ export const AddFromLibraryModal: React.FC<AddFromLibraryModalProps> = ({
 
       const results: JobWithThumb[] = [];
       for (const job of allJobs) {
+        if (isCancelled) break;
         if (!job.id) continue;
         let thumbUrl: string | null = null;
         const img = await db.images.where({ jobId: job.id }).first();
+        if (isCancelled) break;
         if (img) {
           const blob = img.translatedImageBlob || img.rawImageBlob;
           if (blob) {
