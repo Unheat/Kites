@@ -162,4 +162,64 @@ describe('TextRenderer Rich Text (charStyles)', () => {
     });
     expect(vi.mocked(ctx.fillText).mock.calls.map((call) => call[0])).toEqual(['原', '文', '文', '字']);
   });
+
+  it('renders vertical CJK with centered RTL columns within bounding box', () => {
+    const ctx = createMockContext();
+    const obj: TextObject = {
+      id: 'vertical-cjk',
+      x: 0,
+      y: 0,
+      width: 100,
+      height: 120,
+      text: 'こんにちは世界',
+      lines: ['こんに', 'ちは世', '界'],
+      fontSize: 16,
+      fontFamily: 'sans-serif',
+      color: '#000',
+      isVertical: true,
+      lineSpacing: 1.15,
+    };
+
+    TextRenderer.renderText(ctx, obj);
+
+    const calls = vi.mocked(ctx.fillText).mock.calls;
+    expect(calls.length).toBe(7); // 7 characters rendered individually
+
+    // All X coordinates must be strictly within bounding box (0 to 100)
+    for (const call of calls) {
+      const x = call[1] as number;
+      expect(x).toBeGreaterThan(0);
+      expect(x).toBeLessThan(100);
+    }
+
+    // Column 0 ('こ') must be to the right of Column 1 ('ち') (RTL)
+    const col0X = calls[0][1] as number; // 'こ'
+    const col1X = calls[3][1] as number; // 'ち'
+    expect(col0X).toBeGreaterThan(col1X);
+  });
+
+  it('maps CJK punctuation to vertical Unicode presentation forms', () => {
+    const ctx = createMockContext();
+    const obj: TextObject = {
+      id: 'vertical-punct',
+      x: 0,
+      y: 0,
+      width: 80,
+      height: 100,
+      text: '「あー…」',
+      lines: ['「あー…」'],
+      fontSize: 16,
+      fontFamily: 'sans-serif',
+      color: '#000',
+      isVertical: true,
+    };
+
+    TextRenderer.renderText(ctx, obj);
+
+    const renderedChars = vi.mocked(ctx.fillText).mock.calls.map((c) => c[0]);
+    expect(renderedChars).toContain('\ufe41'); // 「 mapped to ﹁
+    expect(renderedChars).toContain('\ufe31'); // ー mapped to ︱
+    expect(renderedChars).toContain('\ufe19'); // … mapped to ︙
+    expect(renderedChars).toContain('\ufe42'); // 」 mapped to ﹂
+  });
 });

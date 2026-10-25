@@ -36,7 +36,7 @@ import { StudioSourceSampler } from './StudioSourceSampler';
 import { ToolViewModePolicy } from './tools/ToolViewModePolicy';
 import { requestStudioInpaint, requestStudioOcr } from '../bridge/offscreenStudioBridge';
 import { computeRotatedBounds, getHandleCursor } from './transformMath';
-import { applyTextObjectUpdates, prepareInitialTextObject } from './studioTypeset';
+import { applyTextObjectUpdates, prepareInitialTextObject, CJK_CHARACTER_REGEX } from './studioTypeset';
 import { extractTypographyStyle } from '../state/studioStore';
 import type {
   BoundingBox,
@@ -1489,7 +1489,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
           const horizontalPadding = Math.round(4 * zoom);
 
           // Check single-column vertical CJK layout
-          const hasCjk = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/.test(editingObj.text);
+          const hasCjk = CJK_CHARACTER_REGEX.test(editingObj.text);
           const isVerticalMode = Boolean(editingObj.isVertical && hasCjk);
 
           return (
@@ -1519,7 +1519,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
               <textarea
                 ref={inlineTextareaRef}
                 value={
-                  (!editingObj.text.includes('\n') && editingObj.lines && editingObj.lines.length > 1)
+                  (!isVerticalMode && !editingObj.text.includes('\n') && editingObj.lines && editingObj.lines.length > 1)
                     ? editingObj.lines.join('\n')
                     : editingObj.text
                 }

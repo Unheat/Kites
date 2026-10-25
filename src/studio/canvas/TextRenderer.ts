@@ -1,22 +1,46 @@
 import type { TextObject } from '../types';
-import { getTypesetDisplayText } from './studioTypeset';
+import { getTypesetDisplayText, CJK_CHARACTER_REGEX, wrapVerticalTypeset } from './studioTypeset';
 
 /** Vertical punctuation rotation mappings for CJK manga typography. */
 const VERTICAL_ROTATION_MAP: Record<string, string> = {
-  'ー': '丨',
-  '―': '丨',
-  '…': '︙',
-  '‥': '︰',
-  '（': '︵',
-  '）': '︶',
-  '(': '︵',
-  ')': '︶',
-  '[': '﹇',
-  ']': '﹈',
-  '【': '︻',
-  '】': '︼',
-  '～': '丨',
-  '~': '丨',
+  // Horizontal dashes / prolonged sound marks
+  'ー': '\ufe31',
+  '―': '\ufe31',
+  '—': '\ufe31',
+  '–': '\ufe31',
+  '～': '\ufe31',
+  '~': '\ufe31',
+  // Ellipses & two dots
+  '…': '\ufe19',
+  '‥': '\ufe19',
+  // Parentheses & Brackets
+  '（': '\ufe35',
+  '）': '\ufe36',
+  '(': '\ufe35',
+  ')': '\ufe36',
+  '[': '\ufe37',
+  ']': '\ufe38',
+  '［': '\ufe37',
+  '］': '\ufe38',
+  '【': '\ufe3b',
+  '】': '\ufe3c',
+  '〔': '\ufe39',
+  '〕': '\ufe3a',
+  '〈': '\ufe3d',
+  '〉': '\ufe3e',
+  '《': '\ufe3f',
+  '》': '\ufe40',
+  '「': '\ufe41',
+  '」': '\ufe42',
+  '『': '\ufe43',
+  '』': '\ufe44',
+  // Japanese punctuation marks
+  '。': '\ufe12',
+  '、': '\ufe11',
+  '！': '\ufe15',
+  '？': '\ufe16',
+  '!': '\ufe15',
+  '?': '\ufe16',
 };
 
 export class TextRenderer {
@@ -61,12 +85,12 @@ export class TextRenderer {
       .map((line) => getTypesetDisplayText(line, obj));
     const processedText = lines.join('\n');
 
-    // Only render single-column vertical CJK if text contains CJK glyphs or explicitly requested
-    const hasCjk = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/.test(processedText);
+    // Only render vertical CJK if text contains CJK glyphs or explicitly requested
+    const hasCjk = CJK_CHARACTER_REGEX.test(processedText);
     const isVerticalMode = Boolean(obj.isVertical && hasCjk);
 
     if (isVerticalMode) {
-      this.renderVertical(ctx, processedText, obj);
+      this.renderVertical(ctx, lines, obj);
     } else {
       this.renderHorizontal(ctx, lines, obj);
     }
@@ -223,26 +247,50 @@ export class TextRenderer {
     return runs;
   }
 
+  /**
+   * Renders vertical CJK dialogue with centered right-to-left column progression.
+   *
+   * @param ctx - Target canvas 2D rendering context.
+   * @param lines - Pre-measured column strings from studioTypeset.
+   * @param obj - Text object containing geometry and styling.
+   */
   private static renderVertical(
     ctx: CanvasRenderingContext2D,
-    text: string,
+    lines: string[],
     obj: TextObject
   ): void {
-    const columns = text.split('\n');
+    const columns = obj.lines?.length
+      ? lines
+      : wrapVerticalTypeset(obj.text, obj.width, obj.height, obj.fontSize, 'simple', obj).lines;
+
     const charHeight = obj.fontSize * (obj.lineSpacing ?? 1.15);
     const colWidth = obj.fontSize * 1.3;
+    const totalColsWidth = columns.length * colWidth;
+
+    const align = obj.align ?? 'center';
+    let startX: number;
+    if (align === 'right') {
+      startX = obj.width - 4 - colWidth / 2;
+    } else if (align === 'left') {
+      startX = 4 + totalColsWidth - colWidth / 2;
+    } else {
+      startX = (obj.width + totalColsWidth) / 2 - colWidth / 2;
+    }
 
     ctx.textAlign = 'center';
-    let colX = obj.width - colWidth / 2;
 
-    for (const col of columns) {
-      let charY = charHeight / 2;
+    for (let colIdx = 0; colIdx < columns.length; colIdx++) {
+      const col = columns[colIdx];
+      const colX = startX - colIdx * colWidth;
+      const colHeight = col.length * charHeight;
+
+      let charY = (obj.height - colHeight) / 2 + charHeight / 2;
+
       for (const char of col) {
         const mapped = VERTICAL_ROTATION_MAP[char] || char;
         this.strokeAndFillText(ctx, mapped, colX, charY, obj);
         charY += charHeight;
       }
-      colX -= colWidth;
     }
   }
 
