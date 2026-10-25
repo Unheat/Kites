@@ -217,7 +217,8 @@ export class AotInpaintEngine implements IInpaintEngine {
     let scratchWidth = 1;
     let scratchHeight = 1;
 
-    for (const box of boxes) {
+    try {
+      for (const box of boxes) {
       const desiredWidth = Math.max(1, Math.ceil(box.maxX + AOT_PATCH_CONTEXT) - Math.floor(box.minX - AOT_PATCH_CONTEXT));
       const desiredHeight = Math.max(1, Math.ceil(box.maxY + AOT_PATCH_CONTEXT) - Math.floor(box.minY - AOT_PATCH_CONTEXT));
       const patchWidth = Math.max(AOT_MIN_PATCH_SIZE, Math.ceil(desiredWidth / AOT_BUCKET_SIZE) * AOT_BUCKET_SIZE);
@@ -319,6 +320,12 @@ export class AotInpaintEngine implements IInpaintEngine {
         }
       }
     }
+  } finally {
+    for (const canvas of [imageScratch, maskScratch, outputScratch]) {
+      canvas.width = 0;
+      canvas.height = 0;
+    }
+  }
 
     return this.canvasToArrayBuffer(finalCanvas);
   }

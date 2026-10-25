@@ -95,6 +95,30 @@ describe('OcrManager', () => {
       await ocrManager.cleanup();
       expect(destroy).toHaveBeenCalledTimes(1);
     });
+
+    it('recreates engine when isProviderCurrent reports false', async () => {
+      const destroy = vi.fn().mockResolvedValue(undefined);
+      let isCurrent = true;
+      (PaddleOcrEngine as any).mockImplementation(function (preset: string) {
+        return {
+          preset,
+          init: vi.fn().mockResolvedValue(undefined),
+          recognize: vi.fn().mockResolvedValue({ texts: ['sample'], polygons: [], scores: [], detectionScores: [], boxes: [] }),
+          destroy,
+          isProviderCurrent: vi.fn().mockImplementation(async () => isCurrent),
+        };
+      });
+
+      await ocrManager.processImage(new ArrayBuffer(1), 'v6-small');
+      expect(PaddleOcrEngine).toHaveBeenCalledTimes(1);
+
+      // Provider changes (e.g. user toggled WebGPU off)
+      isCurrent = false;
+
+      await ocrManager.processImage(new ArrayBuffer(1), 'v6-small');
+      expect(PaddleOcrEngine).toHaveBeenCalledTimes(2);
+      expect(destroy).toHaveBeenCalledOnce();
+    });
   });
 
   describe('low-confidence suppression (XianScan builder.rs:278, neighborhood-gated)', () => {
