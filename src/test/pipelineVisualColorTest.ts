@@ -23,6 +23,16 @@ export async function runPipelineVisualColorTest() {
   }
   fs.mkdirSync(resultBaseDir, { recursive: true });
 
+  const colorModelPath = path.resolve(process.cwd(), 'src/test/models/color/manga-colorize-fp16.onnx');
+  if (!fs.existsSync(colorModelPath)) {
+    console.log(`[ColorTest] Downloading manga-colorize-fp16.onnx from HuggingFace...`);
+    fs.mkdirSync(path.dirname(colorModelPath), { recursive: true });
+    const res = await fetch('https://huggingface.co/Faridzar/manga-colorization-v2-onnx/resolve/main/manga-colorize-fp16.onnx', { redirect: 'follow' });
+    if (!res.ok) throw new Error(`Failed to download color model: HTTP ${res.status}`);
+    fs.writeFileSync(colorModelPath, Buffer.from(await res.arrayBuffer()));
+    console.log(`[ColorTest] Model downloaded successfully.`);
+  }
+
   const ocrManager = new OcrManager();
   const inpaintManager = new InpaintManager();
   const colorManager = new ColorManager();
