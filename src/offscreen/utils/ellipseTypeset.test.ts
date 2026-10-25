@@ -119,5 +119,47 @@ describe('ellipseTypeset module', () => {
       expect(result.lines.length).toBeGreaterThan(1);
       expect(result.fontSize).toBeGreaterThanOrEqual(12); // within 80% scale
     });
+
+    it('prevents vertical overflow on tall-narrow dialogue bubbles (Vietnamese regression)', () => {
+      // 17-word sentence that previously overflowed into 16 single-word lines
+      const text = 'quái thể phá hủy này, hãy thành thật khai báo, đồng bọn của ngươi đều ở đâu?';
+      const targetWidth = 100;
+      const targetHeight = 350;
+      const initialFontSize = 24;
+
+      const result = wrapTextEllipse(
+        text,
+        targetWidth,
+        targetHeight,
+        initialFontSize,
+        'sans-serif',
+        1.0,
+        mockCtx,
+        'vi',
+        { minFontSize: 6 }
+      );
+
+      // Must fit strictly within height boundary without overflowing
+      expect(result.height).toBeLessThanOrEqual(targetHeight);
+      // Words must pair up where the ellipse is wider, not degrade to 1-word per line
+      expect(result.lines.length).toBeLessThan(16);
+      expect(result.lines.some((l) => l.trim().includes(' '))).toBe(true);
+      expect(result.fontSize).toBeGreaterThanOrEqual(10);
+    });
+
+    it('respects maxWidthGrowth budget of 1.2 for round layouts', () => {
+      const text = 'Slightly wider text that needs a tiny bit of growth to remain round';
+      const result = wrapTextEllipse(text, 80, 150, 14, 'sans-serif', 1.0, mockCtx, 'en');
+      // Should not grow beyond 1.2 * 80 + 1.5 = 97.5
+      expect(result.width).toBeLessThanOrEqual(80 * 1.2 + 2);
+    });
+
+    it('prevents forbidden punctuation from starting lines (Kinsoku)', () => {
+      const text = 'First phrase ! Second phrase ? Third phrase .';
+      const result = wrapTextEllipse(text, 60, 200, 14, 'sans-serif', 1.0, mockCtx);
+      for (const line of result.lines) {
+        expect(/^[!?,.:;]/.test(line.trim())).toBe(false);
+      }
+    });
   });
 });

@@ -353,7 +353,9 @@ export function recalculateBlockTypeset(
         fallbackSize,
         fontFamily || 'sans-serif',
         strength,
-        ctx
+        ctx,
+        'en',
+        { minFontSize: 6 }
       );
       return {
         fontSize: result.fontSize,

@@ -468,7 +468,29 @@ export class PipelineOrchestrator {
           accept: (index, proposed) => {
             const block = blockByOcrIndex.get(index);
             if (!block) return false;
-            const fitted = measureBubbleLayoutFontSize(ctx, block, proposed, resolvedFontFamily, renderFontBold, targetLang);
+            const isNeuralMode = bubbleMode === 'neural' || bubbleMode === 'neural-mask';
+            const curv = isNeuralMode ? bubbleGeometry.curvatures?.[index] : undefined;
+            const blockWithCurvature = curv?.isRounded
+              ? { ...block, isRounded: true, borderRadius: curv.borderRadius }
+              : block;
+            const fitted = popupState?.renderFontMinSize !== undefined
+              ? measureBubbleLayoutFontSize(
+                  ctx,
+                  blockWithCurvature,
+                  proposed,
+                  resolvedFontFamily,
+                  renderFontBold,
+                  targetLang,
+                  popupState.renderFontMinSize
+                )
+              : measureBubbleLayoutFontSize(
+                  ctx,
+                  blockWithCurvature,
+                  proposed,
+                  resolvedFontFamily,
+                  renderFontBold,
+                  targetLang
+                );
             return fitted > 0;
           },
           onDiagnostics: (counts) => console.log('[PipelineOrchestrator] Bubble layouts:', counts)

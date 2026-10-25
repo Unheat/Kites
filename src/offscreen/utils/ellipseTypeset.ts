@@ -13,7 +13,7 @@ export const ELLIPSE_MAX_LINES = 50;
 export const ELLIPSE_FILL_WEIGHT = 2.0;
 
 /** Weight applied to notch depth and boundary overflow penalties. */
-export const ELLIPSE_NOTCH_WEIGHT = 1.5;
+export const ELLIPSE_NOTCH_WEIGHT = 5.0;
 
 /** Slack multiplier applied to ellipse fill width before penalizing width. */
 export const ELLIPSE_FILL_SLACK = 1.04;
@@ -21,14 +21,86 @@ export const ELLIPSE_FILL_SLACK = 1.04;
 /** Fractional tolerance for notch detection between adjacent lines. */
 export const ELLIPSE_NOTCH_TOLERANCE = 0.05;
 
-/** Minimum font scale factor permitted during iterative ellipse font refitting (up to 20% shrink). */
+/** Maximum width growth budget permitted for round layouts (20% growth). */
+export const ELLIPSE_MAX_WIDTH_GROWTH = 1.2;
+
+/** Minimum font scale factor permitted during iterative ellipse font refitting. */
 export const ELLIPSE_MIN_FONT_SCALE = 0.8;
 
 /** Lower bound on the normalized horizontal chord share for top/bottom lines. */
-export const MIN_CHORD_SHARE = 0.15;
+export const MIN_CHORD_SHARE = 0.05;
+
+/** Opening punctuation marks that must bind to the following word token. */
+const OPENING_MARK_RE = /[¡¿([{«‹‘‚‛“„‟〈《「『【〔〖〘〚〝（［｛｟｢#@$£¥§₦₩€₱₹₽฿№]/;
 
 /** Characters forbidden from starting a rendered line (Kinsoku Shori / western punctuation). */
-const NO_LINE_START_RE = /^[.,!?:;…\-—―–‒ー－～─‥）」』】》〉，、。：；！？，。、)\]}）】]/;
+const NO_LINE_START_RE = /^[\.,!\?:;…\-—―–‒ー－～─‥）」』】》〉，、。：；！？，。、،۔\)\]}）】ฯៗๆ\u31F0-\u31FF〕〗”’♪~．〙〛]/;
+
+/** Dashes that may break if intra-word. */
+const BREAKABLE_DASH_RE = /[\-‐‒–—―]/;
+
+/**
+ * Checks if a string cluster ends in an intra-word dash.
+ */
+function isIntraWordDash(cluster: string): boolean {
+  if (!cluster || cluster.length < 2) return false;
+  if (!BREAKABLE_DASH_RE.test(cluster[cluster.length - 1])) return false;
+  const before = cluster[cluster.length - 2];
+  return !/\s/.test(before) && !BREAKABLE_DASH_RE.test(before) && !OPENING_MARK_RE.test(before);
+}
+
+/**
+ * Checks if a token is barred from starting a line.
+ */
+const barredStart = (token: string): boolean =>
+  NO_LINE_START_RE.test(token) || /^[»›](?![\p{L}\p{N}])/u.test(token);
+
+/**
+ * Checks if line break before index k in tokens is barred.
+ */
+const lineStartBarred = (tokens: string[], k: number): boolean =>
+  barredStart(tokens[k].trim())
+  || (tokens[k][0] === '・' && /[\p{L}・]$/u.test(tokens[k - 1] ?? ''))
+  || (!tokens[k].trim() && k + 1 < tokens.length && barredStart(tokens[k + 1].trim()));
+
+/**
+ * Merges raw punctuation and word tokens into clusters that must stay together.
+ *
+ * @param tokens - Raw word and punctuation tokens.
+ * @returns Cohesive bound tokens.
+ */
+export function bindWrapTokens(tokens: string[]): string[] {
+  const bound: string[] = [];
+  let pendingOpen = false;
+
+  for (const token of tokens) {
+    if (!token) continue;
+    const prev = bound.length > 0 ? bound[bound.length - 1] : '';
+    let bind = false;
+
+    if (prev) {
+      const prevChar = prev[prev.length - 1];
+      const nextChar = token[0];
+      if (pendingOpen) {
+        bind = true;
+      } else if (!/\s/.test(prevChar) && !/\s/.test(nextChar)) {
+        const dashBreak = isIntraWordDash(prev) && !BREAKABLE_DASH_RE.test(nextChar);
+        bind = !dashBreak;
+      }
+    }
+
+    if (bind) {
+      bound[bound.length - 1] = prev + token;
+    } else {
+      bound.push(token);
+    }
+
+    const core = bound[bound.length - 1].replace(/\s+$/, '');
+    pendingOpen = core.length > 0 && OPENING_MARK_RE.test(core[core.length - 1]);
+  }
+
+  return bound;
+}
 
 /**
  * Strips inserted soft hyphens and unwraps soft newlines into a continuous sentence.
@@ -137,7 +209,7 @@ export function outlineOverflow(widths: number[], lineHeight: number, strength: 
 }
 
 /**
- * Breaks dialogue into tokens, binding punctuation to adjacent words.
+ * Breaks dialogue into tokens, binding punctuation and prefixes to adjacent words.
  *
  * @param text - Source sentence to tokenize.
  * @returns Array of cohesive word tokens.
@@ -159,6 +231,67 @@ export function tokenizeDialogue(text: string): string[] {
   return tokens.length > 0 ? tokens : [text];
 }
 
+export interface LineSpan {
+  k: number;
+  text: string;
+  width: number;
+}
+
+/**
+ * Precomputes multi-word substrings and hyphenated syllable cuts that fit within maxWidth.
+ *
+ * @param tokens - Word or syllable tokens.
+ * @param maxWidth - Upper limit measurement budget.
+ * @param measure - Width measurement callback.
+ * @param hyphenBefore - Indices that continue a hyphenated word.
+ * @param wordOf - Mapping from token index to original word index.
+ * @returns 2D array of valid line spans starting at token index j.
+ */
+export function measureLineSpans(
+  tokens: string[],
+  maxWidth: number,
+  measure: (s: string) => number,
+  hyphenBefore: Set<number> = new Set(),
+  wordOf: number[] = []
+): LineSpan[][] {
+  const canBreakBefore = (k: number): boolean => k === tokens.length || !lineStartBarred(tokens, k);
+  const spans: LineSpan[][] = [];
+
+  for (let j = 0; j < tokens.length; j++) {
+    spans.push([]);
+    if (j > 0 && !canBreakBefore(j)) continue;
+
+    let joined = '';
+    for (let k = j + 1; k <= tokens.length; k++) {
+      const isHyphenContinuation = hyphenBefore.has(k - 1);
+      const piece = tokens[k - 1];
+      if (k === j + 1) {
+        joined = piece;
+      } else if (isHyphenContinuation) {
+        joined += piece;
+      } else {
+        joined += ' ' + piece;
+      }
+
+      if (!canBreakBefore(k)) continue;
+
+      const hyphen = hyphenBefore.has(k);
+      // No line both continues a split word and splits it again
+      if (hyphen && hyphenBefore.has(j) && wordOf[j] === wordOf[k]) continue;
+
+      const text = hyphen ? joined + INSERTED_HYPHEN : joined;
+      const width = measure(text);
+      if (width > maxWidth) {
+        if (hyphen) continue;
+        break;
+      }
+      spans[j].push({ k, text, width });
+    }
+  }
+
+  return spans;
+}
+
 export interface EllipseLineLayout {
   lines: string[];
   widths: number[];
@@ -168,72 +301,201 @@ export interface EllipseLineLayout {
 
 /**
  * Solves optimal dynamic programming line breaks given precomputed line width profiles.
+ * Implements two-phase DP: Phase 1 finds minimax ellipse width; Phase 2 finds even-fill breaks.
  *
- * @param words - Word tokens.
- * @param measure - Measurement callback returning pixel width of arbitrary substring.
- * @param maxWidth - Upper limit boundary width.
- * @param profile - Ellipse width shares per line.
- * @returns Optimal layout candidate or null if text cannot fit within profile.
+ * @param spans - Precomputed candidate line spans per starting token.
+ * @param tokenCount - Total number of tokens.
+ * @param textWidth - Summed width of all words.
+ * @param profile - Ellipse width proportions per line slot.
+ * @returns Optimal layout candidate or null if text cannot fit within profile slots.
  */
 export function layoutEllipseLines(
-  words: string[],
-  measure: (str: string) => number,
-  maxWidth: number,
+  spans: LineSpan[][],
+  tokenCount: number,
+  textWidth: number,
   profile: number[]
 ): EllipseLineLayout | null {
-  const lineCount = profile.length;
-  if (lineCount === 0 || words.length === 0) return null;
+  if (profile.length === 0 || tokenCount === 0 || spans.length === 0) return null;
 
-  // Greedy slot assignment with profile chord constraints
-  const lines: string[] = [];
-  const widths: number[] = [];
-  let wordIdx = 0;
-
-  for (let lineIdx = 0; lineIdx < lineCount; lineIdx++) {
-    const allowedWidth = maxWidth * profile[lineIdx];
-    let currentLine = '';
-    let currentWidth = 0;
-
-    while (wordIdx < words.length) {
-      const nextWord = words[wordIdx];
-      const testLine = currentLine ? `${currentLine} ${nextWord}` : nextWord;
-      const testWidth = measure(testLine);
-
-      if (testWidth <= allowedWidth || !currentLine) {
-        currentLine = testLine;
-        currentWidth = testWidth;
-        wordIdx++;
-      } else {
-        // Line full; break to next slot
-        break;
+  // Phase 1: Minimax DP — find the narrowest overall ellipse width for this line count
+  let widest = new Array(tokenCount + 1).fill(Infinity);
+  widest[0] = 0;
+  for (const share of profile) {
+    const next = new Array(tokenCount + 1).fill(Infinity);
+    for (let j = 0; j < tokenCount; j++) {
+      if (widest[j] === Infinity) continue;
+      for (const span of spans[j]) {
+        next[span.k] = Math.min(next[span.k], Math.max(widest[j], span.width / share));
       }
     }
+    widest = next;
+  }
+  const ellipseWidth = widest[tokenCount];
+  if (ellipseWidth === Infinity) return null;
 
-    if (currentLine) {
-      lines.push(currentLine);
-      widths.push(currentWidth);
+  // Phase 2: Minimum cost DP — find breaks that fill slots most evenly within slack
+  let cost = new Array(tokenCount + 1).fill(Infinity);
+  cost[0] = 0;
+  const choices: { from: number; span: LineSpan }[][] = [];
+  const sumShare = profile.reduce((sum, share) => sum + share, 0);
+  const fillWidth = sumShare > 0 ? textWidth / sumShare : textWidth;
+
+  for (const share of profile) {
+    const slot = share * ellipseWidth * ELLIPSE_FILL_SLACK;
+    const target = share * fillWidth;
+    const next = new Array(tokenCount + 1).fill(Infinity);
+    const chosen: { from: number; span: LineSpan }[] = new Array(tokenCount + 1).fill(null);
+
+    for (let j = 0; j < tokenCount; j++) {
+      if (cost[j] === Infinity) continue;
+      for (const span of spans[j]) {
+        if (span.width > slot + 0.01) continue;
+        const c = cost[j] + Math.pow(1 - span.width / target, 2);
+        if (c < next[span.k]) {
+          next[span.k] = c;
+          chosen[span.k] = { from: j, span };
+        }
+      }
     }
-
-    if (wordIdx >= words.length) break;
+    cost = next;
+    choices.push(chosen);
   }
 
-  // If words remain after exhausting available line slots, layout failed
-  if (wordIdx < words.length) {
-    return null;
-  }
+  if (cost[tokenCount] === Infinity) return null;
 
-  const widest = Math.max(...widths);
-  let unevenness = 0;
-  for (let i = 1; i < widths.length; i++) {
-    unevenness += Math.abs(widths[i] - widths[i - 1]) / Math.max(1, widest);
+  const lines: string[] = [];
+  const widths: number[] = [];
+  for (let i = profile.length - 1, k = tokenCount; i >= 0; i--) {
+    const step = choices[i]?.[k];
+    if (!step || !step.span) return null;
+    lines.unshift(step.span.text);
+    widths.unshift(step.span.width);
+    k = step.from;
   }
 
   return {
     lines,
     widths,
-    ellipseWidth: widest,
-    unevenness,
+    ellipseWidth,
+    unevenness: cost[tokenCount] / profile.length,
   };
+}
+
+/**
+ * Splits words exceeding maxWidth into syllable cuts.
+ */
+function ellipsePieces(
+  words: string[],
+  maxWidth: number,
+  measure: (s: string) => number,
+  targetLang: string = 'en'
+): { pieces: string[]; hyphenBefore: Set<number>; wordOf: number[] } {
+  const pieces: string[] = [];
+  const hyphenBefore = new Set<number>();
+  const wordOf: number[] = [];
+
+  words.forEach((word, i) => {
+    const isWord = word.length >= 6;
+    const syls = isWord && measure(word) > maxWidth ? syllables(word, targetLang) : null;
+    if (!syls || syls.length <= 1) {
+      pieces.push(word);
+      wordOf.push(i);
+      return;
+    }
+    for (let k = 0; k < syls.length; k++) {
+      if (k > 0) hyphenBefore.add(pieces.length);
+      pieces.push(syls[k]);
+      wordOf.push(i);
+    }
+  });
+
+  return { pieces, hyphenBefore, wordOf };
+}
+
+/**
+ * Evaluates candidate line layouts for an ellipse container across all valid line counts.
+ */
+function ellipseWrap(
+  words: string[],
+  targetWidth: number,
+  targetHeight: number,
+  lineHeight: number,
+  strength: number,
+  maxWidthGrowth: number,
+  measure: (s: string) => number,
+  targetLang: string = 'en',
+  currentText: string = ''
+): {
+  lines: string[];
+  widths: number[];
+  width: number;
+  height: number;
+  tooTall: boolean;
+} | null {
+  const fitWidth = targetWidth + 1.5;
+  const heightBound = Number.isFinite(targetHeight);
+  const maxWidth = targetWidth * maxWidthGrowth + 1.5;
+
+  const { pieces, hyphenBefore, wordOf } = ellipsePieces(words, maxWidth, measure, targetLang);
+  const spans = measureLineSpans(pieces, maxWidth, measure, hyphenBefore, wordOf);
+  const textWidth = measure(pieces.join(' '));
+  const boxAspect = targetWidth / Math.max(1, targetHeight);
+
+  let bestInBox: any = null;
+  let bestRoundInBox: any = null;
+  let bestRoundGrown: any = null;
+  let current: any = null;
+  const currentLineCount = currentText ? currentText.split('\n').length : 0;
+
+  for (let lineCount = 1; lineCount <= Math.min(pieces.length, ELLIPSE_MAX_LINES); lineCount++) {
+    const tooTall = lineCount * lineHeight > targetHeight + 0.01;
+    if (tooTall && (bestInBox || bestRoundGrown)) break;
+
+    const profile = ellipseProfile(lineCount, lineHeight, strength);
+    const layout = layoutEllipseLines(spans, pieces.length, textWidth, profile);
+    if (!layout) continue;
+
+    if (tooTall) {
+      return {
+        lines: layout.lines,
+        widths: layout.widths,
+        width: Math.max(...layout.widths),
+        height: lineCount * lineHeight,
+        tooTall: true,
+      };
+    }
+
+    const widest = Math.max(...layout.widths);
+    const notch = notchDepth(layout.widths, widest * ELLIPSE_NOTCH_TOLERANCE);
+    const overflow = outlineOverflow(layout.widths, lineHeight, strength);
+    const looksRound = notch === 0 && overflow === 0;
+    const aspect = layout.ellipseWidth / ((lineCount + 1) * lineHeight);
+    const aspectError = heightBound
+      ? Math.abs(Math.log(aspect / boxAspect))
+      : Math.abs(Math.log(layout.ellipseWidth / targetWidth));
+    const pastTarget = heightBound ? aspect < boxAspect : layout.ellipseWidth < targetWidth;
+    const score = aspectError + ELLIPSE_FILL_WEIGHT * layout.unevenness + ELLIPSE_NOTCH_WEIGHT * (notch + overflow);
+    const candidate = {
+      score,
+      lines: layout.lines,
+      widths: layout.widths,
+      width: widest,
+      height: lineCount * lineHeight,
+      tooTall: false,
+    };
+
+    if (widest <= fitWidth) {
+      if (!bestInBox || score < bestInBox.score) bestInBox = candidate;
+      if (looksRound && (!bestRoundInBox || score < bestRoundInBox.score)) bestRoundInBox = candidate;
+      if (looksRound && currentText && layout.lines.join('\n') === currentText) current = candidate;
+    } else if (looksRound && (!bestRoundGrown || score < bestRoundGrown.score)) {
+      bestRoundGrown = candidate;
+    }
+
+    if (bestRoundInBox && lineCount >= currentLineCount && pastTarget && aspectError > bestRoundInBox.score) break;
+  }
+
+  return current ?? bestRoundInBox ?? bestRoundGrown ?? bestInBox;
 }
 
 /**
@@ -242,6 +504,7 @@ export function layoutEllipseLines(
  * @param words - Word tokens.
  * @param targetWidth - Maximum line width.
  * @param measure - Width measurement callback.
+ * @param targetLang - Language code for hyphenation.
  * @returns Wrapped lines.
  */
 export function wrapRectangular(
@@ -302,6 +565,13 @@ export interface WrapEllipseResult {
   height: number;
 }
 
+export interface WrapEllipseOptions {
+  minFontSize?: number;
+  maxWidthGrowth?: number;
+  currentText?: string;
+  lineSpacing?: number;
+}
+
 /**
  * Fits and wraps dialogue into a balanced ellipse profile, adapting font size if required.
  *
@@ -312,6 +582,8 @@ export interface WrapEllipseResult {
  * @param fontFamily - CSS font stack.
  * @param strength - Curvature strength in [0, 1] (0 = rectangle, 1 = full oval).
  * @param ctx - Canvas 2D measurement context.
+ * @param targetLang - Language code for hyphenation.
+ * @param options - Optional layout tuning parameters.
  * @returns Wrapped lines, resolved font size, and bounded dimensions.
  */
 export function wrapTextEllipse(
@@ -322,71 +594,89 @@ export function wrapTextEllipse(
   fontFamily: string,
   strength: number,
   ctx: CanvasRenderingContext2D,
-  targetLang: string = 'en'
+  targetLang: string = 'en',
+  options?: WrapEllipseOptions
 ): WrapEllipseResult {
   const clean = unwrapWrappedText(text);
   if (!clean) {
-    return { lines: [''], fontSize: initialFontSize, width: targetWidth, height: initialFontSize * 1.2 };
+    return { lines: [''], fontSize: initialFontSize, width: targetWidth, height: initialFontSize * 1.25 };
   }
 
   const words = tokenizeDialogue(clean);
   const safeWidth = Math.max(20, targetWidth);
-  const minFontSize = Math.max(8, Math.floor(initialFontSize * ELLIPSE_MIN_FONT_SCALE));
+  const minFontSize = options?.minFontSize !== undefined
+    ? Math.max(6, options.minFontSize)
+    : Math.max(6, Math.floor(initialFontSize * ELLIPSE_MIN_FONT_SCALE));
+  const maxWidthGrowth = options?.maxWidthGrowth ?? ELLIPSE_MAX_WIDTH_GROWTH;
+  const lineSpacing = options?.lineSpacing ?? 1.25;
+  const currentText = options?.currentText ?? '';
 
   // Pure rectangular fallback for caption boxes
   if (strength <= 0) {
-    ctx.font = `${initialFontSize}px ${fontFamily || 'sans-serif'}`;
-    const measure = (s: string) => ctx.measureText(s).width;
-    const lines = wrapRectangular(words, safeWidth, measure, targetLang);
-    const lineHeight = initialFontSize * 1.25;
-    return {
-      lines,
-      fontSize: initialFontSize,
-      width: Math.max(...lines.map(measure)),
-      height: lines.length * lineHeight,
-    };
+    for (let size = initialFontSize; size >= minFontSize; size--) {
+      ctx.font = `${size}px ${fontFamily || 'sans-serif'}`;
+      const measure = (s: string) => ctx.measureText(s).width;
+      const lineHeight = size * lineSpacing;
+      const lines = wrapRectangular(words, safeWidth, measure, targetLang);
+      const totalH = lines.length * lineHeight;
+      if (totalH <= targetHeight + 0.01 || size === minFontSize) {
+        return {
+          lines,
+          fontSize: size,
+          width: Math.max(...lines.map(measure)),
+          height: totalH,
+        };
+      }
+    }
   }
 
   // Iterative font size search from initial size down to minFontSize
+  let bestCandidateOverall: WrapEllipseResult | null = null;
+
   for (let size = initialFontSize; size >= minFontSize; size--) {
     ctx.font = `${size}px ${fontFamily || 'sans-serif'}`;
     const measure = (s: string) => ctx.measureText(s).width;
-    const lineHeight = size * 1.25;
-    const maxLinesInHeight = Math.max(1, Math.floor(targetHeight / lineHeight));
-    const candidateMaxLines = Math.min(words.length, maxLinesInHeight, ELLIPSE_MAX_LINES);
+    const lineHeight = size * lineSpacing;
 
-    let bestCandidate: { score: number; lines: string[]; widths: number[] } | null = null;
+    const res = ellipseWrap(
+      words,
+      safeWidth,
+      targetHeight,
+      lineHeight,
+      strength,
+      maxWidthGrowth,
+      measure,
+      targetLang,
+      currentText
+    );
 
-    for (let count = 1; count <= candidateMaxLines; count++) {
-      const profile = ellipseProfile(count, lineHeight, strength);
-      const layout = layoutEllipseLines(words, measure, safeWidth, profile);
-      if (!layout) continue;
-
-      const notch = notchDepth(layout.widths, layout.ellipseWidth * ELLIPSE_NOTCH_TOLERANCE);
-      const overflow = outlineOverflow(layout.widths, lineHeight, strength);
-      const score = layout.unevenness * ELLIPSE_FILL_WEIGHT + (notch + overflow) * ELLIPSE_NOTCH_WEIGHT;
-
-      if (!bestCandidate || score < bestCandidate.score) {
-        bestCandidate = { score, lines: layout.lines, widths: layout.widths };
-      }
-    }
-
-    if (bestCandidate) {
-      const widest = Math.max(...bestCandidate.widths);
-      return {
-        lines: bestCandidate.lines,
+    if (res && res.lines && res.lines.length > 0) {
+      const candidateResult: WrapEllipseResult = {
+        lines: res.lines,
         fontSize: size,
-        width: Math.max(widest, safeWidth * 0.5),
-        height: bestCandidate.lines.length * lineHeight,
+        width: res.width ?? safeWidth,
+        height: res.height,
       };
+
+      if (!bestCandidateOverall) {
+        bestCandidateOverall = candidateResult;
+      }
+
+      if (!res.tooTall && res.height <= targetHeight + 0.5) {
+        return candidateResult;
+      }
     }
   }
 
-  // Fallback if strict ellipse profile did not fit: rectangular wrap at minFontSize
+  // If no font size strictly fit height, return the smallest font candidate or rectangular fallback
+  if (bestCandidateOverall) {
+    return bestCandidateOverall;
+  }
+
   ctx.font = `${minFontSize}px ${fontFamily || 'sans-serif'}`;
   const measure = (s: string) => ctx.measureText(s).width;
-  const fallbackLines = wrapRectangular(words, safeWidth, measure);
-  const fallbackLineHeight = minFontSize * 1.25;
+  const fallbackLines = wrapRectangular(words, safeWidth, measure, targetLang);
+  const fallbackLineHeight = minFontSize * lineSpacing;
 
   return {
     lines: fallbackLines,

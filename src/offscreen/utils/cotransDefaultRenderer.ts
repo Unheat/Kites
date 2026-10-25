@@ -797,7 +797,9 @@ export function renderRegionDefault(
       fontSize,
       fontFamily || DEFAULT_RENDER_FONT_FAMILY,
       strength,
-      ctx
+      ctx,
+      targetLang,
+      { minFontSize: Math.max(6, Math.floor(fontSize * 0.4)) }
     );
     fitted = { size: ellipseRes.fontSize, lines: ellipseRes.lines };
   } else {

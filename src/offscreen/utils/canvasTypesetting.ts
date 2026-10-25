@@ -14,6 +14,7 @@ import {
   sanitizeTypesetText,
   compactSpecialSymbols,
 } from '../../shared/utils/textCleaning';
+import { wrapTextEllipse } from './ellipseTypeset';
 
 /**
  * Batch driver for translated-text rendering.
@@ -379,9 +380,34 @@ export function measureBubbleLayoutFontSize(
   box: NonNullable<TextBlockItem['typesetBox']>,
   fontFamily: string = DEFAULT_RENDER_FONT_FAMILY,
   isBold: boolean = false,
-  targetLang: string = 'en'
+  targetLang: string = 'en',
+  minFontSize?: number
 ): number {
   if (!block.text?.trim() || !Number.isFinite(box.w) || !Number.isFinite(box.h) || box.w < 1 || box.h < 1) return 0;
+
+  if (block.isRounded) {
+    const rMax = Math.min(box.w / 2, box.h / 2);
+    const radius = block.borderRadius !== undefined ? block.borderRadius : rMax;
+    const strength = rMax > 0 ? Math.min(1.0, radius / rMax) : 1.0;
+    const targetSize = bubbleLayoutFontTarget(block);
+    const res = wrapTextEllipse(
+      block.text.trim(),
+      box.w,
+      box.h,
+      targetSize,
+      fontFamily,
+      strength,
+      ctx as any,
+      targetLang,
+      { minFontSize: minFontSize ?? Math.max(6, Math.floor(targetSize * 0.4)) }
+    );
+    if (!res || !res.lines || res.lines.length === 0) return 0;
+    if (res.height <= box.h + 0.5 && res.width <= box.w * 1.2 + 1.5) {
+      return res.fontSize;
+    }
+    return 0;
+  }
+
   const fitted = measureDefaultLayout(ctx, block.text.trim(), box.w, box.h, bubbleLayoutFontTarget(block), undefined, fontFamily, isBold, undefined, targetLang);
   return defaultLayoutFits(ctx, fitted, box.w, box.h, fontFamily, isBold) ? fitted.size : 0;
 }
@@ -666,7 +692,7 @@ function renderTextBlocksDefault(
       const { dstPoints, fontSize: targetFontSize } = fixed
         ? { dstPoints: poly, fontSize: bubbleLayoutFontTarget(b) }
         : resizeRegionToFontSize(region, pageWidth, pageHeight);
-      if (fixed && measureBubbleLayoutFontSize(ctx, b, b.typesetBox!, fontFamily, isBold) === 0) continue;
+      if (fixed && measureBubbleLayoutFontSize(ctx, b, b.typesetBox!, fontFamily, isBold, targetLang) === 0) continue;
       const wordCount = translation.split(/\s+/).filter(Boolean).length;
       if (wordCount >= 2) {
         // Same quad dims renderRegionDefault will lay out against (edge midpoints).
