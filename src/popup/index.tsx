@@ -209,6 +209,13 @@ function PopupApp() {
           >
             <Power size={18} className={state.isExtensionEnabled ? "text-[var(--color-editorial)]" : "text-[var(--color-dust)]"} />
           </button>
+          <button 
+            onClick={() => updateState({ isDark: !state.isDark })}
+            className="p-1.5 rounded transition-colors hover:bg-[var(--color-vellum)] cursor-pointer text-[var(--color-ink)]"
+            title={state.isDark ? "Switch to Light Mode" : "Switch to Dark Mode"}
+          >
+            {state.isDark ? <Sun size={18} /> : <Moon size={18} />}
+          </button>
           <div className="w-px h-5 bg-[var(--color-dust)] opacity-30 mx-0.5" />
           <button 
             onClick={() => setActiveTab('home')}
@@ -230,14 +237,6 @@ function PopupApp() {
             title="Settings"
           >
             <Settings size={18} className="text-[var(--color-ink)]" />
-          </button>
-          <div className="w-px h-5 bg-[var(--color-dust)] opacity-30 mx-0.5" />
-          <button 
-            onClick={() => updateState({ isDark: !state.isDark })}
-            className="p-1.5 rounded transition-colors hover:bg-[var(--color-vellum)] cursor-pointer text-[var(--color-ink)]"
-            title={state.isDark ? "Switch to Light Mode" : "Switch to Dark Mode"}
-          >
-            {state.isDark ? <Sun size={18} /> : <Moon size={18} />}
           </button>
         </div>
       </div>
