@@ -8,6 +8,7 @@ import {
   ShieldCheck,
   AlertTriangle,
   FolderPlus,
+  ArrowLeft,
 } from 'lucide-react';
 import {
   getStorageQuota,
@@ -26,6 +27,7 @@ export interface LibrarySidebarProps {
   onRenameSelected: () => void;
   onDeleteSelected: () => void;
   onCreateNewProject: () => void;
+  onBackToEditor?: () => void;
 }
 
 export const LibrarySidebar: React.FC<LibrarySidebarProps> = ({
@@ -37,6 +39,7 @@ export const LibrarySidebar: React.FC<LibrarySidebarProps> = ({
   onRenameSelected,
   onDeleteSelected,
   onCreateNewProject,
+  onBackToEditor,
 }) => {
   const [quota, setQuota] = useState<StorageQuotaInfo | null>(null);
   const [isPersisted, setIsPersisted] = useState(false);
@@ -60,9 +63,21 @@ export const LibrarySidebar: React.FC<LibrarySidebarProps> = ({
   const isSelected = selectedProject !== null;
 
   return (
-    <aside className="w-72 bg-[#12141c] border-r border-[#282d3f] flex flex-col justify-between p-4 shrink-0 select-none">
+    <aside className="w-72 bg-[#12141c] border-r border-[#262a3b] flex flex-col justify-between p-4 shrink-0 select-none">
       {/* Top Section: Library Stats & Storage */}
-      <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-5">
+        {/* Back to Studio Editor Button */}
+        {onBackToEditor && (
+          <button
+            type="button"
+            onClick={onBackToEditor}
+            className="flex items-center gap-2 py-2 px-3 rounded-lg bg-[#181a26] hover:bg-[#202436] border border-[#262a3b] text-slate-200 text-xs font-semibold transition cursor-pointer"
+          >
+            <ArrowLeft className="w-3.5 h-3.5 text-[#f4446d]" />
+            <span>Back to Canvas Editor</span>
+          </button>
+        )}
+
         {/* Header */}
         <div>
           <div className="flex items-center justify-between">
@@ -70,7 +85,7 @@ export const LibrarySidebar: React.FC<LibrarySidebarProps> = ({
             <button
               type="button"
               onClick={onCreateNewProject}
-              className="flex items-center gap-1 text-xs font-semibold text-blue-400 hover:text-blue-300 transition"
+              className="flex items-center gap-1 text-xs font-semibold text-[#f4446d] hover:text-[#ff6b8b] transition cursor-pointer"
             >
               <FolderPlus className="w-3.5 h-3.5" />
               <span>New</span>
@@ -86,7 +101,7 @@ export const LibrarySidebar: React.FC<LibrarySidebarProps> = ({
         </div>
 
         {/* Storage Quota Card */}
-        <div className="flex flex-col gap-2 p-3 rounded-xl bg-[#181a26] border border-[#282d3f]">
+        <div className="flex flex-col gap-2 p-3 rounded-xl bg-[#161924] border border-[#262a3b]">
           <div className="flex items-center justify-between text-xs font-medium text-slate-300">
             <div className="flex items-center gap-1.5">
               <HardDrive className="w-3.5 h-3.5 text-slate-400" />
@@ -101,7 +116,7 @@ export const LibrarySidebar: React.FC<LibrarySidebarProps> = ({
               <button
                 type="button"
                 onClick={handleRequestPersistence}
-                className="text-[0.65rem] text-blue-400 hover:text-blue-300 underline font-semibold"
+                className="text-[0.65rem] text-[#f4446d] hover:text-[#ff6b8b] underline font-semibold cursor-pointer"
                 title="Lock browser from auto-clearing storage"
               >
                 Protect
@@ -110,12 +125,12 @@ export const LibrarySidebar: React.FC<LibrarySidebarProps> = ({
           </div>
 
           {/* Progress bar */}
-          <div className="w-full h-1.5 bg-[#282d3f] rounded-full overflow-hidden mt-1">
+          <div className="w-full h-1.5 bg-[#262a3b] rounded-full overflow-hidden mt-1">
             <div
               className={`h-full rounded-full transition-all ${
                 quota && quota.usagePercent > HIGH_STORAGE_WARNING_THRESHOLD_PERCENT
                   ? 'bg-amber-500'
-                  : 'bg-blue-500'
+                  : 'bg-[#f4446d]'
               }`}
               style={{ width: `${quota ? Math.max(2, quota.usagePercent) : 2}%` }}
             />
@@ -136,7 +151,7 @@ export const LibrarySidebar: React.FC<LibrarySidebarProps> = ({
       </div>
 
       {/* Bottom Section: Actions on Selected Project */}
-      <div className="flex flex-col gap-2 pt-4 border-t border-[#282d3f]">
+      <div className="flex flex-col gap-2 pt-4 border-t border-[#262a3b]">
         <div className="flex items-center justify-between text-xs text-slate-400 font-medium">
           <span className="uppercase text-[0.65rem] tracking-wider font-bold">Actions</span>
           <span className="text-[0.65rem] truncate text-slate-500">
@@ -149,7 +164,7 @@ export const LibrarySidebar: React.FC<LibrarySidebarProps> = ({
             type="button"
             disabled={!isSelected}
             onClick={onOpenSelected}
-            className="flex items-center justify-center gap-1.5 py-2 px-3 text-xs font-semibold rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:pointer-events-none text-white transition shadow-sm"
+            className="flex items-center justify-center gap-1.5 py-2 px-3 text-xs font-semibold rounded-lg bg-[#f4446d] hover:bg-[#e0335c] disabled:opacity-40 disabled:pointer-events-none text-white transition shadow-md shadow-[rgba(244,68,109,0.25)] cursor-pointer"
           >
             <FolderOpen className="w-3.5 h-3.5" />
             <span>Open</span>
@@ -159,7 +174,7 @@ export const LibrarySidebar: React.FC<LibrarySidebarProps> = ({
             type="button"
             disabled={!isSelected}
             onClick={onExportSelected}
-            className="flex items-center justify-center gap-1.5 py-2 px-3 text-xs font-semibold rounded-lg bg-[#1c1f2e] hover:bg-[#282d3f] disabled:opacity-40 disabled:pointer-events-none text-slate-200 transition border border-[#282d3f]"
+            className="flex items-center justify-center gap-1.5 py-2 px-3 text-xs font-semibold rounded-lg bg-[#181a26] hover:bg-[#202436] disabled:opacity-40 disabled:pointer-events-none text-slate-200 transition border border-[#262a3b] cursor-pointer"
           >
             <Download className="w-3.5 h-3.5" />
             <span>Export</span>
@@ -169,7 +184,7 @@ export const LibrarySidebar: React.FC<LibrarySidebarProps> = ({
             type="button"
             disabled={!isSelected}
             onClick={onRenameSelected}
-            className="flex items-center justify-center gap-1.5 py-2 px-3 text-xs font-semibold rounded-lg bg-[#1c1f2e] hover:bg-[#282d3f] disabled:opacity-40 disabled:pointer-events-none text-slate-200 transition border border-[#282d3f]"
+            className="flex items-center justify-center gap-1.5 py-2 px-3 text-xs font-semibold rounded-lg bg-[#181a26] hover:bg-[#202436] disabled:opacity-40 disabled:pointer-events-none text-slate-200 transition border border-[#262a3b] cursor-pointer"
           >
             <Edit2 className="w-3.5 h-3.5" />
             <span>Rename</span>
@@ -179,7 +194,7 @@ export const LibrarySidebar: React.FC<LibrarySidebarProps> = ({
             type="button"
             disabled={!isSelected}
             onClick={onDeleteSelected}
-            className="flex items-center justify-center gap-1.5 py-2 px-3 text-xs font-semibold rounded-lg bg-red-500/10 hover:bg-red-500/20 disabled:opacity-40 disabled:pointer-events-none text-red-400 transition border border-red-500/20"
+            className="flex items-center justify-center gap-1.5 py-2 px-3 text-xs font-semibold rounded-lg bg-red-500/10 hover:bg-red-500/20 disabled:opacity-40 disabled:pointer-events-none text-red-400 transition border border-red-500/20 cursor-pointer"
           >
             <Trash2 className="w-3.5 h-3.5" />
             <span>Delete</span>

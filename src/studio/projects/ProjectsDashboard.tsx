@@ -9,11 +9,13 @@ import { ProjectDetailsPane } from './ProjectDetailsPane';
 export interface ProjectsDashboardProps {
   onOpenProject: (projectId: number) => void;
   onOpenAddFromLibrary: (projectId: number) => void;
+  onBackToEditor?: () => void;
 }
 
 export const ProjectsDashboard: React.FC<ProjectsDashboardProps> = ({
   onOpenProject,
   onOpenAddFromLibrary,
+  onBackToEditor,
 }) => {
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
   const [renameTarget, setRenameTarget] = useState<ProjectFolder | null>(null);
@@ -107,6 +109,7 @@ export const ProjectsDashboard: React.FC<ProjectsDashboardProps> = ({
         onRenameSelected={() => selectedProjectId && handleStartRename(selectedProjectId)}
         onDeleteSelected={() => selectedProjectId && handleStartDelete(selectedProjectId)}
         onCreateNewProject={handleCreateProject}
+        onBackToEditor={onBackToEditor}
       />
 
       {/* Center Projects Grid */}
@@ -134,10 +137,10 @@ export const ProjectsDashboard: React.FC<ProjectsDashboardProps> = ({
 
       {/* Rename Modal */}
       {renameTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-xs p-4 select-none">
           <form
             onSubmit={handleConfirmRename}
-            className="w-full max-w-sm rounded-xl bg-[#181a26] border border-[#282d3f] p-5 shadow-2xl flex flex-col gap-4"
+            className="w-full max-w-sm rounded-xl bg-[#161924] border border-[#262a3b] p-5 shadow-2xl flex flex-col gap-4"
           >
             <h3 className="text-sm font-semibold text-slate-100">Rename Project</h3>
             <input
@@ -145,19 +148,19 @@ export const ProjectsDashboard: React.FC<ProjectsDashboardProps> = ({
               autoFocus
               value={renameValue}
               onChange={(e) => setRenameValue(e.target.value)}
-              className="w-full h-9 px-3 rounded-lg bg-[#12141c] border border-[#282d3f] text-xs text-slate-100 focus:outline-none focus:border-blue-500"
+              className="w-full h-9 px-3 rounded-lg bg-[#090a0f] border border-[#262a3b] text-xs text-slate-100 focus:outline-none focus:border-[#f4446d]"
             />
             <div className="flex items-center justify-end gap-2 pt-2">
               <button
                 type="button"
                 onClick={() => setRenameTarget(null)}
-                className="px-3 py-1.5 text-xs text-slate-400 hover:text-white rounded-lg transition"
+                className="px-3 py-1.5 text-xs text-slate-400 hover:text-white rounded-lg transition cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                className="px-4 py-1.5 text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition"
+                className="px-4 py-1.5 text-xs font-semibold bg-[#f4446d] hover:bg-[#e0335c] text-white rounded-lg shadow-md shadow-[rgba(244,68,109,0.25)] transition cursor-pointer"
               >
                 Save
               </button>
@@ -168,8 +171,8 @@ export const ProjectsDashboard: React.FC<ProjectsDashboardProps> = ({
 
       {/* Delete Confirmation Modal */}
       {deleteTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
-          <div className="w-full max-w-sm rounded-xl bg-[#181a26] border border-[#282d3f] p-5 shadow-2xl flex flex-col gap-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-xs p-4 select-none">
+          <div className="w-full max-w-sm rounded-xl bg-[#161924] border border-[#262a3b] p-5 shadow-2xl flex flex-col gap-4">
             <h3 className="text-sm font-semibold text-red-400">Delete Project</h3>
             <p className="text-xs text-slate-400 leading-relaxed">
               Are you sure you want to delete <strong className="text-slate-200">“{deleteTarget.title}”</strong>?
@@ -178,21 +181,21 @@ export const ProjectsDashboard: React.FC<ProjectsDashboardProps> = ({
               <button
                 type="button"
                 onClick={() => handleConfirmDelete(false)}
-                className="w-full py-2 px-3 text-xs font-semibold rounded-lg bg-[#282d3f] hover:bg-[#343b52] text-slate-200 transition"
+                className="w-full py-2 px-3 text-xs font-semibold rounded-lg bg-[#262a3b] hover:bg-[#343b52] text-slate-200 transition cursor-pointer"
               >
                 Unlink Pages (Keep in Library)
               </button>
               <button
                 type="button"
                 onClick={() => handleConfirmDelete(true)}
-                className="w-full py-2 px-3 text-xs font-semibold rounded-lg bg-red-600 hover:bg-red-500 text-white transition"
+                className="w-full py-2 px-3 text-xs font-semibold rounded-lg bg-red-600 hover:bg-red-500 text-white transition cursor-pointer"
               >
                 Delete Project and All Its Images
               </button>
               <button
                 type="button"
                 onClick={() => setDeleteTarget(null)}
-                className="w-full py-1.5 px-3 text-xs text-slate-400 hover:text-white transition"
+                className="w-full py-1.5 px-3 text-xs text-slate-400 hover:text-white transition cursor-pointer"
               >
                 Cancel
               </button>
@@ -203,9 +206,9 @@ export const ProjectsDashboard: React.FC<ProjectsDashboardProps> = ({
 
       {/* Export In-Flight Overlay */}
       {isExporting && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xs p-4">
-          <div className="w-full max-w-xs rounded-xl bg-[#181a26] border border-[#282d3f] p-6 shadow-2xl flex flex-col items-center gap-3 text-center">
-            <div className="w-8 h-8 rounded-full border-2 border-blue-500 border-t-transparent animate-spin" />
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-xs p-4 select-none">
+          <div className="w-full max-w-xs rounded-xl bg-[#161924] border border-[#262a3b] p-6 shadow-2xl flex flex-col items-center gap-3 text-center">
+            <div className="w-8 h-8 rounded-full border-2 border-[#f4446d] border-t-transparent animate-spin" />
             <h4 className="text-sm font-semibold text-slate-100">Exporting Manga Archive</h4>
             <p className="text-xs text-slate-400">{exportProgressText || 'Packaging files...'}</p>
           </div>

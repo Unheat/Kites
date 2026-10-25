@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { db, type TranslationJob } from '../../db';
 import { exportProjectBundle, type BatchExportFormat } from '../export/batchExport';
+import { getTranslatedPageThumbnailUrl } from '../canvas/thumbnailRenderer';
 
 export interface PageRailProps {
   projectId: number;
@@ -40,7 +41,6 @@ export const PageRail: React.FC<PageRailProps> = ({
 
   useEffect(() => {
     let isCancelled = false;
-    const activeUrls: string[] = [];
 
     const loadPages = async () => {
       const jobs = await db.translationJobs
@@ -55,15 +55,7 @@ export const PageRail: React.FC<PageRailProps> = ({
         if (isCancelled) break;
         let thumbUrl: string | null = null;
         if (job.id) {
-          const img = await db.images.where({ jobId: job.id }).first();
-          if (isCancelled) break;
-          if (img) {
-            const blob = img.translatedImageBlob || img.rawImageBlob;
-            if (blob) {
-              thumbUrl = URL.createObjectURL(blob);
-              activeUrls.push(thumbUrl);
-            }
-          }
+          thumbUrl = await getTranslatedPageThumbnailUrl(job.id, 350);
         }
         items.push({ job, thumbUrl });
       }
@@ -77,7 +69,6 @@ export const PageRail: React.FC<PageRailProps> = ({
 
     return () => {
       isCancelled = true;
-      activeUrls.forEach((url) => URL.revokeObjectURL(url));
     };
   }, [projectId]);
 
@@ -99,7 +90,7 @@ export const PageRail: React.FC<PageRailProps> = ({
         <button
           type="button"
           onClick={() => setIsCollapsed(false)}
-          className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-[#1c1f2e] transition"
+          className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-[#1c1f2e] transition cursor-pointer"
           title="Expand Pages Rail"
         >
           <ChevronRight className="w-4 h-4" />
@@ -117,14 +108,14 @@ export const PageRail: React.FC<PageRailProps> = ({
       {/* Top Header */}
       <div className="h-9 px-3 border-b border-[#262a3b] bg-[#141724] flex items-center justify-between shrink-0">
         <div className="flex items-center gap-1.5 text-xs font-bold text-slate-300">
-          <Layers className="w-3.5 h-3.5 text-blue-400" />
+          <Layers className="w-3.5 h-3.5 text-[#f4446d]" />
           <span>Pages ({pages.length})</span>
         </div>
         <div className="flex items-center gap-1">
           <button
             type="button"
             onClick={onOpenAddFromLibrary}
-            className="p-1 rounded-md text-blue-400 hover:text-white hover:bg-blue-600 transition"
+            className="p-1 rounded-md text-[#f4446d] hover:text-white hover:bg-[#f4446d] transition cursor-pointer"
             title="Add pages from library"
           >
             <Plus className="w-3.5 h-3.5" />
@@ -132,7 +123,7 @@ export const PageRail: React.FC<PageRailProps> = ({
           <button
             type="button"
             onClick={() => setIsCollapsed(true)}
-            className="p-1 rounded-md text-slate-400 hover:text-white hover:bg-[#1c1f2e] transition"
+            className="p-1 rounded-md text-slate-400 hover:text-white hover:bg-[#1c1f2e] transition cursor-pointer"
             title="Collapse rail"
           >
             <ChevronLeft className="w-3.5 h-3.5" />
@@ -153,12 +144,12 @@ export const PageRail: React.FC<PageRailProps> = ({
               onClick={() => job.id && onSelectPage(job.id)}
               className={`group relative flex items-center gap-2 p-1.5 rounded-lg border cursor-pointer transition ${
                 isActive
-                  ? 'bg-blue-600/15 border-blue-500 shadow-sm'
-                  : 'bg-[#181a26] border-[#262a3b] hover:border-slate-500'
+                  ? 'bg-[#f4446d]/15 border-[#f4446d] ring-1 ring-[#f4446d]/30 shadow-sm'
+                  : 'bg-[#161924] border-[#262a3b] hover:border-slate-500'
               }`}
             >
               {/* Thumbnail */}
-              <div className="w-10 h-14 rounded bg-[#090a0f] border border-[#282d3f] overflow-hidden shrink-0 flex items-center justify-center">
+              <div className="w-10 h-14 rounded bg-[#090a0f] border border-[#262a3b] overflow-hidden shrink-0 flex items-center justify-center">
                 {thumbUrl ? (
                   <img src={thumbUrl} alt="" className="w-full h-full object-cover" />
                 ) : (
@@ -186,12 +177,12 @@ export const PageRail: React.FC<PageRailProps> = ({
 
         {pages.length === 0 && (
           <div className="h-full flex flex-col items-center justify-center text-center p-4 text-xs text-slate-500">
-            <Layers className="w-6 h-6 mb-1 opacity-40" />
+            <Layers className="w-6 h-6 mb-1 opacity-40 text-slate-600" />
             <span>No pages in this project.</span>
             <button
               type="button"
               onClick={onOpenAddFromLibrary}
-              className="mt-2 text-xs text-blue-400 hover:underline font-semibold"
+              className="mt-2 text-xs text-[#f4446d] hover:underline font-semibold cursor-pointer"
             >
               + Add pages
             </button>
@@ -205,26 +196,26 @@ export const PageRail: React.FC<PageRailProps> = ({
           type="button"
           disabled={pages.length === 0 || isExporting}
           onClick={() => setExportMenuOpen((v) => !v)}
-          className="w-full flex items-center justify-center gap-1.5 py-1.5 px-2 text-xs font-semibold rounded-lg bg-[#1c1f2e] hover:bg-[#282d3f] disabled:opacity-40 text-slate-200 transition border border-[#282d3f]"
+          className="w-full flex items-center justify-center gap-1.5 py-1.5 px-2 text-xs font-semibold rounded-lg bg-[#181a26] hover:bg-[#202436] disabled:opacity-40 text-slate-200 transition border border-[#262a3b] cursor-pointer"
         >
           <Download className="w-3.5 h-3.5 text-slate-400" />
           <span>{isExporting ? 'Exporting...' : 'Export All'}</span>
         </button>
 
         {exportMenuOpen && (
-          <div className="absolute bottom-full left-2 right-2 mb-1 bg-[#181a26] border border-[#282d3f] rounded-lg shadow-xl z-50 py-1 text-xs text-slate-200">
+          <div className="absolute bottom-full left-2 right-2 mb-1 bg-[#161924] border border-[#262a3b] rounded-lg shadow-xl z-50 py-1 text-xs text-slate-200">
             <button
               type="button"
               onClick={() => handleExport('images')}
-              className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-[#282d3f] transition text-left"
+              className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-[#262a3b] transition text-left cursor-pointer"
             >
-              <Download className="w-3 h-3 text-blue-400" />
+              <Download className="w-3 h-3 text-[#f4446d]" />
               <span>Standard ZIP</span>
             </button>
             <button
               type="button"
               onClick={() => handleExport('cbz')}
-              className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-[#282d3f] transition text-left"
+              className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-[#262a3b] transition text-left cursor-pointer"
             >
               <FileText className="w-3 h-3 text-emerald-400" />
               <span>Comic CBZ</span>
@@ -232,7 +223,7 @@ export const PageRail: React.FC<PageRailProps> = ({
             <button
               type="button"
               onClick={() => handleExport('psd')}
-              className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-[#282d3f] transition text-left"
+              className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-[#262a3b] transition text-left cursor-pointer"
             >
               <FileCode className="w-3 h-3 text-purple-400" />
               <span>Layered PSD</span>
