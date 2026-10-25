@@ -107,14 +107,7 @@ function reflowTextObject(object: TextObject, mode: StudioTypesetMode): TextObje
     getTypesetDisplayText(object.text, object), object.fontFamily,
     object.width, object.height, object.fontSize, mode, object
   );
-  // Auto-snap height to hug measured text lines ("upper limit" bounds)
-  const lineSpacingMultiplier = object.lineSpacing
-    ? (object.lineSpacing > 10 ? object.lineSpacing / 100 : object.lineSpacing)
-    : 1.25;
-  const measuredHeight = layout.height ?? (layout.lines.length * layout.fontSize * lineSpacingMultiplier);
-  const nextHeight = Math.max(MIN_LAYOUT_DIMENSION, Math.round(measuredHeight));
-
-  return { ...object, fontSize: layout.fontSize, lines: layout.lines, height: nextHeight };
+  return { ...object, fontSize: layout.fontSize, lines: layout.lines };
 }
 
 let sharedMeasureCanvas: HTMLCanvasElement | null = null;

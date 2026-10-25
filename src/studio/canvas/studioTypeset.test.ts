@@ -156,7 +156,7 @@ describe('Studio Algorithmic Typeset & Line Reflow', () => {
     expect(ellipseJoined).toContain('community');
   });
 
-  it('auto-snaps box height to hug reflowed lines when width changes (upper-limit bounds)', () => {
+  it('preserves box height on manual resize and updates reflowed lines when width changes', () => {
     const multiLineObject: TextObject = {
       ...object,
       width: 100,
@@ -164,11 +164,15 @@ describe('Studio Algorithmic Typeset & Line Reflow', () => {
       text: 'This is a long sentence that occupies multiple lines inside a narrow speech bubble container.',
       typesetMode: 'ellipse',
     };
-    // Widening from 100 to 400 reduces line count and auto-snaps height smaller
+    // Widening from 100 to 400 reduces line count while preserving height
     const widened = applyTextObjectUpdates(multiLineObject, { width: 400 });
     expect(widened.width).toBe(400);
-    expect(widened.height).toBeLessThan(multiLineObject.height);
+    expect(widened.height).toBe(200);
     expect(widened.lines?.length).toBeLessThan(recalculateBlockTypeset(multiLineObject.text, multiLineObject.fontFamily, 100, 200, 16, 'ellipse').lines.length);
+
+    // Height can be resized independently in any direction
+    const resizedHeight = applyTextObjectUpdates(multiLineObject, { height: 350 });
+    expect(resizedHeight.height).toBe(350);
   });
 
   describe('CJK Vertical Layout & Column Wrapping', () => {

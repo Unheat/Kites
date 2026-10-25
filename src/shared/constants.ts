@@ -26,5 +26,5 @@ export type StorageKey = (typeof STORAGE_KEYS)[keyof typeof STORAGE_KEYS];
  */
 export const TYPESET_MODES = ['ellipse', 'balloon', 'simple'] as const;
 export type TypesetMode = (typeof TYPESET_MODES)[number];
-export const DEFAULT_TYPESET_MODE: TypesetMode = 'ellipse';
+export const DEFAULT_TYPESET_MODE: TypesetMode = 'balloon';
 
