@@ -1,12 +1,14 @@
 import React from 'react';
-import { Upload, FlipHorizontal, FlipVertical, Trash2 } from 'lucide-react';
+import { Upload, FlipHorizontal, FlipVertical, Trash2, Loader } from 'lucide-react';
 import { studioStore, useStudioStore } from '../state/studioStore';
 import { studioUndoStack } from '../state/undoStack';
 import type { ImageLayer } from '../types';
+import { STUDIO_IMAGE_INPUT_ACCEPT } from '../../shared/constants';
 
 interface ImageLayerSettingsProps {
-  onUploadPage?: (file: File) => Promise<void>;
+  onUploadPage?: (files: File[]) => Promise<void>;
   isUploadingPage?: boolean;
+  uploadProgress?: { current: number; total: number; currentFileName: string } | null;
 }
 
 /**
@@ -14,7 +16,11 @@ interface ImageLayerSettingsProps {
  * @param props Page-upload callback and shared queue-loading state from App.
  * @returns Existing sticker controls plus an explicitly labeled page translation control.
  */
-export const ImageLayerSettings: React.FC<ImageLayerSettingsProps> = ({ onUploadPage, isUploadingPage = false }) => {
+export const ImageLayerSettings: React.FC<ImageLayerSettingsProps> = ({
+  onUploadPage,
+  isUploadingPage = false,
+  uploadProgress = null,
+}) => {
   const imageLayers = useStudioStore((s) => s.imageLayers);
   const selectedImageLayerId = useStudioStore((s) => s.selectedImageLayerId);
 
@@ -82,14 +88,17 @@ export const ImageLayerSettings: React.FC<ImageLayerSettingsProps> = ({ onUpload
   };
 
   /**
-   * Passes a separate page upload to App and resets selection for repeat uploads.
+   * Passes page upload(s) to App and resets selection for repeat uploads.
    * @param event Page file-input change event, never the sticker input.
    * @returns Resolves after App handles persistence, queueing, and failure feedback.
    */
   const handlePageUpload = async (event: React.ChangeEvent<HTMLInputElement>): Promise<void> => {
-    const file = event.currentTarget.files?.[0];
+    const fileList = event.currentTarget.files;
+    const files = fileList ? Array.from(fileList) : [];
     event.currentTarget.value = '';
-    if (file && onUploadPage && !isUploadingPage) await onUploadPage(file);
+    if (files.length > 0 && onUploadPage && !isUploadingPage) {
+      await onUploadPage(files);
+    }
   };
 
   /**
@@ -126,17 +135,53 @@ export const ImageLayerSettings: React.FC<ImageLayerSettingsProps> = ({ onUpload
           <Upload className="w-5 h-5 text-[#f4446d] mb-1" />
           <span className="font-medium text-slate-200">Upload Sticker Image</span>
           <span className="text-[11px] text-slate-500">PNG with transparency, WebP, JPEG</span>
-          <input type="file" accept="image/*" onChange={handleFileUpload} className="hidden" />
+          <input type="file" accept={STUDIO_IMAGE_INPUT_ACCEPT} onChange={handleFileUpload} className="hidden" />
         </label>
       </div>
 
       {onUploadPage && (
         <div className="pt-3 border-t border-[#282d3f]">
-          <label className={`flex flex-col items-center justify-center p-4 rounded-xl border-2 border-dashed border-[#282d3f] bg-[#090a0f] transition ${isUploadingPage ? 'opacity-50 cursor-wait' : 'hover:border-indigo-500 hover:bg-[#12141c] cursor-pointer'}`}>
-            <Upload className="w-5 h-5 text-indigo-400 mb-1" />
-            <span className="font-medium text-slate-200">{isUploadingPage ? 'Queueing page…' : 'Upload & translate page'}</span>
-            <span className="text-[11px] text-slate-500">New page · full translation pipeline, not a sticker</span>
-            <input type="file" accept="image/*" aria-label="Upload and translate page" onChange={handlePageUpload} disabled={isUploadingPage} className="hidden" />
+          <label className={`flex flex-col items-center justify-center p-4 rounded-xl border-2 border-dashed border-[#282d3f] bg-[#090a0f] transition ${isUploadingPage ? 'opacity-70 cursor-wait' : 'hover:border-indigo-500 hover:bg-[#12141c] cursor-pointer'}`}>
+            {isUploadingPage ? (
+              <Loader className="w-5 h-5 text-indigo-400 mb-1 animate-spin" />
+            ) : (
+              <Upload className="w-5 h-5 text-indigo-400 mb-1" />
+            )}
+            <span className="font-medium text-slate-200">
+              {uploadProgress && uploadProgress.total > 1
+                ? `Queueing ${uploadProgress.current}/${uploadProgress.total}…`
+                : isUploadingPage
+                ? 'Queueing page…'
+                : 'Upload & translate pages'}
+            </span>
+            {uploadProgress && uploadProgress.total > 1 ? (
+              <div className="w-full mt-2 space-y-1">
+                <div className="w-full bg-[#1c1f2e] h-1.5 rounded-full overflow-hidden">
+                  <div
+                    className="bg-indigo-500 h-full rounded-full transition-all duration-300 ease-out"
+                    style={{
+                      width: `${Math.round((uploadProgress.current / uploadProgress.total) * 100)}%`,
+                    }}
+                  />
+                </div>
+                <p className="text-[10px] text-slate-400 text-center truncate max-w-full">
+                  {uploadProgress.currentFileName}
+                </p>
+              </div>
+            ) : (
+              <span className="text-[11px] text-slate-500">
+                {isUploadingPage ? 'Full translation pipeline' : 'PNG, JPG, WebP, AVIF · single or batch'}
+              </span>
+            )}
+            <input
+              type="file"
+              accept={STUDIO_IMAGE_INPUT_ACCEPT}
+              multiple
+              aria-label="Upload and translate pages"
+              onChange={handlePageUpload}
+              disabled={isUploadingPage}
+              className="hidden"
+            />
           </label>
         </div>
       )}

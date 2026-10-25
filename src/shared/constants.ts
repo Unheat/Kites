@@ -29,3 +29,36 @@ export const TYPESET_MODES = ['ellipse', 'balloon', 'simple'] as const;
 export type TypesetMode = (typeof TYPESET_MODES)[number];
 export const DEFAULT_TYPESET_MODE: TypesetMode = 'balloon';
 
+/**
+ * Canonical image formats supported for Studio uploads and processing pipeline.
+ * Formats like SVG and multi-frame GIF are explicitly excluded to prevent pipeline stalls.
+ */
+export const SUPPORTED_STUDIO_IMAGE_FORMATS = [
+  { id: 'png', mime: 'image/png', ext: '.png', label: 'PNG' },
+  { id: 'jpeg', mime: 'image/jpeg', ext: '.jpg', label: 'JPEG' },
+  { id: 'jpeg-alt', mime: 'image/jpeg', ext: '.jpeg', label: 'JPEG' },
+  { id: 'webp', mime: 'image/webp', ext: '.webp', label: 'WebP' },
+  { id: 'avif', mime: 'image/avif', ext: '.avif', label: 'AVIF' },
+] as const;
+
+export const SUPPORTED_STUDIO_MIME_TYPES = [
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+  'image/avif',
+] as const;
+
+export const SUPPORTED_STUDIO_FILE_EXTENSIONS = [
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.webp',
+  '.avif',
+] as const;
+
+/**
+ * HTML file-input `accept` attribute string forcing OS file picker to only allow supported images.
+ */
+export const STUDIO_IMAGE_INPUT_ACCEPT = 'image/png,image/jpeg,image/webp,image/avif,.png,.jpg,.jpeg,.webp,.avif';
+
+

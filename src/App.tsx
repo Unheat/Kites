@@ -13,6 +13,7 @@ import {
   FileImage,
   Layers,
   PanelLeftClose,
+  Loader,
 } from 'lucide-react';
 import './index.css';
 import { Studio } from './studio/Studio';
@@ -20,7 +21,12 @@ import { ProjectsDashboard } from './studio/projects/ProjectsDashboard';
 import { AddFromLibraryModal } from './studio/modals/AddFromLibraryModal';
 import type { TextObject } from './studio/types';
 import type { ProjectFolder } from './db';
-import { uploadStudioPage } from './shared/studioUpload';
+import {
+  BatchUploadError,
+  uploadStudioPagesBatch,
+  type BatchUploadProgress,
+} from './shared/studioUpload';
+import { STUDIO_IMAGE_INPUT_ACCEPT } from './shared/constants';
 import { restoreTextObject } from './studio/state/persistedTextObjects';
 import { loadHyphenationLanguage } from './offscreen/utils/hyphenation';
 
@@ -144,6 +150,7 @@ export default function App() {
   const jobLoadVersionRef = useRef(0);
   const uploadInFlightRef = useRef(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<BatchUploadProgress | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
   // Revoke active Blob URLs on component unmount
@@ -259,38 +266,68 @@ export default function App() {
   const studioTextObjects = useMemo(() => textBlocks.map(restoreTextObject), [textBlocks]);
 
   /**
-   * Uploads a page from either the library or editor through the same persisted pipeline entry point.
-   * @param file User-selected image file; sticker uploads use their separate layer handler.
+   * Uploads one or more pages through the same persisted pipeline entry point.
+   * For batch uploads, updates progress state sequentially and sets the first uploaded page as active.
+   *
+   * @param files Single File or array of Files selected by the user.
    * @returns Resolves after queue acknowledgement and library refresh, or visible failure feedback.
    */
-  const handlePageUpload = async (file: File): Promise<void> => {
+  const handlePageUpload = async (files: File | File[]): Promise<void> => {
+    const fileList = Array.isArray(files) ? files : [files];
+    if (fileList.length === 0) return;
     if (uploadInFlightRef.current) return;
     uploadInFlightRef.current = true;
     setIsUploading(true);
     setUploadError(null);
+    setUploadProgress({
+      current: 1,
+      total: fileList.length,
+      currentFileName: fileList[0].name,
+    });
+
+    let firstQueuedId: number | null = null;
     try {
-      const jobId = await uploadStudioPage(file);
+      const jobIds = await uploadStudioPagesBatch(fileList, (progress) => {
+        setUploadProgress(progress);
+      });
+      if (jobIds.length > 0) {
+        firstQueuedId = jobIds[0];
+      }
       await loadJobs();
-      setActiveJobId(jobId);
+      if (firstQueuedId !== null) {
+        setActiveJobId(firstQueuedId);
+      }
     } catch (err) {
       console.error('[Studio] Manual upload failed:', err);
-      setUploadError(err instanceof Error ? err.message : 'Could not upload and queue this page.');
+      if (err instanceof BatchUploadError && err.queuedJobIds.length > 0) {
+        firstQueuedId = err.queuedJobIds[0];
+      }
+      setUploadError(
+        err instanceof Error ? err.message : 'Could not upload and queue selected pages.'
+      );
       await loadJobs();
+      if (firstQueuedId !== null) {
+        setActiveJobId(firstQueuedId);
+      }
     } finally {
       uploadInFlightRef.current = false;
       setIsUploading(false);
+      setUploadProgress(null);
     }
   };
 
   /**
-   * Reads and resets the library file input so the same file can be selected again.
+   * Reads and resets the library file input so the same files can be selected again.
+   * Passes all selected files to handlePageUpload for batch queueing.
+   *
    * @param event Native file-input change event.
-   * @returns Resolves after the selected page upload completes.
+   * @returns Resolves after the selected page uploads complete.
    */
   const handleManualUpload = async (event: React.ChangeEvent<HTMLInputElement>): Promise<void> => {
-    const file = event.currentTarget.files?.[0];
+    const fileList = event.currentTarget.files;
+    const files = fileList ? Array.from(fileList) : [];
     event.currentTarget.value = '';
-    if (file) await handlePageUpload(file);
+    if (files.length > 0) await handlePageUpload(files);
   };
 
   const handleDeleteJob = async (jobId: number, e: React.MouseEvent) => {
@@ -360,7 +397,8 @@ export default function App() {
       <input
         type="file"
         ref={fileInputRef}
-        accept="image/*"
+        accept={STUDIO_IMAGE_INPUT_ACCEPT}
+        multiple
         onChange={handleManualUpload}
         disabled={isUploading}
         className="hidden"
@@ -414,10 +452,32 @@ export default function App() {
                 <button
                   onClick={() => fileInputRef.current?.click()}
                   disabled={isUploading}
-                  className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg border border-dashed border-[#282d3f] hover:border-slate-500 bg-[#090a0f] text-xs text-slate-300 font-medium transition"
+                  className="w-full flex flex-col items-center justify-center gap-1 py-1.5 px-2 rounded-lg border border-dashed border-[#282d3f] hover:border-slate-500 bg-[#090a0f] text-xs text-slate-300 font-medium transition"
                 >
-                  <Upload className="w-3.5 h-3.5" />
-                  {isUploading ? 'Queueing page…' : 'Upload Image'}
+                  <div className="flex items-center gap-1.5">
+                    {isUploading ? (
+                      <Loader className="w-3.5 h-3.5 text-indigo-400 animate-spin" />
+                    ) : (
+                      <Upload className="w-3.5 h-3.5" />
+                    )}
+                    <span>
+                      {uploadProgress && uploadProgress.total > 1
+                        ? `Queueing ${uploadProgress.current}/${uploadProgress.total}…`
+                        : isUploading
+                        ? 'Queueing page…'
+                        : 'Upload Images'}
+                    </span>
+                  </div>
+                  {uploadProgress && uploadProgress.total > 1 && (
+                    <div className="w-full bg-[#1c1f2e] h-1 rounded-full overflow-hidden">
+                      <div
+                        className="bg-indigo-500 h-full rounded-full transition-all duration-300 ease-out"
+                        style={{
+                          width: `${Math.round((uploadProgress.current / uploadProgress.total) * 100)}%`,
+                        }}
+                      />
+                    </div>
+                  )}
                 </button>
               </div>
 
@@ -468,6 +528,7 @@ export default function App() {
                 jobTitle={activeJob?.srcUrl || `Manga Page #${activeJobId}`}
                 onUploadPage={handlePageUpload}
                 isUploadingPage={isUploading}
+                uploadProgress={uploadProgress}
                 projectId={currentProjectId ?? undefined}
                 projectName={activeProject?.title}
                 onBackToProjects={() => setAppMode('dashboard')}
@@ -502,8 +563,18 @@ export default function App() {
                     disabled={isUploading}
                     className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-500 transition shadow-lg shadow-indigo-900/30"
                   >
-                    <Upload className="w-4 h-4" />
-                    <span>{isUploading ? 'Queueing page…' : 'Upload Manga Page'}</span>
+                    {isUploading ? (
+                      <Loader className="w-4 h-4 text-white animate-spin" />
+                    ) : (
+                      <Upload className="w-4 h-4" />
+                    )}
+                    <span>
+                      {uploadProgress && uploadProgress.total > 1
+                        ? `Queueing ${uploadProgress.current}/${uploadProgress.total}…`
+                        : isUploading
+                        ? 'Queueing page…'
+                        : 'Upload Manga Pages'}
+                    </span>
                   </button>
                 </div>
               </div>
