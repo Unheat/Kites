@@ -17,6 +17,7 @@
     "preview": "vite preview",
     "test": "vitest run src/",
     "test:e2e": "node scripts/test-extension.js",
+    "test:e2e:color": "node scripts/test-color-e2e.js",
     "test:webllm": "node scripts/test-webllm-user-flow.js",
     "test:visual:custom-api": "tsx src/test/pipelineVisualTestCustomApi.ts",
     "test:visual:cloudflare": "tsx src/test/pipelineVisualTestCloudflare.ts",
