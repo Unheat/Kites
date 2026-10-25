@@ -71,4 +71,11 @@ export interface IOcrEngine {
    * @returns A promise that resolves when destruction is complete.
    */
   destroy(): Promise<void>;
+
+  /**
+   * Checks whether the active execution provider matches current hardware options.
+   *
+   * @returns True if cached session provider matches requested options.
+   */
+  isProviderCurrent?(): Promise<boolean>;
 }

@@ -35,6 +35,15 @@ export class BubbleManager {
   }
 
   /**
+   * Waits until all concurrent in-flight detection calls finish before mutating or disposing engine.
+   */
+  private async waitForUsersToDrain(): Promise<void> {
+    while (this.activeUsers > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  }
+
+  /**
    * Creates an engine instance conforming to the requested bubble mode.
    *
    * @param mode - Configured bubble detection mode ('heuristic' | 'neural' | 'off').
@@ -82,9 +91,18 @@ export class BubbleManager {
         (this.activeMode === 'neural' && mode === 'neural-mask') ||
         (this.activeMode === 'neural-mask' && mode === 'neural');
 
-      if (this.activeMode !== mode) {
-        if (this.activeEngine && !isBothNeural) {
-          console.log(`[BubbleManager] Switching bubble mode from '${this.activeMode}' to '${mode}'. Destroying old engine...`);
+      const options = this.resolveEngineOptions(mode, popupState);
+      const isProviderCurrent =
+        !this.activeEngine ||
+        typeof this.activeEngine.isProviderCurrent !== 'function' ||
+        (await this.activeEngine.isProviderCurrent(options));
+
+      const shouldRecreate = this.activeMode !== mode || !isProviderCurrent;
+
+      if (shouldRecreate) {
+        if (this.activeEngine && (!isBothNeural || !isProviderCurrent)) {
+          console.log(`[BubbleManager] Recreating bubble engine (mode: '${this.activeMode}' -> '${mode}', isProviderCurrent: ${isProviderCurrent}). Destroying old engine...`);
+          await this.waitForUsersToDrain();
           await this.activeEngine.destroy();
           this.activeEngine = null;
           this.activeMode = null;
@@ -98,7 +116,6 @@ export class BubbleManager {
               onInitialization?.('started', 'bubble', mode);
             }
             try {
-              const options = this.resolveEngineOptions(mode, popupState);
               await newEngine.init(options);
             } finally {
               if (isNeural) {
@@ -160,6 +177,7 @@ export class BubbleManager {
    */
   async destroy(): Promise<void> {
     return this.serializeLifecycle(async () => {
+      await this.waitForUsersToDrain();
       if (this.activeEngine) {
         console.log('[BubbleManager] Destroying active bubble engine...');
         await this.activeEngine.destroy();
@@ -167,6 +185,13 @@ export class BubbleManager {
         this.activeMode = null;
       }
     });
+  }
+
+  /**
+   * Alias for destroy to satisfy uniform subsystem manager interface.
+   */
+  async cleanup(): Promise<void> {
+    return this.destroy();
   }
 }
 

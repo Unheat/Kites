@@ -56,4 +56,60 @@ describe('Bubble Engine OOP Abstraction', () => {
 
     await manager.destroy();
   });
+
+  it('BubbleManager recreates engine when isProviderCurrent reports false', async () => {
+    const manager = new BubbleManager();
+    const lease1 = await manager.acquireEngine('neural');
+    expect(lease1.engine).toBeInstanceOf(NeuralBubbleEngine);
+    lease1.release();
+
+    const oldEngine = lease1.engine as NeuralBubbleEngine;
+    const spyDestroy = vi.spyOn(oldEngine, 'destroy');
+    vi.spyOn(oldEngine, 'isProviderCurrent').mockResolvedValue(false);
+
+    const lease2 = await manager.acquireEngine('neural');
+    expect(spyDestroy).toHaveBeenCalledOnce();
+    expect(lease2.engine).not.toBe(oldEngine);
+    lease2.release();
+
+    await manager.destroy();
+  });
+
+  it('BubbleManager waits for active users to drain before destroying', async () => {
+    const manager = new BubbleManager();
+    let resolveDetect!: (val: any) => void;
+    const pendingDetect = new Promise<any>((resolve) => {
+      resolveDetect = resolve;
+    });
+
+    // Seed heuristic engine
+    const seedLease = await manager.acquireEngine('heuristic');
+    const engine = seedLease.engine!;
+    seedLease.release();
+
+    vi.spyOn(engine, 'detect').mockImplementation(() => pendingDetect);
+    const spyDestroy = vi.spyOn(engine, 'destroy');
+
+    // Start long-running detect operation (which holds activeUsers = 1)
+    const detectOp = manager.detect({ width: 10, height: 10 } as any, [], 'heuristic');
+
+    // Concurrently request switch to neural mode
+    let switchFinished = false;
+    const switchPromise = manager.acquireEngine('neural').then((l) => {
+      switchFinished = true;
+      l.release();
+    });
+
+    await new Promise((r) => setTimeout(r, 50));
+    expect(switchFinished).toBe(false);
+    expect(spyDestroy).not.toHaveBeenCalled();
+
+    resolveDetect({ bubbles: [] });
+    await detectOp;
+    await switchPromise;
+
+    expect(switchFinished).toBe(true);
+    expect(spyDestroy).toHaveBeenCalledOnce();
+    await manager.destroy();
+  });
 });

@@ -145,128 +145,153 @@ export class LamaMangaInpaintEngine extends LamaBaseInpaintEngine {
     const startTime = performance.now();
     console.log(`[LamaMangaInpaintEngine] Starting localized patch inpainting for ${boxes.length} bubble components using ${this.activeProvider}.`);
 
-    // 3. Process each speech bubble component independently at 1:1 native resolution
-    for (let i = 0; i < boxes.length; i++) {
-      const b = boxes[i];
-      const x0 = Math.max(0, Math.floor(b.minX - LAMA_PATCH_PAD));
-      const y0 = Math.max(0, Math.floor(b.minY - LAMA_PATCH_PAD));
-      const x1 = Math.min(width, Math.ceil(b.maxX + LAMA_PATCH_PAD));
-      const y1 = Math.min(height, Math.ceil(b.maxY + LAMA_PATCH_PAD));
+    // Scratch canvases are allocated once per inpaint call and resized dynamically to avoid DOM canvas churn.
+    const imageScratch = await this.createCanvas(1, 1);
+    const maskScratch = await this.createCanvas(1, 1);
+    const outputScratch = await this.createCanvas(1, 1);
+    let scratchWidth = 1;
+    let scratchHeight = 1;
 
-      const pw = x1 - x0;
-      const ph = y1 - y0;
-      if (pw < 8 || ph < 8) continue;
+    try {
+      // 3. Process each speech bubble component independently at 1:1 native resolution
+      for (let i = 0; i < boxes.length; i++) {
+        const b = boxes[i];
+        const x0 = Math.max(0, Math.floor(b.minX - LAMA_PATCH_PAD));
+        const y0 = Math.max(0, Math.floor(b.minY - LAMA_PATCH_PAD));
+        const x1 = Math.min(width, Math.ceil(b.maxX + LAMA_PATCH_PAD));
+        const y1 = Math.min(height, Math.ceil(b.maxY + LAMA_PATCH_PAD));
 
-      // Snap dimensions to 64px multiple (XianScan DirectML rule) to avoid GPU shader recompilations
-      const snapW = Math.max(64, Math.ceil(pw / LAMA_BUCKET_SIZE) * LAMA_BUCKET_SIZE);
-      const snapH = Math.max(64, Math.ceil(ph / LAMA_BUCKET_SIZE) * LAMA_BUCKET_SIZE);
+        const pw = x1 - x0;
+        const ph = y1 - y0;
+        if (pw < 8 || ph < 8) continue;
 
-      // Crop patch image
-      const patchCanvas = await this.createCanvas(snapW, snapH);
-      const patchCtx = patchCanvas.getContext('2d', { willReadFrequently: true });
-      patchCtx.drawImage(finalCanvas, x0, y0, pw, ph, 0, 0, pw, ph);
+        // Snap dimensions to 64px multiple (XianScan DirectML rule) to avoid GPU shader recompilations
+        const snapW = Math.max(64, Math.ceil(pw / LAMA_BUCKET_SIZE) * LAMA_BUCKET_SIZE);
+        const snapH = Math.max(64, Math.ceil(ph / LAMA_BUCKET_SIZE) * LAMA_BUCKET_SIZE);
 
-      // Prepare patch mask
-      const maskCanvas = await this.createCanvas(snapW, snapH);
-      const maskCtx = maskCanvas.getContext('2d', { willReadFrequently: true });
-      maskCtx.fillStyle = 'black';
-      maskCtx.fillRect(0, 0, snapW, snapH);
-
-      if (strokeMaskCanvas) {
-        maskCtx.drawImage(strokeMaskCanvas, x0, y0, pw, ph, 0, 0, pw, ph);
-      } else {
-        maskCtx.fillStyle = 'white';
-        maskCtx.strokeStyle = 'white';
-        maskCtx.lineWidth = LAMA_MASK_STROKE_WIDTH;
-        maskCtx.lineJoin = 'round';
-        maskCtx.lineCap = 'round';
-
-        for (const poly of polygons) {
-          if (!poly || poly.length < 3) continue;
-          let pMinX = Infinity, pMinY = Infinity, pMaxX = -Infinity, pMaxY = -Infinity;
-          for (const pt of poly) {
-            if (pt.x < pMinX) pMinX = pt.x;
-            if (pt.x > pMaxX) pMaxX = pt.x;
-            if (pt.y < pMinY) pMinY = pt.y;
-            if (pt.y > pMaxY) pMaxY = pt.y;
-          }
-          // Skip polygons outside this patch
-          if (pMaxX < x0 || pMinX > x1 || pMaxY < y0 || pMinY > y1) continue;
-
-          maskCtx.beginPath();
-          maskCtx.moveTo(poly[0].x - x0, poly[0].y - y0);
-          for (let k = 1; k < poly.length; k++) {
-            maskCtx.lineTo(poly[k].x - x0, poly[k].y - y0);
-          }
-          maskCtx.closePath();
-          maskCtx.fill();
-          maskCtx.stroke();
-        }
-      }
-
-      const totalPx = snapW * snapH;
-      const imgData = patchCtx.getImageData(0, 0, snapW, snapH).data;
-      const maskData = maskCtx.getImageData(0, 0, snapW, snapH).data;
-
-      const imgFloat = new Float32Array(1 * 3 * totalPx);
-      const maskFloat = new Float32Array(1 * 1 * totalPx);
-
-      for (let p = 0; p < totalPx; p++) {
-        const off = p * 4;
-        const m = maskData[off] >= 127 ? 1.0 : 0.0;
-        maskFloat[p] = m;
-        imgFloat[0 * totalPx + p] = this.normalizeImagePixel(imgData[off]) * (1.0 - m);
-        imgFloat[1 * totalPx + p] = this.normalizeImagePixel(imgData[off + 1]) * (1.0 - m);
-        imgFloat[2 * totalPx + p] = this.normalizeImagePixel(imgData[off + 2]) * (1.0 - m);
-      }
-
-      const imageTensor = new this.ort.Tensor('float32', imgFloat, [1, 3, snapH, snapW]);
-      const maskTensor = new this.ort.Tensor('float32', maskFloat, [1, 1, snapH, snapW]);
-      const feeds = { image: imageTensor, mask: maskTensor };
-
-      let results: any;
-      let outData: Float32Array;
-      try {
-        results = await this.runPatch(feeds);
-        const outName = this.session.outputNames[0];
-        outData = new Float32Array(results[outName].data as Float32Array);
-      } finally {
-        imageTensor.dispose();
-        maskTensor.dispose();
-        if (results) {
-          for (const tensor of Object.values(results) as any[]) {
-            if (typeof tensor?.dispose === 'function') tensor.dispose();
+        if (snapW > scratchWidth || snapH > scratchHeight) {
+          scratchWidth = Math.max(scratchWidth, snapW);
+          scratchHeight = Math.max(scratchHeight, snapH);
+          for (const canvas of [imageScratch, maskScratch, outputScratch]) {
+            canvas.width = scratchWidth;
+            canvas.height = scratchHeight;
           }
         }
-      }
 
-      // Transfer output to patch canvas
-      const outCanvas = await this.createCanvas(snapW, snapH);
-      const outCtx = outCanvas.getContext('2d', { willReadFrequently: true });
-      const outImgData = outCtx.createImageData(snapW, snapH);
+        const patchCtx = imageScratch.getContext('2d', { willReadFrequently: true });
+        const maskCtx = maskScratch.getContext('2d', { willReadFrequently: true });
+        const outCtx = outputScratch.getContext('2d', { willReadFrequently: true });
+        patchCtx.clearRect(0, 0, snapW, snapH);
+        maskCtx.clearRect(0, 0, snapW, snapH);
+        outCtx.clearRect(0, 0, snapW, snapH);
 
-      for (let p = 0; p < totalPx; p++) {
-        const idx = p * 4;
-        outImgData.data[idx] = Math.max(0, Math.min(255, this.denormalizeImagePixel(outData[0 * totalPx + p])));
-        outImgData.data[idx + 1] = Math.max(0, Math.min(255, this.denormalizeImagePixel(outData[1 * totalPx + p])));
-        outImgData.data[idx + 2] = Math.max(0, Math.min(255, this.denormalizeImagePixel(outData[2 * totalPx + p])));
-        outImgData.data[idx + 3] = 255;
-      }
-      outCtx.putImageData(outImgData, 0, 0);
+        // Crop patch image
+        patchCtx.drawImage(finalCanvas, x0, y0, pw, ph, 0, 0, pw, ph);
 
-      // Composite patch back to finalCanvas strictly where mask is active
-      const currentPatchData = finalCtx.getImageData(x0, y0, pw, ph);
-      const hallucinatedPatchData = outCtx.getImageData(0, 0, pw, ph);
-      const localMaskData = maskCtx.getImageData(0, 0, pw, ph);
+        // Prepare patch mask
+        maskCtx.fillStyle = 'black';
+        maskCtx.fillRect(0, 0, snapW, snapH);
 
-      for (let p = 0; p < currentPatchData.data.length; p += 4) {
-        if (localMaskData.data[p] >= 127) {
-          currentPatchData.data[p] = hallucinatedPatchData.data[p];
-          currentPatchData.data[p + 1] = hallucinatedPatchData.data[p + 1];
-          currentPatchData.data[p + 2] = hallucinatedPatchData.data[p + 2];
+        if (strokeMaskCanvas) {
+          maskCtx.drawImage(strokeMaskCanvas, x0, y0, pw, ph, 0, 0, pw, ph);
+        } else {
+          maskCtx.fillStyle = 'white';
+          maskCtx.strokeStyle = 'white';
+          maskCtx.lineWidth = LAMA_MASK_STROKE_WIDTH;
+          maskCtx.lineJoin = 'round';
+          maskCtx.lineCap = 'round';
+
+          for (const poly of polygons) {
+            if (!poly || poly.length < 3) continue;
+            let pMinX = Infinity, pMinY = Infinity, pMaxX = -Infinity, pMaxY = -Infinity;
+            for (const pt of poly) {
+              if (pt.x < pMinX) pMinX = pt.x;
+              if (pt.x > pMaxX) pMaxX = pt.x;
+              if (pt.y < pMinY) pMinY = pt.y;
+              if (pt.y > pMaxY) pMaxY = pt.y;
+            }
+            // Skip polygons outside this patch
+            if (pMaxX < x0 || pMinX > x1 || pMaxY < y0 || pMinY > y1) continue;
+
+            maskCtx.beginPath();
+            maskCtx.moveTo(poly[0].x - x0, poly[0].y - y0);
+            for (let k = 1; k < poly.length; k++) {
+              maskCtx.lineTo(poly[k].x - x0, poly[k].y - y0);
+            }
+            maskCtx.closePath();
+            maskCtx.fill();
+            maskCtx.stroke();
+          }
         }
+
+        const totalPx = snapW * snapH;
+        const imgData = patchCtx.getImageData(0, 0, snapW, snapH).data;
+        const maskData = maskCtx.getImageData(0, 0, snapW, snapH).data;
+
+        const imgFloat = new Float32Array(1 * 3 * totalPx);
+        const maskFloat = new Float32Array(1 * 1 * totalPx);
+
+        for (let p = 0; p < totalPx; p++) {
+          const off = p * 4;
+          const m = maskData[off] >= 127 ? 1.0 : 0.0;
+          maskFloat[p] = m;
+          imgFloat[0 * totalPx + p] = this.normalizeImagePixel(imgData[off]) * (1.0 - m);
+          imgFloat[1 * totalPx + p] = this.normalizeImagePixel(imgData[off + 1]) * (1.0 - m);
+          imgFloat[2 * totalPx + p] = this.normalizeImagePixel(imgData[off + 2]) * (1.0 - m);
+        }
+
+        const imageTensor = new this.ort.Tensor('float32', imgFloat, [1, 3, snapH, snapW]);
+        const maskTensor = new this.ort.Tensor('float32', maskFloat, [1, 1, snapH, snapW]);
+        const feeds = { image: imageTensor, mask: maskTensor };
+
+        let results: any;
+        let outData: Float32Array;
+        try {
+          results = await this.runPatch(feeds);
+          const outName = this.session.outputNames[0];
+          outData = new Float32Array(results[outName].data as Float32Array);
+        } finally {
+          imageTensor.dispose();
+          maskTensor.dispose();
+          if (results) {
+            for (const tensor of Object.values(results) as any[]) {
+              if (typeof tensor?.dispose === 'function') tensor.dispose();
+            }
+          }
+        }
+
+        // Transfer output to patch canvas
+        const outImgData = outCtx.createImageData(snapW, snapH);
+
+        for (let p = 0; p < totalPx; p++) {
+          const idx = p * 4;
+          outImgData.data[idx] = Math.max(0, Math.min(255, this.denormalizeImagePixel(outData[0 * totalPx + p])));
+          outImgData.data[idx + 1] = Math.max(0, Math.min(255, this.denormalizeImagePixel(outData[1 * totalPx + p])));
+          outImgData.data[idx + 2] = Math.max(0, Math.min(255, this.denormalizeImagePixel(outData[2 * totalPx + p])));
+          outImgData.data[idx + 3] = 255;
+        }
+        outCtx.putImageData(outImgData, 0, 0);
+
+        // Composite patch back to finalCanvas strictly where mask is active
+        const currentPatchData = finalCtx.getImageData(x0, y0, pw, ph);
+        const hallucinatedPatchData = outCtx.getImageData(0, 0, pw, ph);
+        const localMaskData = maskCtx.getImageData(0, 0, pw, ph);
+
+        for (let p = 0; p < currentPatchData.data.length; p += 4) {
+          if (localMaskData.data[p] >= 127) {
+            currentPatchData.data[p] = hallucinatedPatchData.data[p];
+            currentPatchData.data[p + 1] = hallucinatedPatchData.data[p + 1];
+            currentPatchData.data[p + 2] = hallucinatedPatchData.data[p + 2];
+          }
+        }
+        finalCtx.putImageData(currentPatchData, x0, y0);
       }
-      finalCtx.putImageData(currentPatchData, x0, y0);
+    } finally {
+      // Zero scratch canvas dimensions to immediately release backing graphics memory.
+      for (const canvas of [imageScratch, maskScratch, outputScratch]) {
+        canvas.width = 0;
+        canvas.height = 0;
+      }
     }
 
     const endTime = performance.now();

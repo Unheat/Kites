@@ -60,6 +60,19 @@ export class NeuralBubbleDetector {
   }
 
   /**
+   * Checks whether the active session provider matches the requested execution options.
+   *
+   * @param options - Execution options or extension settings state.
+   * @returns True if session provider matches requested options, or if no session is active.
+   */
+  static isProviderCurrent(options?: BubbleEngineOptions | PopupState): boolean {
+    if (!this.session) return true;
+    const wantGpu = this.resolvePreferGpu(options);
+    const requestedProvider = wantGpu ? 'webgpu' : 'wasm';
+    return this.activeProvider === requestedProvider;
+  }
+
+  /**
    * Preprocesses canvas/image pixel data into float32 planar RGB tensor [1, 3, inputSize, inputSize].
    *
    * @param rawRgba - Raw RGBA pixel array from 2D canvas scaled to inputSize x inputSize.

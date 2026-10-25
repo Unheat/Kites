@@ -72,6 +72,8 @@ vi.mock('./InpaintManager', () => {
     InpaintManager: class {
       // Matches the real InpaintManager surface used by runPipeline.
       eraseText = vi.fn().mockResolvedValue(new ArrayBuffer(123)) // cleaned buffer
+      cleanup = vi.fn().mockResolvedValue(undefined)
+      destroy = vi.fn().mockResolvedValue(undefined)
       getEngine = vi.fn().mockResolvedValue({
         inpaint: vi.fn().mockResolvedValue(new ArrayBuffer(123))
       })
@@ -118,6 +120,10 @@ describe('PipelineOrchestrator', () => {
         activeInpaintId: 'simple'
       }
     });
+
+    (pipelineOrchestrator.getTranslationManager().processTranslation as any) = vi.fn().mockResolvedValue(['Hello', 'World']);
+    (pipelineOrchestrator.getInpaintManager().eraseText as any) = vi.fn().mockResolvedValue(new ArrayBuffer(123));
+    (pipelineOrchestrator.getInpaintManager().cleanup as any) = vi.fn().mockResolvedValue(undefined);
   });
 
   it('should run the full pipeline successfully', async () => {
@@ -488,5 +494,98 @@ describe('PipelineOrchestrator', () => {
     expect(custom.getInpaintManager()).toBe(mockInpaint);
     expect(custom.getTranslationManager()).toBe(mockTranslation);
     expect(custom.getBubbleManager()).toBe(mockBubble);
+  });
+
+  it('runs translation and inpainting sequentially when translation engine is webllm', async () => {
+    const mockImageRecord = {
+      id: 9,
+      jobId: 900,
+      rawImageBlob: new Blob(['fake image data'], { type: 'image/png' })
+    };
+    ((db.images as any).first as any).mockResolvedValue(mockImageRecord);
+
+    vi.spyOn(chrome.runtime, 'sendMessage').mockImplementation((_message: any, callback: any) => {
+      callback({ activeInpaintId: 'simple', activeEngineId: 'webllm', targetLang: 'en' });
+    });
+
+    const executionLog: string[] = [];
+    pipelineOrchestrator.getTranslationManager().processTranslation = vi.fn().mockImplementation(async () => {
+      executionLog.push('translation-start');
+      await new Promise((r) => setTimeout(r, 20));
+      executionLog.push('translation-end');
+      return ['Hello', 'World'];
+    });
+
+    pipelineOrchestrator.getInpaintManager().eraseText = vi.fn().mockImplementation(async () => {
+      executionLog.push('inpaint-start');
+      await new Promise((r) => setTimeout(r, 20));
+      executionLog.push('inpaint-end');
+      return new ArrayBuffer(8);
+    });
+
+    const blobSpy = vi.spyOn(pipelineOrchestrator as any, 'blobToArrayBuffer').mockResolvedValue(new ArrayBuffer(8));
+
+    await pipelineOrchestrator.runPipeline(900);
+
+    // Verify sequential execution: translation finishes before inpainting starts
+    expect(executionLog).toEqual(['translation-start', 'translation-end', 'inpaint-start', 'inpaint-end']);
+
+    blobSpy.mockRestore();
+  });
+
+  it('calls inpaintManager.cleanup when inpaintTier is none to prevent zombie models', async () => {
+    const mockImageRecord = {
+      id: 10,
+      jobId: 1000,
+      rawImageBlob: new Blob(['fake image data'], { type: 'image/png' })
+    };
+    ((db.images as any).first as any).mockResolvedValue(mockImageRecord);
+
+    vi.spyOn(chrome.runtime, 'sendMessage').mockImplementation((_message: any, callback: any) => {
+      callback({ activeInpaintId: 'none', activeEngineId: 'cloudflare-translate', targetLang: 'en' });
+    });
+
+    const cleanupMock = vi.fn().mockResolvedValue(undefined);
+    pipelineOrchestrator.getInpaintManager().cleanup = cleanupMock;
+    const blobSpy = vi.spyOn(pipelineOrchestrator as any, 'blobToArrayBuffer').mockResolvedValue(new ArrayBuffer(8));
+
+    await pipelineOrchestrator.runPipeline(1000);
+
+    expect(cleanupMock).toHaveBeenCalledOnce();
+
+    blobSpy.mockRestore();
+  });
+
+  it('explicitly closes createImageBitmap to free backing memory', async () => {
+    const mockImageRecord = {
+      id: 11,
+      jobId: 1100,
+      rawImageBlob: new Blob(['fake image data'], { type: 'image/png' })
+    };
+    ((db.images as any).first as any).mockResolvedValue(mockImageRecord);
+
+    vi.spyOn(chrome.runtime, 'sendMessage').mockImplementation((_message: any, callback: any) => {
+      callback({ activeInpaintId: 'simple', targetLang: 'en' });
+    });
+
+    const mockBitmaps: any[] = [];
+    vi.mocked(global.createImageBitmap).mockImplementation(() => {
+      const c = createCanvas(100, 100) as any;
+      c.close = vi.fn();
+      mockBitmaps.push(c);
+      return Promise.resolve(c);
+    });
+
+    pipelineOrchestrator.getInpaintManager().eraseText = vi.fn().mockResolvedValue(new ArrayBuffer(8));
+    const blobSpy = vi.spyOn(pipelineOrchestrator as any, 'blobToArrayBuffer').mockResolvedValue(new ArrayBuffer(8));
+
+    await pipelineOrchestrator.runPipeline(1100);
+
+    expect(mockBitmaps.length).toBeGreaterThanOrEqual(1);
+    for (const b of mockBitmaps) {
+      expect(b.close).toHaveBeenCalled();
+    }
+
+    blobSpy.mockRestore();
   });
 });

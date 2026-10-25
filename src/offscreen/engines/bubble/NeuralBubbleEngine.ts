@@ -117,4 +117,13 @@ export class NeuralBubbleEngine implements IBubbleEngine {
   async destroy(): Promise<void> {
     await NeuralBubbleDetector.dispose();
   }
+
+  /**
+   * Checks whether the active bubble detector provider remains aligned with current options.
+   *
+   * @param options - Execution options.
+   */
+  async isProviderCurrent(options?: BubbleEngineOptions): Promise<boolean> {
+    return NeuralBubbleDetector.isProviderCurrent(options);
+  }
 }

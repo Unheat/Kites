@@ -5,11 +5,14 @@ import type {
   ProcessJobMessage,
   StudioInpaintPayload,
   StudioOcrPayload,
+  PopupState,
 } from '../shared/types';
 import type { Point2D } from './engines/inpaint/BaseInpaintEngine';
 import { extractMaskPolygons } from './utils/maskPolygonExtractor';
 import { pipelineOrchestrator } from './services/PipelineOrchestrator';
 import { translationManager } from './services/TranslationManager';
+import { bubbleManager } from './services/BubbleManager';
+import { STORAGE_KEYS } from '../shared/constants';
 import { runStudioOcr, type StudioOcrResponse } from './services/StudioOcr';
 import { CustomApiEngine } from './engines/translation/CustomApiEngine';
 import { inpaintRegistry } from './engines/inpaint/inpaintRegistry';
@@ -629,5 +632,62 @@ async function handleStudioOcr(payload: StudioOcrPayload): Promise<StudioOcrResp
     getInpaintManager: () => pipelineOrchestrator.getInpaintManager(),
     translationManager,
     blobToBase64,
+  });
+}
+
+// Listen to extension storage updates to eagerly evict resident models and VRAM when tiers change
+if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.onChanged) {
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== 'local' || !changes[STORAGE_KEYS.POPUP_STATE]) return;
+
+    const oldValue = changes[STORAGE_KEYS.POPUP_STATE].oldValue as Partial<PopupState> | undefined;
+    const newValue = changes[STORAGE_KEYS.POPUP_STATE].newValue as Partial<PopupState> | undefined;
+    if (!newValue) return;
+
+    // 1. Evict Translation model if engine switched away from WebLLM or another local runtime
+    if (oldValue?.activeEngineId && oldValue.activeEngineId !== newValue.activeEngineId) {
+      console.log(`[Offscreen] Active translation engine changed: ${oldValue.activeEngineId} -> ${newValue.activeEngineId}. Eagerly unloading previous engine...`);
+      void translationManager.cleanup();
+    }
+
+    // 2. Evict Inpaint model if tier switched to 'none' or to a different family
+    const oldInpaint = oldValue?.activeInpaintId ?? (oldValue as any)?.inpaintTier;
+    const newInpaint = newValue?.activeInpaintId ?? (newValue as any)?.inpaintTier;
+    if (oldInpaint && oldInpaint !== newInpaint) {
+      console.log(`[Offscreen] Inpaint tier changed: ${oldInpaint} -> ${newInpaint}. Eagerly unloading inpaint engine...`);
+      void pipelineOrchestrator.getInpaintManager().cleanup();
+    }
+
+    // 3. Evict Bubble model if switched to 'off' or between families
+    const oldBubble = oldValue?.bubbleMode;
+    const newBubble = newValue?.bubbleMode;
+    if (oldBubble && oldBubble !== newBubble) {
+      console.log(`[Offscreen] Bubble mode changed: ${oldBubble} -> ${newBubble}. Eagerly unloading bubble engine...`);
+      void bubbleManager.destroy();
+    }
+
+    // 4. Evict OCR model if active tier changed
+    const oldOcr = oldValue?.activeOcrId;
+    const newOcr = newValue?.activeOcrId;
+    if (oldOcr && oldOcr !== newOcr) {
+      console.log(`[Offscreen] OCR tier changed: ${oldOcr} -> ${newOcr}. Eagerly unloading OCR engine...`);
+      void pipelineOrchestrator.getOcrManager().cleanup();
+    }
+
+    // 5. If WebGPU master toggle or overrides changed, evict active sessions so they re-probe cleanly
+    const oldWebgpuMaster = oldValue?.webgpuMaster;
+    const newWebgpuMaster = newValue?.webgpuMaster;
+    const oldOverrides = oldValue?.webgpuOverrides;
+    const newOverrides = newValue?.webgpuOverrides;
+    const webgpuChanged =
+      oldWebgpuMaster !== newWebgpuMaster ||
+      JSON.stringify(oldOverrides) !== JSON.stringify(newOverrides);
+
+    if (webgpuChanged) {
+      console.log('[Offscreen] WebGPU hardware configuration changed in settings. Evicting active engines for re-probing...');
+      void pipelineOrchestrator.getInpaintManager().cleanup();
+      void bubbleManager.destroy();
+      void pipelineOrchestrator.getOcrManager().cleanup();
+    }
   });
 }

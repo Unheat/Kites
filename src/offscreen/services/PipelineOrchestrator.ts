@@ -263,43 +263,62 @@ export class PipelineOrchestrator {
       let cleanedImageBuffer: ArrayBuffer = imageBuffer;
 
       const stage2Start = import.meta.env.DEV ? performance.now() : 0;
+      const activeTranslationEngineId = popupState?.activeEngineId || 'cloudflare-translate';
+      const isLocalTranslation = activeTranslationEngineId === 'webllm';
+
       if (shouldInpaint) {
-        console.log(`[PipelineOrchestrator] Running translation and inpainting in parallel (tier: ${inpaintTier}).`);
-        
-        const activeTranslationEngineId = popupState?.activeEngineId || 'cloudflare-translate';
-        const translationPromise = this.services.translationManager
+        const executeTranslation = () => this.services.translationManager
           .processTranslation(ocrResult.texts, sourceLang, targetLang, makeLifecycle('translation', activeTranslationEngineId), popupState)
           .then((r) => {
             if (import.meta.env.DEV) {
               console.log(`[PipelineOrchestrator] Translation branch finished in ${(performance.now() - stage2Start).toFixed(2)}ms.`);
             }
-            return r;
+            return r || ocrResult.texts;
           })
           .catch((err) => {
             console.warn(`[PipelineOrchestrator] Translation branch failed; preserving original source texts so pipeline does not stop:`, err);
             return ocrResult.texts;
           });
-        const inpaintPromise = this.services.inpaintManager.eraseText(imageBuffer, inpaintPolygons, inpaintTier as InpaintTier, ocrResult.maskRawCanvas, makeLifecycle('inpaint', inpaintTier)).then((r) => {
-          if (import.meta.env.DEV) {
-            console.log(`[PipelineOrchestrator] Inpaint branch (${inpaintTier}) finished in ${(performance.now() - stage2Start).toFixed(2)}ms.`);
-          }
-          return r;
-        }).catch(err => {
-          console.warn(`[PipelineOrchestrator] Inpainting failed (likely WebGPU shape mismatch). Falling back to original image. Error:`, err);
-          return imageBuffer; // Fallback to original image
-        });
 
-        [translatedTexts, cleanedImageBuffer] = await Promise.all([translationPromise, inpaintPromise]);
+        const executeInpainting = () => this.services.inpaintManager
+          .eraseText(imageBuffer, inpaintPolygons, inpaintTier as InpaintTier, ocrResult.maskRawCanvas, makeLifecycle('inpaint', inpaintTier))
+          .then((r) => {
+            if (import.meta.env.DEV) {
+              console.log(`[PipelineOrchestrator] Inpaint branch (${inpaintTier}) finished in ${(performance.now() - stage2Start).toFixed(2)}ms.`);
+            }
+            return r;
+          })
+          .catch((err) => {
+            console.warn(`[PipelineOrchestrator] Inpainting failed (likely WebGPU shape mismatch). Falling back to original image. Error:`, err);
+            return imageBuffer; // Fallback to original image
+          });
+
+        if (isLocalTranslation) {
+          // WebLLM runs heavy WebGPU inference on the offscreen thread. Running concurrent WebGPU
+          // inpainting triggers device contention and VRAM spikes; serialize these two stages.
+          console.log(`[PipelineOrchestrator] Running translation and inpainting sequentially to prevent WebGPU contention (translation: ${activeTranslationEngineId}, inpaint: ${inpaintTier}).`);
+          translatedTexts = await executeTranslation();
+          cleanedImageBuffer = await executeInpainting();
+        } else {
+          // External translation APIs (Google, Cloudflare, Custom API) operate over network I/O;
+          // run in parallel with local inpainting to maximize throughput.
+          console.log(`[PipelineOrchestrator] Running translation and inpainting in parallel (tier: ${inpaintTier}).`);
+          [translatedTexts, cleanedImageBuffer] = await Promise.all([executeTranslation(), executeInpainting()]);
+        }
+
         if (import.meta.env.DEV) {
           const stage2Duration = (performance.now() - stage2Start).toFixed(2);
-          console.log(`[PipelineOrchestrator] Parallel Inpainting (${inpaintTier}) & Translation complete in ${stage2Duration}ms (= the slower of the two branches above).`);
+          console.log(`[PipelineOrchestrator] Stage 2 Inpainting (${inpaintTier}) & Translation complete in ${stage2Duration}ms.`);
         }
       } else {
+        if (inpaintTier === 'none') {
+          void this.services.inpaintManager.cleanup();
+        }
         // No inpainting — just translate
         console.log(`[PipelineOrchestrator] Translating ${ocrResult.texts.length} text blocks (no inpainting)...`);
-        const activeTranslationEngineId = popupState?.activeEngineId || 'cloudflare-translate';
         try {
-          translatedTexts = await this.services.translationManager.processTranslation(ocrResult.texts, sourceLang, targetLang, makeLifecycle('translation', activeTranslationEngineId), popupState);
+          const res = await this.services.translationManager.processTranslation(ocrResult.texts, sourceLang, targetLang, makeLifecycle('translation', activeTranslationEngineId), popupState);
+          translatedTexts = res || ocrResult.texts;
         } catch (err) {
           console.warn(`[PipelineOrchestrator] Translation failed; preserving original source texts so pipeline does not stop:`, err);
           translatedTexts = ocrResult.texts;
@@ -328,11 +347,19 @@ export class PipelineOrchestrator {
       
       const cleanedBlob = new Blob([cleanedImageBuffer], { type: 'image/png' });
       const bitmap = await createImageBitmap(cleanedBlob);
-      const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-      const ctx = canvas.getContext('2d', { willReadFrequently: true }) as OffscreenCanvasRenderingContext2D;
-
-      // Draw the clean inpainted image
-      ctx.drawImage(bitmap, 0, 0);
+      let canvas: OffscreenCanvas;
+      let ctx: OffscreenCanvasRenderingContext2D;
+      try {
+        canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+        ctx = canvas.getContext('2d', { willReadFrequently: true }) as OffscreenCanvasRenderingContext2D;
+        // Draw the clean inpainted image
+        ctx.drawImage(bitmap, 0, 0);
+      } finally {
+        // Explicitly release backing GPU texture / compositor buffer to prevent RAM spikes.
+        if (typeof bitmap.close === 'function') {
+          bitmap.close();
+        }
+      }
       
       // Draw all translated text blocks with the Cotrans default region renderer. Track the
       // original OCR index of every item so render results can be mapped back for DB persistence.

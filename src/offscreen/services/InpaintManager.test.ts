@@ -102,4 +102,13 @@ describe('InpaintManager lifecycle', () => {
     expect(engines[0].destroy).toHaveBeenCalledOnce();
     expect(engines[1].init).toHaveBeenCalledOnce();
   });
+
+  it('unloads active engine and frees resources when destroy/cleanup is called', async () => {
+    const manager = new InpaintManager();
+    await manager.eraseText(new ArrayBuffer(1), [[{ x: 0, y: 0 }]], 'telea');
+    expect(engines).toHaveLength(1);
+
+    await manager.destroy();
+    expect(engines[0].destroy).toHaveBeenCalledOnce();
+  });
 });
