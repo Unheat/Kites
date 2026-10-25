@@ -212,4 +212,11 @@ export class ColorManager {
       }
     });
   }
+
+  /**
+   * Canonical alias for destroy() matching InpaintManager / OcrManager conventions.
+   */
+  async cleanup(): Promise<void> {
+    return this.destroy();
+  }
 }

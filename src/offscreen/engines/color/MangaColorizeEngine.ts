@@ -86,6 +86,8 @@ export class MangaColorizeEngine implements IColorEngine {
     const ort = this.runtime.ortInstance;
     const inputTensor = new ort.Tensor('float32', inputTensorData, [1, 5, inputH, inputW]);
     let outputMap: Record<string, any> | null = null;
+    let colorCanvas: any = null;
+    let finalCanvas: any = null;
 
     try {
       // 5. Run inference
@@ -99,7 +101,7 @@ export class MangaColorizeEngine implements IColorEngine {
       const isTanh = outData[0] < 0 || outData[Math.floor(outData.length / 2)] < 0;
 
       // 6. Decode output tensor [1, 3, H, W] into color canvas at model resolution
-      const colorCanvas = await this.createCanvas(inputW, inputH);
+      colorCanvas = await this.createCanvas(inputW, inputH);
       const colorCtx = colorCanvas.getContext('2d');
       if (!colorCtx) {
         throw new Error('[MangaColorizeEngine] Failed to acquire context for color canvas');
@@ -131,7 +133,7 @@ export class MangaColorizeEngine implements IColorEngine {
       colorCtx.putImageData(colorImageData, 0, 0);
 
       // 7. Upscale color canvas back to original image dimensions
-      const finalCanvas = await this.createCanvas(origW, origH);
+      finalCanvas = await this.createCanvas(origW, origH);
       const finalCtx = finalCanvas.getContext('2d');
       if (!finalCtx) {
         throw new Error('[MangaColorizeEngine] Failed to acquire context for final canvas');
@@ -147,7 +149,7 @@ export class MangaColorizeEngine implements IColorEngine {
       // 9. Convert final canvas to ArrayBuffer
       return await this.canvasToArrayBuffer(finalCanvas);
     } finally {
-      // 11. Free intermediate tensors to prevent VRAM / WebGPU leaks
+      // Free intermediate tensors to prevent VRAM / WebGPU leaks
       if (typeof inputTensor?.dispose === 'function') {
         inputTensor.dispose();
       }
@@ -156,6 +158,13 @@ export class MangaColorizeEngine implements IColorEngine {
           if (typeof tensor?.dispose === 'function') {
             tensor.dispose();
           }
+        }
+      }
+      // Zero canvas dimensions to release backing graphics buffers immediately
+      for (const c of [origCanvas, modelCanvas, colorCanvas, finalCanvas]) {
+        if (c) {
+          c.width = 0;
+          c.height = 0;
         }
       }
     }
@@ -203,12 +212,17 @@ export class MangaColorizeEngine implements IColorEngine {
 
     const blob = new Blob([buffer]);
     const img = await createImageBitmap(blob);
-    const canvas = new OffscreenCanvas(img.width, img.height);
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    if (!ctx) throw new Error('[MangaColorizeEngine] Failed to acquire OffscreenCanvas context');
-    ctx.drawImage(img, 0, 0);
-    img.close();
-    return { canvas, ctx, width: canvas.width, height: canvas.height };
+    try {
+      const canvas = new OffscreenCanvas(img.width, img.height);
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      if (!ctx) throw new Error('[MangaColorizeEngine] Failed to acquire OffscreenCanvas context');
+      ctx.drawImage(img, 0, 0);
+      return { canvas, ctx, width: canvas.width, height: canvas.height };
+    } finally {
+      if (typeof img?.close === 'function') {
+        img.close();
+      }
+    }
   }
 
   /**

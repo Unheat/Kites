@@ -588,4 +588,61 @@ describe('PipelineOrchestrator', () => {
 
     blobSpy.mockRestore();
   });
+
+  it('calls colorManager.destroy when activeColorId is none to evict VRAM', async () => {
+    const mockImageRecord = {
+      id: 12,
+      jobId: 1200,
+      rawImageBlob: new Blob(['fake image data'], { type: 'image/png' })
+    };
+    ((db.images as any).first as any).mockResolvedValue(mockImageRecord);
+
+    vi.spyOn(chrome.runtime, 'sendMessage').mockImplementation((_message: any, callback: any) => {
+      callback({ activeInpaintId: 'none', activeColorId: 'none', targetLang: 'en' });
+    });
+
+    const destroyMock = vi.fn().mockResolvedValue(undefined);
+    pipelineOrchestrator.getColorManager().destroy = destroyMock;
+    const blobSpy = vi.spyOn(pipelineOrchestrator as any, 'blobToArrayBuffer').mockResolvedValue(new ArrayBuffer(8));
+
+    await pipelineOrchestrator.runPipeline(1200);
+
+    expect(destroyMock).toHaveBeenCalled();
+
+    blobSpy.mockRestore();
+  });
+
+  it('executes colorization before inpainting and feeds colorized buffer into inpaintManager', async () => {
+    const mockImageRecord = {
+      id: 13,
+      jobId: 1300,
+      rawImageBlob: new Blob(['fake image data'], { type: 'image/png' })
+    };
+    ((db.images as any).first as any).mockResolvedValue(mockImageRecord);
+
+    vi.spyOn(chrome.runtime, 'sendMessage').mockImplementation((_message: any, callback: any) => {
+      callback({ activeInpaintId: 'simple', activeColorId: 'manga-colorization-v2', targetLang: 'en' });
+    });
+
+    // Mock resolveInstalledColorTier to return manga-colorization-v2
+    vi.spyOn(pipelineOrchestrator as any, 'resolveInstalledColorTier').mockResolvedValue('manga-colorization-v2');
+
+    const colorizedBuffer = new ArrayBuffer(999);
+    const colorizeMock = vi.fn().mockResolvedValue(colorizedBuffer);
+    pipelineOrchestrator.getColorManager().colorize = colorizeMock;
+
+    const eraseTextMock = vi.fn().mockResolvedValue(new ArrayBuffer(888));
+    pipelineOrchestrator.getInpaintManager().eraseText = eraseTextMock;
+
+    const blobSpy = vi.spyOn(pipelineOrchestrator as any, 'blobToArrayBuffer').mockResolvedValue(new ArrayBuffer(8));
+
+    await pipelineOrchestrator.runPipeline(1300);
+
+    expect(colorizeMock).toHaveBeenCalled();
+    // Inpainting must receive the colorized buffer, NOT the original B&W buffer!
+    expect(eraseTextMock.mock.calls[0][0]).toBe(colorizedBuffer);
+    expect(eraseTextMock.mock.calls[0][2]).toBe('simple');
+
+    blobSpy.mockRestore();
+  });
 });

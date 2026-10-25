@@ -707,7 +707,15 @@ if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.onChanged)
       void pipelineOrchestrator.getOcrManager().cleanup();
     }
 
-    // 5. If WebGPU master toggle or overrides changed, evict active sessions so they re-probe cleanly
+    // 5. Evict Color model if active tier changed
+    const oldColor = oldValue?.activeColorId;
+    const newColor = newValue?.activeColorId;
+    if (oldColor && oldColor !== newColor) {
+      console.log(`[Offscreen] Color tier changed: ${oldColor} -> ${newColor}. Eagerly unloading color engine...`);
+      void pipelineOrchestrator.getColorManager().destroy();
+    }
+
+    // 6. If WebGPU master toggle or overrides changed, evict active sessions so they re-probe cleanly
     const oldWebgpuMaster = oldValue?.webgpuMaster;
     const newWebgpuMaster = newValue?.webgpuMaster;
     const oldOverrides = oldValue?.webgpuOverrides;
@@ -721,6 +729,7 @@ if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.onChanged)
       void pipelineOrchestrator.getInpaintManager().cleanup();
       void bubbleManager.destroy();
       void pipelineOrchestrator.getOcrManager().cleanup();
+      void pipelineOrchestrator.getColorManager().destroy();
     }
   });
 }
