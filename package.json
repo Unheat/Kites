@@ -22,6 +22,7 @@
     "test:visual:custom-api": "tsx src/test/pipelineVisualTestCustomApi.ts",
     "test:visual:cloudflare": "tsx src/test/pipelineVisualTestCloudflare.ts",
     "test:visual:webllm": "npm run build:dev && tsx src/test/pipelineVisualTestWebLlm.ts",
+    "test:pipeline:smoke": "tsx src/test/pipelineSmokeMatrix.ts",
     "worker:test": "npm run test:providers --prefix worker",
     "worker:deploy": "npm run deploy --prefix worker",
     "test:e2e:roliascan": "node scripts/verify-roliascan-fix.js",

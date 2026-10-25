@@ -131,6 +131,13 @@ async function runPipelineVisualTest() {
   console.log('\n--- Pipeline Visual Test Complete ---');
 }
 
-runPipelineVisualTest().catch(err => {
-  console.error('Test execution failed:', err);
-});
+export { runPipelineVisualTest };
+
+if (process.argv[1] && process.argv[1].endsWith('pipelineVisualTest.ts')) {
+  runPipelineVisualTest()
+    .then(() => process.exit(0))
+    .catch((err) => {
+      console.error('[PipelineTest] Fatal error:', err);
+      process.exit(1);
+    });
+}

@@ -38,12 +38,15 @@ async function runPipelineVisualBubbleTest() {
   const translator = new GoogleTranslateEngine();
   await translator.init();
 
-  // Load Neural Bubble Detector model if available in models/
-  const neuralModelPath = fs.existsSync(path.resolve(process.cwd(), 'models/manga109_yolo11n_seg_1024.onnx'))
-    ? path.resolve(process.cwd(), 'models/manga109_yolo11n_seg_1024.onnx')
-    : path.resolve(process.cwd(), 'models/detector-v4-s_int8.onnx');
+  // Load Neural Bubble Detector model if available in test/models or models/
+  const candidateBubblePaths = [
+    path.resolve(process.cwd(), 'src/test/models/bubble/manga109_yolo11n_seg_1024.onnx'),
+    path.resolve(process.cwd(), 'models/manga109_yolo11n_seg_1024.onnx'),
+    path.resolve(process.cwd(), 'models/detector-v4-s_int8.onnx'),
+  ];
+  const neuralModelPath = candidateBubblePaths.find((p) => fs.existsSync(p));
   let neuralSession: any = null;
-  if (fs.existsSync(neuralModelPath)) {
+  if (neuralModelPath) {
     console.log(`[Neural] Loading ONNX detector from ${neuralModelPath}...`);
     try {
       neuralSession = await ort.InferenceSession.create(neuralModelPath);
@@ -52,7 +55,7 @@ async function runPipelineVisualBubbleTest() {
       console.warn('[Neural] Failed initializing ONNX session, neural tier will fallback to heuristic:', err);
     }
   } else {
-    console.warn(`[Neural] Model not found at ${neuralModelPath}. Skipping neural tier.`);
+    console.warn(`[Neural] No bubble model found in candidate paths. Skipping neural tier.`);
   }
 
   const testFiles = ['image1.jpg', 'image2.jpg', 'image3.jpg', 'image4.jpg', 'image5.png', 'image6.jpg', 'image7.jpg', 'image8.png'];
@@ -342,6 +345,13 @@ async function runPipelineVisualBubbleTest() {
   console.log('======================================================\n');
 }
 
-runPipelineVisualBubbleTest().catch((err) => {
-  console.error('Test execution failed:', err);
-});
+export { runPipelineVisualBubbleTest };
+
+if (process.argv[1] && process.argv[1].endsWith('pipelineVisualBubbleTest.ts')) {
+  runPipelineVisualBubbleTest()
+    .then(() => process.exit(0))
+    .catch((err) => {
+      console.error('[BubbleTest] Fatal error:', err);
+      process.exit(1);
+    });
+}
