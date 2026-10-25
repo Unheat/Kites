@@ -1,6 +1,6 @@
 import { writePsd, type Psd, type Layer } from 'ag-psd';
 import type { TextBlock } from '../../db';
-import type { TextObject } from '../types';
+import type { ImageLayer, TextObject } from '../types';
 
 /** Default canvas dimension fallback if image natural sizes cannot be read. */
 const DEFAULT_CANVAS_DIMENSION = 800;
@@ -81,12 +81,14 @@ export async function blobToCanvas(blob: Blob): Promise<HTMLCanvasElement> {
  * @param originalCanvas - Canvas containing the raw original page scan.
  * @param cleanedCanvas - Optional canvas containing inpaint-cleaned art (bubbles erased).
  * @param textBlocks - Array of text block metadata containing translated text, font, and bounds.
+ * @param imageLayers - Optional sticker or overlay raster layers.
  * @returns Resolves with binary ArrayBuffer of the written PSD.
  */
 export function buildPsdDocument(
   originalCanvas: HTMLCanvasElement,
   cleanedCanvas: HTMLCanvasElement | null,
-  textBlocks: (TextBlock | TextObject)[]
+  textBlocks: (TextBlock | TextObject)[],
+  imageLayers?: ImageLayer[]
 ): ArrayBuffer {
   const width = originalCanvas.width || DEFAULT_CANVAS_DIMENSION;
   const height = originalCanvas.height || DEFAULT_CANVAS_DIMENSION;
@@ -111,8 +113,45 @@ export function buildPsdDocument(
     });
   }
 
+  // Middle Layers: Sticker / Image overlay layers if present
+  if (imageLayers && imageLayers.length > 0) {
+    for (let i = 0; i < imageLayers.length; i++) {
+      const layer = imageLayers[i];
+      if (layer.isVisible === false || !layer.imageBitmap) continue;
+      const layerCanvas = document.createElement('canvas');
+      const w = Math.max(1, Math.round(layer.width));
+      const h = Math.max(1, Math.round(layer.height));
+      layerCanvas.width = w;
+      layerCanvas.height = h;
+      const layerCtx = layerCanvas.getContext('2d');
+      if (layerCtx) {
+        layerCtx.save();
+        layerCtx.translate(w / 2, h / 2);
+        if (layer.rotation) layerCtx.rotate((layer.rotation * Math.PI) / 180);
+        if (layer.flipH || layer.flipV) layerCtx.scale(layer.flipH ? -1 : 1, layer.flipV ? -1 : 1);
+        try {
+          layerCtx.drawImage(layer.imageBitmap as CanvasImageSource, -w / 2, -h / 2, w, h);
+        } catch {
+          // Ignore if un-renderable in current environment
+        }
+        layerCtx.restore();
+
+        layers.push({
+          name: `Layer ${i + 1}`,
+          canvas: layerCanvas,
+          left: Math.round(layer.x),
+          top: Math.round(layer.y),
+          opacity: typeof layer.opacity === 'number' ? layer.opacity : 1,
+        });
+      }
+    }
+  }
+
   // Top Layers: Editable Photoshop Text Layers
   for (const block of textBlocks) {
+    if ('isVisible' in block && block.isVisible === false) continue;
+    if ('isSkipped' in block && block.isSkipped) continue;
+
     const textContent = 'text' in block ? block.text : block.translatedText;
     if (!textContent || !textContent.trim()) continue;
 
@@ -153,6 +192,70 @@ export function buildPsdDocument(
   };
 
   return writePsd(psd);
+}
+
+/**
+ * Assembles a downloadable PSD Blob from live Studio canvas/image elements and text objects.
+ *
+ * @param originalSource - HTMLImageElement or HTMLCanvasElement holding the raw original scan.
+ * @param cleanedCanvas - Working background canvas containing inpaint/brush edits (or null).
+ * @param textBlocks - Array of text blocks or text objects to write as editable text layers.
+ * @param imageLayers - Optional sticker or overlay raster layers.
+ * @param fallbackWidth - Optional width fallback if originalSource is unavailable.
+ * @param fallbackHeight - Optional height fallback if originalSource is unavailable.
+ * @returns Blob formatted as image/vnd.adobe.photoshop.
+ */
+export function exportCanvasToPsdBlob(
+  originalSource: HTMLImageElement | HTMLCanvasElement | null,
+  cleanedCanvas: HTMLCanvasElement | null,
+  textBlocks: (TextBlock | TextObject)[],
+  imageLayers?: ImageLayer[],
+  fallbackWidth?: number,
+  fallbackHeight?: number
+): Blob {
+  const width =
+    (originalSource
+      ? 'naturalWidth' in originalSource
+        ? originalSource.naturalWidth || originalSource.width
+        : originalSource.width
+      : 0) ||
+    cleanedCanvas?.width ||
+    fallbackWidth ||
+    DEFAULT_CANVAS_DIMENSION;
+
+  const height =
+    (originalSource
+      ? 'naturalHeight' in originalSource
+        ? originalSource.naturalHeight || originalSource.height
+        : originalSource.height
+      : 0) ||
+    cleanedCanvas?.height ||
+    fallbackHeight ||
+    DEFAULT_CANVAS_DIMENSION;
+
+  let origCanvas: HTMLCanvasElement;
+  if (
+    originalSource &&
+    'getContext' in originalSource &&
+    typeof originalSource.getContext === 'function'
+  ) {
+    origCanvas = originalSource as HTMLCanvasElement;
+  } else {
+    origCanvas = document.createElement('canvas');
+    origCanvas.width = width;
+    origCanvas.height = height;
+    const ctx = origCanvas.getContext('2d');
+    if (ctx) {
+      if (originalSource) {
+        ctx.drawImage(originalSource, 0, 0, width, height);
+      } else if (cleanedCanvas) {
+        ctx.drawImage(cleanedCanvas, 0, 0, width, height);
+      }
+    }
+  }
+
+  const buffer = buildPsdDocument(origCanvas, cleanedCanvas, textBlocks, imageLayers);
+  return new Blob([buffer], { type: PSD_MIME_TYPE });
 }
 
 /**

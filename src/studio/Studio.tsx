@@ -6,6 +6,7 @@ import {
   ZoomOut,
   Search,
   FileText,
+  FileCode,
   Type,
   Keyboard,
   Palette,
@@ -315,6 +316,36 @@ export const Studio: React.FC<StudioProps> = ({
     await downloadCanvasAsFile(compositeCanvas, filename, format);
     setToastMessage(`Exported ${format.toUpperCase()} image successfully!`);
     setTimeout(() => setToastMessage(null), 3000);
+  };
+
+  const handleExportPsd = async () => {
+    setExportDropdownOpen(false);
+    try {
+      setToastMessage('Generating Layered PSD...');
+      const [{ exportCanvasToPsdBlob }, { triggerBrowserDownload }] = await Promise.all([
+        import('./export/psdExport'),
+        import('./export/batchExport'),
+      ]);
+
+      const bgCanvas = getWorkingCanvas();
+      const psdBlob = exportCanvasToPsdBlob(
+        originalImage,
+        bgCanvas,
+        textObjects,
+        imageLayers,
+        imageWidth,
+        imageHeight
+      );
+
+      const filename = `kites-${getCleanBaseFilename()}-layers.psd`;
+      triggerBrowserDownload(psdBlob, filename);
+      setToastMessage('Exported Layered PSD successfully!');
+    } catch (err) {
+      console.error('[Studio] PSD export failed:', err);
+      setToastMessage(err instanceof Error ? err.message : 'Failed to export PSD');
+    } finally {
+      setTimeout(() => setToastMessage(null), 3000);
+    }
   };
 
   const handleCopyCompositeToClipboard = async () => {
@@ -866,7 +897,7 @@ export const Studio: React.FC<StudioProps> = ({
 
               {exportDropdownOpen && (
                 <div
-                  className="absolute top-full mt-1.5 right-0 w-44 rounded-xl border border-[#262a3b] bg-[#12141c]/95 backdrop-blur-md p-1.5 shadow-2xl text-xs z-50 space-y-0.5"
+                  className="absolute top-full mt-1.5 right-0 w-48 rounded-xl border border-[#262a3b] bg-[#12141c]/95 backdrop-blur-md p-1.5 shadow-2xl text-xs z-50 space-y-0.5"
                   onClick={() => setExportDropdownOpen(false)}
                 >
                   <button
@@ -884,6 +915,14 @@ export const Studio: React.FC<StudioProps> = ({
                   >
                     <Download className="w-3.5 h-3.5 text-amber-400" />
                     <span>Download JPEG</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleExportPsd}
+                    className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-[#1c1f2e] text-slate-200 text-left transition cursor-pointer"
+                  >
+                    <FileCode className="w-3.5 h-3.5 text-purple-400" />
+                    <span>Download PSD (Layers)</span>
                   </button>
                   <button
                     type="button"
