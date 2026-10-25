@@ -1,4 +1,4 @@
-name: Validate Inpaint Registry URLs
+name: Validate Model Registry URLs
 
 on:
   push:
@@ -19,5 +19,5 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Extract and Validate URLs
-        run: node scripts/validate-inpaint-urls.mjs
+      - name: Extract and Validate Model URLs
+        run: node scripts/validate-model-urls.mjs
