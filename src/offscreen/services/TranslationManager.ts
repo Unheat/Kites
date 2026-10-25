@@ -302,6 +302,23 @@ export class TranslationManager {
     this.activeEngineId = null;
     await engine.destroy?.();
   }
+
+  /**
+   * Waits for active translations to finish and unloads the current engine.
+   */
+  async cleanup(): Promise<void> {
+    await this.enqueueLifecycle(async () => {
+      await this.waitForIdle();
+      await this.unloadCurrentEngine();
+    });
+  }
+
+  /**
+   * Alias for cleanup to satisfy uniform subsystem manager interface.
+   */
+  async destroy(): Promise<void> {
+    return this.cleanup();
+  }
 }
 
 // Export a singleton instance to be used by the background/offscreen handlers

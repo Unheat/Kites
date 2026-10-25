@@ -274,4 +274,11 @@ export class InpaintManager {
       }
     });
   }
+
+  /**
+   * Alias for cleanup to satisfy uniform subsystem manager interface.
+   */
+  async destroy(): Promise<void> {
+    return this.cleanup();
+  }
 }

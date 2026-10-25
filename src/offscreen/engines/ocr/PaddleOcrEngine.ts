@@ -536,6 +536,34 @@ export class PaddleOcrEngine implements IOcrEngine {
     this.isWebGpuActive = false;
     console.log('[PaddleOcrEngine] Destroyed and memory freed.');
   }
+
+  /**
+   * Checks whether the active execution provider matches current settings.
+   *
+   * @returns True if session provider matches requested settings, false if hardware settings changed.
+   */
+  async isProviderCurrent(): Promise<boolean> {
+    if (!this.isInitialized) return true;
+    const isNode = typeof window === 'undefined';
+    let wantWebGpu = await checkWebGPUAvailability();
+    if (!isNode && typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+      try {
+        const popupState = await new Promise<any>((resolve) => {
+          chrome.runtime.sendMessage({ type: 'GET_POPUP_STATE' }, (response) => {
+            resolve(response || {});
+          });
+        });
+        const masterOn = popupState?.webgpuMaster === true;
+        const ocrOn = popupState?.webgpuOverrides?.ocr !== false;
+        if (!masterOn || !ocrOn) {
+          wantWebGpu = false;
+        }
+      } catch {
+        return true;
+      }
+    }
+    return this.isWebGpuActive === wantWebGpu;
+  }
 }
 
 /**

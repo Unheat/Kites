@@ -188,7 +188,12 @@ export class OcrManager {
     return this.serializeLifecycle(async () => {
       const canonicalTier = resolveOcrTier(tier);
       let engine = this.activeEngine;
-      if (!engine || this.activeTier !== canonicalTier) {
+      const isCurrent =
+        !engine ||
+        typeof engine.isProviderCurrent !== 'function' ||
+        (await engine.isProviderCurrent());
+
+      if (!engine || this.activeTier !== canonicalTier || !isCurrent) {
         engine = await this.loadEngineInsideLifecycle(canonicalTier, onInitialization);
       }
       this.activeUsers += 1;
@@ -956,5 +961,12 @@ export class OcrManager {
         this.activeTier = null;
       }
     });
+  }
+
+  /**
+   * Alias for cleanup to satisfy uniform subsystem manager interface.
+   */
+  async destroy(): Promise<void> {
+    return this.cleanup();
   }
 }

@@ -54,4 +54,12 @@ export interface IBubbleEngine {
    * Releases and disposes runtime sessions to free WebGPU VRAM and CPU buffers.
    */
   destroy(): Promise<void>;
+
+  /**
+   * Checks whether the active execution provider matches current hardware options.
+   *
+   * @param options - Current bubble execution options.
+   * @returns True if cached session provider matches requested options.
+   */
+  isProviderCurrent?(options?: BubbleEngineOptions): Promise<boolean>;
 }
