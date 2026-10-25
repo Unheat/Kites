@@ -795,6 +795,129 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
         </div>
       </div>
 
+      {/* Layout & Bubble Fit Selector */}
+      {(() => {
+        const activeBubbleMode = state.bubbleMode ?? 'off';
+
+        return (
+          <div className="flex flex-col gap-1.5">
+            <div className="flex items-center gap-1.5 mb-1">
+              <h2 className="text-sm font-medium">Layout & Bubble Fit</h2>
+              <HelpTooltip
+                size="md"
+                content="Speech bubbles expand horizontal layout space and center translated text inside the balloon chamber, preventing tiny 6px fonts."
+              />
+            </div>
+
+            <div className="relative flex flex-col">
+              <button
+                aria-label="Layout and Bubble Fit"
+                aria-expanded={isOpenBubbleMode}
+                onClick={() => setIsOpenBubbleMode(!isOpenBubbleMode)}
+                className="w-full flex items-center justify-between p-3 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md hover:border-[var(--color-ink)] transition-colors cursor-pointer"
+              >
+                <span className="font-medium truncate pr-2">
+                  {activeBubbleMode === 'neural-mask' && isNeuralDownloaded
+                    ? 'YOLO Smart Mask'
+                    : activeBubbleMode === 'neural' && isNeuralDownloaded
+                      ? 'YOLO Box'
+                      : activeBubbleMode === 'heuristic'
+                        ? 'Heuristic'
+                        : 'Disabled'}
+                </span>
+                <ChevronDown size={16} className={`text-[var(--color-dust)] transition-transform ${isOpenBubbleMode ? 'rotate-180' : ''}`} />
+              </button>
+
+              {/* Inline progress bar for YOLO bubble detector download */}
+              {(() => {
+                const dl = downloads['bubble-yolo'];
+                if (!dl || dl.progress >= 1) return null;
+                return (
+                  <div className="mt-2 p-2 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md animate-in fade-in duration-200">
+                    <div className="flex justify-between items-end mb-1.5">
+                      <span className="text-[10px] font-medium text-[var(--color-dust)] uppercase tracking-wider truncate max-w-[80%]">
+                        YOLO Bubble: {dl.status}
+                      </span>
+                      <span className="text-xs font-bold text-[var(--color-ink)]">
+                        {Math.round(dl.progress * 100)}%
+                      </span>
+                    </div>
+                    <div className="h-1.5 w-full bg-[var(--color-paper)] rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-[var(--color-editorial)] transition-all duration-300 ease-out" 
+                        style={{ width: `${dl.progress * 100}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {isOpenBubbleMode && (
+                <div className="mt-1 bg-[var(--color-paper)] border border-[var(--color-dust)] rounded-md shadow-sm flex flex-col z-50">
+                  <div className="p-1">
+                    {BUBBLE_MODE_OPTIONS.map((opt) => {
+                      const isUninstalled = opt.isModel && !isNeuralDownloaded;
+                      const isActive = activeBubbleMode === opt.id && !isUninstalled;
+                      return (
+                        <button
+                          type="button"
+                          key={opt.id}
+                          aria-disabled={isUninstalled}
+                          onClick={() => {
+                            if (isUninstalled) return;
+                            updateState({ bubbleMode: opt.id });
+                            setIsOpenBubbleMode(false);
+                          }}
+                          className={`w-full flex items-center justify-between p-2 rounded-sm transition-colors text-left bg-transparent border-none ${
+                            isActive
+                              ? 'bg-[var(--color-vellum)] text-[var(--color-editorial)] font-semibold cursor-pointer'
+                              : isUninstalled
+                                ? 'text-[var(--color-dust)] opacity-50 cursor-not-allowed'
+                                : 'hover:bg-[var(--color-vellum)] cursor-pointer'
+                          }`}
+                        >
+                          <div className="min-w-0 flex-1 flex items-center gap-1.5">
+                            <span className="truncate pr-1 text-sm">{opt.name}</span>
+                            {opt.tooltip && (
+                              <span
+                                onClick={(e) => e.stopPropagation()}
+                                className="inline-flex items-center"
+                              >
+                                <HelpTooltip
+                                  size="sm"
+                                  width={220}
+                                  content={opt.tooltip}
+                                />
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex-shrink-0 ml-2">
+                            {isActive ? (
+                              <Check size={14} className="text-[var(--color-editorial)]" />
+                            ) : isUninstalled ? (
+                              <div
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void requestDownload('bubble-yolo', 'bubble');
+                                }}
+                                className="p-1 -mr-1 rounded hover:bg-[var(--color-vellum)] transition-colors cursor-pointer text-[var(--color-ink)] opacity-100"
+                                title="Download model"
+                              >
+                                <Download size={14} />
+                              </div>
+                            ) : null}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Render Font Selector */}
       <div className="flex flex-col gap-1.5">
         <div className="flex items-center gap-1.5 mb-1">
@@ -966,129 +1089,6 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
           )}
         </div>
       </div>
-
-      {/* Layout & Bubble Fit Selector */}
-      {(() => {
-        const activeBubbleMode = state.bubbleMode ?? 'off';
-
-        return (
-          <div className="flex flex-col gap-1.5">
-            <div className="flex items-center gap-1.5 mb-1">
-              <h2 className="text-sm font-medium">Layout & Bubble Fit</h2>
-              <HelpTooltip
-                size="md"
-                content="Speech bubbles expand horizontal layout space and center translated text inside the balloon chamber, preventing tiny 6px fonts."
-              />
-            </div>
-
-            <div className="relative flex flex-col">
-              <button
-                aria-label="Layout and Bubble Fit"
-                aria-expanded={isOpenBubbleMode}
-                onClick={() => setIsOpenBubbleMode(!isOpenBubbleMode)}
-                className="w-full flex items-center justify-between p-3 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md hover:border-[var(--color-ink)] transition-colors cursor-pointer"
-              >
-                <span className="font-medium truncate pr-2">
-                  {activeBubbleMode === 'neural-mask' && isNeuralDownloaded
-                    ? 'YOLO Smart Mask'
-                    : activeBubbleMode === 'neural' && isNeuralDownloaded
-                      ? 'YOLO Box'
-                      : activeBubbleMode === 'heuristic'
-                        ? 'Heuristic'
-                        : 'Disabled'}
-                </span>
-                <ChevronDown size={16} className={`text-[var(--color-dust)] transition-transform ${isOpenBubbleMode ? 'rotate-180' : ''}`} />
-              </button>
-
-              {/* Inline progress bar for YOLO bubble detector download */}
-              {(() => {
-                const dl = downloads['bubble-yolo'];
-                if (!dl || dl.progress >= 1) return null;
-                return (
-                  <div className="mt-2 p-2 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md animate-in fade-in duration-200">
-                    <div className="flex justify-between items-end mb-1.5">
-                      <span className="text-[10px] font-medium text-[var(--color-dust)] uppercase tracking-wider truncate max-w-[80%]">
-                        YOLO Bubble: {dl.status}
-                      </span>
-                      <span className="text-xs font-bold text-[var(--color-ink)]">
-                        {Math.round(dl.progress * 100)}%
-                      </span>
-                    </div>
-                    <div className="h-1.5 w-full bg-[var(--color-paper)] rounded-full overflow-hidden">
-                      <div 
-                        className="h-full bg-[var(--color-editorial)] transition-all duration-300 ease-out" 
-                        style={{ width: `${dl.progress * 100}%` }}
-                      />
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {isOpenBubbleMode && (
-                <div className="mt-1 bg-[var(--color-paper)] border border-[var(--color-dust)] rounded-md shadow-sm flex flex-col z-50">
-                  <div className="p-1">
-                    {BUBBLE_MODE_OPTIONS.map((opt) => {
-                      const isUninstalled = opt.isModel && !isNeuralDownloaded;
-                      const isActive = activeBubbleMode === opt.id && !isUninstalled;
-                      return (
-                        <button
-                          type="button"
-                          key={opt.id}
-                          aria-disabled={isUninstalled}
-                          onClick={() => {
-                            if (isUninstalled) return;
-                            updateState({ bubbleMode: opt.id });
-                            setIsOpenBubbleMode(false);
-                          }}
-                          className={`w-full flex items-center justify-between p-2 rounded-sm transition-colors text-left bg-transparent border-none ${
-                            isActive
-                              ? 'bg-[var(--color-vellum)] text-[var(--color-editorial)] font-semibold cursor-pointer'
-                              : isUninstalled
-                                ? 'text-[var(--color-dust)] opacity-50 cursor-not-allowed'
-                                : 'hover:bg-[var(--color-vellum)] cursor-pointer'
-                          }`}
-                        >
-                          <div className="min-w-0 flex-1 flex items-center gap-1.5">
-                            <span className="truncate pr-1 text-sm">{opt.name}</span>
-                            {opt.tooltip && (
-                              <span
-                                onClick={(e) => e.stopPropagation()}
-                                className="inline-flex items-center"
-                              >
-                                <HelpTooltip
-                                  size="sm"
-                                  width={220}
-                                  content={opt.tooltip}
-                                />
-                              </span>
-                            )}
-                          </div>
-                          <div className="flex-shrink-0 ml-2">
-                            {isActive ? (
-                              <Check size={14} className="text-[var(--color-editorial)]" />
-                            ) : isUninstalled ? (
-                              <div
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  void requestDownload('bubble-yolo', 'bubble');
-                                }}
-                                className="p-1 -mr-1 rounded hover:bg-[var(--color-vellum)] transition-colors cursor-pointer text-[var(--color-ink)] opacity-100"
-                                title="Download model"
-                              >
-                                <Download size={14} />
-                              </div>
-                            ) : null}
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        );
-      })()}
     </div>
   );
 }
