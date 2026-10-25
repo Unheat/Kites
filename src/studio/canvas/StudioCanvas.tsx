@@ -36,7 +36,7 @@ import { StudioSourceSampler } from './StudioSourceSampler';
 import { ToolViewModePolicy } from './tools/ToolViewModePolicy';
 import { requestStudioInpaint, requestStudioOcr } from '../bridge/offscreenStudioBridge';
 import { computeRotatedBounds, getHandleCursor } from './transformMath';
-import { applyTextObjectUpdates, prepareInitialTextObject, CJK_CHARACTER_REGEX, MIN_LAYOUT_DIMENSION } from './studioTypeset';
+import { applyTextObjectUpdates, prepareInitialTextObject, CJK_CHARACTER_REGEX } from './studioTypeset';
 import { extractTypographyStyle } from '../state/studioStore';
 import type {
   BoundingBox,
@@ -677,14 +677,6 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       const scaleStep = Math.round((localDeltaX - localDeltaY) * 0.25);
       const newFontSize = Math.max(6, Math.min(140, Math.round(initialTransform.fontSize + scaleStep)));
       updated.fontSize = newFontSize;
-    } else if (handle === 'e' || handle === 'w' || handle === 'wrap') {
-      const activeSide = handle === 'wrap' ? 'e' : handle;
-      const newBounds = computeRotatedBounds(initialTransform, activeSide, latestDeltaX, latestDeltaY);
-      updated.x = newBounds.x;
-      updated.y = newBounds.y;
-      updated.width = newBounds.width;
-      // Allow height to auto-snap to the reflowed text ink lines ("upper limit" bounds)
-      updated.height = MIN_LAYOUT_DIMENSION;
     } else {
       const newBounds = computeRotatedBounds(initialTransform, handle, latestDeltaX, latestDeltaY);
       updated.x = newBounds.x;

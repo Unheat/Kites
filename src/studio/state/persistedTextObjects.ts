@@ -21,7 +21,7 @@ export function restoreTextObject(block: TextBlock): TextObject {
     text: unhyphenatedText,
     lines: block.lines,
     lineSpacing: block.lineSpacing,
-    typesetMode: block.typesetMode,
+    typesetMode: block.typesetMode || 'balloon',
     borderRadius: block.borderRadius,
     isRounded: block.isRounded,
     originalText: block.originalText,
