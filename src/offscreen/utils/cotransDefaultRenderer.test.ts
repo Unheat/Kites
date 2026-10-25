@@ -162,4 +162,53 @@ describe('font family propagation', () => {
     expect(fullText).toContain("I'M");
     expect(fullText).toContain("DiD"); // internal I becomes lowercase i
   });
+
+  it('renders rotated speech bubble with ellipse typesetting and rigid affine transform', () => {
+    const drawCtx = createCanvas(400, 400).getContext('2d');
+    const transformSpy = vi.spyOn(drawCtx, 'setTransform');
+    const fillSpy = vi.spyOn(drawCtx, 'fillText');
+
+    // Create a 25-degree rotated quad for a speech bubble
+    const angleRad = (25 * Math.PI) / 180;
+    const cos = Math.cos(angleRad);
+    const sin = Math.sin(angleRad);
+    const cx = 150, cy = 150, w = 120, h = 80;
+    const halfW = w / 2, halfH = h / 2;
+    const rot = (x: number, y: number) => ({
+      x: cx + x * cos - y * sin,
+      y: cy + x * sin + y * cos,
+    });
+    const rotatedQuad = [
+      rot(-halfW, -halfH),
+      rot(halfW, -halfH),
+      rot(halfW, halfH),
+      rot(-halfW, halfH),
+    ];
+
+    const metadata: any = {
+      translation: 'I cannot believe this is happening right now in this tilted manga panel',
+      originalText: 'テスト',
+      fontSize: 16,
+      angle: 25,
+      sourceLineCount: 2,
+      polygon: rotatedQuad,
+      textColor: '#000000',
+      strokeColor: '#ffffff',
+      alignment: 'center',
+      sourceDirection: 'h',
+      isRounded: true,
+      borderRadius: 40,
+    };
+
+    const result = renderRegionDefault(drawCtx, metadata, rotatedQuad, 16);
+    expect(result).not.toBeNull();
+    expect(result!.lines.length).toBeGreaterThanOrEqual(2);
+    expect(fillSpy).toHaveBeenCalled();
+    // Verify affine transform was called with rotated basis vectors (non-zero b and c)
+    expect(transformSpy).toHaveBeenCalled();
+    const [a, b, c, d] = transformSpy.mock.calls[0];
+    expect(Math.abs(b)).toBeGreaterThan(0.1); // sin(25deg) ≈ 0.42
+    expect(Math.abs(c)).toBeGreaterThan(0.1);
+    expect(a * d - b * c).toBeCloseTo(1.0, 2); // Rigid rotation determinant is 1.0
+  });
 });

@@ -28,14 +28,8 @@ export const BUBBLE_MODE_OPTIONS: BubbleModeOption[] = [
     tooltip: 'Expands into white bubble whitespace with tail severing. Fast (<1ms), zero download.',
   },
   {
-    id: 'neural',
-    name: 'YOLO Box',
-    tooltip: 'Fast AI bounding box detector for speech bubble bounds (~11 MB).',
-    isModel: true,
-  },
-  {
     id: 'neural-mask',
-    name: 'YOLO Smart Mask',
+    name: 'YOLO (AI)',
     tooltip: 'Neural segmentation mask with morphological tail severing on AI contours (~11 MB).',
     isModel: true,
   },
@@ -817,13 +811,11 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                 className="w-full flex items-center justify-between p-3 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md hover:border-[var(--color-ink)] transition-colors cursor-pointer"
               >
                 <span className="font-medium truncate pr-2">
-                  {activeBubbleMode === 'neural-mask' && isNeuralDownloaded
-                    ? 'YOLO Smart Mask'
-                    : activeBubbleMode === 'neural' && isNeuralDownloaded
-                      ? 'YOLO Box'
-                      : activeBubbleMode === 'heuristic'
-                        ? 'Heuristic'
-                        : 'Disabled'}
+                  {(activeBubbleMode === 'neural-mask' || activeBubbleMode === 'neural') && isNeuralDownloaded
+                    ? 'YOLO (AI)'
+                    : activeBubbleMode === 'heuristic'
+                      ? 'Heuristic'
+                      : 'Disabled'}
                 </span>
                 <ChevronDown size={16} className={`text-[var(--color-dust)] transition-transform ${isOpenBubbleMode ? 'rotate-180' : ''}`} />
               </button>

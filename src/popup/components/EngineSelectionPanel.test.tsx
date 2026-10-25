@@ -215,7 +215,7 @@ describe('WebLLM download control', () => {
     container.remove();
   });
 
-  it('renders both YOLO Box and YOLO Smart Mask options in dropdown', async () => {
+  it('renders unified YOLO (AI) option in dropdown', async () => {
     const container = document.createElement('div');
     document.body.appendChild(container);
     const root = createRoot(container);
@@ -236,11 +236,9 @@ describe('WebLLM download control', () => {
     });
 
     const buttons = Array.from(container.querySelectorAll('button'));
-    const yoloBoxBtn = buttons.find((b) => b.textContent?.includes('YOLO Box'));
-    const yoloMaskBtn = buttons.find((b) => b.textContent?.includes('YOLO Smart Mask'));
+    const yoloBtn = buttons.find((b) => b.textContent?.includes('YOLO (AI)'));
 
-    expect(yoloBoxBtn).toBeDefined();
-    expect(yoloMaskBtn).toBeDefined();
+    expect(yoloBtn).toBeDefined();
 
     await act(async () => {
       root.unmount();

@@ -1,6 +1,7 @@
 import type { Point2D } from '../../shared/utils/geometry';
 import { syllables } from './hyphenation';
 import { fitFontSizeWithLines, fontSpec, type MeasureCache } from './typesetLayout';
+import { wrapTextEllipse, unwrapWrappedText } from './ellipseTypeset';
 import {
   sanitizeTypesetText,
   compactSpecialSymbols,
@@ -78,6 +79,10 @@ export interface DefaultRenderRegion {
   alignment: 'left' | 'center' | 'right';
   /** Source reading direction from OCR merge ('v' for vertical manga columns). */
   sourceDirection?: 'h' | 'v';
+  /** Whether the region is enclosed in a speech bubble with curved boundary. */
+  isRounded?: boolean;
+  /** Mathematical bubble corner radius in pixels. */
+  borderRadius?: number;
 }
 
 /** Result of the default render pass for one region. */
@@ -783,10 +788,27 @@ export function renderRegionDefault(
   const fg = region.textColor || '#000000';
   const bg = region.strokeColor && region.strokeColor !== 'transparent' ? region.strokeColor : null;
 
-  // XianScan-style fit returns both the verified font size and exact wrapped lines.
-  // Rendering those same lines prevents Cotrans's independent syllable pass from
-  // turning English dialogue into narrow barcode columns.
-  const fitted = measureDefaultLayout(ctx, region.translation, normH, normV, fontSize, maxFontSizeCap, fontFamily, isBold, measureCache, targetLang);
+  // Use dynamic programming ellipse profile for curved speech bubbles (supporting arbitrary rotation),
+  // and XianScan diamond envelopes for standard text blocks.
+  let fitted: { size: number; lines: string[] } | null = null;
+  if (region.isRounded) {
+    const unhyphenated = unwrapWrappedText(region.translation);
+    const rMax = Math.min(normH / 2, normV / 2);
+    const radius = region.borderRadius !== undefined ? region.borderRadius : rMax;
+    const strength = rMax > 0 ? Math.min(1.0, radius / rMax) : 1.0;
+    const ellipseRes = wrapTextEllipse(
+      unhyphenated,
+      normH,
+      normV,
+      fontSize,
+      fontFamily || DEFAULT_RENDER_FONT_FAMILY,
+      strength,
+      ctx
+    );
+    fitted = { size: ellipseRes.fontSize, lines: ellipseRes.lines };
+  } else {
+    fitted = measureDefaultLayout(ctx, region.translation, normH, normV, fontSize, maxFontSizeCap, fontFamily, isBold, measureCache, targetLang);
+  }
   if (!fitted || fitted.lines.length === 0) return null;
 
   const drawableLines = fitted.lines.filter((line) => line.trim());
