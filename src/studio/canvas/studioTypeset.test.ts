@@ -151,4 +151,67 @@ describe('Studio Algorithmic Typeset & Line Reflow', () => {
     expect(simpleJoined).not.toContain('com-munity');
     expect(simpleJoined).not.toContain('com- munity');
   });
+
+  describe('CJK Vertical Layout & Column Wrapping', () => {
+    const japaneseDialogue = 'こんにちは、元気ですか？今日もいい天気ですね。';
+
+    it('wraps CJK text into vertical columns based on box height when isVertical is true', () => {
+      // In a tall box of height 120 and width 100, wrapping by height creates multiple vertical columns
+      const vertical = recalculateBlockTypeset(japaneseDialogue, 'sans-serif', 100, 120, 16, 'simple', {
+        isVertical: true,
+      });
+
+      expect(vertical.lines.length).toBeGreaterThan(1);
+      // Each column height must not exceed the vertical character capacity
+      for (const col of vertical.lines) {
+        expect(col.length).toBeLessThanOrEqual(Math.ceil((120 - 8) / (16 * 1.15)));
+      }
+    });
+
+    it('stays in horizontal layout for Latin text even when isVertical is true', () => {
+      const englishText = 'This is an English dialogue that should never be stacked vertically.';
+      const horizontal = recalculateBlockTypeset(englishText, 'WildWords', 100, 200, 16, 'simple', {
+        isVertical: true,
+      });
+
+      // Horizontal wrapping produces word-based lines, not character chunks
+      expect(horizontal.lines[0]).toContain(' ');
+    });
+
+    it('respects explicit newlines as manual column breaks', () => {
+      const forcedColumns = 'こんにち\nは世界';
+      const res = recalculateBlockTypeset(forcedColumns, 'sans-serif', 200, 300, 16, 'simple', {
+        isVertical: true,
+      });
+
+      expect(res.lines.length).toBe(2);
+      expect(res.lines[0]).toBe('こんにち');
+      expect(res.lines[1]).toBe('は世界');
+    });
+
+    it('adapts font size in balloon mode so columns fit within container bounds', () => {
+      // Narrow vertical manga bubble (60 x 200)
+      const res = recalculateBlockTypeset('こんにちは世界', 'sans-serif', 60, 200, 24, 'balloon', {
+        isVertical: true,
+      });
+
+      expect(res.lines.length).toBeGreaterThanOrEqual(1);
+      // Total column width must fit within container width
+      const colWidth = res.fontSize * 1.3;
+      expect(res.lines.length * colWidth).toBeLessThanOrEqual(60);
+    });
+
+    it('reflows CJK text into vertical columns when isVertical is updated on TextObject', () => {
+      const cjkObj: TextObject = {
+        id: 'cjk-bubble', x: 0, y: 0, width: 80, height: 200,
+        text: '我不知道你在说什么',
+        lines: ['我不知道你在说什么'], fontSize: 16, fontFamily: 'sans-serif', color: '#000',
+      };
+
+      const updated = applyTextObjectUpdates(cjkObj, { isVertical: true }, 'balloon');
+      expect(updated.isVertical).toBe(true);
+      expect(updated.lines).toBeDefined();
+      expect(updated.lines!.length).toBeGreaterThanOrEqual(1);
+    });
+  });
 });

@@ -3,13 +3,24 @@ import type { TextObject } from '../types';
 
 export type StudioTypesetMode = NonNullable<TextObject['typesetMode']>;
 
-type TypesetStyle = Pick<TextObject, 'bold' | 'italic' | 'letterSpacing' | 'lineSpacing'>;
+type TypesetStyle = Pick<TextObject, 'bold' | 'italic' | 'letterSpacing' | 'lineSpacing' | 'isVertical'>;
 
 /** Small boxes cannot reliably run the fitting engine. */
 const MIN_LAYOUT_DIMENSION = 15;
 /** Existing simple-wrap horizontal padding and minimum usable width. */
 const SIMPLE_HORIZONTAL_PADDING = 8;
 const MIN_SIMPLE_WIDTH = 20;
+
+/** Inset padding used for vertical column layout within bounding box. */
+const VERTICAL_LAYOUT_PADDING = 8;
+/** Column width ratio relative to font size (1.3x gives standard CJK column spacing). */
+const VERTICAL_COLUMN_WIDTH_RATIO = 1.3;
+/** Default line spacing ratio for vertical CJK text. */
+const DEFAULT_VERTICAL_LINE_SPACING = 1.15;
+/** Minimum font size floor during auto-balloon vertical fitting. */
+const MIN_VERTICAL_FONT_SIZE = 8;
+/** Standard CJK character range regex matching Japanese Kana, Kanji, and Chinese Hanzi. */
+export const CJK_CHARACTER_REGEX = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/;
 
 /** Fields whose actual changes invalidate measured lines; paint/selection changes do not. */
 const LAYOUT_FIELDS = [
@@ -156,6 +167,127 @@ function wrapSimpleGreedy(
 }
 
 /**
+ * Wraps raw text into vertical column lines based on container height.
+ *
+ * @param text - Source dialogue string.
+ * @param height - Container height in image pixels.
+ * @param fontSize - Font size in pixels used for vertical advancement.
+ * @param style - Object styling containing lineSpacing.
+ * @returns Array of vertical column strings.
+ */
+function wrapVerticalColumns(
+  text: string,
+  height: number,
+  fontSize: number,
+  style: TypesetStyle
+): string[] {
+  const lineSpacing = style.lineSpacing ?? DEFAULT_VERTICAL_LINE_SPACING;
+  const charHeight = Math.max(1, fontSize * lineSpacing);
+  const safeHeight = Math.max(MIN_LAYOUT_DIMENSION, height - VERTICAL_LAYOUT_PADDING);
+  const charsPerCol = Math.max(1, Math.floor(safeHeight / charHeight));
+
+  const paragraphs = text.split('\n');
+  const columns: string[] = [];
+
+  for (const para of paragraphs) {
+    if (!para.trim()) {
+      columns.push('');
+      continue;
+    }
+
+    const glyphs = Array.from(para);
+    let currentCol = '';
+    let count = 0;
+
+    for (const char of glyphs) {
+      if (count >= charsPerCol) {
+        columns.push(currentCol);
+        currentCol = '';
+        count = 0;
+      }
+      if (count === 0 && char === ' ') {
+        continue;
+      }
+      currentCol += char;
+      count++;
+    }
+
+    if (currentCol.length > 0) {
+      columns.push(currentCol);
+    }
+  }
+
+  return columns.length > 0 ? columns : [text];
+}
+
+/**
+ * Fits font size and wraps text into vertical right-to-left columns.
+ *
+ * @param text - Dialogue text string to typeset.
+ * @param width - Available bubble width in image pixels.
+ * @param height - Available bubble height in image pixels.
+ * @param fallbackSize - Baseline starting font size.
+ * @param mode - 'balloon' for auto font scaling or 'simple' for fixed font size.
+ * @param style - Object-level style containing lineSpacing and isVertical.
+ * @returns Fitted font size and vertical column lines.
+ */
+export function wrapVerticalTypeset(
+  text: string,
+  width: number,
+  height: number,
+  fallbackSize: number = 16,
+  mode: StudioTypesetMode = 'balloon',
+  style: TypesetStyle = {}
+): { fontSize: number; lines: string[] } {
+  if (mode === 'simple') {
+    const lines = wrapVerticalColumns(text, height, fallbackSize, style);
+    return { fontSize: fallbackSize, lines };
+  }
+
+  // Balloon mode: scale font size so all columns fit within container width and height
+  const safeWidth = Math.max(MIN_LAYOUT_DIMENSION, width - VERTICAL_LAYOUT_PADDING);
+  const safeHeight = Math.max(MIN_LAYOUT_DIMENSION, height - VERTICAL_LAYOUT_PADDING);
+  const cleanLen = text.replace(/\s+/g, '').length;
+
+  let low = MIN_VERTICAL_FONT_SIZE;
+  let high = Math.min(MAX_FONT_SIZE_CEILING, Math.max(fallbackSize, 36));
+  let bestSize = low;
+  let bestColumns: string[] = [];
+
+  while (low <= high) {
+    const candidateSize = Math.floor((low + high) / 2);
+    const lineSpacing = style.lineSpacing ?? DEFAULT_VERTICAL_LINE_SPACING;
+    const charHeight = Math.max(1, candidateSize * lineSpacing);
+    const charsPerCol = Math.max(1, Math.floor(safeHeight / charHeight));
+
+    // Avoid 1-character columns when dialogue has multiple characters
+    if (cleanLen >= 2 && charsPerCol < 2 && candidateSize > MIN_VERTICAL_FONT_SIZE) {
+      high = candidateSize - 1;
+      continue;
+    }
+
+    const cols = wrapVerticalColumns(text, height, candidateSize, style);
+    const colWidth = candidateSize * VERTICAL_COLUMN_WIDTH_RATIO;
+    const totalColsWidth = cols.length * colWidth;
+
+    if (totalColsWidth <= safeWidth) {
+      bestSize = candidateSize;
+      bestColumns = cols;
+      low = candidateSize + 1;
+    } else {
+      high = candidateSize - 1;
+    }
+  }
+
+  if (bestColumns.length === 0) {
+    bestColumns = wrapVerticalColumns(text, height, MIN_VERTICAL_FONT_SIZE, style);
+    bestSize = MIN_VERTICAL_FONT_SIZE;
+  }
+
+  return { fontSize: bestSize, lines: bestColumns };
+}
+
+/**
  * Fits font size and wraps text into balanced diamond line envelopes using Kites's
  * exact pipeline typesetting engine (including punctuation sanitation, symbol compaction,
  * syllable hyphenation, and diamond envelopes) or fast simple wrapping.
@@ -181,6 +313,13 @@ export function recalculateBlockTypeset(
   const ctx = getTypesetMeasureContext();
   if (!ctx || !text || !text.trim() || width <= MIN_LAYOUT_DIMENSION || height <= MIN_LAYOUT_DIMENSION) {
     return { fontSize: fallbackSize, lines: text ? [text] : [] };
+  }
+
+  // Vertical CJK Mode: Gate on both isVertical preference AND actual CJK glyph presence
+  const hasCjk = CJK_CHARACTER_REGEX.test(text);
+  const isVerticalMode = Boolean(style.isVertical && hasCjk);
+  if (isVerticalMode) {
+    return wrapVerticalTypeset(text, width, height, fallbackSize, mode, style);
   }
 
   // Native tracking affects both measureText and paint in supported Chromium versions.

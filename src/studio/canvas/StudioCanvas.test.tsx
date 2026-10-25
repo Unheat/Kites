@@ -7,7 +7,11 @@ import { studioUndoStack } from '../state/undoStack';
 import type { TextObject } from '../types';
 
 const layout = vi.hoisted(() => ({ apply: vi.fn(), prepare: vi.fn() }));
-vi.mock('./studioTypeset', () => ({ applyTextObjectUpdates: layout.apply, prepareInitialTextObject: layout.prepare }));
+vi.mock('./studioTypeset', () => ({
+  applyTextObjectUpdates: layout.apply,
+  prepareInitialTextObject: layout.prepare,
+  CJK_CHARACTER_REGEX: /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/,
+}));
 vi.mock('./TextRenderer', () => ({ TextRenderer: { renderText: vi.fn() } }));
 vi.mock('./CanvasFurniture', () => ({ CanvasFurniture: { drawSelectionFurniture: vi.fn() } }));
 
