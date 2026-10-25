@@ -13,6 +13,7 @@ import { isBubbleGpuAvailable } from '../../shared/utils/hardwareUtils';
 import type { BubbleEngineOptions } from '../engines/bubble/BaseBubbleEngine';
 import { BubbleManager, bubbleManager as defaultBubbleManager } from './BubbleManager';
 import { acquireBubbleGeometry, resolveBubbleLayouts, type BubbleGeometry } from './BubbleLayoutService';
+import { loadHyphenationLanguage } from '../utils/hyphenation';
 
 export interface PipelineServices {
   ocrManager: OcrManager;
@@ -145,6 +146,7 @@ export class PipelineOrchestrator {
       const inpaintTier = await this.resolveInstalledInpaintTier(requestedInpaintTier);
       const sourceLang = popupState?.sourceLang || 'auto';
       const targetLang = popupState?.targetLang || 'en';
+      const hyphenationPromise = loadHyphenationLanguage(targetLang);
       const ocrTier: OcrTier = popupState?.activeOcrId || 'v6-small';
       const resolvedFontFamily = resolveRenderFontFamily(popupState?.renderFontPresetId);
       const renderFontBold = popupState?.renderFontBold === true;
@@ -321,6 +323,7 @@ export class PipelineOrchestrator {
       if (typeof document !== 'undefined' && document.fonts) {
         await document.fonts.ready;
       }
+      await hyphenationPromise;
       
       const cleanedBlob = new Blob([cleanedImageBuffer], { type: 'image/png' });
       const bitmap = await createImageBitmap(cleanedBlob);
@@ -376,7 +379,7 @@ export class PipelineOrchestrator {
           accept: (index, proposed) => {
             const block = blockByOcrIndex.get(index);
             if (!block) return false;
-            const fitted = measureBubbleLayoutFontSize(ctx, block, proposed, resolvedFontFamily, renderFontBold);
+            const fitted = measureBubbleLayoutFontSize(ctx, block, proposed, resolvedFontFamily, renderFontBold, targetLang);
             return fitted > 0;
           },
           onDiagnostics: (counts) => console.log('[PipelineOrchestrator] Bubble layouts:', counts)

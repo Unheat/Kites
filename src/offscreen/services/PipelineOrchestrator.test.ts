@@ -283,7 +283,7 @@ describe('PipelineOrchestrator', () => {
     const renderSpy = vi.spyOn(canvasTypesetting, 'renderTextBlocksBatch');
     await pipelineOrchestrator.runPipeline(500);
     expect(measureSpy).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ text: 'Hello', fontSize: 18 }),
-      expect.any(Object), expect.any(String), expect.any(Boolean));
+      expect.any(Object), expect.any(String), expect.any(Boolean), expect.any(String));
     const fixed = renderSpy.mock.calls[0][1][0].typesetBox!;
     expect(fixed).toBeDefined();
     expect(fixed.w).toBeGreaterThan(20);

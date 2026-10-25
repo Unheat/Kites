@@ -1,3 +1,5 @@
+import { HyphenationService, INSERTED_HYPHEN } from './hyphenation';
+
 /**
  * @file typesetLayout.ts
  * Typeset Layout Engine for Comic / Manga Speech Bubbles
@@ -77,16 +79,26 @@ const HYPHEN_SUFFIXES = [
 ];
 
 /**
- * 6-stage morphological hyphenation point finder.
+ * Hyphenation point finder supporting on-demand multi-language dictionaries
+ * with a 6-stage morphological fallback for English.
  * Strict comic rule: Never hyphenate words shorter than 7 letters.
  */
-export function findHyphenationPoints(rawWord: string): number[] {
+export function findHyphenationPoints(rawWord: string, targetLang: string = 'en'): number[] {
   // Pure numeric strings must not be hyphenated
   if (/^\d+$/.test(rawWord)) return [];
 
   const word = rawWord.toLowerCase();
   const len = word.length;
   if (len < 7) return [];
+
+  // Query on-demand multi-language Liang / rule-based HyphenationService
+  const service = HyphenationService.getInstance();
+  const servicePoints = service.findHyphenationPoints(rawWord, targetLang);
+  if (servicePoints.length > 0) {
+    return servicePoints
+      .filter((p) => p >= 3 && len - p >= 3 && word[p - 1] !== "'" && word[p] !== "'" && word[p - 1] !== '’' && word[p] !== '’')
+      .sort((a, b) => a - b);
+  }
 
   const points = new Set<number>();
 
@@ -170,7 +182,8 @@ export function findHyphenationPoints(rawWord: string): number[] {
 export function wrapText(
   ctx: { measureText(t: string): { width: number } },
   text: string,
-  maxWidth: number
+  maxWidth: number,
+  targetLang: string = 'en'
 ): string[] {
   const lines: string[] = [];
 
@@ -205,11 +218,11 @@ export function wrapText(
       }
 
       // Try natural syllable points first
-      const points = findHyphenationPoints(curStem);
+      const points = findHyphenationPoints(curStem, targetLang);
       let chosenSplit = -1;
       for (let i = points.length - 1; i >= 0; i--) {
         const p = points[i];
-        const candHead = curStem[p - 1] === '-' ? curStem.slice(0, p) : `${curStem.slice(0, p)}-`;
+        const candHead = curStem[p - 1] === '-' ? curStem.slice(0, p) : `${curStem.slice(0, p)}${INSERTED_HYPHEN}`;
         if (ctx.measureText(candHead).width <= maxWidth) {
           chosenSplit = p;
           break;
@@ -217,7 +230,7 @@ export function wrapText(
       }
 
       if (chosenSplit > 0) {
-        const candHead = curStem[chosenSplit - 1] === '-' ? curStem.slice(0, chosenSplit) : `${curStem.slice(0, chosenSplit)}-`;
+        const candHead = curStem[chosenSplit - 1] === '-' ? curStem.slice(0, chosenSplit) : `${curStem.slice(0, chosenSplit)}${INSERTED_HYPHEN}`;
         heads.push(candHead);
         current = curStem.slice(chosenSplit) + curPunct;
         continue;
@@ -232,7 +245,7 @@ export function wrapText(
         break;
       }
       const prefix = curStem.slice(0, k);
-      heads.push(prefix.endsWith('-') ? prefix : `${prefix}-`);
+      heads.push(prefix.endsWith('-') || prefix.endsWith(INSERTED_HYPHEN) ? prefix : `${prefix}${INSERTED_HYPHEN}`);
       current = curStem.slice(k) + curPunct;
     }
     return { head: heads, tail: current };
@@ -300,7 +313,8 @@ export function wrapText(
         }
       } else {
         const isPurePunct = LONE_PUNCT.test(word);
-        const candidate = current.endsWith('-') || isPurePunct ? `${current}${word}` : `${current} ${word}`;
+        const isHyphenEnd = current.endsWith('-') || current.endsWith(INSERTED_HYPHEN);
+        const candidate = isHyphenEnd || isPurePunct ? `${current}${word}` : `${current} ${word}`;
         if (ctx.measureText(candidate).width <= (isPurePunct ? maxWidth * 1.15 : maxWidth)) {
           current = candidate;
         } else {
@@ -371,9 +385,10 @@ export function wrapText(
 export function balancedWrapText(
   ctx: { measureText(t: string): { width: number } },
   text: string,
-  maxWidth: number
+  maxWidth: number,
+  targetLang: string = 'en'
 ): string[] {
-  const greedy = wrapText(ctx, text, maxWidth);
+  const greedy = wrapText(ctx, text, maxWidth, targetLang);
   const N = greedy.length;
   if (N <= 1) return greedy;
 
@@ -381,10 +396,10 @@ export function balancedWrapText(
   let hi = maxWidth;
   while (lo < hi - 1) {
     const mid = Math.floor((lo + hi) / 2);
-    if (wrapText(ctx, text, mid).length <= N) hi = mid;
+    if (wrapText(ctx, text, mid, targetLang).length <= N) hi = mid;
     else lo = mid + 1;
   }
-  return wrapText(ctx, text, hi);
+  return wrapText(ctx, text, hi, targetLang);
 }
 
 /**
@@ -486,13 +501,14 @@ export function splitIntoLogicalParagraphs(text: string): string[] {
 export function reflowText(
   ctx: { measureText(t: string): { width: number } },
   text: string,
-  maxWidth: number
+  maxWidth: number,
+  targetLang: string = 'en'
 ): string[] {
   if (isStructuredList(text)) {
     const rawLines = text.split('\n').map((l) => l.trim()).filter(Boolean);
     const out: string[] = [];
     for (const line of rawLines) {
-      const wrapped = wrapText(ctx, line, maxWidth);
+      const wrapped = wrapText(ctx, line, maxWidth, targetLang);
       out.push(...wrapped);
     }
     return out;
@@ -503,7 +519,7 @@ export function reflowText(
   for (const p of paragraphs) {
     const cleanedParagraph = p.replace(/\s+/g, ' ').trim();
     if (!cleanedParagraph) continue;
-    const wrapped = balancedWrapText(ctx, cleanedParagraph, maxWidth);
+    const wrapped = balancedWrapText(ctx, cleanedParagraph, maxWidth, targetLang);
     out.push(...wrapped);
   }
   return out;
@@ -576,7 +592,8 @@ export function fitFontSizeWithLines(
   boxInset?: number,
   customCjk?: string,
   isBold: boolean = false,
-  measureCache?: MeasureCache
+  measureCache?: MeasureCache,
+  targetLang: string = 'en'
 ): FitFontSizeLayout {
   const inset = boxInset ?? BOX_INSET;
   const maxW = Math.max(10, boxW * (1 - 2 * inset));
@@ -613,7 +630,7 @@ export function fitFontSizeWithLines(
 
   let finalSize = MIN_FONT_SIZE;
   mCtx.font = fontSpec(MIN_FONT_SIZE, fontFamily, text, customCjk, isBold);
-  let finalLines: string[] = wrapText(mCtx, text, maxW);
+  let finalLines: string[] = wrapText(mCtx, text, maxW, targetLang);
   const consider = (size: number, lines: string[]): void => {
     if (size > finalSize && lines.length > 0) {
       finalSize = size;
@@ -640,12 +657,12 @@ export function fitFontSizeWithLines(
         const trailingPunct = punctMatch?.[2] ?? '';
         const wordW = mCtx.measureText(w).width;
         if (wordW <= maxW) return wordW;
-        const points = findHyphenationPoints(stem);
+        const points = findHyphenationPoints(stem, targetLang);
         if (points.length > 0) {
           let segMax = 0;
           let prev = 0;
           for (const p of points) {
-            const seg = stem[p - 1] === '-' ? stem.slice(prev, p) : `${stem.slice(prev, p)}-`;
+            const seg = stem[p - 1] === '-' ? stem.slice(prev, p) : `${stem.slice(prev, p)}${INSERTED_HYPHEN}`;
             segMax = Math.max(segMax, mCtx.measureText(seg).width);
             prev = p;
           }
@@ -657,10 +674,10 @@ export function fitFontSizeWithLines(
     );
 
     if (maxWordWidth <= maxW) {
-      const lines = reflowText(mCtx, text, maxW);
+      const lines = reflowText(mCtx, text, maxW, targetLang);
       const lineH = mid * LINE_HEIGHT;
       const allLinesFitW = lines.every((l) => mCtx.measureText(l).width <= maxW + 0.5);
-      const hasNoHyphenBreaks = lines.every((l) => !l.endsWith('-') || text.includes(l));
+      const hasNoHyphenBreaks = lines.every((l) => (!l.endsWith('-') && !l.endsWith(INSERTED_HYPHEN)) || text.includes(l));
       if (allLinesFitW && lines.length * lineH <= maxH && hasNoHyphenBreaks) {
         cleanBest = mid;
         foundClean = true;
@@ -690,7 +707,7 @@ export function fitFontSizeWithLines(
       const mid = Math.floor((floorLo + floorHi) / 2);
       if (mid === 0) break;
       mCtx.font = fontSpec(mid, fontFamily, text, customCjk, isBold);
-      const lines = reflowText(mCtx, text, maxW);
+      const lines = reflowText(mCtx, text, maxW, targetLang);
       const lineH = mid * LINE_HEIGHT;
       const allFitW = lines.every((l) => mCtx.measureText(l).width <= maxW + 0.5);
       const totalH = lines.length * lineH;
@@ -710,7 +727,7 @@ export function fitFontSizeWithLines(
     while (p3Lo <= p3Hi) {
       const mid = Math.floor((p3Lo + p3Hi) / 2);
       mCtx.font = fontSpec(mid, fontFamily, text, customCjk, isBold);
-      const lines = wrapText(mCtx, text, maxW);
+      const lines = wrapText(mCtx, text, maxW, targetLang);
       const allLinesFitW = lines.every((l) => mCtx.measureText(l).width <= maxW + 0.5);
       if (allLinesFitW && lines.length * mid * LINE_HEIGHT <= maxH) {
         consider(mid, lines);
@@ -735,10 +752,10 @@ export function fitFontSizeWithLines(
     const mid = Math.floor((lo + hi) / 2);
     if (mid === 0) break;
     mCtx.font = fontSpec(mid, fontFamily, text, customCjk, isBold);
-    const lines = reflowText(mCtx, text, maxW);
+    const lines = reflowText(mCtx, text, maxW, targetLang);
     const lineH = mid * LINE_HEIGHT;
     const allLinesFitW = lines.every((l) => mCtx.measureText(l).width <= maxW + 0.5);
-    const hasNoHyphenBreaks = lines.every((l) => !l.endsWith('-') || text.includes(l));
+    const hasNoHyphenBreaks = lines.every((l) => (!l.endsWith('-') && !l.endsWith(INSERTED_HYPHEN)) || text.includes(l));
     if (allLinesFitW && lines.length * lineH <= maxH && hasNoHyphenBreaks) {
       consider(mid, lines);
       lo = mid + 1;
