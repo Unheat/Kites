@@ -380,10 +380,11 @@ export function measureBubbleLayoutFontSize(
   block: TextBlockItem,
   box: NonNullable<TextBlockItem['typesetBox']>,
   fontFamily: string = DEFAULT_RENDER_FONT_FAMILY,
-  isBold: boolean = false
+  isBold: boolean = false,
+  targetLang: string = 'en'
 ): number {
   if (!block.text?.trim() || !Number.isFinite(box.w) || !Number.isFinite(box.h) || box.w < 1 || box.h < 1) return 0;
-  const fitted = measureDefaultLayout(ctx, block.text.trim(), box.w, box.h, bubbleLayoutFontTarget(block), undefined, fontFamily, isBold);
+  const fitted = measureDefaultLayout(ctx, block.text.trim(), box.w, box.h, bubbleLayoutFontTarget(block), undefined, fontFamily, isBold, undefined, targetLang);
   return defaultLayoutFits(ctx, fitted, box.w, box.h, fontFamily, isBold) ? fitted.size : 0;
 }
 
@@ -563,7 +564,7 @@ export function renderTextBlocksBatch(
   const orientation = LANGUAGE_ORIENTATION_PRESETS[langKey] || 'h';
 
   if (orientation === 'h') {
-    return renderTextBlocksDefault(ctx, coloredBlocks, bounds.width, bounds.height, fontFamily, isBold);
+    return renderTextBlocksDefault(ctx, coloredBlocks, bounds.width, bounds.height, fontFamily, isBold, targetLang);
   }
   return renderTextBlocksLegacy(ctx, coloredBlocks, targetLang, bounds, fontFamily, isBold);
 }
@@ -578,6 +579,7 @@ export function renderTextBlocksBatch(
  * @param pageHeight - Page height.
  * @param fontFamily - CSS font-family stack to render and measure with.
  * @param isBold - Whether to render text in bold weight.
+ * @param targetLang - Target language code for hyphenation and typesetting rules.
  * @returns Per-block render info aligned with `blocks` (null for skipped blocks).
  */
 function renderTextBlocksDefault(
@@ -586,7 +588,8 @@ function renderTextBlocksDefault(
   pageWidth: number,
   pageHeight: number,
   fontFamily: string = DEFAULT_RENDER_FONT_FAMILY,
-  isBold: boolean = false
+  isBold: boolean = false,
+  targetLang: string = 'en'
 ): (RenderedBlockInfo | null)[] {
   const results: (RenderedBlockInfo | null)[] = blocks.map(() => null);
   // WORKAROUND: [Tall strip font floor inflation] -> on extreme tall strips the Cotrans
@@ -677,8 +680,8 @@ function renderTextBlocksDefault(
           sanitizedTranslation = formatComicLetteringCasing(sanitizedTranslation, true);
         }
         const fitted = fixed
-          ? measureDefaultLayout(ctx, sanitizedTranslation, normH, normV, targetFontSize, undefined, fontFamily, isBold, pageMeasureCache)
-          : fitFontSizeWithLines(ctx, sanitizedTranslation, fontFamily, normH, normV, targetFontSize, Math.max(targetFontSize, 48), 0.05, undefined, isBold, pageMeasureCache);
+          ? measureDefaultLayout(ctx, sanitizedTranslation, normH, normV, targetFontSize, undefined, fontFamily, isBold, pageMeasureCache, targetLang)
+          : fitFontSizeWithLines(ctx, sanitizedTranslation, fontFamily, normH, normV, targetFontSize, Math.max(targetFontSize, 48), 0.05, undefined, isBold, pageMeasureCache, targetLang);
         dialogueSizes.push(fitted.size);
       }
       planned.push({ index: i, region, dstPoints, targetFontSize, wordCount, fixed });
@@ -734,7 +737,7 @@ function renderTextBlocksDefault(
       const baselineCap = !plan.fixed && pageDialogueBaseline > 0 && isShortNonShout
         ? Math.max(18, Math.round(pageDialogueBaseline * 1.25))
         : undefined;
-      const info = renderRegionDefault(ctx, plan.region, plan.dstPoints, plan.targetFontSize, baselineCap, fontFamily, isBold, pageMeasureCache);
+      const info = renderRegionDefault(ctx, plan.region, plan.dstPoints, plan.targetFontSize, baselineCap, fontFamily, isBold, pageMeasureCache, targetLang);
       if (info) {
         results[plan.index] = {
           fontSize: info.fontSize,

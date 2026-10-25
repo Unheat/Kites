@@ -149,7 +149,8 @@ export function calcHorizontal(
   maxWidth: number,
   maxHeight: number,
   hyphenate = true,
-  fontFamily: string = DEFAULT_RENDER_FONT_FAMILY
+  fontFamily: string = DEFAULT_RENDER_FONT_FAMILY,
+  targetLang: string = 'en'
 ): { lineTexts: string[]; lineWidths: number[] } {
   fontSize = Math.trunc(fontSize);
   const measure = makeMeasurer(ctx, fontSize, fontFamily, text);
@@ -181,7 +182,7 @@ export function calcHorizontal(
 
   // Split each word into syllables; break syllables wider than maxWidth into single characters.
   const wordSyllables: string[][] = words.map(word => {
-    const raw = syllables(word);
+    const raw = syllables(word, targetLang);
     const normalized: string[] = [];
     for (const syl of raw) {
       if (stringWidth(syl) > maxWidth) {
@@ -694,7 +695,8 @@ export function measureDefaultLayout(
   maxFontSizeCap?: number,
   fontFamily: string = DEFAULT_RENDER_FONT_FAMILY,
   isBold: boolean = false,
-  measureCache?: MeasureCache
+  measureCache?: MeasureCache,
+  targetLang: string = 'en'
 ): ReturnType<typeof fitFontSizeWithLines> {
   let cleaned = sanitizeTypesetText(compactSpecialSymbols(text));
   if (isComicLetteringFont(fontFamily)) {
@@ -711,7 +713,8 @@ export function measureDefaultLayout(
     DEFAULT_FIT_INSET,
     undefined,
     isBold,
-    measureCache
+    measureCache,
+    targetLang
   );
 }
 
@@ -767,7 +770,8 @@ export function renderRegionDefault(
   maxFontSizeCap?: number,
   fontFamily: string = DEFAULT_RENDER_FONT_FAMILY,
   isBold: boolean = false,
-  measureCache?: MeasureCache
+  measureCache?: MeasureCache,
+  targetLang: string = 'en'
 ): DefaultRenderResult | null {
   const [tl, tr, br, bl] = dstPoints;
   // Layout and aspect padding must use the resized destination dimensions. Using the
@@ -782,7 +786,7 @@ export function renderRegionDefault(
   // XianScan-style fit returns both the verified font size and exact wrapped lines.
   // Rendering those same lines prevents Cotrans's independent syllable pass from
   // turning English dialogue into narrow barcode columns.
-  const fitted = measureDefaultLayout(ctx, region.translation, normH, normV, fontSize, maxFontSizeCap, fontFamily, isBold, measureCache);
+  const fitted = measureDefaultLayout(ctx, region.translation, normH, normV, fontSize, maxFontSizeCap, fontFamily, isBold, measureCache, targetLang);
   if (!fitted || fitted.lines.length === 0) return null;
 
   const drawableLines = fitted.lines.filter((line) => line.trim());

@@ -22,6 +22,7 @@ import type { TextObject } from './studio/types';
 import type { ProjectFolder } from './db';
 import { uploadStudioPage } from './shared/studioUpload';
 import { restoreTextObject } from './studio/state/persistedTextObjects';
+import { loadHyphenationLanguage } from './offscreen/utils/hyphenation';
 
 export type DragHandle = 'move' | 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
 
@@ -353,6 +354,13 @@ export default function App() {
   };
 
   const activeJob = jobs.find((j) => j.id === activeJobId);
+
+  // Pre-load hyphenation dictionary for the active project's translation language
+  useEffect(() => {
+    if (activeJob?.targetLang) {
+      void loadHyphenationLanguage(activeJob.targetLang);
+    }
+  }, [activeJob?.targetLang]);
 
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-[#090a0f] text-slate-100 flex">
