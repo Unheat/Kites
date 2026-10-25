@@ -117,15 +117,8 @@ export default function App() {
   const [isAddFromLibraryOpen, setIsAddFromLibraryOpen] = useState(false);
   const [addFromLibraryProjectId, setAddFromLibraryProjectId] = useState<number | null>(null);
 
-  const initialJobParam = useMemo(() => {
-    if (typeof window === 'undefined') return null;
-    const params = new URLSearchParams(window.location.search);
-    return params.get('jobId') ? Number(params.get('jobId')) : null;
-  }, []);
-
-  const [appMode, setAppMode] = useState<'dashboard' | 'editor'>(() => {
-    return initialJobParam ? 'editor' : 'dashboard';
-  });
+  // Studio editor is the default workspace; Projects dashboard is an optional library manager
+  const [appMode, setAppMode] = useState<'dashboard' | 'editor'>('editor');
 
   const handleOpenProject = async (projectId: number) => {
     setCurrentProjectId(projectId);
@@ -380,6 +373,7 @@ export default function App() {
       {appMode === 'dashboard' ? (
         <ProjectsDashboard
           onOpenProject={handleOpenProject}
+          onBackToEditor={() => setAppMode('editor')}
           onOpenAddFromLibrary={(projId) => {
             setAddFromLibraryProjectId(projId);
             setIsAddFromLibraryOpen(true);
@@ -401,11 +395,18 @@ export default function App() {
                 </button>
               </div>
 
-              <div className="p-2 border-b border-[#282d3f]">
+              <div className="p-2 border-b border-[#282d3f] flex flex-col gap-1.5">
+                <button
+                  onClick={() => setAppMode('dashboard')}
+                  className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg border border-[#f4446d]/40 bg-[#f4446d]/10 hover:bg-[#f4446d]/20 text-xs text-[#f4446d] font-semibold transition"
+                >
+                  <Layers className="w-3.5 h-3.5" />
+                  <span>Manga Projects Hub</span>
+                </button>
                 <button
                   onClick={() => fileInputRef.current?.click()}
                   disabled={isUploading}
-                  className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg border border-dashed border-[#282d3f] hover:border-indigo-500 bg-[#090a0f] text-xs text-indigo-300 font-medium transition"
+                  className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg border border-dashed border-[#282d3f] hover:border-slate-500 bg-[#090a0f] text-xs text-slate-300 font-medium transition"
                 >
                   <Upload className="w-3.5 h-3.5" />
                   {isUploading ? 'Queueing page…' : 'Upload Image'}

@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { db, type ProjectFolder } from '../../db';
 import { getProjectStats, type ProjectStats } from '../state/projectStore';
+import { getTranslatedPageThumbnailUrl } from '../canvas/thumbnailRenderer';
 import type { BatchExportFormat } from '../export/batchExport';
 
 export interface ProjectDetailsPaneProps {
@@ -34,7 +35,6 @@ export const ProjectDetailsPane: React.FC<ProjectDetailsPaneProps> = ({
 
   useEffect(() => {
     let isCancelled = false;
-    let urlToRevoke: string | null = null;
 
     const loadDetails = async () => {
       if (!project || !project.id) {
@@ -58,14 +58,9 @@ export const ProjectDetailsPane: React.FC<ProjectDetailsPaneProps> = ({
       }
 
       if (targetJob && targetJob.id) {
-        const img = await db.images.where({ jobId: targetJob.id }).first();
-        if (img) {
-          const blob = img.translatedImageBlob || img.rawImageBlob;
-          if (blob && !isCancelled) {
-            const url = URL.createObjectURL(blob);
-            urlToRevoke = url;
-            setCoverUrl(url);
-          }
+        const thumbUrl = await getTranslatedPageThumbnailUrl(targetJob.id, 600);
+        if (!isCancelled) {
+          setCoverUrl(thumbUrl);
         }
       }
     };
@@ -74,15 +69,14 @@ export const ProjectDetailsPane: React.FC<ProjectDetailsPaneProps> = ({
 
     return () => {
       isCancelled = true;
-      if (urlToRevoke) URL.revokeObjectURL(urlToRevoke);
     };
   }, [project]);
 
   if (!project) {
     return (
-      <aside className="w-80 bg-[#12141c] border-l border-[#282d3f] flex flex-col items-center justify-center p-6 text-center select-none shrink-0">
-        <div className="w-12 h-12 rounded-2xl bg-[#1c1f2e] border border-[#282d3f] flex items-center justify-center text-slate-500 mb-3 shadow-inner">
-          <Layers className="w-6 h-6" />
+      <aside className="w-80 bg-[#12141c] border-l border-[#262a3b] flex flex-col items-center justify-center p-6 text-center select-none shrink-0">
+        <div className="w-12 h-12 rounded-2xl bg-[#161924] border border-[#262a3b] flex items-center justify-center text-slate-500 mb-3 shadow-inner">
+          <Layers className="w-6 h-6 text-[#f4446d]/40" />
         </div>
         <h4 className="text-sm font-semibold text-slate-300">No project selected</h4>
         <p className="text-xs text-slate-500 mt-1 max-w-[200px] leading-relaxed">
@@ -100,7 +94,7 @@ export const ProjectDetailsPane: React.FC<ProjectDetailsPaneProps> = ({
   const sizeMB = stats ? (stats.totalBytes / (1024 * 1024)).toFixed(1) : '0';
 
   return (
-    <aside className="w-80 bg-[#12141c] border-l border-[#282d3f] flex flex-col justify-between p-4 overflow-y-auto select-none shrink-0">
+    <aside className="w-80 bg-[#12141c] border-l border-[#262a3b] flex flex-col justify-between p-4 overflow-y-auto select-none shrink-0">
       <div className="flex flex-col gap-5">
         {/* Section Header */}
         <div className="flex items-center justify-between">
@@ -108,12 +102,12 @@ export const ProjectDetailsPane: React.FC<ProjectDetailsPaneProps> = ({
         </div>
 
         {/* Cover Banner */}
-        <div className="relative w-full h-44 rounded-xl overflow-hidden bg-[#181a26] border border-[#282d3f] flex items-center justify-center">
+        <div className="relative w-full h-44 rounded-xl overflow-hidden bg-[#161924] border border-[#262a3b] flex items-center justify-center shadow-inner">
           {coverUrl ? (
             <img src={coverUrl} alt="Cover" className="w-full h-full object-cover" />
           ) : (
             <div className="flex flex-col items-center text-slate-500 text-xs gap-1">
-              <Layers className="w-8 h-8 opacity-40" />
+              <Layers className="w-8 h-8 opacity-40 text-slate-600" />
               <span>No cover page</span>
             </div>
           )}
@@ -132,13 +126,13 @@ export const ProjectDetailsPane: React.FC<ProjectDetailsPaneProps> = ({
         </div>
 
         {/* Translation Progress Section */}
-        <div className="flex flex-col gap-2 p-3 rounded-xl bg-[#181a26] border border-[#282d3f]">
+        <div className="flex flex-col gap-2 p-3 rounded-xl bg-[#161924] border border-[#262a3b]">
           <div className="flex items-center justify-between text-xs font-semibold text-slate-300">
             <span>Progress</span>
-            <span className="text-blue-400 tabular-nums">{progressPercent}%</span>
+            <span className="text-[#f4446d] tabular-nums font-bold">{progressPercent}%</span>
           </div>
 
-          <div className="w-full h-2 bg-[#282d3f] rounded-full overflow-hidden flex">
+          <div className="w-full h-2 bg-[#262a3b] rounded-full overflow-hidden flex">
             <div className="h-full bg-emerald-500 transition-all" style={{ width: `${progressPercent}%` }} />
             {stats && stats.errorCount > 0 && (
               <div
@@ -164,7 +158,7 @@ export const ProjectDetailsPane: React.FC<ProjectDetailsPaneProps> = ({
         <div className="flex flex-col gap-2.5 text-xs text-slate-400">
           <div className="flex items-center justify-between">
             <span className="flex items-center gap-1.5">
-              <Sparkles className="w-3.5 h-3.5 text-blue-400" />
+              <Sparkles className="w-3.5 h-3.5 text-[#f4446d]" />
               <span>Dialogue Bubbles</span>
             </span>
             <span className="font-semibold text-slate-200 tabular-nums">{stats?.totalTextBlocks || 0}</span>
@@ -177,7 +171,7 @@ export const ProjectDetailsPane: React.FC<ProjectDetailsPaneProps> = ({
                 {stats.languages.map((lang) => (
                   <span
                     key={lang}
-                    className="px-1.5 py-0.5 rounded text-[0.65rem] font-bold uppercase bg-blue-500/15 text-blue-400 border border-blue-500/30"
+                    className="px-1.5 py-0.5 rounded text-[0.65rem] font-bold uppercase bg-[#f4446d]/15 text-[#f4446d] border border-[#f4446d]/30"
                   >
                     {lang}
                   </span>
@@ -186,7 +180,7 @@ export const ProjectDetailsPane: React.FC<ProjectDetailsPaneProps> = ({
             </div>
           )}
 
-          <div className="flex items-center justify-between pt-1 border-t border-[#282d3f]/60 text-[0.7rem]">
+          <div className="flex items-center justify-between pt-1 border-t border-[#262a3b]/60 text-[0.7rem]">
             <span className="flex items-center gap-1 text-slate-500">
               <Calendar className="w-3 h-3" /> Created
             </span>
@@ -203,11 +197,11 @@ export const ProjectDetailsPane: React.FC<ProjectDetailsPaneProps> = ({
       </div>
 
       {/* Bottom CTA Action Buttons */}
-      <div className="flex flex-col gap-2 pt-4 border-t border-[#282d3f]">
+      <div className="flex flex-col gap-2 pt-4 border-t border-[#262a3b]">
         <button
           type="button"
           onClick={onOpenStudio}
-          className="w-full flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold shadow-md transition"
+          className="w-full flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg bg-[#f4446d] hover:bg-[#e0335c] text-white text-xs font-semibold shadow-md shadow-[rgba(244,68,109,0.25)] transition cursor-pointer"
         >
           <FolderOpen className="w-4 h-4" />
           <span>Open in Studio</span>
@@ -216,9 +210,9 @@ export const ProjectDetailsPane: React.FC<ProjectDetailsPaneProps> = ({
         <button
           type="button"
           onClick={onAddFromLibrary}
-          className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-[#1c1f2e] hover:bg-[#282d3f] border border-[#282d3f] text-slate-200 text-xs font-semibold transition"
+          className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-[#161924] hover:bg-[#202436] border border-[#262a3b] text-slate-200 text-xs font-semibold transition cursor-pointer"
         >
-          <PlusCircle className="w-3.5 h-3.5 text-blue-400" />
+          <PlusCircle className="w-3.5 h-3.5 text-[#f4446d]" />
           <span>Add Pages from Library</span>
         </button>
 
@@ -227,7 +221,7 @@ export const ProjectDetailsPane: React.FC<ProjectDetailsPaneProps> = ({
           <button
             type="button"
             onClick={() => setIsExportMenuOpen((v) => !v)}
-            className="w-full flex items-center justify-between py-2 px-3 rounded-lg bg-[#181a26] hover:bg-[#202436] border border-[#282d3f] text-slate-300 text-xs font-medium transition"
+            className="w-full flex items-center justify-between py-2 px-3 rounded-lg bg-[#161924] hover:bg-[#202436] border border-[#262a3b] text-slate-300 text-xs font-medium transition cursor-pointer"
           >
             <span className="flex items-center gap-2">
               <Download className="w-3.5 h-3.5 text-slate-400" />
@@ -237,16 +231,16 @@ export const ProjectDetailsPane: React.FC<ProjectDetailsPaneProps> = ({
           </button>
 
           {isExportMenuOpen && (
-            <div className="absolute bottom-full left-0 right-0 mb-1 bg-[#181a26] border border-[#282d3f] rounded-lg shadow-xl z-50 py-1 text-xs text-slate-200">
+            <div className="absolute bottom-full left-0 right-0 mb-1 bg-[#161924] border border-[#262a3b] rounded-lg shadow-xl z-50 py-1 text-xs text-slate-200">
               <button
                 type="button"
                 onClick={() => {
                   setIsExportMenuOpen(false);
                   onBatchExport('images');
                 }}
-                className="w-full flex items-center gap-2 px-3 py-2 hover:bg-[#282d3f] transition text-left"
+                className="w-full flex items-center gap-2 px-3 py-2 hover:bg-[#262a3b] transition text-left cursor-pointer"
               >
-                <Download className="w-3.5 h-3.5 text-blue-400" />
+                <Download className="w-3.5 h-3.5 text-[#f4446d]" />
                 <div>
                   <div className="font-semibold">Standard ZIP</div>
                   <div className="text-[0.65rem] text-slate-400">Numbered image scans</div>
@@ -259,7 +253,7 @@ export const ProjectDetailsPane: React.FC<ProjectDetailsPaneProps> = ({
                   setIsExportMenuOpen(false);
                   onBatchExport('cbz');
                 }}
-                className="w-full flex items-center gap-2 px-3 py-2 hover:bg-[#282d3f] transition text-left"
+                className="w-full flex items-center gap-2 px-3 py-2 hover:bg-[#262a3b] transition text-left cursor-pointer"
               >
                 <FileText className="w-3.5 h-3.5 text-emerald-400" />
                 <div>
@@ -274,7 +268,7 @@ export const ProjectDetailsPane: React.FC<ProjectDetailsPaneProps> = ({
                   setIsExportMenuOpen(false);
                   onBatchExport('psd');
                 }}
-                className="w-full flex items-center gap-2 px-3 py-2 hover:bg-[#282d3f] transition text-left"
+                className="w-full flex items-center gap-2 px-3 py-2 hover:bg-[#262a3b] transition text-left cursor-pointer"
               >
                 <FileCode className="w-3.5 h-3.5 text-purple-400" />
                 <div>

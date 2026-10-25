@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { MoreVertical, Folder, Layers, Trash2, Edit2, Play, Download } from 'lucide-react';
 import { db, type ProjectFolder, type TranslationJob } from '../../db';
+import { getTranslatedPageThumbnailUrl } from '../canvas/thumbnailRenderer';
 
 /** Maximum number of thumbnail previews rendered inside the project card strip. */
 const MAX_PREVIEW_THUMBNAILS = 4;
@@ -49,10 +50,13 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
   const [thumbUrls, setThumbUrls] = useState<string[]>([]);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
-  // Load preview thumbnails for member jobs
+  // Compute scaled preview image dimensions based on slider rem setting
+  const thumbW = Math.round(tileSizeRem * 9.5); // 48px to 135px
+  const thumbH = Math.round(thumbW * 1.42);      // proportional 3:4 portrait aspect
+
+  // Load composited translated preview thumbnails for member jobs
   useEffect(() => {
     let isCancelled = false;
-    const activeUrls: string[] = [];
 
     const loadPreviews = async () => {
       if (!project.id) return;
@@ -69,15 +73,8 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
 
       for (const job of previewJobs) {
         if (!job.id) continue;
-        const img = await db.images.where({ jobId: job.id }).first();
-        if (img) {
-          const blob = img.translatedImageBlob || img.rawImageBlob;
-          if (blob) {
-            const url = URL.createObjectURL(blob);
-            urls.push(url);
-            activeUrls.push(url);
-          }
-        }
+        const thumbUrl = await getTranslatedPageThumbnailUrl(job.id, 400);
+        if (thumbUrl) urls.push(thumbUrl);
       }
 
       if (!isCancelled) {
@@ -89,7 +86,6 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
 
     return () => {
       isCancelled = true;
-      activeUrls.forEach((url) => URL.revokeObjectURL(url));
     };
   }, [project.id]);
 
@@ -100,17 +96,16 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
     <div
       onClick={onSelect}
       onDoubleClick={onOpen}
-      style={{ minHeight: `${tileSizeRem}rem` }}
       className={`group relative flex flex-col justify-between p-4 rounded-xl border transition-all cursor-pointer select-none ${
         isSelected
-          ? 'bg-[#1a1f33] border-blue-500 shadow-lg shadow-blue-500/10'
-          : 'bg-[#12141c] hover:bg-[#181c2b] border-[#282d3f] hover:border-slate-600'
+          ? 'bg-[#18121a] border-[#f4446d] shadow-lg shadow-[rgba(244,68,109,0.18)] ring-1 ring-[#f4446d]/40'
+          : 'bg-[#12141c] hover:bg-[#161924] border-[#262a3b] hover:border-slate-500'
       }`}
     >
       {/* Top Header Row */}
       <div className="flex items-start justify-between gap-3 min-w-0">
         <div className="flex items-center gap-2 min-w-0 flex-1">
-          <div className="p-2 rounded-lg bg-blue-500/15 text-blue-400 shrink-0">
+          <div className="p-2 rounded-lg bg-[#f4446d]/15 text-[#f4446d] shrink-0">
             <Folder className="w-4 h-4" />
           </div>
           <div className="min-w-0 flex-1">
@@ -133,7 +128,7 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
               e.stopPropagation();
               setIsMenuOpen((v) => !v);
             }}
-            className="p-1 rounded-md text-slate-400 hover:text-white hover:bg-[#282d3f] transition"
+            className="p-1 rounded-md text-slate-400 hover:text-white hover:bg-[#262a3b] transition cursor-pointer"
           >
             <MoreVertical className="w-4 h-4" />
           </button>
@@ -141,7 +136,7 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
           {isMenuOpen && (
             <div
               onClick={(e) => e.stopPropagation()}
-              className="absolute right-0 top-full mt-1 w-36 bg-[#181a26] border border-[#282d3f] rounded-lg shadow-xl z-50 py-1 text-xs text-slate-200"
+              className="absolute right-0 top-full mt-1 w-36 bg-[#161924] border border-[#262a3b] rounded-lg shadow-xl z-50 py-1 text-xs text-slate-200"
             >
               <button
                 type="button"
@@ -149,7 +144,7 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
                   setIsMenuOpen(false);
                   onOpen();
                 }}
-                className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-blue-600 hover:text-white transition"
+                className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-[#f4446d] hover:text-white transition cursor-pointer"
               >
                 <Play className="w-3.5 h-3.5" />
                 <span>Open Studio</span>
@@ -160,7 +155,7 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
                   setIsMenuOpen(false);
                   onRename();
                 }}
-                className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-[#282d3f] transition"
+                className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-[#262a3b] transition cursor-pointer"
               >
                 <Edit2 className="w-3.5 h-3.5" />
                 <span>Rename</span>
@@ -171,19 +166,19 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
                   setIsMenuOpen(false);
                   onExport();
                 }}
-                className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-[#282d3f] transition"
+                className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-[#262a3b] transition cursor-pointer"
               >
                 <Download className="w-3.5 h-3.5" />
                 <span>Export ZIP</span>
               </button>
-              <div className="my-1 border-t border-[#282d3f]" />
+              <div className="my-1 border-t border-[#262a3b]" />
               <button
                 type="button"
                 onClick={() => {
                   setIsMenuOpen(false);
                   onDelete();
                 }}
-                className="w-full flex items-center gap-2 px-3 py-1.5 text-red-400 hover:bg-red-500/20 hover:text-red-300 transition"
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-red-400 hover:bg-red-500/20 hover:text-red-300 transition cursor-pointer"
               >
                 <Trash2 className="w-3.5 h-3.5" />
                 <span>Delete</span>
@@ -193,28 +188,35 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
         </div>
       </div>
 
-      {/* Center Horizontal Preview Strip */}
-      <div className="mt-3 min-w-0">
+      {/* Center Dynamic Scalable Preview Strip */}
+      <div className="mt-3 min-w-0" style={{ minHeight: `${thumbH}px` }}>
         {thumbUrls.length > 0 ? (
-          <div className="flex items-center gap-2 overflow-hidden py-1">
+          <div className="flex items-center gap-2 overflow-hidden py-1" style={{ height: `${thumbH + 8}px` }}>
             {thumbUrls.map((url, i) => (
               <img
                 key={i}
                 src={url}
                 alt=""
-                className="w-14 h-18 object-cover rounded-md border border-[#282d3f] shrink-0 shadow-sm"
+                style={{ width: `${thumbW}px`, height: `${thumbH}px` }}
+                className="object-cover rounded-md border border-[#262a3b] shrink-0 shadow-sm transition-all duration-150"
               />
             ))}
             {pageCount > MAX_PREVIEW_THUMBNAILS && (
-              <div className="w-14 h-18 rounded-md bg-[#1c1f2e] border border-[#282d3f] flex items-center justify-center text-xs font-semibold text-slate-400 shrink-0">
+              <div
+                style={{ width: `${thumbW}px`, height: `${thumbH}px` }}
+                className="rounded-md bg-[#181a26] border border-[#262a3b] flex items-center justify-center text-xs font-semibold text-slate-400 shrink-0"
+              >
                 +{pageCount - MAX_PREVIEW_THUMBNAILS}
               </div>
             )}
           </div>
         ) : (
-          <div className="h-18 rounded-lg border border-dashed border-[#282d3f] flex flex-col items-center justify-center text-xs text-slate-500 px-3 text-center">
-            <Layers className="w-4 h-4 mb-1 text-slate-600" />
-            <span>No images yet. Drop files or add from library.</span>
+          <div
+            style={{ height: `${thumbH}px` }}
+            className="rounded-lg border border-dashed border-[#262a3b] flex flex-col items-center justify-center text-xs text-slate-500 px-3 text-center transition-all duration-150"
+          >
+            <Layers className="w-5 h-5 mb-1.5 text-slate-600 opacity-60" />
+            <span className="leading-snug">No images yet. Drop files or add from library.</span>
           </div>
         )}
       </div>

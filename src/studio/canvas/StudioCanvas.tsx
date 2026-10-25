@@ -1414,6 +1414,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
   return (
     <div
       ref={containerRef}
+      data-studio-canvas-container="true"
       onWheel={handleWheel}
       className={`relative flex flex-1 min-h-0 overflow-auto p-4 w-full h-full bg-[#0a0c12] select-none ${
         isSpacePanning ? 'cursor-grab active:cursor-grabbing' : ''
