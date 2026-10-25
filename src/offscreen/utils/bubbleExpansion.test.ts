@@ -7,7 +7,9 @@ import {
   computeTypesetBox,
   partitionSharedContainer,
   groupBoxesBySharedContainer,
+  pairwiseClampBox,
   SHARED_CHAMBER_MAX_V_GROWTH,
+  SIBLING_GAP,
   type BoxRect
 } from './bubbleExpansion';
 
@@ -246,6 +248,59 @@ describe('bubbleExpansion', () => {
       const sub = computeTypesetBox(text, territory, true, 1200, true, true);
       const subCx = sub.x + sub.w / 2;
       expect(Math.abs(subCx - (territory.x + territory.w / 2))).toBeLessThanOrEqual(1);
+    });
+  });
+
+  describe('pairwiseClampBox (XianScan expansion.rs clearance parity)', () => {
+    it('clamps candidate box from expanding into a right-hand neighbor with SIBLING_GAP clearance', () => {
+      const orig1: BoxRect = { x: 50, y: 100, w: 40, h: 30 };
+      const orig2: BoxRect = { x: 120, y: 100, w: 40, h: 30 };
+      // Candidate 1 tried to balloon wide to x=40, w=100 (right edge at 140, which would invade box 2)
+      const candidate: BoxRect = { x: 40, y: 95, w: 100, h: 40 };
+
+      const clamped = pairwiseClampBox(candidate, orig1, [orig1, orig2], 0, SIBLING_GAP);
+
+      // Clamped right edge must not exceed orig2.x - SIBLING_GAP (120 - 6 = 114)
+      expect(clamped.x + clamped.w).toBeLessThanOrEqual(orig2.x - SIBLING_GAP);
+      // Still larger than original width (40)
+      expect(clamped.w).toBeGreaterThanOrEqual(orig1.w);
+      expect(clamped.x).toBe(candidate.x);
+    });
+
+    it('clamps candidate box from expanding into a left-hand neighbor with SIBLING_GAP clearance', () => {
+      const orig1: BoxRect = { x: 50, y: 100, w: 40, h: 30 };
+      const orig2: BoxRect = { x: 130, y: 100, w: 40, h: 30 };
+      // Candidate 2 tried to expand leftward to x=60 (invading orig1's right edge at 90)
+      const candidate: BoxRect = { x: 60, y: 95, w: 100, h: 40 };
+
+      const clamped = pairwiseClampBox(candidate, orig2, [orig1, orig2], 1, SIBLING_GAP);
+
+      // Clamped left edge must not be less than orig1.x + orig1.w + SIBLING_GAP (50 + 40 + 6 = 96)
+      expect(clamped.x).toBeGreaterThanOrEqual(orig1.x + orig1.w + SIBLING_GAP);
+      // Width must preserve at least the original text box
+      expect(clamped.w).toBeGreaterThanOrEqual(orig2.w);
+    });
+
+    it('clamps candidate box vertically against an upper or lower neighbor', () => {
+      const origTop: BoxRect = { x: 100, y: 50, w: 50, h: 40 };
+      const origBot: BoxRect = { x: 100, y: 140, w: 50, h: 40 };
+      // Candidate bottom tried to expand upward to y=70 (invading origTop which ends at y=90)
+      const candidate: BoxRect = { x: 90, y: 70, w: 70, h: 100 };
+
+      const clamped = pairwiseClampBox(candidate, origBot, [origTop, origBot], 1, SIBLING_GAP);
+
+      // Clamped top must stay below origTop.y + origTop.h + SIBLING_GAP (50 + 40 + 6 = 96)
+      expect(clamped.y).toBeGreaterThanOrEqual(origTop.y + origTop.h + SIBLING_GAP);
+      expect(clamped.h).toBeGreaterThanOrEqual(origBot.h);
+    });
+
+    it('leaves candidate untouched when neighbor has no spatial overlap', () => {
+      const orig1: BoxRect = { x: 50, y: 50, w: 40, h: 30 };
+      const farAway: BoxRect = { x: 500, y: 500, w: 40, h: 30 };
+      const candidate: BoxRect = { x: 30, y: 40, w: 80, h: 50 };
+
+      const clamped = pairwiseClampBox(candidate, orig1, [orig1, farAway], 0, SIBLING_GAP);
+      expect(clamped).toEqual(candidate);
     });
   });
 });

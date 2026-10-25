@@ -623,3 +623,75 @@ export function applySiblingBoundaryConstraints(
     }
   }
 }
+
+/**
+ * Clamps a candidate expanded typeset box against all neighboring original OCR boxes.
+ *
+ * 1:1 port of XianScan `expansion.rs:235-276` pairwise boundary limits.
+ * Guarantees that an expanded box never grows into an adjacent dialogue region,
+ * maintaining at least SIBLING_GAP pixels of clearance on all axes.
+ *
+ * @param candidate - The proposed expanded BoxRect.
+ * @param original - The original unexpanded OCR BoxRect for this block.
+ * @param allOriginals - Array of all original unexpanded OCR boxes on the page.
+ * @param myIndex - The index of the current block in allOriginals.
+ * @param siblingGap - Minimum clearance gap in pixels (default SIBLING_GAP = 6).
+ * @returns Bounded BoxRect with sibling clearance guaranteed.
+ */
+export function pairwiseClampBox(
+  candidate: BoxRect,
+  original: BoxRect,
+  allOriginals: BoxRect[],
+  myIndex: number,
+  siblingGap: number = SIBLING_GAP
+): BoxRect {
+  let { x, y, w, h } = candidate;
+  const cxI = original.x + original.w / 2;
+  const cyI = original.y + original.h / 2;
+
+  for (let j = 0; j < allOriginals.length; j++) {
+    if (j === myIndex) continue;
+    const origJ = allOriginals[j];
+    const cxJ = origJ.x + origJ.w / 2;
+    const cyJ = origJ.y + origJ.h / 2;
+
+    // 1. Horizontal clearance: when candidate overlaps neighbor vertically
+    const yOverlap = (y + h > origJ.y) && (origJ.y + origJ.h > y);
+    if (yOverlap) {
+      if (cxJ < cxI && origJ.x + origJ.w <= cxI) {
+        const minLeft = origJ.x + origJ.w + siblingGap;
+        if (x < minLeft) {
+          const shift = minLeft - x;
+          x = minLeft;
+          w = Math.max(original.w, w - shift);
+        }
+      } else if (cxJ > cxI && origJ.x >= cxI) {
+        const maxRight = origJ.x - siblingGap;
+        if (x + w > maxRight) {
+          w = Math.max(original.w, maxRight - x);
+        }
+      }
+    }
+
+    // 2. Vertical clearance: when candidate overlaps neighbor horizontally
+    const xOverlap = (x + w > origJ.x) && (origJ.x + origJ.w > x);
+    if (xOverlap) {
+      if (cyJ < cyI && origJ.y + origJ.h <= cyI) {
+        const minTop = origJ.y + origJ.h + siblingGap;
+        if (y < minTop) {
+          const shift = minTop - y;
+          y = minTop;
+          h = Math.max(original.h, h - shift);
+        }
+      } else if (cyJ > cyI && origJ.y >= cyI) {
+        const maxBottom = origJ.y - siblingGap;
+        if (y + h > maxBottom) {
+          h = Math.max(original.h, maxBottom - y);
+        }
+      }
+    }
+  }
+
+  return { x, y, w, h };
+}
+

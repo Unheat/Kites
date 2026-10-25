@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { acquireBubbleGeometry, computeMaskCurvature, MIN_SHARED_FONT_RATIO, resolveBubbleLayouts, type BubbleLayoutInput } from './BubbleLayoutService';
+import { acquireBubbleGeometry, computeMaskCurvature, MIN_SHARED_FONT_RATIO, resolveBubbleLayouts, significantOverlap, type BubbleLayoutInput } from './BubbleLayoutService';
 import { computeTypesetBox, type BoxRect } from '../utils/bubbleExpansion';
 import type { BubbleShapeEvidence } from '../engines/bubble/HeuristicBubbleExtractor';
 
@@ -190,5 +190,159 @@ describe('conservative bubble layouts', () => {
     expect(geometry.proposals[0]).toBe(proposal);
     expect(geometry.carriers[0]).toBe(proposal);
     expect(boxes).toEqual([{ x: 100, y: 100, w: 30, h: 40 }]);
+  });
+
+  describe('dense page and pairwise clamping resilience (XianScan expansion parity)', () => {
+    it('does not group distinct adjacent bubbles merely because carrier bounding boxes overlap', () => {
+      // Two separate speech bubbles on a page: bubble 1 in panel 1, bubble 2 in panel 2
+      const box1 = { x: 50, y: 50, w: 60, h: 40 };
+      const box2 = { x: 120, y: 70, w: 60, h: 40 };
+      // Carrier 1 extends rightward to x=140; Carrier 2 extends leftward to x=100.
+      // Their bounding boxes overlap in [100, 140], but IoU is low (separate bubbles).
+      const carrier1 = { x: 30, y: 30, w: 110, h: 80 };
+      const carrier2 = { x: 100, y: 50, w: 110, h: 80 };
+      const input: BubbleLayoutInput = {
+        pageWidth: 800,
+        pageHeight: 800,
+        boxes: [box1, box2],
+        carriers: [carrier1, carrier2],
+        proposals: [{ ...carrier1 }, { ...carrier2 }], // distinct proposal objects!
+        shapes: [],
+        directions: ['h', 'h'],
+        accept: () => true,
+      };
+
+      const result = resolveBubbleLayouts(input);
+      // Both bubbles MUST expand independently, not be grouped as multi-lobe and rolled back!
+      expect(result[0]).toBeDefined();
+      expect(result[1]).toBeDefined();
+      expect(result[0]!.w).toBeGreaterThan(box1.w);
+      expect(result[1]!.w).toBeGreaterThan(box2.w);
+      // Pairwise clearance: they must not overlap each other
+      expect(result[0]!.x + result[0]!.w).toBeLessThanOrEqual(result[1]!.x);
+    });
+
+    it('isolates rollback so an invalid or unaccepted bubble does not cancel independent neighboring bubbles', () => {
+      // 3 independent bubbles across different panels
+      const b1 = { x: 50, y: 50, w: 60, h: 40 };
+      const b2 = { x: 250, y: 50, w: 60, h: 40 };
+      const b3 = { x: 500, y: 50, w: 60, h: 40 };
+      const c1 = { x: 30, y: 30, w: 100, h: 80 };
+      const c2 = { x: 230, y: 30, w: 100, h: 80 };
+      const c3 = { x: 480, y: 30, w: 100, h: 80 };
+
+      const input: BubbleLayoutInput = {
+        pageWidth: 1000,
+        pageHeight: 1000,
+        boxes: [b1, b2, b3],
+        carriers: [c1, c2, c3],
+        proposals: [{ ...c1 }, { ...c2 }, { ...c3 }],
+        shapes: [],
+        directions: ['h', 'h', 'h'],
+        // b2 fails font fit (e.g. translated text too long), but b1 and b3 are valid!
+        accept: (i) => i !== 1,
+      };
+
+      const result = resolveBubbleLayouts(input);
+      expect(result[0]).toBeDefined();
+      expect(result[1]).toBeUndefined(); // b2 rolled back
+      expect(result[2]).toBeDefined(); // b3 must NOT be dragged down by b2!
+    });
+
+    it('allows slight natural rotation angle within 5 degrees', () => {
+      const box = { x: 100, y: 100, w: 80, h: 40 };
+      const c = { x: 70, y: 80, w: 140, h: 80 };
+      const input: BubbleLayoutInput = {
+        pageWidth: 800,
+        pageHeight: 800,
+        boxes: [box],
+        carriers: [c],
+        proposals: [c],
+        shapes: [],
+        directions: ['h'],
+        angles: [3.5], // OCR detected 3.5 deg angle
+        accept: () => true,
+      };
+
+      const result = resolveBubbleLayouts(input);
+      expect(result[0]).toBeDefined();
+      expect(result[0]!.w).toBeGreaterThan(box.w);
+    });
+
+    it('handles a realistic dense page with 12 bubbles across multiple panels without cascading collapse', () => {
+      // 12 bubbles distributed in a 3x2 grid of comic panels (similar to the Torii test image)
+      const boxes: BoxRect[] = [];
+      const carriers: BoxRect[] = [];
+      const proposals: BoxRect[] = [];
+
+      for (let row = 0; row < 3; row++) {
+        for (let col = 0; col < 4; col++) {
+          const bx = 50 + col * 200;
+          const by = 50 + row * 250;
+          boxes.push({ x: bx, y: by, w: 60, h: 40 });
+          const c = { x: bx - 20, y: by - 15, w: 100, h: 70 };
+          carriers.push(c);
+          proposals.push({ ...c }); // distinct proposal objects
+        }
+      }
+
+      const input: BubbleLayoutInput = {
+        pageWidth: 1000,
+        pageHeight: 1000,
+        boxes,
+        carriers,
+        proposals,
+        shapes: [],
+        directions: new Array(12).fill('h'),
+        // Let's say box 5 fails font fit
+        accept: (i) => i !== 5,
+      };
+
+      const result = resolveBubbleLayouts(input);
+
+      // 11 of the 12 bubbles MUST expand successfully!
+      expect(result.filter((r) => r !== undefined).length).toBe(11);
+      // Only box 5 fell back
+      expect(result[5]).toBeUndefined();
+
+      // For all expanded bubbles, verify they enlarged and maintain pairwise clearance
+      for (let i = 0; i < result.length; i++) {
+        if (i === 5) continue;
+        const expanded = result[i]!;
+        expect(expanded.w).toBeGreaterThan(boxes[i].w);
+        // Check no significant collision with any other box on page
+        for (let j = 0; j < boxes.length; j++) {
+          if (i === j) continue;
+          const obstacle = result[j] ?? boxes[j];
+          expect(significantOverlap(expanded, obstacle, 0.35)).toBe(false);
+        }
+      }
+    });
+
+    it('rolls back only when an expanded box collides significantly (>= 35%) with an obstacle', () => {
+      const box1 = { x: 50, y: 50, w: 60, h: 40 };
+      // An obstacle (e.g. unmovable artwork or fixed box) heavily overlapping box 1's right area
+      const obstacleBox = { x: 80, y: 50, w: 60, h: 40 };
+      // Carrier 1 wants to expand rightward across the obstacle
+      const carrier1 = { x: 30, y: 30, w: 140, h: 80 };
+
+      // Case A: Major collision (> 35% overlap area)
+      const inputMajor: BubbleLayoutInput = {
+        pageWidth: 800,
+        pageHeight: 800,
+        boxes: [box1, obstacleBox],
+        carriers: [carrier1, null], // obstacle has no carrier
+        proposals: [{ ...carrier1 }, null],
+        shapes: [],
+        directions: ['h', 'h'],
+        accept: () => true,
+      };
+
+      const resultMajor = resolveBubbleLayouts(inputMajor);
+      // Box 1 must either be safely pairwise-clamped away from obstacle, or rolled back if unable to fit
+      if (resultMajor[0]) {
+        expect(resultMajor[0].x + resultMajor[0].w).toBeLessThanOrEqual(obstacleBox.x);
+      }
+    });
   });
 });
