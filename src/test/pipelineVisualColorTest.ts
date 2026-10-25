@@ -29,7 +29,7 @@ export async function runPipelineVisualColorTest() {
   const translator = new GoogleTranslateEngine();
   await translator.init();
 
-  const testFiles = ['image1.jpg', 'image2.jpg', 'image3.jpg'];
+  const testFiles = ['image1.jpg', 'image2.jpg', 'image3.jpg', 'image6.jpg', 'image8.png'];
 
   for (const testFile of testFiles) {
     console.log(`\n================================`);
@@ -51,7 +51,8 @@ export async function runPipelineVisualColorTest() {
 
     // 1. OCR Detection
     console.log('[ColorTest] 1. Running OCR detection...');
-    const ocrResult = await ocrManager.processImage(arrayBuffer, 'v6-small', { sourceLang: 'ja', pageWidth, pageHeight });
+    const sourceLang = testFile === 'image8.png' ? undefined : 'ja';
+    const ocrResult = await ocrManager.processImage(arrayBuffer, 'v6-small', { sourceLang, pageWidth, pageHeight });
     const polygons = (ocrResult.polygons || []) as Point2D[][];
     const texts = ocrResult.texts || [];
 
