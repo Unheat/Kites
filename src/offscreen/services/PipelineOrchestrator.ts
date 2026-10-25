@@ -476,7 +476,9 @@ export class PipelineOrchestrator {
         itemOcrIndices.forEach((index, position) => {
           const typesetBox = ocrResult.typesetBoxes?.[index];
           textBlockItems[position].typesetBox = typesetBox;
-          if (typesetBox) {
+          // Only YOLO (AI) neural mode routes through the ellipse curvature engine
+          const isNeuralMode = bubbleMode === 'neural' || bubbleMode === 'neural-mask';
+          if (typesetBox && isNeuralMode) {
             const curv = bubbleGeometry.curvatures?.[index];
             if (curv) {
               textBlockItems[position].isRounded = curv.isRounded;
@@ -541,11 +543,13 @@ export class PipelineOrchestrator {
         const renderColors = renderInfo;
         const curvature = bubbleGeometry?.curvatures?.[i];
         const hasBubbleBox = Boolean(bubbleGeometry && ocrResult.typesetBoxes?.[i]);
-        const typesetMode: TypesetMode = hasBubbleBox
+        const isNeuralMode = bubbleMode === 'neural' || bubbleMode === 'neural-mask';
+        // Only YOLO (AI) neural mode sets 'ellipse' typesetting; Heuristic and Disabled use 'balloon' (Auto Balloon)
+        const typesetMode: TypesetMode = (hasBubbleBox && isNeuralMode)
           ? (curvature?.isRounded ? 'ellipse' : 'simple')
           : 'balloon';
-        const borderRadius = hasBubbleBox ? (curvature?.borderRadius ?? 0) : 0;
-        const isRounded = hasBubbleBox ? Boolean(curvature?.isRounded) : false;
+        const borderRadius = (hasBubbleBox && isNeuralMode) ? (curvature?.borderRadius ?? 0) : 0;
+        const isRounded = (hasBubbleBox && isNeuralMode) ? Boolean(curvature?.isRounded) : false;
 
         return {
           imageId: imageRecord.id!,
