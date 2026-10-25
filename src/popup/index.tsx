@@ -6,7 +6,7 @@ import EngineDropdown from './components/EngineDropdown';
 import SettingsView from './components/SettingsView';
 import BatchScanPanel from './components/BatchScanPanel';
 
-import { Settings, Home, Power, Crop, Globe, Layers } from 'lucide-react';
+import { Settings, Home, Power, Crop, Globe, Layers, Sun, Moon } from 'lucide-react';
 
 import type { PopupState } from '../shared/types';
 import { DEFAULT_POPUP_STATE } from '../shared/types';
@@ -201,7 +201,7 @@ function PopupApp() {
             <span className="text-xs font-normal text-amber-500 px-2 py-0.5 border border-amber-500/40 rounded-full">PAUSED</span>
           ) : null}
         </h1>
-        <div className="flex gap-2 items-center">
+        <div className="flex gap-1.5 items-center">
           <button 
             onClick={() => updateState({ isExtensionEnabled: !state.isExtensionEnabled })}
             className={`p-1.5 rounded transition-colors hover:bg-[var(--color-vellum)] cursor-pointer`}
@@ -230,6 +230,14 @@ function PopupApp() {
             title="Settings"
           >
             <Settings size={18} className="text-[var(--color-ink)]" />
+          </button>
+          <div className="w-px h-5 bg-[var(--color-dust)] opacity-30 mx-0.5" />
+          <button 
+            onClick={() => updateState({ isDark: !state.isDark })}
+            className="p-1.5 rounded transition-colors hover:bg-[var(--color-vellum)] cursor-pointer text-[var(--color-ink)]"
+            title={state.isDark ? "Switch to Light Mode" : "Switch to Dark Mode"}
+          >
+            {state.isDark ? <Sun size={18} /> : <Moon size={18} />}
           </button>
         </div>
       </div>

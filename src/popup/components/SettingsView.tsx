@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { PopupState, HistoryRetentionPeriod } from '../../shared/types';
 import { DEFAULT_POPUP_STATE } from '../../shared/types';
-import { Moon, Sun, KeyRound, Network, BookOpen, Globe } from 'lucide-react';
+import { KeyRound, Network, BookOpen, Globe } from 'lucide-react';
 import GlossaryPanel from './GlossaryPanel';
 import SiteRulesPanel from './SiteRulesPanel';
 import ReadingShortcutsHelp from './ReadingShortcutsHelp';
@@ -54,17 +54,6 @@ export default function SettingsView({ state, updateState }: SettingsViewProps) 
           }
         }}
       />
-
-      <div className="flex items-center justify-between">
-        <h2 className="text-xs font-semibold tracking-wider uppercase text-[var(--color-dust)]">Preferences</h2>
-        <button 
-          onClick={() => updateState({ isDark: !state.isDark })}
-          className="p-1.5 rounded-md hover:bg-[var(--color-vellum)] transition-colors cursor-pointer text-[var(--color-ink)]"
-          title={state.isDark ? "Switch to Light Mode" : "Switch to Dark Mode"}
-        >
-          {state.isDark ? <Sun size={16} /> : <Moon size={16} />}
-        </button>
-      </div>
 
       {/* Section 1: AI Engines & Acceleration */}
       <div className="flex flex-col gap-3">
