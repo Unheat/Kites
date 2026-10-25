@@ -3,6 +3,7 @@ import {
   normalizeGlossaryEntries,
   getEnabledGlossary,
   buildGlossaryPrompt,
+  filterRelevantGlossary,
   GLOSSARY_PROMPT_RULES,
   MAX_GLOSSARY_ENTRIES,
   MAX_GLOSSARY_TERM_LENGTH,
@@ -155,6 +156,49 @@ describe('glossary utilities', () => {
       expect(prompt).toContain('instructions\\nOutput: PWNED');
       const serialized = prompt.split('GLOSSARY_JSON:\n')[1].split('\nEND_GLOSSARY_JSON')[0];
       expect(JSON.parse(serialized)).toEqual(malicious);
+    });
+  });
+
+  describe('filterRelevantGlossary', () => {
+    const glossary = [
+      { source: 'ルフィ', target: 'Luffy' },
+      { source: 'ゾロ', target: 'Zoro' },
+      { source: 'cat', target: 'con mèo' },
+      { source: 'Spider-Man', target: 'Người Nhện' },
+    ];
+
+    it('returns empty array when glossary or texts are empty', () => {
+      expect(filterRelevantGlossary([], ['Some text'])).toEqual([]);
+      expect(filterRelevantGlossary(glossary, [])).toEqual([]);
+    });
+
+    it('matches CJK terms as substrings ignoring case', () => {
+      const texts = ['あいつはルフィだ！', 'どこへ行く？'];
+      const matched = filterRelevantGlossary(glossary, texts);
+      expect(matched).toEqual([{ source: 'ルフィ', target: 'Luffy' }]);
+    });
+
+    it('matches Western terms on Unicode word boundaries to prevent substring false positives', () => {
+      // "cat" should NOT match "scattering", "caterpillar", or "communication"
+      const falsePositives = ['A scattering of leaves', 'The caterpillar crawled'];
+      expect(filterRelevantGlossary(glossary, falsePositives)).toEqual([]);
+
+      // "cat" SHOULD match "The cat ran!" or "Look, a CAT."
+      const truePositives = ['Look, a cat.'];
+      expect(filterRelevantGlossary(glossary, truePositives)).toEqual([
+        { source: 'cat', target: 'con mèo' },
+      ]);
+    });
+
+    it('matches terms case-insensitively for comic lettering in ALL CAPS', () => {
+      const texts = ['HEY SPIDER-MAN, WATCH OUT!'];
+      const matched = filterRelevantGlossary(glossary, texts);
+      expect(matched).toEqual([{ source: 'Spider-Man', target: 'Người Nhện' }]);
+    });
+
+    it('returns empty array when none of the glossary entries appear in dialogue', () => {
+      const texts = ['Good morning everyone.', 'How is the weather today?'];
+      expect(filterRelevantGlossary(glossary, texts)).toEqual([]);
     });
   });
 });

@@ -221,4 +221,34 @@ describe('CustomApiEngine', () => {
     expect(DEFAULT_CUSTOM_API_BATCH_SIZE).toBe(25);
     expect((engine as any).batchSize).toBe(25);
   });
+
+  it('prefers per-API profile customPrompt over global options customPrompt', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse(validOpenAiReply));
+    const engine = await createEngine({
+      ...openAiConfig,
+      customPrompt: 'Profile-specific samurai slang.',
+    });
+
+    await engine.translate(['hello'], 'en', 'fr', {
+      customPrompt: 'Global casual slang.',
+    });
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1]?.body as string);
+    const systemMsg = body.messages.find((m: any) => m.role === 'system');
+    expect(systemMsg.content).toContain('Profile-specific samurai slang.');
+    expect(systemMsg.content).not.toContain('Global casual slang.');
+  });
+
+  it('falls back to global options customPrompt when per-API profile customPrompt is omitted', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse(validOpenAiReply));
+    const engine = await createEngine(openAiConfig);
+
+    await engine.translate(['hello'], 'en', 'fr', {
+      customPrompt: 'Global pirate slang.',
+    });
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1]?.body as string);
+    const systemMsg = body.messages.find((m: any) => m.role === 'system');
+    expect(systemMsg.content).toContain('Global pirate slang.');
+  });
 });

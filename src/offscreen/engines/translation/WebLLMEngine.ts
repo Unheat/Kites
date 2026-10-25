@@ -2,6 +2,7 @@ import { MLCEngine, CreateMLCEngine } from '@mlc-ai/web-llm';
 import {
   BaseLlmTranslationEngine,
   maxTokensForBatch,
+  estimateTokenCount,
   type LlmChatMessage,
 } from './BaseLlmTranslationEngine';
 import { checkWebGPUAvailability } from '../../utils/hardware';
@@ -12,6 +13,9 @@ export const DEFAULT_WEBLLM_BATCH_SIZE = 8;
 
 /** Maximum input tokens reserved for WebLLM prompt within its strict 1024-token WebGPU context window */
 export const DEFAULT_WEBLLM_MAX_INPUT_TOKENS = 550;
+
+/** Maximum allowed custom prompt tokens on local WebGPU to prevent KV cache exhaustion */
+export const MAX_WEBLLM_CUSTOM_PROMPT_TOKENS = 80;
 
 /** Greedy sampling temperature for deterministic translation */
 const WEBLLM_TEMPERATURE = 0;
@@ -39,8 +43,30 @@ export class WebLLMEngine extends BaseLlmTranslationEngine {
     this.modelId = modelId;
     this.batchSize = DEFAULT_WEBLLM_BATCH_SIZE;
     this.maxInputTokens = DEFAULT_WEBLLM_MAX_INPUT_TOKENS;
+    this.maxContextWindow = 1024;
     this.throwOnCountMismatch = false;
     this.allowPartialMissingLines = true;
+  }
+
+  /**
+   * Enforces strict safety token ceiling on custom user prompts for local WebGPU inference.
+   * If the custom prompt exceeds 80 tokens, safely bypasses it to prevent WebGPU KV cache overflow.
+   *
+   * @param options - Request translation options.
+   * @returns Bounded prompt string or undefined.
+   */
+  override resolveCustomPrompt(options?: TranslationOptions): string | undefined {
+    const prompt = options?.customPrompt?.trim();
+    if (!prompt) return undefined;
+    const tokens = estimateTokenCount(prompt);
+    if (tokens > MAX_WEBLLM_CUSTOM_PROMPT_TOKENS) {
+      console.warn(
+        `[WebLLMEngine] Custom prompt (${tokens} tokens) exceeds ${MAX_WEBLLM_CUSTOM_PROMPT_TOKENS}-token local ceiling. ` +
+        `Bypassing custom prompt to protect WebGPU context limits.`
+      );
+      return undefined;
+    }
+    return prompt;
   }
 
   /**

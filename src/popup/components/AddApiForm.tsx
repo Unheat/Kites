@@ -12,6 +12,8 @@ export default function AddApiForm({ onSave, onCancel }: AddApiFormProps) {
   const [newModelName, setNewModelName] = useState('');
   const [newApiKey, setNewApiKey] = useState('');
   const [newBaseUrl, setNewBaseUrl] = useState('');
+  const [customPrompt, setCustomPrompt] = useState('');
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [validationError, setValidationError] = useState('');
   const [isValidating, setIsValidating] = useState(false);
 
@@ -34,12 +36,14 @@ export default function AddApiForm({ onSave, onCancel }: AddApiFormProps) {
       return;
     }
 
+    const trimmedCustomPrompt = customPrompt.trim().slice(0, 4000);
     const newApi: CustomApiConfig = {
       id: `api_${crypto.randomUUID()}`,
       provider,
       modelName: newModelName.trim(),
       apiKey: newApiKey.trim(),
       ...(compatibleBaseUrl?.normalized ? { baseUrl: compatibleBaseUrl.normalized } : {}),
+      ...(trimmedCustomPrompt ? { customPrompt: trimmedCustomPrompt } : {}),
     };
 
     setIsValidating(true);
@@ -131,6 +135,33 @@ export default function AddApiForm({ onSave, onCancel }: AddApiFormProps) {
           disabled={isValidating}
           className="w-full p-2 text-sm bg-[var(--color-paper)] border border-[var(--color-dust)] rounded focus:outline-none focus:border-[var(--color-ink)] transition-colors placeholder:text-[var(--color-dust)]"
         />
+      </div>
+
+      <div className="pt-1">
+        <button
+          type="button"
+          onClick={() => setShowAdvanced(!showAdvanced)}
+          className="text-xs text-[var(--color-editorial)] font-medium hover:underline flex items-center gap-1 cursor-pointer"
+        >
+          <span>{showAdvanced ? '▾' : '▸'} Custom Prompt Override (Optional)</span>
+        </button>
+
+        {showAdvanced && (
+          <div className="mt-2 flex flex-col gap-1">
+            <textarea
+              placeholder="Detailed system prompt for this API (overrides global prompt)..."
+              value={customPrompt}
+              onChange={(e) => setCustomPrompt(e.target.value.slice(0, 4000))}
+              disabled={isValidating}
+              rows={3}
+              className="w-full p-2 text-xs bg-[var(--color-paper)] border border-[var(--color-dust)] rounded focus:outline-none focus:border-[var(--color-ink)] transition-colors placeholder:text-[var(--color-dust)] resize-none"
+            />
+            <div className="flex justify-between items-center text-[11px] text-[var(--color-dust)]">
+              <span>Overrides global Custom Prompt for this API.</span>
+              <span className="font-mono">{customPrompt.length}/4000</span>
+            </div>
+          </div>
+        )}
       </div>
       
       {validationError && <p className="text-xs text-red-600 leading-tight" role="alert">{validationError}</p>}

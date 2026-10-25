@@ -169,8 +169,44 @@ describe('WebLLMEngine Keyed JSON Protocol', () => {
     );
   });
 
-  it('configures bounded batch size and strict input token budget for 1k WebGPU context', () => {
+  it('configures bounded batch size, strict input token budget, and 1024 context window for WebGPU', () => {
     expect((engine as any).batchSize).toBe(8);
     expect((engine as any).maxInputTokens).toBe(550);
+    expect((engine as any).maxContextWindow).toBe(1024);
+  });
+
+  it('includes custom prompt when within 80-token local ceiling', async () => {
+    mockCreate.mockResolvedValueOnce({
+      choices: [{ message: { content: JSON.stringify({ b0: 'Translated' }) } }],
+    });
+
+    await engine.translate(['Hello'], 'ja', 'en', {
+      customPrompt: 'Natural conversational tone, keep -san honorifics.',
+    });
+
+    const callArg = mockCreate.mock.calls[0][0];
+    const systemContent = callArg.messages.find((m: any) => m.role === 'system')?.content;
+    expect(systemContent).toContain('Additional translation guidelines:');
+    expect(systemContent).toContain('Natural conversational tone, keep -san honorifics.');
+  });
+
+  it('bypasses custom prompt when exceeding 80-token local ceiling to protect WebGPU context', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockCreate.mockResolvedValueOnce({
+      choices: [{ message: { content: JSON.stringify({ b0: 'Translated' }) } }],
+    });
+
+    // 400 characters of text (~120+ tokens)
+    const longPrompt = 'This is an excessively detailed prompt designed to exceed eighty tokens '.repeat(5);
+    await engine.translate(['Hello'], 'ja', 'en', {
+      customPrompt: longPrompt,
+    });
+
+    const callArg = mockCreate.mock.calls[0][0];
+    const systemContent = callArg.messages.find((m: any) => m.role === 'system')?.content;
+    expect(systemContent).not.toContain('Additional translation guidelines:');
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('exceeds 80-token local ceiling')
+    );
   });
 });

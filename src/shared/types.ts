@@ -174,6 +174,7 @@ export interface CustomApiConfig {
   modelName: string;
   apiKey: string;
   baseUrl?: string; // Optional for openAI-compatible
+  customPrompt?: string; // Optional per-API system prompt override (max 4,000 chars)
 }
 
 export interface UserAccountInfo {
@@ -221,6 +222,7 @@ export interface PopupState {
   renderFontMinSize?: number;
   bubbleMode: BubbleDetectionMode;
   historyRetention: HistoryRetentionPeriod;
+  customPrompt?: string; // Optional global prompt for translation tone (max 250 chars)
   glossaryEnabled: boolean;
   glossaryEntries: GlossaryEntry[];
   disabledDomains: string[];
@@ -259,6 +261,7 @@ export const DEFAULT_POPUP_STATE: PopupState = {
   renderFontMinSize: 6,
   bubbleMode: 'off',
   historyRetention: '1week',
+  customPrompt: '',
   glossaryEnabled: false,
   glossaryEntries: [],
   disabledDomains: [],

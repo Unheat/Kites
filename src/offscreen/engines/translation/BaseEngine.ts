@@ -1,7 +1,9 @@
 import type { GlossarySettings } from '../../../shared/glossary';
 
-/** Per-request context. Non-LLM engines may ignore terminology preferences. */
-export type TranslationOptions = Readonly<GlossarySettings>;
+/** Per-request context. Non-LLM engines may ignore terminology preferences or custom prompts. */
+export interface TranslationOptions extends Readonly<GlossarySettings> {
+  readonly customPrompt?: string;
+}
 
 export interface ITranslationEngine {
   /**

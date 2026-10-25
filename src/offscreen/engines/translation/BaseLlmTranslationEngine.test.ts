@@ -79,11 +79,19 @@ describe('maxTokensForBatch and countCodePoints', () => {
     expect(tokensLong).toBeLessThanOrEqual(1024);
   });
 
-  it('estimates token counts appropriately for CJK vs Latin text', () => {
-    // 5 CJK characters: 5 * 1.8 = 9 tokens
-    expect(estimateTokenCount('行こうよ！')).toBe(9);
-    // 10 Latin characters: 10 * 0.35 = 3.5 -> 4 tokens
+  it('estimates token counts appropriately for CJK, Latin, Vietnamese, and other scripts', () => {
+    // 5 CJK characters: 1 baseline + 1 Hanzi (0.90) + 3 Kana (3*1.05) + 1 Punct (0.90) = 5.95 -> 6 tokens
+    expect(estimateTokenCount('行こうよ！')).toBe(6);
+    // 10 Latin characters: 1 baseline + 5 ASCII (1.5) + 1 space (0.2) + 4 ASCII (1.2) = 3.9 -> 4 tokens
     expect(estimateTokenCount('Hello guys')).toBe(4);
+    // Vietnamese with diacritics: ~0.35 tokens/char (16 chars -> 7 tokens)
+    expect(estimateTokenCount('Xin chào các bạn')).toBe(7);
+    // Cyrillic
+    expect(estimateTokenCount('Привет мир')).toBe(5);
+    // Thai
+    expect(estimateTokenCount('สวัสดี')).toBe(5);
+    // Emojis: 2.5 tokens
+    expect(estimateTokenCount('🔥🎉')).toBe(6);
     // Empty text
     expect(estimateTokenCount('')).toBe(0);
     expect(estimateTokenCount('   ')).toBe(0);
@@ -108,10 +116,10 @@ describe('partitionIntoChunks dual-budget window', () => {
 
   it('splits earlier on token budget when dense text would exceed maxInputTokens', () => {
     const engine = new MockLlmEngine(15);
-    // Set a tight input token budget (e.g. 120 tokens, system overhead is 75)
-    (engine as any).maxInputTokens = 150;
+    // Set a tight input token budget (120 tokens, system overhead is 75, maxBubbleTokens = 64)
+    (engine as any).maxInputTokens = 120;
 
-    // Each segment has ~30 CJK characters: ~54 text tokens + 6 syntax tokens = ~60 tokens each
+    // Each segment has ~30 CJK characters: ~33 text tokens + 6 syntax tokens = ~39 tokens each
     const denseSegmentText = 'あ'.repeat(30);
     const segments = [
       { originalIndex: 0, text: denseSegmentText },
@@ -119,9 +127,8 @@ describe('partitionIntoChunks dual-budget window', () => {
       { originalIndex: 2, text: denseSegmentText },
     ];
 
-    // Budget: 75 overhead + 60 (seg 0) = 135 <= 150.
-    // Adding seg 1: 135 + 60 = 195 > 150 -> splits after seg 0!
-    const chunks = engine.partitionIntoChunks(segments);
+    // Budget: maxBubbleTokens = 64. Seg 0 (39 tok) <= 64. Seg 0 + Seg 1 (78 tok) > 64 -> splits!
+    const chunks = engine.partitionIntoChunks(segments, 75);
     expect(chunks.length).toBe(3);
     expect(chunks[0]).toEqual([segments[0]]);
     expect(chunks[1]).toEqual([segments[1]]);
@@ -226,8 +233,8 @@ describe('BaseLlmTranslationEngine Keyed JSON Protocol', () => {
 
     expect(msgs).toHaveLength(2);
     expect(msgs[0].role).toBe('system');
-    expect(msgs[0].content).toContain('Return only one JSON object matching the required schema');
-    expect(msgs[0].content).toContain('Keep every output key exactly as required (e.g. b0, b1)');
+    expect(msgs[0].content).toContain('Return only one JSON object with the exact same keys as SOURCE, mapping each key to its translated text');
+    expect(msgs[0].content).toContain('Keep every key from SOURCE unchanged; do not add, omit, merge, or rename keys');
     expect(msgs[0].content).toContain('natural sentence capitalization');
     expect(msgs[1].role).toBe('user');
     expect(msgs[1].content).toContain('"b0":"One"');

@@ -1,5 +1,5 @@
 import type { ITranslationEngine, TranslationOptions } from './BaseEngine';
-import { buildGlossaryPrompt, GLOSSARY_PROMPT_RULES, getEnabledGlossary, type GlossaryEntry } from '../../../shared/glossary';
+import { buildGlossaryPrompt, GLOSSARY_PROMPT_RULES, getEnabledGlossary, filterRelevantGlossary, type GlossaryEntry } from '../../../shared/glossary';
 import { getLanguageName } from '../../../shared/utils/LanguageRegistry';
 import { hasNativeScriptForLang } from '../../../shared/utils/textCleaning';
 
@@ -42,9 +42,23 @@ export function countCodePoints(text: string): number {
 }
 
 /**
- * Estimates token count for multilingual text across CJK and Latin scripts.
- * - CJK (Hanzi, Kanji, Kana, Hangul): ~1.8 tokens per character in modern BPE tokenizers.
- * - Latin / Western / numeric: ~0.35 tokens per character (~3-4 chars per token).
+ * Estimates token count for multilingual text across modern BPE / SentencePiece tokenizers.
+ * Accurately models token fertility across scripts:
+ * - Basic Latin ASCII [A-Za-z]: ~0.30 tokens/char (~3.3 chars per token)
+ * - Vietnamese Latin Extended: ~0.35 tokens/char (~1.1-1.3 tokens per word)
+ * - Cyrillic (Russian, Ukrainian): ~0.42 tokens/char
+ * - Arabic / Hebrew: ~0.45 tokens/char
+ * - Thai / Lao: ~0.60 tokens/char
+ * - Devanagari / Indic: ~1.00 tokens/char
+ * - CJK Ideographs (Hanzi / Kanji): ~0.90 tokens/char
+ * - CJK Kana (Hiragana, Katakana, SFX): ~1.05 tokens/char
+ * - Hangul Syllables: ~0.85 tokens/char
+ * - Digits: ~0.60 tokens/char
+ * - Whitespace: ~0.20 tokens/char
+ * - Symbols & Punctuation: ~0.90 tokens/char
+ * - Emojis & Astral planes: ~2.50 tokens/char
+ *
+ * Runs in a single O(N) pass with zero memory allocation.
  *
  * @param text - Input text string.
  * @returns Conservative upper-bound estimated token count.
@@ -54,12 +68,43 @@ export function estimateTokenCount(text: string): number {
   const trimmed = text.trim();
   if (!trimmed) return 0;
 
-  // CJK Unified Ideographs, Hiragana, Katakana, Hangul, and CJK punctuation
-  const cjkMatches = trimmed.match(/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\u3000-\u303F\uFF00-\uFFEF]/gu);
-  const cjkCount = cjkMatches ? cjkMatches.length : 0;
-  const nonCjkCount = [...trimmed].length - cjkCount;
+  let totalTokens = 1.0; // Baseline BOS / string prefix
+  const len = trimmed.length;
 
-  return Math.ceil(cjkCount * 1.8 + nonCjkCount * 0.35);
+  for (let i = 0; i < len; i++) {
+    const cp = trimmed.codePointAt(i)!;
+    if (cp > 0xffff) i++; // Step over surrogate pair
+
+    if ((cp >= 65 && cp <= 90) || (cp >= 97 && cp <= 122)) {
+      totalTokens += 0.30; // Latin ASCII
+    } else if (cp >= 0x4e00 && cp <= 0x9fff) {
+      totalTokens += 0.90; // CJK Hanzi / Kanji
+    } else if (cp >= 0x3040 && cp <= 0x30ff) {
+      totalTokens += 1.05; // Hiragana / Katakana / SFX
+    } else if (cp >= 0xac00 && cp <= 0xd7af) {
+      totalTokens += 0.85; // Hangul
+    } else if (cp >= 0x0400 && cp <= 0x04ff) {
+      totalTokens += 0.42; // Cyrillic
+    } else if (cp >= 0x1ea0 && cp <= 0x1ef9) {
+      totalTokens += 0.35; // Vietnamese Latin
+    } else if ((cp >= 0x0600 && cp <= 0x06ff) || (cp >= 0x0590 && cp <= 0x05ff)) {
+      totalTokens += 0.45; // Arabic / Hebrew
+    } else if (cp >= 0x0e00 && cp <= 0x0e7f) {
+      totalTokens += 0.60; // Thai
+    } else if (cp >= 0x0900 && cp <= 0x097f) {
+      totalTokens += 1.00; // Devanagari
+    } else if (cp >= 48 && cp <= 57) {
+      totalTokens += 0.60; // Digits
+    } else if (cp <= 32) {
+      totalTokens += 0.20; // Whitespace
+    } else if (cp > 0xffff) {
+      totalTokens += 2.50; // Emoji / astral planes
+    } else {
+      totalTokens += 0.90; // Punctuation / brackets / symbols
+    }
+  }
+
+  return Math.ceil(totalTokens);
 }
 
 /**
@@ -208,6 +253,12 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
   protected maxInputTokens = DEFAULT_LLM_MAX_INPUT_TOKENS;
 
   /**
+   * Total context window size for the model (input prompt + output completion).
+   * WebLLM overrides this to 1024 to protect local WebGPU memory limits.
+   */
+  protected maxContextWindow = 4096;
+
+  /**
    * Whether to throw an Error when the response line count does not match the chunk length.
    * Defaults to false to allow 1 or 2 dropped lines to fall back gracefully to original text
    * without incurring costly resend overhead or aborting the full translation.
@@ -226,6 +277,17 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
    * Used to distinguish missing keys from intentional verbatim passthroughs.
    */
   protected lastParsedKeys = new Set<string>();
+
+  /**
+   * Resolves the effective custom prompt for this engine request.
+   * Subclasses (e.g. WebLLMEngine) can override to enforce strict token budgets.
+   *
+   * @param options - Translation options for the request.
+   * @returns Trimmed custom prompt or undefined.
+   */
+  protected resolveCustomPrompt(options?: TranslationOptions): string | undefined {
+    return options?.customPrompt?.trim() || undefined;
+  }
 
   /**
    * Translates an array of text segments from source language to target language.
@@ -260,17 +322,37 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
     const sourceLang = this.resolveLanguage(sourceLangId, 'source');
     const targetLang = this.resolveLanguage(targetLangId, 'target');
     // Snapshot before awaiting inference so edits cannot alter later batches of this request.
-    const glossary = getEnabledGlossary(options);
+    const rawGlossary = getEnabledGlossary(options);
+    const customPrompt = this.resolveCustomPrompt(options);
 
-    // 2. Process remaining meaningful segments in bounded batches respecting both
-    // bubble count (batchSize) and token budget (maxInputTokens)
-    const chunks = this.partitionIntoChunks(toTranslate);
+    // 2. Filter glossary: keep only terms matching any text in this page/batch.
+    // If 0 terms match, activeGlossary is empty -> zero glossary prompt overhead.
+    const activeGlossary = filterRelevantGlossary(rawGlossary, toTranslate.map((s) => s.text));
+
+    // 3. Compute dynamic prompt overhead (system prompt + user template + matched glossary + ChatML tokens)
+    const emptySystemPrompt = this.buildSystemPrompt(sourceLang, targetLang, activeGlossary, customPrompt);
+    const emptyUserPrompt = `Translate SOURCE from ${sourceLang} to ${targetLang}.\n\nSOURCE:\n{}` + buildGlossaryPrompt(activeGlossary);
+    const CHATML_FRAMING_TOKENS = 16;
+    const dynamicOverhead = estimateTokenCount(emptySystemPrompt) + estimateTokenCount(emptyUserPrompt) + CHATML_FRAMING_TOKENS;
+
+    // 4. Process remaining meaningful segments in bounded batches respecting both
+    // bubble count (batchSize) and dynamic token budget
+    const chunks = this.partitionIntoChunks(toTranslate, dynamicOverhead);
 
     for (const chunk of chunks) {
-      const prompt = this.buildPrompt(chunk, sourceLang, targetLang, glossary);
-      const messages = this.buildJsonMessages(chunk, sourceLang, targetLang, glossary);
+      // Per-chunk glossary filtering for maximum token efficiency
+      const chunkGlossary = filterRelevantGlossary(activeGlossary, chunk.map((s) => s.text));
+      const prompt = this.buildPrompt(chunk, sourceLang, targetLang, chunkGlossary, customPrompt);
+      const messages = this.buildJsonMessages(chunk, sourceLang, targetLang, chunkGlossary, customPrompt);
       const schema = buildSchema(chunk.length);
-      const maxTokens = maxTokensForBatch(chunk.map((s) => s.text));
+
+      // Clamp completion budget so input + output <= maxContextWindow
+      const chunkTextTokens = chunk.reduce((sum, s) => sum + estimateTokenCount(s.text) + 6, 0);
+      const chunkInputTokens = dynamicOverhead + chunkTextTokens;
+      const maxAvailableOutput = Math.max(64, this.maxContextWindow - chunkInputTokens - 16);
+      const rawMaxTokens = maxTokensForBatch(chunk.map((s) => s.text));
+      const maxTokens = Math.min(rawMaxTokens, maxAvailableOutput);
+
       const rawOutput = await this.requestLlm(prompt, messages, schema, undefined, maxTokens);
       const parsedChunk = this.parseKeyedOutput(rawOutput, chunk);
 
@@ -306,6 +388,7 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
    * @param messages - Structured ChatMessage array with system and user roles.
    * @param schema - Strict JSON schema for the batch slots (b0, b1, ... bN).
    * @param signal - Optional AbortSignal.
+   * @param maxTokens - Dynamic completion tokens ceiling.
    * @returns Raw string response from the LLM.
    */
   protected abstract requestLlm(
@@ -338,9 +421,16 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
    * @param sourceLang - Resolved source language name.
    * @param targetLang - Resolved target language name.
    * @param glossary - Immutable literal terminology mappings for this request.
+   * @param customPrompt - Optional user custom prompt or tone instruction.
    * @returns Formatted prompt string.
    */
-  protected buildPrompt(chunk: LlmTranslationSegment[], sourceLang: string, targetLang: string, glossary: readonly GlossaryEntry[] = []): string {
+  protected buildPrompt(
+    chunk: LlmTranslationSegment[],
+    sourceLang: string,
+    targetLang: string,
+    glossary: readonly GlossaryEntry[] = [],
+    customPrompt?: string
+  ): string {
     const sourceObj: Record<string, string> = {};
     chunk.forEach((item, index) => {
       sourceObj[`b${index}`] = item.text;
@@ -348,7 +438,8 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
 
     return (
       `Translate SOURCE from ${sourceLang} to ${targetLang}.\n\n` +
-      `Return only one JSON object mapping each input key (e.g. b0, b1) to its translation.` +
+      `Return only one JSON object with the exact same keys as SOURCE, mapping each key to its translated text.` +
+      (customPrompt?.trim() ? `\n\nAdditional translation guidelines:\n${customPrompt.trim()}` : '') +
       (glossary.length > 0 ? GLOSSARY_PROMPT_RULES : '') + '\n\n' +
       `SOURCE:\n${JSON.stringify(sourceObj)}` + buildGlossaryPrompt(glossary)
     );
@@ -359,34 +450,36 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
    * and maximum estimated input token budget (maxInputTokens), whichever hits first.
    *
    * @param segments - Meaningful segments to partition.
-   * @param systemOverheadTokens - Fixed tokens for system prompt and prompt template framing.
+   * @param overheadTokens - Fixed tokens for system prompt, user prompt framing, and matched glossary.
    * @returns Array of segmented chunks safe for model context limits.
    */
   partitionIntoChunks(
     segments: LlmTranslationSegment[],
-    systemOverheadTokens = 75
+    overheadTokens = 75
   ): LlmTranslationSegment[][] {
     if (segments.length === 0) return [];
 
     const chunks: LlmTranslationSegment[][] = [];
     let currentChunk: LlmTranslationSegment[] = [];
-    let currentTokens = systemOverheadTokens;
+    // Bubble token headroom = total maxInputTokens minus fixed prompt overhead
+    const maxBubbleTokens = Math.max(64, this.maxInputTokens - overheadTokens);
+    let currentBubbleTokens = 0;
 
     for (const segment of segments) {
       // Per-item token cost: text tokens + ~6 tokens syntax overhead ("b0": "...",\n)
       const itemTokens = estimateTokenCount(segment.text) + 6;
 
       const exceedsCount = currentChunk.length >= this.batchSize;
-      const exceedsTokens = currentTokens + itemTokens > this.maxInputTokens;
+      const exceedsTokens = currentBubbleTokens + itemTokens > maxBubbleTokens;
 
       if (currentChunk.length > 0 && (exceedsCount || exceedsTokens)) {
         chunks.push(currentChunk);
         currentChunk = [];
-        currentTokens = systemOverheadTokens;
+        currentBubbleTokens = 0;
       }
 
       currentChunk.push(segment);
-      currentTokens += itemTokens;
+      currentBubbleTokens += itemTokens;
     }
 
     if (currentChunk.length > 0) {
@@ -399,29 +492,39 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
   /**
    * Constructs high-signal, compact system instructions for manga dialogue translation.
    * Aligns with XGrammar constrained decoding for local WebLLMs while providing
-   * unambiguous schema, casing, and anti-markdown directives for remote APIs.
+   * unambiguous structural mirroring, casing, and anti-markdown directives for remote APIs.
    *
    * @param sourceLang - Resolved source language name.
    * @param targetLang - Resolved target language name.
    * @param glossary - Immutable literal terminology mappings for this request.
-   * @returns Clean system prompt string (~55 tokens).
+   * @param customPrompt - Optional user custom prompt or tone instruction.
+   * @returns Clean system prompt string.
    */
   protected buildSystemPrompt(
     sourceLang: string,
     targetLang: string,
-    glossary: readonly GlossaryEntry[] = []
+    glossary: readonly GlossaryEntry[] = [],
+    customPrompt?: string
   ): string {
-    return (
+    let prompt =
       `You translate manga/comic OCR text from ${sourceLang} into natural ${targetLang}.\n\n` +
-      `Return only one JSON object matching the required schema.\n\n` +
+      `Return only one JSON object with the exact same keys as SOURCE, mapping each key to its translated text.\n\n` +
       `Rules:\n` +
       `- Write translations using natural sentence capitalization (capitalize only sentence starts and proper nouns).\n` +
-      `- Keep every output key exactly as required (e.g. b0, b1).\n` +
+      `- Keep every key from SOURCE unchanged; do not add, omit, merge, or rename keys.\n` +
       `- Use surrounding values for dialogue context, natural tone, and pronouns.\n` +
       `- If a value is empty, punctuation-only, an ellipsis, or cannot be usefully translated, copy it unchanged.\n` +
-      `- Output raw JSON only. Do not add markdown code fences, explanations, or commentary.` +
-      (glossary.length > 0 ? GLOSSARY_PROMPT_RULES : '')
-    );
+      `- Output raw JSON only. Do not add markdown code fences, explanations, or commentary.`;
+
+    if (customPrompt?.trim()) {
+      prompt += `\n\nAdditional translation guidelines:\n${customPrompt.trim()}`;
+    }
+
+    if (glossary.length > 0) {
+      prompt += GLOSSARY_PROMPT_RULES;
+    }
+
+    return prompt;
   }
 
   /**
@@ -433,13 +536,15 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
    * @param sourceLang - Resolved source language name.
    * @param targetLang - Resolved target language name.
    * @param glossary - Immutable literal terminology mappings for this request.
+   * @param customPrompt - Optional user custom prompt or tone instruction.
    * @returns Structured ChatMessage array with system and user turns.
    */
   protected buildJsonMessages(
     chunk: LlmTranslationSegment[],
     sourceLang: string,
     targetLang: string,
-    glossary: readonly GlossaryEntry[] = []
+    glossary: readonly GlossaryEntry[] = [],
+    customPrompt?: string
   ): LlmChatMessage[] {
     const sourceObj: Record<string, string> = {};
     chunk.forEach((item, index) => {
@@ -449,7 +554,7 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
     return [
       {
         role: 'system',
-        content: this.buildSystemPrompt(sourceLang, targetLang, glossary),
+        content: this.buildSystemPrompt(sourceLang, targetLang, glossary, customPrompt),
       },
       {
         role: 'user',
@@ -472,9 +577,10 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
     chunk: LlmTranslationSegment[],
     sourceLang: string,
     targetLang: string,
-    glossary: readonly GlossaryEntry[] = []
+    glossary: readonly GlossaryEntry[] = [],
+    customPrompt?: string
   ): LlmChatMessage[] {
-    return this.buildJsonMessages(chunk, sourceLang, targetLang, glossary);
+    return this.buildJsonMessages(chunk, sourceLang, targetLang, glossary, customPrompt);
   }
 
   /**

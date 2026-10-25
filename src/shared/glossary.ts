@@ -72,3 +72,58 @@ export function buildGlossaryPrompt(entries: readonly GlossaryEntry[] = []): str
     .replace(/\u2029/g, '\\u2029');
   return `\n\nGLOSSARY_JSON:\n${json}\nEND_GLOSSARY_JSON`;
 }
+
+const CJK_CHAR_REGEX = /[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}\p{sc=Hangul}]/u;
+
+export interface CompiledGlossaryMatcher {
+  readonly entry: GlossaryEntry;
+  readonly test: (text: string, lowerText: string) => boolean;
+}
+
+/**
+ * Compiles reusable matchers for a glossary snapshot.
+ * - CJK terms: case-insensitive substring search (continuous unspaced scripts).
+ * - Spaced / alphabetic terms: Unicode word boundary RegExp to avoid false positives (e.g. "he" in "hello").
+ *
+ * @param entries - Validated glossary mappings.
+ * @returns Array of compiled matchers.
+ */
+export function compileGlossaryMatchers(entries: readonly GlossaryEntry[]): readonly CompiledGlossaryMatcher[] {
+  return entries.map((entry) => {
+    const isCjk = CJK_CHAR_REGEX.test(entry.source);
+    if (isCjk) {
+      const lowerSource = entry.source.toLowerCase();
+      return {
+        entry,
+        test: (_text: string, lowerText: string) => lowerText.includes(lowerSource),
+      };
+    }
+    const escaped = entry.source.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+    const regex = new RegExp(`(^|[^\\p{L}\\p{N}])${escaped}($|[^\\p{L}\\p{N}])`, 'iu');
+    return {
+      entry,
+      test: (text: string) => regex.test(text),
+    };
+  });
+}
+
+/**
+ * Filters glossary entries down to only those whose source term appears in the supplied texts.
+ * If no entries match, returns an empty array so no glossary rules or tokens are injected.
+ *
+ * @param glossary - The enabled glossary entries.
+ * @param texts - The batch or chunk of source texts.
+ * @returns Filtered glossary entries containing only active terms.
+ */
+export function filterRelevantGlossary(
+  glossary: readonly GlossaryEntry[],
+  texts: string[]
+): readonly GlossaryEntry[] {
+  if (glossary.length === 0 || texts.length === 0) return [];
+  const combined = texts.join('\n');
+  const lowerCombined = combined.toLowerCase();
+  const matchers = compileGlossaryMatchers(glossary);
+  return matchers
+    .filter((matcher) => matcher.test(combined, lowerCombined))
+    .map((matcher) => matcher.entry);
+}

@@ -87,8 +87,12 @@ export class TranslationManager {
 
     // Freeze request terminology before engine initialization or fallback awaits. No engine cache state.
     const glossaryEntries = getEnabledGlossary(popupState);
-    const options: TranslationOptions | undefined = glossaryEntries.length > 0
-      ? Object.freeze({ glossaryEnabled: true, glossaryEntries })
+    const globalPrompt = popupState.customPrompt?.trim();
+    const baseOptions: TranslationOptions | undefined = (glossaryEntries.length > 0 || globalPrompt)
+      ? Object.freeze({
+          ...(glossaryEntries.length > 0 ? { glossaryEnabled: true, glossaryEntries } : {}),
+          ...(globalPrompt ? { customPrompt: globalPrompt } : {}),
+        })
       : undefined;
     const primaryEngineId = popupState.activeEngineId;
     const fallbackChain: string[] = popupState.fallbackChain || [];
@@ -110,6 +114,13 @@ export class TranslationManager {
         const customApi = popupState.customApis?.find((api) => api.id === engineId);
         lease = await this.acquireEngine(engineId, undefined, customApi, onInitialization);
         const loadMs = import.meta.env.DEV ? performance.now() - loadStart : 0;
+
+        const options = (customApi?.customPrompt?.trim() && customApi.customPrompt.trim() !== globalPrompt)
+          ? Object.freeze({
+              ...(glossaryEntries.length > 0 ? { glossaryEnabled: true, glossaryEntries } : {}),
+              customPrompt: customApi.customPrompt.trim(),
+            })
+          : baseOptions;
 
         const inferStart = import.meta.env.DEV ? performance.now() : 0;
         const rawResults = await lease.engine.translate(normalizedTexts, sourceLang, targetLang, options);

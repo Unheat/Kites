@@ -186,4 +186,33 @@ describe('normalizePopupState', () => {
     expect(result.state.historyRetention).toBe('1week');
     expect(result.changed).toBe(true);
   });
+
+  it('normalizes customPrompt and clamps to 250 characters', () => {
+    const longPrompt = 'A'.repeat(300);
+    const result = normalizePopupState({
+      ...DEFAULT_POPUP_STATE,
+      customPrompt: longPrompt,
+    });
+
+    expect(result.state.customPrompt).toHaveLength(250);
+    expect(result.changed).toBe(true);
+  });
+
+  it('preserves customPrompt in custom API configurations up to 4000 characters', () => {
+    const longApiPrompt = 'B'.repeat(4500);
+    const result = normalizePopupState({
+      ...DEFAULT_POPUP_STATE,
+      customApis: [
+        {
+          id: 'api-1',
+          provider: 'openai',
+          modelName: 'gpt-4o',
+          apiKey: 'key-1',
+          customPrompt: longApiPrompt,
+        },
+      ],
+    });
+
+    expect(result.state.customApis[0].customPrompt).toHaveLength(4000);
+  });
 });

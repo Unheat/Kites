@@ -143,6 +143,9 @@ export function normalizePopupState(popupState: Partial<PopupState> | undefined)
         : 6,
     bubbleMode,
     historyRetention,
+    customPrompt: typeof completedState.customPrompt === 'string'
+      ? completedState.customPrompt.slice(0, 250)
+      : '',
     glossaryEnabled: completedState.glossaryEnabled === true,
     glossaryEntries: normalizeGlossaryEntries(completedState.glossaryEntries),
     disabledDomains: normalizeDisabledDomains(completedState.disabledDomains),

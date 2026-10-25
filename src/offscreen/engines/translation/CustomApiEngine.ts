@@ -38,7 +38,18 @@ export class CustomApiEngine extends BaseLlmTranslationEngine {
     super();
     this.config = config;
     this.batchSize = DEFAULT_CUSTOM_API_BATCH_SIZE;
+    this.maxContextWindow = 8192;
     this.throwOnCountMismatch = true; // Preserve strict delimiter verification for custom API tests
+  }
+
+  /**
+   * Resolves custom prompt with per-API profile precedence over global popup prompt.
+   *
+   * @param options - Request translation options.
+   * @returns Per-API custom prompt, global custom prompt fallback, or undefined.
+   */
+  override resolveCustomPrompt(options?: TranslationOptions): string | undefined {
+    return this.config.customPrompt?.trim() || options?.customPrompt?.trim() || undefined;
   }
 
   /**

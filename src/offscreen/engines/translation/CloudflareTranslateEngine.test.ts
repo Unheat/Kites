@@ -91,7 +91,7 @@ describe('CloudflareTranslateEngine Keyed JSON Protocol', () => {
     expect(body.messages[1].content).toContain('"target":"Preferred"');
     // Worker endpoint keeps its existing plain-message contract; BaseLlm owns alignment.
     expect(body.messages[1].content).toContain('"b0":"Name"');
-    expect(body.messages[0].content).toContain('Keep every output key exactly as required');
+    expect(body.messages[0].content).toContain('Keep every key from SOURCE unchanged; do not add, omit, merge, or rename keys');
   });
 
   it('preserves alignment without shifting when upstream model drops a key', async () => {

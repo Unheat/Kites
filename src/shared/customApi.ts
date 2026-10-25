@@ -37,11 +37,28 @@ export function normalizeCustomApiConfig(value: unknown): CustomApiConfig | unde
   if (typeof config.id !== 'string' || !config.id.trim() || typeof config.modelName !== 'string' || !config.modelName.trim() || typeof config.apiKey !== 'string' || !config.apiKey.trim() || !SUPPORTED_PROVIDERS.has(config.provider as CustomApiConfig['provider'])) {
     return undefined;
   }
+  const customPrompt = typeof config.customPrompt === 'string' && config.customPrompt.trim()
+    ? config.customPrompt.trim().slice(0, 4000)
+    : undefined;
+
   if (config.provider === 'openai-compatible') {
     if (typeof config.baseUrl !== 'string') return undefined;
     const { normalized } = validateCompatibleBaseUrl(config.baseUrl);
     if (!normalized) return undefined;
-    return { id: config.id.trim(), provider: config.provider, modelName: config.modelName.trim(), apiKey: config.apiKey.trim(), baseUrl: normalized };
+    return {
+      id: config.id.trim(),
+      provider: config.provider,
+      modelName: config.modelName.trim(),
+      apiKey: config.apiKey.trim(),
+      baseUrl: normalized,
+      ...(customPrompt ? { customPrompt } : {}),
+    };
   }
-  return { id: config.id.trim(), provider: config.provider as CustomApiConfig['provider'], modelName: config.modelName.trim(), apiKey: config.apiKey.trim() };
+  return {
+    id: config.id.trim(),
+    provider: config.provider as CustomApiConfig['provider'],
+    modelName: config.modelName.trim(),
+    apiKey: config.apiKey.trim(),
+    ...(customPrompt ? { customPrompt } : {}),
+  };
 }
