@@ -65,9 +65,10 @@ export interface StudioProps {
   jobTitle?: string;
   onSave?: (savedImageBlob: Blob, textObjects: TextObject[]) => Promise<void>;
   onBack?: () => void;
-  /** Queues an uploaded page through App's persisted full translation pipeline. */
-  onUploadPage?: (file: File) => Promise<void>;
+  /** Queues one or more uploaded pages through App's persisted full translation pipeline. */
+  onUploadPage?: (files: File[]) => Promise<void>;
   isUploadingPage?: boolean;
+  uploadProgress?: { current: number; total: number; currentFileName: string } | null;
   /** Active project folder context for multi-page workflow. */
   projectId?: number;
   projectName?: string;
@@ -99,6 +100,7 @@ export const Studio: React.FC<StudioProps> = ({
   onBack,
   onUploadPage,
   isUploadingPage = false,
+  uploadProgress = null,
   projectId,
   projectName,
   onBackToProjects,
@@ -621,7 +623,13 @@ export const Studio: React.FC<StudioProps> = ({
                 {activeTool === 'ocr' && <OcrSettings />}
                 {(activeTool === 'text' || (activeTool as any) === 'select') && <TypographySettings />}
                 {activeTool === 'warp' && <WarpSettings />}
-                {activeTool === 'image' && <ImageLayerSettings onUploadPage={onUploadPage} isUploadingPage={isUploadingPage} />}
+                {activeTool === 'image' && (
+                  <ImageLayerSettings
+                    onUploadPage={onUploadPage}
+                    isUploadingPage={isUploadingPage}
+                    uploadProgress={uploadProgress}
+                  />
+                )}
               </>
             )}
           </div>

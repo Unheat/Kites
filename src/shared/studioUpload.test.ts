@@ -1,7 +1,13 @@
 import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { db } from '../db';
-import { uploadStudioPage } from './studioUpload';
+import {
+  BatchUploadError,
+  isSupportedStudioImage,
+  uploadStudioPage,
+  uploadStudioPagesBatch,
+  type BatchUploadProgress,
+} from './studioUpload';
 
 const sendMessage = vi.fn();
 
@@ -96,3 +102,104 @@ describe('uploadStudioPage', () => {
     expect(sendMessage).not.toHaveBeenCalled();
   });
 });
+
+describe('isSupportedStudioImage', () => {
+  it.each([
+    ['PNG MIME', new File(['x'], 'p.png', { type: 'image/png' })],
+    ['JPEG MIME', new File(['x'], 'p.jpg', { type: 'image/jpeg' })],
+    ['WebP MIME', new File(['x'], 'p.webp', { type: 'image/webp' })],
+    ['AVIF MIME', new File(['x'], 'p.avif', { type: 'image/avif' })],
+    ['empty MIME with valid .png ext', new File(['x'], 'page.png', { type: '' })],
+    ['empty MIME with valid .jpeg ext', new File(['x'], 'page.jpeg', { type: '' })],
+    ['uppercase .JPG ext', new File(['x'], 'PAGE.JPG', { type: '' })],
+  ])('accepts supported format: %s', (_label, file) => {
+    expect(isSupportedStudioImage(file)).toBe(true);
+  });
+
+  it.each([
+    ['SVG MIME', new File(['<svg/>'], 'icon.svg', { type: 'image/svg+xml' })],
+    ['SVG ext with image/xml', new File(['<svg/>'], 'icon.svg', { type: 'image/xml' })],
+    ['GIF MIME', new File(['GIF89a'], 'anim.gif', { type: 'image/gif' })],
+    ['BMP MIME', new File(['BM'], 'pic.bmp', { type: 'image/bmp' })],
+    ['Text file', new File(['hello'], 'doc.txt', { type: 'text/plain' })],
+    ['Zero-byte PNG', new File([], 'empty.png', { type: 'image/png' })],
+  ])('rejects unsupported format: %s', (_label, file) => {
+    expect(isSupportedStudioImage(file)).toBe(false);
+  });
+});
+
+describe('uploadStudioPagesBatch', () => {
+  it('rejects empty file list', async () => {
+    await expect(uploadStudioPagesBatch([])).rejects.toThrow('Choose a non-empty image file to upload.');
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('rejects batch before persisting if any file format is unsupported', async () => {
+    const files = [
+      new File(['data1'], 'p1.png', { type: 'image/png' }),
+      new File(['<svg/>'], 'vector.svg', { type: 'image/svg+xml' }),
+      new File(['data2'], 'p2.jpg', { type: 'image/jpeg' }),
+    ];
+
+    await expect(uploadStudioPagesBatch(files)).rejects.toThrow(
+      'Unsupported image format for "vector.svg". Only PNG, JPEG, WebP, and AVIF are supported.'
+    );
+    expect(await db.translationJobs.count()).toBe(0);
+    expect(await db.images.count()).toBe(0);
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('uploads multiple pages sequentially, notifying progress for each', async () => {
+    const files = [
+      new File(['data1'], 'page1.png', { type: 'image/png' }),
+      new File(['data2'], 'page2.webp', { type: 'image/webp' }),
+      new File(['data3'], 'page3.jpg', { type: 'image/jpeg' }),
+    ];
+
+    sendMessage.mockResolvedValue({ status: 'queued' });
+    const progressLog: BatchUploadProgress[] = [];
+
+    const jobIds = await uploadStudioPagesBatch(files, (p) => progressLog.push(p));
+
+    expect(jobIds).toHaveLength(3);
+    expect(progressLog).toEqual([
+      { current: 1, total: 3, currentFileName: 'page1.png' },
+      { current: 2, total: 3, currentFileName: 'page2.webp' },
+      { current: 3, total: 3, currentFileName: 'page3.jpg' },
+    ]);
+
+    expect(sendMessage).toHaveBeenCalledTimes(3);
+    expect(await db.translationJobs.count()).toBe(3);
+    expect(await db.images.count()).toBe(3);
+  });
+
+  it('preserves already queued jobs in BatchUploadError when a later page fails', async () => {
+    const files = [
+      new File(['data1'], 'page1.png', { type: 'image/png' }),
+      new File(['data2'], 'page2.png', { type: 'image/png' }),
+    ];
+
+    sendMessage
+      .mockResolvedValueOnce({ status: 'queued' })
+      .mockRejectedValueOnce(new Error('Port disconnected'));
+
+    let caughtError: unknown;
+    try {
+      await uploadStudioPagesBatch(files);
+    } catch (err) {
+      caughtError = err;
+    }
+
+    expect(caughtError).toBeInstanceOf(BatchUploadError);
+    const batchErr = caughtError as BatchUploadError;
+    expect(batchErr.queuedJobIds).toHaveLength(1);
+    expect(batchErr.message).toContain('Failed to queue "page2.png": Port disconnected. (1/2 pages queued)');
+
+    // Page 1 is queued in DB; Page 2 errored in DB
+    const jobs = await db.translationJobs.toArray();
+    expect(jobs).toHaveLength(2);
+    expect(jobs[0].status).toBe('queued');
+    expect(jobs[1].status).toBe('error');
+  });
+});
+
