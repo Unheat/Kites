@@ -167,6 +167,8 @@ export function buildPsdDocument(
       name: textContent.slice(0, 24).trim(),
       left: Math.round(posX),
       top: Math.round(posY),
+      right: Math.round(posX + blockW),
+      bottom: Math.round(posY + blockH),
       text: {
         text: textContent,
         style: {
@@ -191,7 +193,7 @@ export function buildPsdDocument(
     children: layers,
   };
 
-  return writePsd(psd);
+  return writePsd(psd, { invalidateTextLayers: true });
 }
 
 /**
