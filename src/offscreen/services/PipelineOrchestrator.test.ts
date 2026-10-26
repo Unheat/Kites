@@ -299,6 +299,29 @@ describe('PipelineOrchestrator', () => {
     bitmapSpy.mockRestore(); blobSpy.mockRestore(); measureSpy.mockRestore(); renderSpy.mockRestore();
   });
 
+  it('persists typesetMode: ellipse for Heuristic tier when speech bubble is rounded', async () => {
+    ((db.images as any).first as any).mockResolvedValue({ id: 15, jobId: 1500,
+      rawImageBlob: new Blob(['fake image data'], { type: 'image/png' }) });
+    vi.spyOn(chrome.runtime, 'sendMessage').mockImplementation((_message: any, callback: any) => {
+      callback?.({ activeInpaintId: 'none', bubbleMode: 'heuristic', targetLang: 'en' });
+    });
+    const source = createCanvas(200, 200);
+    const context = source.getContext('2d');
+    context.fillStyle = '#000'; context.fillRect(0, 0, 200, 200);
+    context.fillStyle = '#fff';
+    context.beginPath(); context.arc(100, 100, 45, 0, Math.PI * 2); context.fill();
+    const bitmapSpy = vi.spyOn(global, 'createImageBitmap').mockResolvedValue(source as any);
+    processImageMock.mockResolvedValue({ texts: ['テスト'], boxes: [{ x: 90, y: 80, w: 20, h: 40 }],
+      directions: ['v'], fontSizes: [18], angles: [0],
+      polygons: [[{ x: 90, y: 80 }, { x: 110, y: 80 }, { x: 110, y: 120 }, { x: 90, y: 120 }]] });
+    const blobSpy = vi.spyOn(pipelineOrchestrator as any, 'blobToArrayBuffer').mockResolvedValue(new ArrayBuffer(8));
+    await pipelineOrchestrator.runPipeline(1500);
+    expect(db.textBlocks.bulkAdd).toHaveBeenCalledWith(expect.arrayContaining([expect.objectContaining({
+      typesetMode: 'ellipse', isRounded: true,
+    })]));
+    bitmapSpy.mockRestore(); blobSpy.mockRestore();
+  });
+
   it('maps actual render metadata by OCR index and retains fallback only for skipped blocks', async () => {
     ((db.images as any).first as any).mockResolvedValue({ id: 8, jobId: 800,
       rawImageBlob: new Blob(['fake image data'], { type: 'image/png' }) });

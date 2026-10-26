@@ -204,6 +204,15 @@ describe('typesetLayout', () => {
       const wider = fitFontSizeWithLines(cjkCtx, text, 'sans-serif', 210, 250, 24, 48);
       expect(wider.size).toBeGreaterThanOrEqual(narrow.size);
     });
+
+    it('finds readable font size in tall narrow bubble with long words without binary search collapse', () => {
+      const dialogue = "I'll be the one to hold on here. Teacher, please retreat quickly and get reinforcements!";
+      const res = fitFontSizeWithLines(mockCtx, dialogue, 'sans-serif', 99, 193, 10, 48, 0.05, undefined, false, undefined, 'en');
+      // Must not collapse to 11px micro-text floor; should find >= 13px filling the vertical chamber
+      expect(res.size).toBeGreaterThanOrEqual(13);
+      expect(res.lines.length).toBeGreaterThanOrEqual(8);
+      expect(res.lines.some((l) => l.includes('reinfor-') || l.includes('reinforcements'))).toBe(true);
+    });
   });
 
   describe('decollideBoxes', () => {

@@ -126,10 +126,13 @@ async function runPipelineVisualBubbleTest() {
     const resolveLayouts = (ctx: any, geometry: BubbleGeometry) => resolveBubbleLayouts({
       ...geometry, boxes, directions: ocrResult.directions, angles: ocrResult.angles, pageWidth, pageHeight,
       accept: (index, proposed) => {
+        const curv = geometry.curvatures?.[index];
         const block: TextBlockItem = {
           text: translatedTexts[index], polygon: polygons[index], fontSize: ocrResult.fontSizes?.[index],
           direction: ocrResult.directions?.[index], angle: ocrResult.angles?.[index],
-          originalText: texts[index], sourceLineCount: ocrResult.lineCounts?.[index]
+          originalText: texts[index], sourceLineCount: ocrResult.lineCounts?.[index],
+          isRounded: curv?.isRounded,
+          borderRadius: curv?.borderRadius,
         };
         const fitted = measureBubbleLayoutFontSize(ctx, block, proposed, DEFAULT_RENDER_FONT_FAMILY);
         return fitted > 0;
@@ -150,6 +153,7 @@ async function runPipelineVisualBubbleTest() {
         const text = translatedTexts[i];
         const poly = polygons[i];
         if (text && poly) {
+          const curv = heuristicGeometry.curvatures?.[i];
           textBlockItems.push({
             text,
             polygon: poly,
@@ -158,7 +162,9 @@ async function runPipelineVisualBubbleTest() {
             fontSize: ocrResult.fontSizes ? ocrResult.fontSizes[i] : undefined,
             angle: ocrResult.angles ? ocrResult.angles[i] : undefined,
             originalText: texts[i],
-            sourceLineCount: ocrResult.lineCounts ? ocrResult.lineCounts[i] : undefined
+            sourceLineCount: ocrResult.lineCounts ? ocrResult.lineCounts[i] : undefined,
+            isRounded: curv?.isRounded,
+            borderRadius: curv?.borderRadius,
           });
         }
       }
@@ -226,6 +232,7 @@ async function runPipelineVisualBubbleTest() {
         const text = translatedTexts[i];
         const poly = polygons[i];
         if (text && poly) {
+          const curv = neuralGeometry.curvatures?.[i];
           textBlockItems.push({
             text,
             polygon: poly,
@@ -235,6 +242,8 @@ async function runPipelineVisualBubbleTest() {
             angle: ocrResult.angles ? ocrResult.angles[i] : undefined,
             originalText: texts[i],
             sourceLineCount: ocrResult.lineCounts ? ocrResult.lineCounts[i] : undefined,
+            isRounded: curv?.isRounded,
+            borderRadius: curv?.borderRadius,
           });
         }
       }
@@ -314,6 +323,7 @@ async function runPipelineVisualBubbleTest() {
           const text = translatedTexts[i];
           const poly = polygons[i];
           if (text && poly) {
+            const curv = maskGeometry.curvatures?.[i];
             maskTextBlockItems.push({
               text,
               polygon: poly,
@@ -323,6 +333,8 @@ async function runPipelineVisualBubbleTest() {
               angle: ocrResult.angles ? ocrResult.angles[i] : undefined,
               originalText: texts[i],
               sourceLineCount: ocrResult.lineCounts ? ocrResult.lineCounts[i] : undefined,
+              isRounded: curv?.isRounded,
+              borderRadius: curv?.borderRadius,
             });
           }
         }

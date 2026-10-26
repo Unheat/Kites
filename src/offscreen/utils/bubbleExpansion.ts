@@ -354,15 +354,17 @@ export function computeTypesetBox(
   const textCy = Math.round(textBox.y + textBox.h / 2);
   const carrierCx = Math.round(carrier.x + carrier.w / 2);
 
-  // For vertical CJK columns, parallel lines are drawn side-by-side inside the same bubble chamber,
-  // so translated horizontal text should center at the chamber's horizontal center (carrierCx).
-  // For already-horizontal text (like English dialogue), off-center boxes belong to distinct lobes
-  // and must stay anchored at textCx so they are not pulled into adjacent lobes.
-  const targetCx = isVertical
+  // For pre-partitioned sub-chambers, the territory has already been carved for this utterance,
+  // so center within the territory (carrierCx).
+  // For unpartitioned carriers, solitary vertical CJK text centers at carrierCx.
+  // But if the text is noticeably off-center (>10% deviation, e.g. conjoined staircase boxes or
+  // multi-utterance bubbles), keep it anchored at textCx to prevent dragging it toward boundary seams.
+  const isOffCenter = Math.abs(textCx - carrierCx) / Math.max(1, carrier.w) > 0.10;
+  const targetCx = isSubChamber
     ? carrierCx
-    : (Math.abs(textCx - carrierCx) / Math.max(1, carrier.w) > 0.15 ? textCx : carrierCx);
+    : (isVertical && !isOffCenter ? carrierCx : textCx);
 
-  const targetW = (!isVertical && Math.abs(textCx - carrierCx) / Math.max(1, carrier.w) > 0.15)
+  const targetW = (!isSubChamber && isOffCenter)
     ? Math.min(expandedW, Math.round(textBox.w * 1.35))
     : expandedW;
 

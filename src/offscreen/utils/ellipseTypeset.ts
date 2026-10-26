@@ -1,4 +1,5 @@
 import { syllables } from './hyphenation';
+import { findHyphenationPoints } from './typesetLayout';
 
 /**
  * Invisible word joiner Unicode character used to mark inserted soft hyphens.
@@ -382,10 +383,11 @@ export function layoutEllipseLines(
 }
 
 /**
- * Splits words exceeding maxWidth into syllable cuts.
+ * Splits words exceeding maxWidth or narrow chord thresholds into syllable cuts.
  */
 function ellipsePieces(
   words: string[],
+  targetWidth: number,
   maxWidth: number,
   measure: (s: string) => number,
   targetLang: string = 'en'
@@ -394,17 +396,30 @@ function ellipsePieces(
   const hyphenBefore = new Set<number>();
   const wordOf: number[] = [];
 
+  // Cut threshold: in narrow bubbles, words exceeding 85% of targetWidth or exceeding maxWidth
+  // must be broken into candidate syllable pieces so the ellipse chords can fit them.
+  const cutThreshold = Math.min(maxWidth, Math.max(20, targetWidth * 0.85));
+
   words.forEach((word, i) => {
-    const isWord = word.length >= 6;
-    const syls = isWord && measure(word) > maxWidth ? syllables(word, targetLang) : null;
-    if (!syls || syls.length <= 1) {
+    const punctMatch = word.match(/^(.*?)([.!?,:;~…"']+)?$/);
+    const stem = punctMatch && punctMatch[1] ? punctMatch[1] : word;
+    const trailingPunct = punctMatch?.[2] ?? '';
+
+    const isLongWord = stem.length >= 6;
+    const needsSplit = isLongWord && measure(word) > cutThreshold;
+    const points = needsSplit ? findHyphenationPoints(stem, targetLang) : [];
+
+    if (points.length === 0) {
       pieces.push(word);
       wordOf.push(i);
       return;
     }
-    for (let k = 0; k < syls.length; k++) {
+
+    const cuts = [0, ...points, stem.length];
+    for (let k = 0; k < cuts.length - 1; k++) {
       if (k > 0) hyphenBefore.add(pieces.length);
-      pieces.push(syls[k]);
+      const pieceText = stem.slice(cuts[k], cuts[k + 1]) + (k === cuts.length - 2 ? trailingPunct : '');
+      pieces.push(pieceText);
       wordOf.push(i);
     }
   });
@@ -436,7 +451,7 @@ function ellipseWrap(
   const heightBound = Number.isFinite(targetHeight);
   const maxWidth = targetWidth * maxWidthGrowth + 1.5;
 
-  const { pieces, hyphenBefore, wordOf } = ellipsePieces(words, maxWidth, measure, targetLang);
+  const { pieces, hyphenBefore, wordOf } = ellipsePieces(words, targetWidth, maxWidth, measure, targetLang);
   const spans = measureLineSpans(pieces, maxWidth, measure, hyphenBefore, wordOf);
   const textWidth = measure(pieces.join(' '));
   const boxAspect = targetWidth / Math.max(1, targetHeight);
@@ -488,7 +503,7 @@ function ellipseWrap(
       if (!bestInBox || score < bestInBox.score) bestInBox = candidate;
       if (looksRound && (!bestRoundInBox || score < bestRoundInBox.score)) bestRoundInBox = candidate;
       if (looksRound && currentText && layout.lines.join('\n') === currentText) current = candidate;
-    } else if (looksRound && (!bestRoundGrown || score < bestRoundGrown.score)) {
+    } else if (widest <= maxWidth && (!bestRoundGrown || score < bestRoundGrown.score)) {
       bestRoundGrown = candidate;
     }
 

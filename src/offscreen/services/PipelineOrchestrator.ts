@@ -178,6 +178,8 @@ export class PipelineOrchestrator {
       });
       const requestedInpaintTier = popupState?.activeInpaintId || 'none';
       const inpaintTier = await this.resolveInstalledInpaintTier(requestedInpaintTier);
+      const requestedColorTier = (popupState?.activeColorId as ColorTierId) || 'none';
+      const colorTier = await this.resolveInstalledColorTier(requestedColorTier);
       const sourceLang = popupState?.sourceLang || 'auto';
       const targetLang = popupState?.targetLang || 'en';
       const hyphenationPromise = loadHyphenationLanguage(targetLang);
@@ -313,14 +315,8 @@ export class PipelineOrchestrator {
         });
 
       const executeColorization = async (): Promise<ArrayBuffer> => {
-        const requestedColorTier = (popupState?.activeColorId as ColorTierId) || 'none';
-        if (requestedColorTier === 'none') {
-          void this.services.colorManager.destroy();
-          return imageBuffer;
-        }
-
-        const colorTier = await this.resolveInstalledColorTier(requestedColorTier);
         if (colorTier === 'none') {
+          void this.services.colorManager.destroy();
           return imageBuffer;
         }
 
@@ -468,8 +464,7 @@ export class PipelineOrchestrator {
           accept: (index, proposed) => {
             const block = blockByOcrIndex.get(index);
             if (!block) return false;
-            const isNeuralMode = bubbleMode === 'neural' || bubbleMode === 'neural-mask';
-            const curv = isNeuralMode ? bubbleGeometry.curvatures?.[index] : undefined;
+            const curv = bubbleGeometry?.curvatures?.[index];
             const blockWithCurvature = curv?.isRounded
               ? { ...block, isRounded: true, borderRadius: curv.borderRadius }
               : block;
@@ -498,10 +493,9 @@ export class PipelineOrchestrator {
         itemOcrIndices.forEach((index, position) => {
           const typesetBox = ocrResult.typesetBoxes?.[index];
           textBlockItems[position].typesetBox = typesetBox;
-          // Only YOLO (AI) neural mode routes through the ellipse curvature engine
-          const isNeuralMode = bubbleMode === 'neural' || bubbleMode === 'neural-mask';
-          if (typesetBox && isNeuralMode) {
-            const curv = bubbleGeometry.curvatures?.[index];
+          // All active bubble tiers (heuristic, neural, neural-mask) route curved speech bubbles through ellipse typesetting
+          if (typesetBox) {
+            const curv = bubbleGeometry?.curvatures?.[index];
             if (curv) {
               textBlockItems[position].isRounded = curv.isRounded;
               textBlockItems[position].borderRadius = curv.borderRadius;
@@ -565,13 +559,13 @@ export class PipelineOrchestrator {
         const renderColors = renderInfo;
         const curvature = bubbleGeometry?.curvatures?.[i];
         const hasBubbleBox = Boolean(bubbleGeometry && ocrResult.typesetBoxes?.[i]);
-        const isNeuralMode = bubbleMode === 'neural' || bubbleMode === 'neural-mask';
-        // Only YOLO (AI) neural mode sets 'ellipse' typesetting; Heuristic and Disabled use 'balloon' (Auto Balloon)
-        const typesetMode: TypesetMode = (hasBubbleBox && isNeuralMode)
+        // All active bubble tiers (heuristic, neural, neural-mask) use 'ellipse' for rounded speech bubbles,
+        // and 'simple' for rectangular caption boxes. Disabled tier ('off') uses 'balloon' (Auto Balloon) on OCR bounds.
+        const typesetMode: TypesetMode = hasBubbleBox
           ? (curvature?.isRounded ? 'ellipse' : 'simple')
           : 'balloon';
-        const borderRadius = (hasBubbleBox && isNeuralMode) ? (curvature?.borderRadius ?? 0) : 0;
-        const isRounded = (hasBubbleBox && isNeuralMode) ? Boolean(curvature?.isRounded) : false;
+        const borderRadius = hasBubbleBox ? (curvature?.borderRadius ?? 0) : 0;
+        const isRounded = hasBubbleBox ? Boolean(curvature?.isRounded) : false;
 
         return {
           imageId: imageRecord.id!,
@@ -616,6 +610,7 @@ export class PipelineOrchestrator {
         durationMs,
         ocrEngineId: ocrTier,
         inpaintTier,
+        colorTier,
         translationEngineId: popupState?.activeEngineId || 'gg-translate',
         bubbleMode,
         renderFontPresetId: popupState?.renderFontPresetId || 'standard',

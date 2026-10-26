@@ -302,5 +302,20 @@ describe('bubbleExpansion', () => {
       const clamped = pairwiseClampBox(candidate, orig1, [orig1, farAway], 0, SIBLING_GAP);
       expect(clamped).toEqual(candidate);
     });
+
+    it('anchors off-center vertical text to its own text centroid, avoiding conjoined seam drift', () => {
+      // Wide conjoined carrier encompassing two stepped boxes
+      const carrier: BoxRect = { x: 20, y: 10, w: 160, h: 200 };
+      // Text box sits on the right side of the carrier (e.g. top-right staircase box)
+      const textBox: BoxRect = { x: 100, y: 20, w: 70, h: 150 };
+      const textCx = textBox.x + textBox.w / 2; // 135
+
+      const result = computeTypesetBox(textBox, carrier, true, 1000);
+      const resultCx = result.x + result.w / 2;
+
+      // Must remain anchored close to original text centroid, NOT dragged to carrier center (100)
+      expect(Math.abs(resultCx - textCx)).toBeLessThanOrEqual(8);
+      expect(result.x).toBeGreaterThanOrEqual(textBox.x - 15);
+    });
   });
 });

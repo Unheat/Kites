@@ -198,8 +198,14 @@ export function wrapText(
 
     const punctMatch = current.match(/^(.*?)([.!?,:;~…"']+)?$/);
     const stem = punctMatch && punctMatch[1] ? punctMatch[1] : current;
+    const trailingPunct = punctMatch && punctMatch[2] ? punctMatch[2] : '';
 
-    if (ctx.measureText(current).width <= maxWidth * 1.15) {
+    // Hanging punctuation tolerance (Kinsoku Shori): only allow 1.15x overflow if the word's
+    // actual letters (stem) fit within maxWidth, and trailing punctuation pushes it into margin.
+    if (trailingPunct && ctx.measureText(stem).width <= maxWidth && ctx.measureText(current).width <= maxWidth * 1.15) {
+      return { head: [], tail: current };
+    }
+    if (ctx.measureText(current).width <= maxWidth) {
       return { head: [], tail: current };
     }
 
@@ -721,19 +727,16 @@ export function fitFontSizeWithLines(
   }
 
   // Pass 3: Vertical-fill hyphenation for tall boxes (aspect ratio >= 1.5)
+  // Scan downward from effectiveCap to find the largest fitting font size that cleanly fills the tall container
   if (aspectRatio >= TALL_FILL_MIN_ASPECT) {
-    let p3Lo = MIN_FONT_SIZE;
-    let p3Hi = effectiveCap;
-    while (p3Lo <= p3Hi) {
-      const mid = Math.floor((p3Lo + p3Hi) / 2);
+    const searchCeil = Math.min(effectiveCap, Math.max(finalSize, 36));
+    for (let mid = searchCeil; mid >= Math.max(finalSize, MIN_FONT_SIZE); mid--) {
       mCtx.font = fontSpec(mid, fontFamily, text, customCjk, isBold);
       const lines = wrapText(mCtx, text, maxW, targetLang);
       const allLinesFitW = lines.every((l) => mCtx.measureText(l).width <= maxW + 0.5);
       if (allLinesFitW && lines.length * mid * LINE_HEIGHT <= maxH) {
         consider(mid, lines);
-        p3Lo = mid + 1;
-      } else {
-        p3Hi = mid - 1;
+        break;
       }
     }
   }
