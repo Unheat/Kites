@@ -5,9 +5,13 @@ import type { OcrResult } from '../engines/ocr/BaseOcrEngine';
 import type { OcrManager } from './OcrManager';
 import type { InpaintManager, InpaintTier } from './InpaintManager';
 import type { TranslationManager } from './TranslationManager';
+import type { BubbleManager } from './BubbleManager';
 import { SUPPORTED_INPAINT_IDS } from '../../shared/inpaintTiers';
 import { getRenderedBlockGeometry } from '../utils/canvasTypesetting';
 import { detectBlockTextColors, type DetectedTextColor } from '../utils/textColorDetection';
+import { acquireBubbleGeometry, resolveBubbleLayouts } from './BubbleLayoutService';
+import { wrapTextContour } from '../utils/contourTypeset';
+import type { BoxRect } from '../utils/bubbleExpansion';
 
 // Preserve Studio's minimum editable text-handle dimensions.
 const MIN_TEXT_OBJECT_SIZE = 20;
@@ -16,12 +20,32 @@ const MIN_POLYGON_POINTS = 3;
 // Include all supported inpaint tiers derived from canonical catalog
 const INPAINT_TIERS: readonly string[] = Array.from(SUPPORTED_INPAINT_IDS);
 
+/**
+ * Creates a canvas and 2D context safely across worker, offscreen, and node-test runtimes.
+ */
+function createSafeCanvas(width: number, height: number): { canvas: any; ctx: any } | null {
+  if (typeof OffscreenCanvas !== 'undefined') {
+    const canvas = new OffscreenCanvas(Math.max(1, width), Math.max(1, height));
+    const ctx = canvas.getContext('2d');
+    return ctx ? { canvas, ctx } : null;
+  }
+  if (typeof document !== 'undefined' && typeof document.createElement === 'function') {
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, width);
+    canvas.height = Math.max(1, height);
+    const ctx = canvas.getContext('2d');
+    return ctx ? { canvas, ctx } : null;
+  }
+  return null;
+}
+
 export interface StudioOcrDependencies {
   getPopupState: () => Promise<PopupState>;
   getOcrManager: () => Pick<OcrManager, 'processImage'>;
   getInpaintManager: () => Pick<InpaintManager, 'eraseText'>;
   translationManager: Pick<TranslationManager, 'processTranslation'>;
   blobToBase64: (blob: Blob) => Promise<string>;
+  getBubbleManager?: () => BubbleManager;
 }
 
 export interface StudioOcrResponse {
@@ -35,6 +59,10 @@ export interface StudioOcrResponse {
     text: string;
     originalText: string;
     fontSize?: number;
+    lines?: string[];
+    lineSpacing?: number;
+    typesetMode?: string;
+    contourPoints?: Point2D[];
     isVertical?: boolean;
     /** OCR block rotation in degrees; Studio rotates the unrotated box around its center. */
     rotation: number;
@@ -125,15 +153,17 @@ export async function runStudioOcr(
   // artwork"), so Studio text objects inherit each bubble's real text color with
   // snap-to-pure-black/white normalization instead of assuming black-on-white.
   let detectedTextColors: (DetectedTextColor | null)[] = [];
-  try {
-    const sourceBitmap = await createImageBitmap(new Blob([imageBuffer], { type: 'image/png' }));
+  if (typeof createImageBitmap !== 'undefined') {
     try {
-      detectedTextColors = await detectBlockTextColors(sourceBitmap, result.boxes);
-    } finally {
-      sourceBitmap.close();
+      const sourceBitmap = await createImageBitmap(new Blob([imageBuffer], { type: 'image/png' }));
+      try {
+        detectedTextColors = await detectBlockTextColors(sourceBitmap, result.boxes);
+      } finally {
+        sourceBitmap.close();
+      }
+    } catch (err) {
+      console.warn('[Studio OCR] Text color detection failed; using default colors:', err);
     }
-  } catch (err) {
-    console.warn('[Studio OCR] Text color detection failed; using default colors:', err);
   }
 
   const originalTexts = regions.map(region => region.text);
@@ -170,6 +200,70 @@ export async function runStudioOcr(
     inpaintedPatchBase64 = await dependencies.blobToBase64(new Blob([cleanedBuffer], { type: 'image/png' }));
   }
 
+  // Speech bubble carrier detection & layout expansion for Studio Retranslate
+  let resolvedLayouts: (BoxRect | undefined)[] = [];
+  let bubbleContours: (Point2D[] | undefined)[] = [];
+
+  const bubbleMode = popupState.bubbleMode;
+  if (bubbleMode && bubbleMode !== 'off' && dependencies.getBubbleManager && typeof createImageBitmap !== 'undefined') {
+    try {
+      const bubbleManager = dependencies.getBubbleManager();
+      const safeCanvas = createSafeCanvas(payload.width, payload.height);
+      if (safeCanvas) {
+        const patchBitmap = await createImageBitmap(new Blob([imageBuffer], { type: 'image/png' }));
+        try {
+          safeCanvas.ctx.drawImage(patchBitmap, 0, 0);
+          const isNeural = bubbleMode === 'neural' || bubbleMode === 'neural-mask';
+          const { engine, release } = await bubbleManager.acquireEngine(bubbleMode, popupState);
+          let neuralResult: any;
+          try {
+            neuralResult = isNeural && engine
+              ? await engine.detect(
+                  safeCanvas.canvas as any,
+                  result.boxes,
+                  { mode: bubbleMode === 'neural-mask' ? 'mask' : 'box' }
+                )
+              : undefined;
+          } finally {
+            release();
+          }
+
+          const bubbleGeometry = acquireBubbleGeometry(
+            safeCanvas.ctx as any,
+            result.boxes,
+            neuralResult?.bubbles,
+            neuralResult?.shapes
+          );
+
+          resolvedLayouts = resolveBubbleLayouts({
+            ...bubbleGeometry,
+            boxes: result.boxes,
+            directions: result.directions,
+            angles: result.angles,
+            pageWidth: payload.width,
+            pageHeight: payload.height,
+            accept: () => true
+          });
+
+          bubbleContours = result.boxes.map((_, bIdx) => {
+            const carrier = bubbleGeometry.carriers[bIdx];
+            if (!carrier) return undefined;
+            return [
+              { x: carrier.x, y: carrier.y },
+              { x: carrier.x + carrier.w, y: carrier.y },
+              { x: carrier.x + carrier.w, y: carrier.y + carrier.h },
+              { x: carrier.x, y: carrier.y + carrier.h }
+            ];
+          });
+        } finally {
+          patchBitmap.close();
+        }
+      }
+    } catch (bErr) {
+      console.warn('[Studio OCR] Bubble detection skipped or failed:', bErr);
+    }
+  }
+
   const timestamp = Date.now();
   const textObjects = regions.map(({ polygon, text: originalText, index: origIndex }, index) => {
     const xs = polygon.map(point => point.x);
@@ -179,21 +273,51 @@ export async function runStudioOcr(
     const resolvedIndex = origIndex ?? index;
     const detectedFontSize = result.fontSizes?.[resolvedIndex];
     const detectedDirection = result.directions?.[resolvedIndex];
-    // Studio stores a centered, unrotated rectangle plus an angle. An AABB of a rotated
-    // region would be larger and then rotated a second time, so derive the same
-    // edge-midpoint rectangle the pipeline renderer persists for Studio.
-    const geometry = getRenderedBlockGeometry(polygon) ?? {
+    const isVertical = detectedDirection === 'v';
+
+    const expandedBox = resolvedLayouts[resolvedIndex];
+    const rawGeometry = getRenderedBlockGeometry(polygon) ?? {
       x: minX,
       y: minY,
       w: Math.max(...xs) - minX,
       h: Math.max(...ys) - minY,
     };
+    const geometry = expandedBox
+      ? { x: expandedBox.x, y: expandedBox.y, w: expandedBox.w, h: expandedBox.h }
+      : rawGeometry;
+
+    const contourPoints = bubbleContours[resolvedIndex] || [
+      { x: geometry.x, y: geometry.y },
+      { x: geometry.x + geometry.w, y: geometry.y },
+      { x: geometry.x + geometry.w, y: geometry.y + geometry.h },
+      { x: geometry.x, y: geometry.y + geometry.h }
+    ];
+
+    let precomputedLines: string[] | undefined = undefined;
+    let precomputedFontSize: number | undefined = undefined;
+
+    if (!isVertical && texts[index]) {
+      const safeMeasure = createSafeCanvas(geometry.w, geometry.h);
+      if (safeMeasure?.ctx) {
+        const contourRes = wrapTextContour(texts[index], contourPoints, safeMeasure.ctx, 'WildWords, CCWildWords, sans-serif', {
+          minFontSize: 8,
+          maxFontSize: Math.max(16, Math.round(geometry.h * 0.45)),
+          targetLang: popupState.targetLang || 'en'
+        });
+        if (contourRes.lines.length > 0) {
+          precomputedLines = contourRes.lines;
+          precomputedFontSize = contourRes.fontSize;
+        }
+      }
+    }
+
     // Prefer OcrManager's snapped block angle; older/partial engine results fall back to
     // the source polygon's top-edge rotation. Missing angle must stay an upright block.
     const detectedAngle = result.angles?.[resolvedIndex];
     const rotation = typeof detectedAngle === 'number' && Number.isFinite(detectedAngle)
       ? detectedAngle
       : (calculateRotationAngle(polygon) * 180) / Math.PI;
+
     return {
       id: `ocr-${timestamp}-${index}`,
       x: payload.offsetX + geometry.x,
@@ -202,10 +326,13 @@ export async function runStudioOcr(
       height: Math.max(MIN_TEXT_OBJECT_SIZE, geometry.h),
       text: texts[index],
       originalText,
-      fontSize: typeof detectedFontSize === 'number' && Number.isFinite(detectedFontSize) && detectedFontSize > 0
+      fontSize: precomputedFontSize || (typeof detectedFontSize === 'number' && Number.isFinite(detectedFontSize) && detectedFontSize > 0
         ? Math.round(detectedFontSize)
-        : undefined,
-      isVertical: detectedDirection === 'v',
+        : undefined),
+      lines: precomputedLines,
+      typesetMode: expandedBox ? 'contour' : 'simple',
+      contourPoints,
+      isVertical,
       rotation,
       color: detectedTextColors[resolvedIndex]?.textColor,
       strokeColor: detectedTextColors[resolvedIndex]?.strokeColor,

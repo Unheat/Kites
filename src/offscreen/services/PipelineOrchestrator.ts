@@ -509,14 +509,14 @@ export class PipelineOrchestrator {
         itemOcrIndices.forEach((index, position) => {
           const typesetBox = ocrResult.typesetBoxes?.[index];
           textBlockItems[position].typesetBox = typesetBox;
-          // All active bubble tiers (heuristic, neural, neural-mask) route curved speech bubbles through ellipse typesetting
+          // All active bubble tiers (heuristic, neural, neural-mask) route curved speech bubbles through Koharu contour typesetting
           // and rectangular caption boxes through simple wrap
           if (typesetBox) {
             const curv = bubbleGeometry?.curvatures?.[index];
             if (curv) {
               textBlockItems[position].isRounded = curv.isRounded;
               textBlockItems[position].borderRadius = curv.borderRadius;
-              textBlockItems[position].typesetMode = curv.isRounded ? 'ellipse' : 'simple';
+              textBlockItems[position].typesetMode = curv.isRounded ? 'contour' : 'simple';
             }
           }
         });

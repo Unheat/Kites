@@ -14,7 +14,7 @@ import {
   sanitizeTypesetText,
   compactSpecialSymbols,
 } from '../../shared/utils/textCleaning';
-import { wrapTextEllipse } from './ellipseTypeset';
+import { wrapTextContour } from './contourTypeset';
 
 /**
  * Batch driver for translated-text rendering.
@@ -348,8 +348,10 @@ export interface TextBlockItem {
   isRounded?: boolean;
   /** Mathematical bubble corner radius in pixels. */
   borderRadius?: number;
-  /** Explicit typesetting engine mode: 'balloon' (XianScan), 'ellipse' (DP), or 'simple' (Rectangular wrap). */
-  typesetMode?: 'balloon' | 'ellipse' | 'simple';
+  /** Explicit typesetting engine mode: 'balloon' (XianScan), 'contour' (Koharu DP), 'ellipse' (alias), or 'simple' (Rectangular wrap). */
+  typesetMode?: 'balloon' | 'contour' | 'ellipse' | 'simple';
+  /** Optional bubble contour polygon (in region coordinates). */
+  contourPoints?: Point2D[];
 }
 
 /**
@@ -387,47 +389,54 @@ export function measureBubbleLayoutFontSize(
 ): number {
   if (!block.text?.trim() || !Number.isFinite(box.w) || !Number.isFinite(box.h) || box.w < 1 || box.h < 1) return 0;
 
-  if (block.typesetMode === 'ellipse' || (block.isRounded && block.typesetMode !== 'balloon' && block.typesetMode !== 'simple')) {
-    const rMax = Math.min(box.w / 2, box.h / 2);
-    const radius = block.borderRadius !== undefined ? block.borderRadius : rMax;
-    const strength = rMax > 0 ? Math.min(1.0, radius / rMax) : 1.0;
+  if (block.typesetMode === 'contour' || block.typesetMode === 'ellipse' || (block.isRounded && block.typesetMode !== 'balloon' && block.typesetMode !== 'simple')) {
+    const contour = (block.contourPoints && block.contourPoints.length >= 3)
+      ? block.contourPoints
+      : [
+          { x: 0, y: 0 },
+          { x: box.w, y: 0 },
+          { x: box.w, y: box.h },
+          { x: 0, y: box.h }
+        ];
     const targetSize = bubbleLayoutFontTarget(block);
-    const res = wrapTextEllipse(
+    const res = wrapTextContour(
       block.text.trim(),
-      box.w,
-      box.h,
-      targetSize,
-      fontFamily,
-      strength,
+      contour,
       ctx as any,
-      targetLang,
-      { minFontSize: minFontSize ?? Math.max(6, Math.floor(targetSize * 0.4)) }
+      fontFamily,
+      {
+        minFontSize: minFontSize ?? Math.max(6, Math.floor(targetSize * 0.4)),
+        maxFontSize: Math.max(16, Math.round(box.h * 0.5)),
+        targetLang,
+        isBold
+      }
     );
-    if (!res || !res.lines || res.lines.length === 0) return 0;
-    if (res.height <= box.h + 0.5 && res.width <= box.w * 1.2 + 1.5) {
-      return res.fontSize;
-    }
-    return 0;
+    if (!res || !res.lines || res.lines.length === 0 || res.overflowed) return 0;
+    return res.fontSize;
   }
 
   if (block.typesetMode === 'simple') {
+    const rectContour = [
+      { x: 0, y: 0 },
+      { x: box.w, y: 0 },
+      { x: box.w, y: box.h },
+      { x: 0, y: box.h }
+    ];
     const targetSize = bubbleLayoutFontTarget(block);
-    const res = wrapTextEllipse(
+    const res = wrapTextContour(
       block.text.trim(),
-      box.w,
-      box.h,
-      targetSize,
-      fontFamily,
-      0, // strength 0 = rectangular wrap
+      rectContour,
       ctx as any,
-      targetLang,
-      { minFontSize: minFontSize ?? Math.max(6, Math.floor(targetSize * 0.4)) }
+      fontFamily,
+      {
+        minFontSize: minFontSize ?? Math.max(6, Math.floor(targetSize * 0.4)),
+        maxFontSize: Math.max(16, Math.round(box.h * 0.5)),
+        targetLang,
+        isBold
+      }
     );
-    if (!res || !res.lines || res.lines.length === 0) return 0;
-    if (res.height <= box.h + 0.5) {
-      return res.fontSize;
-    }
-    return 0;
+    if (!res || !res.lines || res.lines.length === 0 || res.overflowed) return 0;
+    return res.fontSize;
   }
 
   const fitted = measureDefaultLayout(ctx, block.text.trim(), box.w, box.h, bubbleLayoutFontTarget(block), undefined, fontFamily, isBold, undefined, targetLang);

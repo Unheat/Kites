@@ -720,6 +720,7 @@ async function handleStudioOcr(payload: StudioOcrPayload): Promise<StudioOcrResp
     }),
     getOcrManager: () => pipelineOrchestrator.getOcrManager(),
     getInpaintManager: () => pipelineOrchestrator.getInpaintManager(),
+    getBubbleManager: () => pipelineOrchestrator.getBubbleManager(),
     translationManager,
     blobToBase64,
   });

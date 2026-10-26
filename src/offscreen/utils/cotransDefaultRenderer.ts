@@ -1,7 +1,8 @@
 import type { Point2D } from '../../shared/utils/geometry';
 import { syllables } from './hyphenation';
 import { fitFontSizeWithLines, fontSpec, type MeasureCache } from './typesetLayout';
-import { wrapTextEllipse, unwrapWrappedText } from './ellipseTypeset';
+import { wrapTextContour } from './contourTypeset';
+import { unwrapWrappedText } from './typography';
 import {
   sanitizeTypesetText,
   compactSpecialSymbols,
@@ -81,8 +82,10 @@ export interface DefaultRenderRegion {
   isRounded?: boolean;
   /** Mathematical bubble corner radius in pixels. */
   borderRadius?: number;
-  /** Explicit typesetting engine mode: 'balloon' (XianScan), 'ellipse' (DP), or 'simple' (Rectangular wrap). */
-  typesetMode?: 'balloon' | 'ellipse' | 'simple';
+  /** Explicit typesetting engine mode: 'balloon' (XianScan), 'contour' (Koharu DP), 'ellipse' (legacy alias), or 'simple' (Rectangular wrap). */
+  typesetMode?: 'balloon' | 'contour' | 'ellipse' | 'simple';
+  /** Optional bubble contour polygon (in region coordinates). */
+  contourPoints?: Point2D[];
 }
 
 /** Result of the default render pass for one region. */
@@ -785,39 +788,55 @@ export function renderRegionDefault(
   const bg = region.strokeColor && region.strokeColor !== 'transparent' ? region.strokeColor : null;
 
   // Strict 3-route typesetting engine dispatch:
-  // Route 2: Bubble Ellipse DP solver for curved bubbles
-  // Route 3: Simple Rectangular greedy wrap for captions/narration boxes
+  // Route 2: Koharu Contour Scanline DP solver for curved bubbles and speech balloons
+  // Route 3: Simple Rectangular wrap for captions/narration boxes
   // Route 1: Auto Balloon XianScan diamond reflow for disabled mode on raw OCR polygons
   let fitted: { size: number; lines: string[] } | null = null;
-  if (region.typesetMode === 'ellipse' || (region.isRounded && region.typesetMode !== 'balloon' && region.typesetMode !== 'simple')) {
+  const isContourRoute = region.typesetMode === 'contour' || region.typesetMode === 'ellipse' || (region.isRounded && region.typesetMode !== 'balloon' && region.typesetMode !== 'simple');
+
+  if (isContourRoute) {
     const unhyphenated = unwrapWrappedText(region.translation);
-    const rMax = Math.min(normH / 2, normV / 2);
-    const radius = region.borderRadius !== undefined ? region.borderRadius : rMax;
-    const strength = rMax > 0 ? Math.min(1.0, radius / rMax) : 1.0;
-    const ellipseRes = wrapTextEllipse(
+    const contour = (region.contourPoints && region.contourPoints.length >= 3)
+      ? region.contourPoints
+      : [
+          { x: 0, y: 0 },
+          { x: normH, y: 0 },
+          { x: normH, y: normV },
+          { x: 0, y: normV }
+        ];
+
+    const contourRes = wrapTextContour(
       unhyphenated,
-      normH,
-      normV,
-      fontSize,
-      fontFamily || DEFAULT_RENDER_FONT_FAMILY,
-      strength,
+      contour,
       ctx,
-      targetLang,
-      { minFontSize: Math.max(6, Math.floor(fontSize * 0.4)) }
+      fontFamily || DEFAULT_RENDER_FONT_FAMILY,
+      {
+        minFontSize: Math.max(6, Math.floor(fontSize * 0.4)),
+        maxFontSize: Math.max(16, Math.round(normV * 0.5)),
+        targetLang,
+        isBold
+      }
     );
-    fitted = { size: ellipseRes.fontSize, lines: ellipseRes.lines };
+    fitted = { size: contourRes.fontSize, lines: contourRes.lines };
   } else if (region.typesetMode === 'simple') {
     const unhyphenated = unwrapWrappedText(region.translation);
-    const simpleRes = wrapTextEllipse(
+    const rectContour = [
+      { x: 0, y: 0 },
+      { x: normH, y: 0 },
+      { x: normH, y: normV },
+      { x: 0, y: normV }
+    ];
+    const simpleRes = wrapTextContour(
       unhyphenated,
-      normH,
-      normV,
-      fontSize,
-      fontFamily || DEFAULT_RENDER_FONT_FAMILY,
-      0,
+      rectContour,
       ctx,
-      targetLang,
-      { minFontSize: Math.max(6, Math.floor(fontSize * 0.4)) }
+      fontFamily || DEFAULT_RENDER_FONT_FAMILY,
+      {
+        minFontSize: Math.max(6, Math.floor(fontSize * 0.4)),
+        maxFontSize: Math.max(16, Math.round(normV * 0.5)),
+        targetLang,
+        isBold
+      }
     );
     fitted = { size: simpleRes.fontSize, lines: simpleRes.lines };
   } else {

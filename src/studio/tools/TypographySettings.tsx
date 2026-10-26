@@ -294,6 +294,7 @@ export const TypographySettings: React.FC = () => {
       ...(globalEditMode ? { globalTypesetMode: newMode } : {}),
     });
     const modeLabels: Record<TypesetMode, string> = {
+      contour: 'Bubble Ellipse',
       ellipse: 'Bubble Ellipse',
       balloon: 'Auto Balloon',
       simple: 'Simple Wrap',
@@ -680,13 +681,13 @@ export const TypographySettings: React.FC = () => {
             type="button"
             onClick={() => handleToggleTypesetMode('ellipse')}
             className={`flex-1 py-1.5 px-1.5 rounded-md font-semibold transition-all flex items-center justify-center gap-1 cursor-pointer text-[11px] ${
-              effectiveTypesetMode === 'ellipse'
+              effectiveTypesetMode === 'contour' || effectiveTypesetMode === 'ellipse'
                 ? 'bg-[#1c1f2e] text-[#f4446d] shadow-xs'
                 : 'text-slate-400 hover:text-white'
             }`}
-            title="Bubble Ellipse: Dynamic programming chord profile fitted to speech bubble curves with auto-snapping height"
+            title="Bubble Ellipse: 2D contour scanline fitted to speech bubble curves with auto-snapping height"
           >
-            <CircleDot size={12} className={effectiveTypesetMode === 'ellipse' ? 'text-[#f4446d]' : ''} />
+            <CircleDot size={12} className={effectiveTypesetMode === 'contour' || effectiveTypesetMode === 'ellipse' ? 'text-[#f4446d]' : ''} />
             <span className="truncate">Bubble Ellipse</span>
           </button>
           <button

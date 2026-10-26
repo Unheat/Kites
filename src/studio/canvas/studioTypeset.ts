@@ -1,11 +1,13 @@
 import { measureDefaultLayout } from '../../offscreen/utils/cotransDefaultRenderer';
-import { wrapTextEllipse, unwrapWrappedText } from '../../offscreen/utils/ellipseTypeset';
+import { wrapTextContour } from '../../offscreen/utils/contourTypeset';
+import { wrapRectangular } from '../../offscreen/utils/ellipseTypeset';
+import { unwrapWrappedText } from '../../offscreen/utils/typography';
 import type { TypesetMode } from '../../shared/constants';
 import type { TextObject } from '../types';
 
 export type StudioTypesetMode = TypesetMode;
 
-type TypesetStyle = Pick<TextObject, 'bold' | 'italic' | 'letterSpacing' | 'lineSpacing' | 'isVertical' | 'borderRadius' | 'targetLang'>;
+type TypesetStyle = Pick<TextObject, 'bold' | 'italic' | 'letterSpacing' | 'lineSpacing' | 'isVertical' | 'borderRadius' | 'targetLang' | 'contourPoints'>;
 
 /** Small boxes cannot reliably run the fitting engine. */
 export const MIN_LAYOUT_DIMENSION = 15;
@@ -112,8 +114,9 @@ function reflowTextObject(object: TextObject, mode: StudioTypesetMode): TextObje
   const startWidth = width;
   const startFontSize = fontSize;
 
+  const isContourMode = mode === 'contour' || mode === 'ellipse';
   const fit = object.roundFit;
-  const refitting = mode === 'ellipse' && !!fit && fit.fittedWidth === width && fit.fittedFontSize === fontSize;
+  const refitting = isContourMode && !!fit && fit.fittedWidth === width && fit.fittedFontSize === fontSize;
   if (refitting) {
     width = fit.width;
     fontSize = fit.fontSize;
@@ -130,7 +133,7 @@ function reflowTextObject(object: TextObject, mode: StudioTypesetMode): TextObje
   );
 
   const updated: TextObject = { ...object, width, fontSize: layout.fontSize, lines: layout.lines };
-  if (mode === 'ellipse') {
+  if (isContourMode) {
     updated.roundFit = {
       width: refitting && fit ? fit.width : startWidth,
       fontSize: refitting && fit ? fit.fontSize : startFontSize,
@@ -369,43 +372,44 @@ export function recalculateBlockTypeset(
   try {
     const targetLang = style.targetLang || 'en';
 
-    // Simple Mode: Rectangular wrap with soft hyphenation and height adaptation (Route 3).
-    // Uses wrapTextEllipse with strength 0, matching the pipeline cotransDefaultRenderer.
+    // Simple Mode: Rectangular greedy wrap without auto font scaling on subsequent edits (Route 3).
     if (mode === 'simple') {
       const unhyphenated = unwrapWrappedText(text);
-      const result = wrapTextEllipse(
-        unhyphenated,
-        width,
-        height,
-        fallbackSize,
-        fontFamily || 'sans-serif',
-        0, // strength 0 = flat rectangle
-        ctx,
-        targetLang,
-        { minFontSize: 6, bold: style.bold, italic: style.italic }
-      );
+      const stylePrefix = `${style.italic ? 'italic ' : ''}${style.bold ? 'bold ' : ''}`;
+      ctx.font = `${stylePrefix}${Math.round(fallbackSize)}px "${fontFamily || 'sans-serif'}"`;
+      const measure = (s: string) => ctx.measureText(s).width;
+      const words = unhyphenated.split(/\s+/).filter(Boolean);
+      const lines = wrapRectangular(words, width, measure, targetLang);
       return {
-        fontSize: result.fontSize,
-        lines: result.lines && result.lines.length > 0 ? result.lines : [unhyphenated],
+        fontSize: fallbackSize,
+        lines: lines.length > 0 ? lines : [unhyphenated],
       };
     }
 
-    // Ellipse Mode: Dynamic programming chord profile, soft hyphenation, and upper-limit bounds
-    if (mode === 'ellipse') {
+    // Contour / Ellipse Mode: Koharu 2D scanline ray-casting on bubble polygon or rectangular box (Route 2)
+    if (mode === 'contour' || mode === 'ellipse') {
       const unhyphenated = unwrapWrappedText(text);
-      const rMax = Math.min(width / 2, height / 2);
-      const radius = style.borderRadius !== undefined && style.borderRadius > 0 ? style.borderRadius : rMax;
-      const strength = rMax > 0 ? Math.min(1.0, radius / rMax) : 1.0;
-      const result = wrapTextEllipse(
+      const contour = (style.contourPoints && style.contourPoints.length >= 3)
+        ? style.contourPoints
+        : [
+            { x: 0, y: 0 },
+            { x: width, y: 0 },
+            { x: width, y: height },
+            { x: 0, y: height }
+          ];
+
+      const result = wrapTextContour(
         unhyphenated,
-        width,
-        height,
-        fallbackSize,
-        fontFamily || 'sans-serif',
-        strength,
+        contour,
         ctx,
-        targetLang,
-        { minFontSize: 6, bold: style.bold, italic: style.italic }
+        fontFamily || 'sans-serif',
+        {
+          minFontSize: 6,
+          maxFontSize: Math.max(16, Math.round(height * 0.5)),
+          targetLang,
+          isBold: style.bold,
+          isItalic: style.italic
+        }
       );
       return {
         fontSize: result.fontSize,

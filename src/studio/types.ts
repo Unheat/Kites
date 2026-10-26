@@ -118,6 +118,8 @@ export interface TextObject {
   borderRadius?: number;
   /** Whether this text object is positioned inside a curved bubble or a rectangular box. */
   isRounded?: boolean;
+  /** Organic bubble contour polygon coordinates (in image pixels), if detected. */
+  contourPoints?: Point[];
   /** Target language code for syllable hyphenation (e.g. 'en', 'es', 'de'). */
   targetLang?: string;
   /** Cached dimensions and font for smooth non-destructive radius slider scrubbing. */

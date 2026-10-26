@@ -342,7 +342,7 @@ export function resolveBubbleLayouts(input: BubbleLayoutInput): (BoxRect | undef
       continue;
     }
     const siblings = group.map((i) => boxes[i]);
-    const isRectangular = group.every((i) => curvatures?.[i] && !curvatures[i].isRounded);
+    const isRectangular = group.every((i) => Boolean(curvatures?.[i] && !curvatures[i].isRounded));
 
     if (isRectangular) {
       // Rectangular caption/narration boxes (Koharu anchor_flow_cells & XianScan expansion.rs:230-270):
