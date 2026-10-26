@@ -86,6 +86,8 @@ export interface DefaultRenderRegion {
   typesetMode?: 'balloon' | 'contour' | 'ellipse' | 'simple';
   /** Optional bubble contour polygon (in region coordinates). */
   contourPoints?: Point2D[];
+  /** When false or undefined, region was not fixed to an accepted bubble and must use Route 1 Auto Balloon. */
+  fixed?: boolean;
 }
 
 /** Result of the default render pass for one region. */
@@ -792,7 +794,9 @@ export function renderRegionDefault(
   // Route 3: Simple Rectangular wrap for captions/narration boxes
   // Route 1: Auto Balloon XianScan diamond reflow for disabled mode on raw OCR polygons
   let fitted: { size: number; lines: string[] } | null = null;
-  const isContourRoute = region.typesetMode === 'contour' || region.typesetMode === 'ellipse' || (region.isRounded && region.typesetMode !== 'balloon' && region.typesetMode !== 'simple');
+  const isFixed = region.fixed ?? (region.typesetMode !== 'balloon' && region.typesetMode !== undefined);
+  const isContourRoute = isFixed && (region.typesetMode === 'contour' || region.typesetMode === 'ellipse' || (region.isRounded && region.typesetMode !== 'simple'));
+  const isSimpleRoute = isFixed && region.typesetMode === 'simple';
 
   if (isContourRoute) {
     const unhyphenated = unwrapWrappedText(region.translation);
@@ -818,7 +822,7 @@ export function renderRegionDefault(
       }
     );
     fitted = { size: contourRes.fontSize, lines: contourRes.lines };
-  } else if (region.typesetMode === 'simple') {
+  } else if (isSimpleRoute) {
     const unhyphenated = unwrapWrappedText(region.translation);
     const rectContour = [
       { x: 0, y: 0 },
@@ -888,6 +892,10 @@ export function renderRegionDefault(
       } else if (region.alignment === 'right') {
         lineX += maxLineWidth - widths[i];
       }
+      // Never allow text to bleed off the left edge of the page canvas
+      if (tl.x + lineX < 4) {
+        lineX = 4 - tl.x;
+      }
       const lineY = startY + i * lineStep;
       ctx.strokeText(drawableLines[i], lineX, lineY);
     }
@@ -899,6 +907,10 @@ export function renderRegionDefault(
       lineX += (maxLineWidth - widths[i]) / 2;
     } else if (region.alignment === 'right') {
       lineX += maxLineWidth - widths[i];
+    }
+    // Never allow text to bleed off the left edge of the page canvas
+    if (tl.x + lineX < 4) {
+      lineX = 4 - tl.x;
     }
     const lineY = startY + i * lineStep;
     ctx.fillText(drawableLines[i], lineX, lineY);

@@ -282,7 +282,7 @@ export class PipelineOrchestrator {
                 const isNeuralMode = bubbleMode === 'neural' || bubbleMode === 'neural-mask';
                 const bubbleOptions: BubbleEngineOptions = {
                   preferGpu: popupState ? isBubbleGpuAvailable(popupState) : false,
-                  mode: bubbleMode === 'neural-mask' ? 'mask' : 'box',
+                  mode: 'mask',
                 };
                 const neuralResult = isNeuralMode && engine
                   ? await engine.detect(rawCanvas, ocrResult.boxes, bubbleOptions)

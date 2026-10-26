@@ -1,6 +1,13 @@
 import { HeuristicBubbleExtractor, type BubbleShapeEvidence, type ImagePatchData } from '../engines/bubble/HeuristicBubbleExtractor';
 import { NeuralBubbleDetector } from '../engines/bubble/NeuralBubbleDetector';
-import { boxIoU, bubbleCore, computeTypesetBox, pairwiseClampBox, SHARED_CONTAINER_IOU, SIBLING_GAP, type BoxRect } from '../utils/bubbleExpansion';
+import {
+  boxIoU,
+  computeTypesetBox,
+  pairwiseClampBox,
+  partitionSharedContainer,
+  SHARED_CONTAINER_IOU,
+  type BoxRect
+} from '../utils/bubbleExpansion';
 
 /** Experimental fit guard, compared only with a caller-supplied valid source reference. */
 export const MIN_SHARED_FONT_RATIO = 0.85;
@@ -86,8 +93,8 @@ export function computeMaskCurvature(
   const endRatio = wCenter > 0 ? (wTop + wBot) / (2 * wCenter) : 0.5;
 
   // 1. Rectangular Narration / Caption Box:
-  // Fills corners evenly or width remains uniform from top to bottom (endRatio >= 0.95)
-  if (fillRatio >= 0.88 || (fillRatio >= 0.78 && endRatio >= 0.95)) {
+  // Fills corners evenly or width remains uniform from top to bottom (endRatio >= 0.75)
+  if (fillRatio >= 0.88 || (fillRatio >= 0.75 && endRatio >= 0.75)) {
     return { isRounded: false, borderRadius: 0 };
   }
 
@@ -172,140 +179,13 @@ export function significantOverlap(a: BoxRect, b: BoxRect, thresholdRatio: numbe
 }
 
 /**
- * Labels existing local mask components, recording components that escape the patch boundary.
- * @param mask - Existing binary interior or erosion mask.
- * @param shape - Local patch geometry.
- * @returns Component labels and boundary-touching IDs; no new segmentation or image processing.
- */
-function labelComponents(mask: Uint8Array, shape: BubbleShapeEvidence): { labels: Int32Array; open: Set<number> } {
-  const { width, height } = shape;
-  const labels = new Int32Array(mask.length);
-  const open = new Set<number>();
-  let id = 0;
-  for (let start = 0; start < mask.length; start++) {
-    if (!mask[start] || labels[start]) continue;
-    id++;
-    const queue = [start];
-    labels[start] = id;
-    for (let head = 0; head < queue.length; head++) {
-      const pixel = queue[head];
-      const x = pixel % width;
-      const y = Math.floor(pixel / width);
-      if (x === 0 || y === 0 || x === width - 1 || y === height - 1) open.add(id);
-      const neighbors = [x > 0 ? pixel - 1 : -1, x + 1 < width ? pixel + 1 : -1,
-        y > 0 ? pixel - width : -1, y + 1 < height ? pixel + width : -1];
-      for (const next of neighbors) {
-        if (next >= 0 && mask[next] && !labels[next]) {
-          labels[next] = id;
-          queue.push(next);
-        }
-      }
-    }
-  }
-  return { labels, open };
-}
-
-/** @param shape - Patch geometry. @param box - Source box. @returns Center pixel index, or -1 outside patch. */
-function centerPixel(shape: BubbleShapeEvidence, box: BoxRect): number {
-  const x = Math.round((box.x + box.w / 2 - shape.x) * shape.scale);
-  const y = Math.round((box.y + box.h / 2 - shape.y) * shape.scale);
-  return x >= 0 && y >= 0 && x < shape.width && y < shape.height ? y * shape.width + x : -1;
-}
-
-/**
- * Requires one enclosed raw component and distinct eroded components at every source center.
- * This is neck evidence from the extractor's existing morphology, never IoMin-only connectivity.
- * @param shape - Existing morphology buffers.
- * @param boxes - All siblings to validate together.
- * @returns Trusted interior label map, or undefined if evidence is insufficient.
- */
-function connectedLobes(shape: BubbleShapeEvidence, boxes: BoxRect[]): { labels: Int32Array; id: number } | undefined {
-  const patch = { x: shape.x, y: shape.y, w: shape.width / shape.scale, h: shape.height / shape.scale };
-  const centers = boxes.map((box) => centerPixel(shape, box));
-  if (centers.some((pixel) => pixel < 0) || boxes.some((box) => !contains(patch, box))) return undefined;
-  const raw = labelComponents(shape.interior, shape);
-  const id = raw.labels[centers[0]];
-  if (!id || raw.open.has(id) || centers.some((pixel) => raw.labels[pixel] !== id)) return undefined;
-  // Actual whitespace must connect the lobes without relying on force-filled OCR rectangles.
-  const observed = labelComponents(shape.observedInterior, shape);
-  const observedIds = boxes.map((box) => {
-    const ids = new Set<number>();
-    const left = Math.floor((box.x - shape.x) * shape.scale);
-    const right = Math.min(shape.width - 1, Math.ceil((box.x + box.w - shape.x) * shape.scale));
-    const top = Math.floor((box.y - shape.y) * shape.scale);
-    const bottom = Math.min(shape.height - 1, Math.ceil((box.y + box.h - shape.y) * shape.scale));
-    for (let y = top; y <= bottom; y++) for (let x = left; x <= right; x++) {
-      const label = observed.labels[y * shape.width + x];
-      if (label && !observed.open.has(label)) ids.add(label);
-    }
-    return ids;
-  });
-  if (![...observedIds[0]].some((label) => observedIds.every((ids) => ids.has(label)))) return undefined;
-  const eroded = labelComponents(shape.eroded, shape);
-  const lobeIds = centers.map((pixel) => eroded.labels[pixel]);
-  if (lobeIds.some((lobe) => !lobe || eroded.open.has(lobe)) || new Set(lobeIds).size !== boxes.length) return undefined;
-  return { labels: raw.labels, id };
-}
-
-/**
- * Checks every retained mask pixel under a proposed rectangle, not just its bounding-box corners.
- * @param shape - Trusted patch geometry. @param labels - Raw component IDs. @param id - Enclosed component.
- * @param box - Proposed fixed rectangle. @returns True only when the entire rectangle stays inside.
- */
-function insideShape(shape: BubbleShapeEvidence, labels: Int32Array, id: number, box: BoxRect): boolean {
-  const left = Math.floor((box.x - shape.x) * shape.scale);
-  const top = Math.floor((box.y - shape.y) * shape.scale);
-  const right = Math.ceil((box.x + box.w - shape.x) * shape.scale);
-  const bottom = Math.ceil((box.y + box.h - shape.y) * shape.scale);
-  if (left < 0 || top < 0 || right >= shape.width || bottom >= shape.height) return false;
-  for (let y = top; y <= bottom; y++) {
-    for (let x = left; x <= right; x++) if (labels[y * shape.width + x] !== id) return false;
-  }
-  return true;
-}
-
-/**
- * Carves only a coherent simple X or Y chain, never negative/tiny gaps or true diagonals.
- * @param container - Shared carrier union. @param boxes - All original siblings.
- * @returns Territories in original order, or undefined for whole-group Disabled fallback.
- */
-function axisTerritories(container: BoxRect, boxes: BoxRect[]): BoxRect[] | undefined {
-  const core = bubbleCore(container);
-  if (!core) return undefined;
-  const axes = (['x', 'y'] as const).filter((axis) => {
-    const other = axis === 'x' ? 'y' : 'x';
-    const size = axis === 'x' ? 'w' : 'h';
-    const otherSize = axis === 'x' ? 'h' : 'w';
-    const sorted = [...boxes].sort((a, b) => a[axis] - b[axis]);
-    // Common orthogonal span rules out zig-zags and diagonal chains, including >=3 siblings.
-    if (Math.max(...boxes.map((b) => b[other])) >= Math.min(...boxes.map((b) => b[other] + b[otherSize]))) return false;
-    return sorted.every((b, i) => i === 0 || b[axis] - (sorted[i - 1][axis] + sorted[i - 1][size]) >= SIBLING_GAP);
-  });
-  if (axes.length !== 1) return undefined;
-  const axis = axes[0];
-  const size = axis === 'x' ? 'w' : 'h';
-  const sorted = boxes.map((box, index) => ({ box, index })).sort((a, b) => a.box[axis] - b.box[axis]);
-  const territories: BoxRect[] = new Array(boxes.length);
-  sorted.forEach(({ box, index }, position) => {
-    const previous = sorted[position - 1]?.box;
-    const next = sorted[position + 1]?.box;
-    const low = previous ? (previous[axis] + previous[size] + box[axis] + SIBLING_GAP) / 2 : (axis === 'x' ? core.left : core.top);
-    const high = next ? (box[axis] + box[size] + next[axis] - SIBLING_GAP) / 2 : (axis === 'x' ? core.right : core.bottom);
-    territories[index] = axis === 'x'
-      ? { x: low, y: core.top, w: high - low, h: core.bottom - core.top }
-      : { x: core.left, y: low, w: core.right - core.left, h: high - low };
-  });
-  return territories.every((territory, index) => contains(territory, boxes[index])) ? territories : undefined;
-}
-
-/**
  * Resolves fixed bubble rectangles after translation/font readiness. Uncertain candidate groups
  * roll back atomically to undefined (exact Disabled), without moving any sibling or source box.
  * @param input - Aligned original geometry, proposal identity, masks, and actual renderer fit gate.
  * @returns Optional fixed boxes; undefined entries retain the untouched Disabled renderer path.
  */
 export function resolveBubbleLayouts(input: BubbleLayoutInput): (BoxRect | undefined)[] {
-  const { boxes, carriers, proposals, shapes, curvatures, directions, angles, pageWidth, pageHeight, accept } = input;
+  const { boxes, carriers, proposals, shapes, directions, angles, pageWidth, pageHeight, accept } = input;
   /** @param box - Candidate/source rectangle. @returns Finite positive geometry inside the page. */
   const validBox = (box: BoxRect): boolean => [box.x, box.y, box.w, box.h].every(Number.isFinite)
     && box.w > 0 && box.h > 0 && box.x >= 0 && box.y >= 0
@@ -329,7 +209,7 @@ export function resolveBubbleLayouts(input: BubbleLayoutInput): (BoxRect | undef
     if (!Number.isFinite(pageWidth) || !Number.isFinite(pageHeight) || pageWidth <= 0 || pageHeight <= 0
       || group.some((i) => !carriers[i] || !validBox(boxes[i]) || !validBox(carriers[i]!)
         || !Number.isFinite(angles?.[i] ?? 0)
-        || (group.length > 1 ? (angles?.[i] ?? 0) !== 0 : Math.abs(angles?.[i] ?? 0) > 5))) continue;
+        || Math.abs(angles?.[i] ?? 0) > 8)) continue;
     if (group.length === 1) {
       const i = group[0];
       const isAlreadySevered = Boolean(!proposals[i] || shapes[i]?.isSeveredCarrier);
@@ -342,38 +222,36 @@ export function resolveBubbleLayouts(input: BubbleLayoutInput): (BoxRect | undef
       continue;
     }
     const siblings = group.map((i) => boxes[i]);
-    const isRectangular = group.every((i) => Boolean(curvatures?.[i] && !curvatures[i].isRounded));
-
-    if (isRectangular) {
-      // Rectangular caption/narration boxes (Koharu anchor_flow_cells & XianScan expansion.rs:230-270):
-      // Rectangular boxes have no organic bubble neck or curved lobes. Each sibling expands into its own
-      // carrier safe core, protected from neighbor collisions via pairwise clearance clamping.
-      const pairwiseCandidates = group.map((i) => {
-        const isAlreadySevered = Boolean(!proposals[i] || shapes[i]?.isSeveredCarrier);
-        const rawBox = computeTypesetBox(boxes[i], carriers[i]!, directions?.[i] === 'v', pageHeight, isAlreadySevered);
-        return pairwiseClampBox(rawBox, boxes[i], boxes, i);
-      });
-
-      if (pairwiseCandidates.every((box, pos) => validBox(box) && accept(group[pos], box, MIN_SHARED_FONT_RATIO))) {
-        group.forEach((i, pos) => { result[i] = pairwiseCandidates[pos]; });
-      }
-      continue;
-    }
-
     const left = Math.min(...group.map((i) => carriers[i]!.x));
     const top = Math.min(...group.map((i) => carriers[i]!.y));
-    const container = { x: left, y: top, w: Math.max(...group.map((i) => carriers[i]!.x + carriers[i]!.w)) - left,
-      h: Math.max(...group.map((i) => carriers[i]!.y + carriers[i]!.h)) - top };
-    const territories = axisTerritories(container, siblings);
-    if (!territories) continue;
-    const evidence = group.map((i) => shapes[i]).filter((shape): shape is BubbleShapeEvidence => !!shape)
-      .map((shape) => ({ shape, connection: connectedLobes(shape, siblings) })).find((item) => item.connection);
-    if (!evidence?.connection) continue;
-    const candidates = group.map((i, position) => computeTypesetBox(boxes[i], territories[position], directions?.[i] === 'v', pageHeight, true, true));
-    if (candidates.every((box, position) => validBox(box) && contains(territories[position], box)
-      && insideShape(evidence.shape, evidence.connection!.labels, evidence.connection!.id, box)
-      && accept(group[position], box, MIN_SHARED_FONT_RATIO))) {
-      group.forEach((i, position) => { result[i] = candidates[position]; });
+    const container = {
+      x: left,
+      y: top,
+      w: Math.max(...group.map((i) => carriers[i]!.x + carriers[i]!.w)) - left,
+      h: Math.max(...group.map((i) => carriers[i]!.y + carriers[i]!.h)) - top,
+    };
+
+    // Multi-utterance container partitioning (Koharu anchor_flow_cells & SAT separating axis):
+    // Partitions shared container into non-overlapping sub-chambers, expanding each sibling
+    // inside its dedicated territory with pairwise clearance clamping.
+    const subChambers = partitionSharedContainer(container, siblings);
+    const candidates = group.map((i, position) => {
+      const isAlreadySevered = Boolean(!proposals[i] || shapes[i]?.isSeveredCarrier);
+      const rawBox = computeTypesetBox(
+        boxes[i],
+        subChambers[position],
+        directions?.[i] === 'v',
+        pageHeight,
+        isAlreadySevered,
+        true
+      );
+      return pairwiseClampBox(rawBox, boxes[i], boxes, i);
+    });
+
+    if (candidates.every((box, position) => validBox(box) && accept(group[position], box, MIN_SHARED_FONT_RATIO))) {
+      group.forEach((i, position) => {
+        result[i] = candidates[position];
+      });
     }
   }
   // Validate against fixed candidates AND untouched originals.

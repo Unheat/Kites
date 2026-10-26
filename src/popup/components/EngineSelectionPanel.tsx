@@ -29,7 +29,7 @@ export const BUBBLE_MODE_OPTIONS: BubbleModeOption[] = [
     tooltip: 'Expands into white bubble whitespace with tail severing. Fast (<1ms), zero download.',
   },
   {
-    id: 'neural-mask',
+    id: 'neural',
     name: 'YOLO (AI)',
     tooltip: 'Neural segmentation mask with morphological tail severing on AI contours (~11 MB).',
     isModel: true,

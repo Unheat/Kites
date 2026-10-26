@@ -6,6 +6,7 @@
  */
 
 import { Graph } from '../../shared/utils/graph';
+import type { Point2D } from '../../shared/utils/geometry';
 
 export interface BoxRect {
   x: number;
@@ -700,5 +701,181 @@ export function pairwiseClampBox(
   }
 
   return { x, y, w, h };
+}
+
+const EPSILON = 1e-5;
+
+/**
+ * Clips a polygon with an oriented half-plane (Sutherland-Hodgman).
+ * Keeps points satisfying: point.x * normal.x + point.y * normal.y <= offset.
+ * 1:1 port of Koharu `clip_half_plane` (`crates/koharu-renderer/src/bubble.rs:563-592`).
+ *
+ * @param polygon - Closed 2D polygon vertices.
+ * @param normal - Outward normal of the dividing half-plane.
+ * @param offset - Scalar projection distance along normal.
+ * @returns Clipped polygon vertices.
+ */
+export function clipHalfPlane(polygon: Point2D[], normal: Point2D, offset: number): Point2D[] {
+  if (polygon.length === 0) return [];
+  const signed = (p: Point2D) => p.x * normal.x + p.y * normal.y - offset;
+  const output: Point2D[] = [];
+  let previous = polygon[polygon.length - 1];
+  let previousDistance = signed(previous);
+
+  for (const current of polygon) {
+    const currentDistance = signed(current);
+    const prevInside = previousDistance <= EPSILON;
+    const currInside = currentDistance <= EPSILON;
+
+    if (prevInside !== currInside) {
+      const denom = previousDistance - currentDistance;
+      if (Math.abs(denom) > EPSILON) {
+        const fraction = previousDistance / denom;
+        output.push({
+          x: previous.x + (current.x - previous.x) * fraction,
+          y: previous.y + (current.y - previous.y) * fraction,
+        });
+      }
+    }
+    if (currInside) {
+      output.push(current);
+    }
+    previous = current;
+    previousDistance = currentDistance;
+  }
+  return output;
+}
+
+/**
+ * Divides a rectangular container among multiple text anchors using Voronoi
+ * perpendicular bisector half-plane clipping.
+ * 1:1 port of Koharu `anchor_flow_cells` (`crates/koharu-renderer/src/bubble.rs:373-445`).
+ *
+ * @param width - Container width in local coordinates.
+ * @param height - Container height in local coordinates.
+ * @param anchors - Text centroids in local coordinates.
+ * @returns Non-overlapping polygon cell for each anchor.
+ */
+export function anchorFlowCells(width: number, height: number, anchors: Point2D[]): Point2D[][] {
+  if (anchors.length === 0) return [];
+  const scale = Math.max(1.0, Math.min(width, height));
+  const coincidenceDistSq = (scale * 0.0025) ** 2;
+
+  // Step 1: Cluster coincident anchors
+  const clusters: { site: Point2D; indices: number[] }[] = [];
+  for (let i = 0; i < anchors.length; i++) {
+    const a = anchors[i];
+    const match = clusters.find(c => {
+      const dx = a.x - c.site.x;
+      const dy = a.y - c.site.y;
+      return dx * dx + dy * dy <= coincidenceDistSq;
+    });
+    if (match) {
+      const count = match.indices.length;
+      match.site.x = (match.site.x * count + a.x) / (count + 1);
+      match.site.y = (match.site.y * count + a.y) / (count + 1);
+      match.indices.push(i);
+    } else {
+      clusters.push({ site: { x: a.x, y: a.y }, indices: [i] });
+    }
+  }
+
+  // Step 2: Clip container against pairwise Voronoi perpendicular bisectors
+  const cells: Point2D[][] = new Array(anchors.length);
+  for (let i = 0; i < clusters.length; i++) {
+    let cell: Point2D[] = [
+      { x: 0, y: 0 },
+      { x: width, y: 0 },
+      { x: width, y: height },
+      { x: 0, y: height },
+    ];
+    const { site, indices } = clusters[i];
+
+    for (let j = 0; j < clusters.length; j++) {
+      if (i === j) continue;
+      const other = clusters[j].site;
+      const normal = { x: other.x - site.x, y: other.y - site.y };
+      const offset = (other.x * other.x + other.y * other.y - site.x * site.x - site.y * site.y) * 0.5;
+      cell = clipHalfPlane(cell, normal, offset);
+      if (cell.length < 3) break;
+    }
+
+    if (indices.length === 1) {
+      cells[indices[0]] = cell;
+      continue;
+    }
+
+    // Step 3: Divide coincident clusters into equal strips along dominant axis
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const p of cell) {
+      if (p.x < minX) minX = p.x;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.y > maxY) maxY = p.y;
+    }
+    const horizontal = (maxX - minX) >= (maxY - minY);
+    const minVal = horizontal ? minX : minY;
+    const maxVal = horizontal ? maxX : maxY;
+    const step = (maxVal - minVal) / indices.length;
+
+    for (let order = 0; order < indices.length; order++) {
+      const lower = minVal + step * order;
+      const upper = (order + 1 === indices.length) ? maxVal : lower + step;
+      const lowerNormal = horizontal ? { x: -1, y: 0 } : { x: 0, y: -1 };
+      const upperNormal = horizontal ? { x: 1, y: 0 } : { x: 0, y: 1 };
+      const strip = clipHalfPlane(cell, lowerNormal, -lower);
+      cells[indices[order]] = clipHalfPlane(strip, upperNormal, upper);
+    }
+  }
+
+  return cells;
+}
+
+/**
+ * Partitions a shared container among multiple text boxes using Voronoi flow cells,
+ * mapping each non-overlapping cell back to an axis-aligned sub-chamber territory.
+ * Guarantees every text box retains its original text floor while expanding into its Voronoi share.
+ *
+ * @param container - Shared carrier box.
+ * @param boxes - Sibling text boxes sharing the container.
+ * @returns Array of sub-chamber territories, one per text box.
+ */
+export function partitionContainerByFlowCells(container: BoxRect, boxes: BoxRect[]): BoxRect[] {
+  if (boxes.length <= 1) return [{ ...container }];
+
+  const anchors: Point2D[] = boxes.map(b => ({
+    x: Math.max(0, Math.min(container.w, b.x + b.w / 2 - container.x)),
+    y: Math.max(0, Math.min(container.h, b.y + b.h / 2 - container.y)),
+  }));
+  const cells = anchorFlowCells(container.w, container.h, anchors);
+
+  return boxes.map((box, i) => {
+    const cell = cells[i];
+    if (!cell || cell.length < 3) return { ...box };
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const p of cell) {
+      if (p.x < minX) minX = p.x;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.y > maxY) maxY = p.y;
+    }
+    const left = Math.round(container.x + minX);
+    const right = Math.round(container.x + maxX);
+    const top = Math.round(container.y + minY);
+    const bottom = Math.round(container.y + maxY);
+
+    // Floor invariant: preserve text box boundaries
+    const effLeft = Math.min(left, box.x);
+    const effRight = Math.max(right, box.x + box.w);
+    const effTop = Math.min(top, box.y);
+    const effBottom = Math.max(bottom, box.y + box.h);
+
+    return {
+      x: effLeft,
+      y: effTop,
+      w: Math.max(box.w, effRight - effLeft),
+      h: Math.max(box.h, effBottom - effTop),
+    };
+  });
 }
 

@@ -715,9 +715,11 @@ function renderTextBlocksDefault(
       strokeColor: b.strokeColor || '#FFFFFF',
       alignment: b.alignment || 'center',
       sourceDirection: b.direction || 'h',
-      isRounded: b.isRounded,
-      borderRadius: b.borderRadius,
-      typesetMode: b.typesetMode,
+      isRounded: fixed ? Boolean(b.isRounded) : false,
+      borderRadius: fixed ? (b.borderRadius ?? 0) : 0,
+      typesetMode: fixed ? (b.typesetMode ?? (b.isRounded ? 'contour' : undefined)) : 'balloon',
+      contourPoints: fixed ? b.contourPoints : undefined,
+      fixed,
     };
 
     try {

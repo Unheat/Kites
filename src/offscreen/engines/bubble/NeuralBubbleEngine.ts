@@ -31,10 +31,8 @@ export class NeuralBubbleEngine implements IBubbleEngine {
     textBoxes?: BoxRect[],
     options?: BubbleEngineOptions
   ): Promise<BubbleDetectionResult | null> {
-    const isMaskMode = options?.mode === 'mask';
-
-    // In fast box mode or when no text boxes are supplied, query detect directly
-    if (!isMaskMode || !textBoxes || textBoxes.length === 0) {
+    // When no text boxes are supplied, query detect directly
+    if (!textBoxes || textBoxes.length === 0) {
       const bubbles = await NeuralBubbleDetector.detect(canvas, options);
       if (!bubbles) return null;
       return { bubbles };
@@ -48,7 +46,7 @@ export class NeuralBubbleEngine implements IBubbleEngine {
       return { bubbles, scores };
     }
 
-    // Process AI masks for each text box in neural-mask mode
+    // Process AI masks for each text box in neural mode
     const shapes: (BubbleShapeEvidence | undefined)[] = new Array(textBoxes.length).fill(undefined);
     const imgW = canvas.width;
     const imgH = canvas.height;

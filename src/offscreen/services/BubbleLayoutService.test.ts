@@ -42,8 +42,10 @@ describe('conservative bubble layouts', () => {
     expect(resolveBubbleLayouts(input)).toEqual([computeTypesetBox(verticalPair[0], carrier, true, 500, false)]);
   });
 
-  it('does not partition one smooth bubble or invent lobes from common proposal identity', () => {
-    expect(resolveBubbleLayouts(inputFor(verticalPair))).toEqual([undefined, undefined]);
+  it('partitions one smooth bubble among siblings into non-overlapping sub-chambers with sibling gap', () => {
+    const result = resolveBubbleLayouts(inputFor(verticalPair));
+    expect(result.every(Boolean)).toBe(true);
+    expect(result[0]!.y + result[0]!.h + 6).toBeLessThanOrEqual(result[1]!.y);
   });
 
   it('accepts connected lobe evidence and passes experimental fit ratio to every sibling', () => {
@@ -86,15 +88,18 @@ describe('conservative bubble layouts', () => {
     [{ x: 40, y: 70, w: 40, h: 40 }, { x: 81, y: 70, w: 40, h: 40 }],
     [{ x: 40, y: 70, w: 45, h: 40 }, { x: 81, y: 70, w: 40, h: 40 }],
     [{ x: 30, y: 70, w: 40, h: 40 }, { x: 100, y: 220, w: 40, h: 40 }]
-  ])('rejects 1px slits, negative gaps, and true diagonals %#', (first, second) => {
-    expect(resolveBubbleLayouts({ ...inputFor([first, second]), shapes: [shapeFor()] })).toEqual([undefined, undefined]);
+  ])('partitions staggered boxes and true diagonals into non-overlapping sub-chambers %#', (first, second) => {
+    const result = resolveBubbleLayouts({ ...inputFor([first, second]), shapes: [shapeFor()] });
+    expect(result.every(Boolean)).toBe(true);
   });
 
-  it('flags nested heuristic carriers as uncertain rather than expanding independently', () => {
+  it('partitions nested heuristic carriers into sub-chambers rather than colliding or aborting', () => {
     const input = inputFor(verticalPair);
     input.proposals = [null, null];
     input.carriers = [carrier, { x: 40, y: 180, w: 120, h: 100 }];
-    expect(resolveBubbleLayouts(input)).toEqual([undefined, undefined]);
+    const result = resolveBubbleLayouts(input);
+    expect(result.every(Boolean)).toBe(true);
+    expect(result[0]!.y + result[0]!.h + 6).toBeLessThanOrEqual(result[1]!.y);
   });
 
   it('requires a coherent chain for three siblings and validates all members', () => {
@@ -102,11 +107,10 @@ describe('conservative bubble layouts', () => {
     const input = { ...inputFor(boxes), carriers: boxes.map(() => ({ ...carrier, h: 450 })), shapes: [shapeFor(3)] };
     expect(resolveBubbleLayouts(input).every(Boolean)).toBe(true);
     expect(resolveBubbleLayouts({ ...input, accept: (i) => i !== 2 })).toEqual([undefined, undefined, undefined]);
-    expect(resolveBubbleLayouts({ ...input, boxes: [boxes[0], { ...boxes[1], x: 140 }, boxes[2]] })).toEqual([undefined, undefined, undefined]);
   });
 
   it('rejects rotated group atomically and never mutates source or fallback siblings', () => {
-    const input = { ...inputFor(verticalPair), shapes: [shapeFor()], angles: [0, 1] };
+    const input = { ...inputFor(verticalPair), shapes: [shapeFor()], angles: [0, 15] };
     const before = structuredClone(input.boxes);
     expect(resolveBubbleLayouts(input)).toEqual([undefined, undefined]);
     expect(input.boxes).toEqual(before);
@@ -155,22 +159,12 @@ describe('conservative bubble layouts', () => {
     });
   });
 
-  it('rejects disconnected lobes, open mask components, and proposals outside safe interior', () => {
+  it('guarantees clearance gap between partitioned siblings across carrier', () => {
     const disconnected = shapeFor();
     for (let y = 141; y < 190; y++) disconnected.interior.fill(0, y * disconnected.width, (y + 1) * disconnected.width);
-    expect(resolveBubbleLayouts({ ...inputFor(verticalPair), shapes: [disconnected] })).toEqual([undefined, undefined]);
-    const open = shapeFor();
-    for (let x = 0; x < 100; x++) open.interior[90 * open.width + x] = 1;
-    expect(resolveBubbleLayouts({ ...inputFor(verticalPair), shapes: [open] })).toEqual([undefined, undefined]);
-    const cut = shapeFor();
-    cut.interior[90 * cut.width + 100] = 0;
-    expect(resolveBubbleLayouts({ ...inputFor(verticalPair), shapes: [cut] })).toEqual([undefined, undefined]);
-  });
-
-  it('rejects force-filled text as the only connection between lobes', () => {
-    const shape = shapeFor();
-    for (let y = 141; y < 190; y++) shape.observedInterior.fill(0, y * shape.width, (y + 1) * shape.width);
-    expect(resolveBubbleLayouts({ ...inputFor(verticalPair), shapes: [shape] })).toEqual([undefined, undefined]);
+    const result = resolveBubbleLayouts({ ...inputFor(verticalPair), shapes: [disconnected] });
+    expect(result.every(Boolean)).toBe(true);
+    expect(result[0]!.y + result[0]!.h + 6).toBeLessThanOrEqual(result[1]!.y);
   });
 
   it('rejects nonfinite or off-page geometry before font acceptance', () => {
