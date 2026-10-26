@@ -176,8 +176,8 @@ export function cleanTranslatedLine(text: string): string {
   if (!text) return '';
   let out = stripMarkdownFormatting(text);
 
-  // 1. Strip leading tag debris, e.g. `<|1|>`, `|1|>`, `[1]`, `1.` or `1:`
-  out = out.replace(/^(?:<\||\[|\|)?\s*\d+\s*(?:\|>|\]|[.:])\s*/, '');
+  // 1. Strip leading tag debris, e.g. `<|1|>`, `|1|>`, `[1]`, `1. ` or `1: ` (require whitespace after dot/colon)
+  out = out.replace(/^(?:<\||\[|\|)?\s*\d+\s*(?:\|>|\]|[.:]\s+)\s*/, '');
 
   // 2. Strip leading labels like `Translated:`, `Translation:`, `Answer:`
   out = out.replace(/^(?:translated|translation|output|result|target):\s*/i, '');
@@ -193,7 +193,7 @@ export function cleanTranslatedLine(text: string): string {
   }
 
   // 4. Strip any lingering leading tag debris
-  out = out.replace(/^(?:<\||\[|\|)?\s*\d+\s*(?:\|>|\]|[.:])\s*/, '');
+  out = out.replace(/^(?:<\||\[|\|)?\s*\d+\s*(?:\|>|\]|[.:]\s+)\s*/, '');
 
   return stripMarkdownFormatting(out);
 }
@@ -649,7 +649,7 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
 
     // 3. Resilient fallback: Delimited tags (<|1|>, [1], 1.) or newline splitting for legacy compatibility
     if (parsedMap.size === 0) {
-      return this.parseDelimitedOutput(rawOutput, chunk);
+      return this.parseDelimitedOutput(rawOutput, chunk, true);
     }
 
     this.lastParsedKeys = new Set(parsedMap.keys());
@@ -672,9 +672,13 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
   /**
    * Legacy delimited parser kept for backward compatibility with delimiter tests.
    */
-  protected parseDelimitedOutput(rawOutput: string, chunk: LlmTranslationSegment[]): string[] {
-    // If output is valid JSON, delegate to parseKeyedOutput
-    if (rawOutput.trim().startsWith('{') || rawOutput.trim().startsWith('```json')) {
+  protected parseDelimitedOutput(
+    rawOutput: string,
+    chunk: LlmTranslationSegment[],
+    fromKeyed = false
+  ): string[] {
+    // If output is valid JSON, delegate to parseKeyedOutput if not already called from it
+    if (!fromKeyed && (rawOutput.trim().startsWith('{') || rawOutput.trim().startsWith('```json'))) {
       return this.parseKeyedOutput(rawOutput, chunk);
     }
 

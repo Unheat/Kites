@@ -73,7 +73,9 @@ export function buildGlossaryPrompt(entries: readonly GlossaryEntry[] = []): str
   return `\n\nGLOSSARY_JSON:\n${json}\nEND_GLOSSARY_JSON`;
 }
 
-const CJK_CHAR_REGEX = /[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}\p{sc=Hangul}]/u;
+const UNSPACED_SCRIPT_REGEX = /[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}\p{sc=Hangul}\p{sc=Thai}\p{sc=Lao}\p{sc=Khmer}\p{sc=Myanmar}]/u;
+const WORD_BOUNDARY_PRE = '(?:^|[^\\p{L}\\p{N}]|[\\p{sc=Han}\\p{sc=Hiragana}\\p{sc=Katakana}\\p{sc=Hangul}\\p{sc=Thai}\\p{sc=Lao}\\p{sc=Khmer}\\p{sc=Myanmar}])';
+const WORD_BOUNDARY_POST = '(?:$|[^\\p{L}\\p{N}]|[\\p{sc=Han}\\p{sc=Hiragana}\\p{sc=Katakana}\\p{sc=Hangul}\\p{sc=Thai}\\p{sc=Lao}\\p{sc=Khmer}\\p{sc=Myanmar}])';
 
 export interface CompiledGlossaryMatcher {
   readonly entry: GlossaryEntry;
@@ -82,16 +84,17 @@ export interface CompiledGlossaryMatcher {
 
 /**
  * Compiles reusable matchers for a glossary snapshot.
- * - CJK terms: case-insensitive substring search (continuous unspaced scripts).
- * - Spaced / alphabetic terms: Unicode word boundary RegExp to avoid false positives (e.g. "he" in "hello").
+ * - Unspaced / CJK terms: case-insensitive substring search (continuous unspaced scripts).
+ * - Spaced / alphabetic terms: Unicode boundary RegExp to avoid false positives (e.g. "he" in "hello"),
+ *   while treating CJK characters as valid script boundaries for Latin terms without spaces (e.g. "Bobの車").
  *
  * @param entries - Validated glossary mappings.
  * @returns Array of compiled matchers.
  */
 export function compileGlossaryMatchers(entries: readonly GlossaryEntry[]): readonly CompiledGlossaryMatcher[] {
   return entries.map((entry) => {
-    const isCjk = CJK_CHAR_REGEX.test(entry.source);
-    if (isCjk) {
+    const isUnspaced = UNSPACED_SCRIPT_REGEX.test(entry.source);
+    if (isUnspaced) {
       const lowerSource = entry.source.toLowerCase();
       return {
         entry,
@@ -99,7 +102,7 @@ export function compileGlossaryMatchers(entries: readonly GlossaryEntry[]): read
       };
     }
     const escaped = entry.source.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
-    const regex = new RegExp(`(^|[^\\p{L}\\p{N}])${escaped}($|[^\\p{L}\\p{N}])`, 'iu');
+    const regex = new RegExp(`${WORD_BOUNDARY_PRE}${escaped}${WORD_BOUNDARY_POST}`, 'iu');
     return {
       entry,
       test: (text: string) => regex.test(text),

@@ -96,6 +96,10 @@ describe('casingNormalization', () => {
         .toBe('The FBI and CIA are investigating the UFO.');
       expect(toSentenceCase("I'M SORRY! I DIDN'T MEAN TO HURT YOU!"))
         .toBe("I'm sorry! I didn't mean to hurt you!");
+      expect(toSentenceCase('CHAPTER V OF THE STORY.'))
+        .toBe('Chapter V of the story.');
+      expect(toSentenceCase('WELCOME TO ACT X.'))
+        .toBe('Welcome to act X.');
     });
   });
 

@@ -13,13 +13,13 @@ import { isOnomatopoeiaOrShout } from './textCleaning';
  */
 const BICAMERAL_LANG_CODES = new Set([
   // Latin
-  'af', 'ca', 'cs', 'da', 'de', 'en', 'es', 'et', 'fi', 'fil', 'fr', 'hr',
+  'af', 'az', 'ca', 'cs', 'cy', 'da', 'de', 'en', 'es', 'et', 'fi', 'fil', 'fr', 'hr',
   'hu', 'id', 'is', 'it', 'lt', 'lv', 'ms', 'nl', 'no', 'pl', 'pt', 'ro',
-  'sk', 'sl', 'sq', 'sv', 'tl', 'tr', 'vi',
+  'sk', 'sl', 'sq', 'sv', 'sw', 'tl', 'tr', 'vi',
   // Cyrillic
   'be', 'bg', 'kk', 'mk', 'ru', 'sr', 'uk',
-  // Greek
-  'el',
+  // Greek & Armenian
+  'el', 'hy',
 ]);
 
 /**
@@ -46,11 +46,11 @@ export const PROTECTED_ACRONYMS = new Set([
 
 /** Standard Roman numerals to preserve in all-caps. */
 const ROMAN_NUMERALS = new Set([
-  'II', 'III', 'IV', 'VI', 'VII', 'VIII', 'IX', 'XI', 'XII', 'XIII', 'XIV', 'XV', 'XVI', 'XVII', 'XVIII', 'XIX', 'XX',
+  'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII', 'XIII', 'XIV', 'XV', 'XVI', 'XVII', 'XVIII', 'XIX', 'XX',
 ]);
 
-/** Regular expression matching Unicode bicameral letters (Latin, Cyrillic, Greek). */
-const BICAMERAL_LETTER_REGEX = /[\p{Script=Latin}\p{Script=Cyrillic}\p{Script=Greek}]/u;
+/** Regular expression matching Unicode bicameral letters (Latin, Cyrillic, Greek, Armenian). */
+const BICAMERAL_LETTER_REGEX = /[\p{Script=Latin}\p{Script=Cyrillic}\p{Script=Greek}\p{Script=Armenian}]/u;
 
 /** Regular expression matching Unicode unicase characters (CJK, Hangul, Arabic, Thai, Devanagari). */
 const UNICASE_SCRIPT_REGEX = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Arabic}\p{Script=Thai}\p{Script=Devanagari}\p{Script=Hebrew}\p{Script=Bengali}]/u;

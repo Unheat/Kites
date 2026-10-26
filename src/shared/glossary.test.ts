@@ -200,5 +200,28 @@ describe('glossary utilities', () => {
       const texts = ['Good morning everyone.', 'How is the weather today?'];
       expect(filterRelevantGlossary(glossary, texts)).toEqual([]);
     });
+
+    it('matches Latin terms when adjacent to Japanese/CJK characters without whitespace', () => {
+      const latinEntries = [
+        { source: 'Bob', target: 'ボブ' },
+        { source: 'HP', target: 'Hit Points' },
+      ];
+      // Latin terms attached to kana particles/kanji
+      const texts = ['Bobの車に乗る', 'HPを回復する'];
+      const matched = filterRelevantGlossary(latinEntries, texts);
+      expect(matched).toEqual(latinEntries);
+
+      // Should still NOT match inside larger Latin words like "Bobby"
+      expect(filterRelevantGlossary(latinEntries, ['Bobby is here'])).toEqual([]);
+    });
+
+    it('matches continuous unspaced scripts like Thai as substrings', () => {
+      const thaiGlossary = [
+        { source: 'สวัสดี', target: 'Hello' },
+      ];
+      const texts = ['สวัสดีครับทุกคน'];
+      const matched = filterRelevantGlossary(thaiGlossary, texts);
+      expect(matched).toEqual([{ source: 'สวัสดี', target: 'Hello' }]);
+    });
   });
 });

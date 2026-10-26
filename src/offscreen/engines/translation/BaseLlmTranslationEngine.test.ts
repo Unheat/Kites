@@ -179,6 +179,13 @@ describe('cleanTranslatedLine tag debris & filler shield', () => {
     expect(cleanTranslatedLine('1: Hello')).toBe('Hello');
   });
 
+  it('preserves valid numbers, timestamps, and ratios without truncating digits', () => {
+    expect(cleanTranslatedLine('2:30 PM')).toBe('2:30 PM');
+    expect(cleanTranslatedLine('3.14')).toBe('3.14');
+    expect(cleanTranslatedLine('1.5 hours')).toBe('1.5 hours');
+    expect(cleanTranslatedLine('1:0 victory')).toBe('1:0 victory');
+  });
+
   it('strips leading labels and quotes', () => {
     expect(cleanTranslatedLine('Translated: "I want to deliver something much better."')).toBe(
       'I want to deliver something much better.'
@@ -416,6 +423,18 @@ describe('BaseLlmTranslationEngine Keyed JSON Protocol', () => {
     }
     await engine.translate(['Name'], 'en', 'en');
     expect(inference.mock.calls[2][0]).not.toContain('GLOSSARY_JSON');
+  });
+
+  it('handles non-keyed JSON responses without infinite mutual recursion or stack overflow', async () => {
+    const engine = new MockLlmEngine(15, false);
+    // Model returns non-keyed JSON error or empty object
+    engine.mockResponse = JSON.stringify({ error: 'Rate limit exceeded', code: 429 });
+
+    const inputs = ['こんにちは', 'さようなら'];
+    const result = await engine.translate(inputs, 'ja', 'en');
+
+    // Falls back safely to original text without throwing RangeError: Maximum call stack size exceeded
+    expect(result).toEqual(inputs);
   });
 
   it('does not promote malicious terminology into system instructions', async () => {
