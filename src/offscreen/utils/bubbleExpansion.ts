@@ -338,7 +338,10 @@ export function computeTypesetBox(
 
   // Utilize the roomy chamber dimensions (XianScan builder.rs:673 expands vertical text
   // to utilize up to 80% of safe core width rather than constraining to the narrow CJK column).
-  const expandedW = Math.min(coreW, Math.max(Math.round(textBox.w * 1.25), Math.round(coreW * 0.80)));
+  // Pre-partitioned sub-chambers already represent dedicated territories; use full core width.
+  const expandedW = isSubChamber
+    ? coreW
+    : Math.min(coreW, Math.max(Math.round(textBox.w * 1.25), Math.round(coreW * 0.80)));
   const expandedH = isSubChamber
     // Shared chamber: never grow taller than SHARED_CHAMBER_MAX_V_GROWTH x the original text height,
     // unless the territory itself is tighter than the text (then keep the text height untouched).
@@ -479,10 +482,10 @@ export function partitionSharedContainer(
 
   for (let i = 0; i < K; i++) {
     const curr = utterances[i];
-    let leftLimit = core.left;
-    let rightLimit = core.right;
-    let topLimit = core.top;
-    let bottomLimit = core.bottom;
+    let leftLimit = container.x;
+    let rightLimit = container.x + container.w;
+    let topLimit = container.y;
+    let bottomLimit = container.y + container.h;
 
     for (let j = 0; j < K; j++) {
       if (i === j) continue;
@@ -747,16 +750,24 @@ export function clipHalfPlane(polygon: Point2D[], normal: Point2D, offset: numbe
 }
 
 /**
- * Divides a rectangular container among multiple text anchors using Voronoi
- * perpendicular bisector half-plane clipping.
- * 1:1 port of Koharu `anchor_flow_cells` (`crates/koharu-renderer/src/bubble.rs:373-445`).
+ * Divides a container among multiple text anchors using Voronoi
+ * perpendicular bisector half-plane clipping with sibling clearance gap.
+ * 1:1 port of Koharu `anchor_flow_cells` (`crates/koharu-renderer/src/bubble.rs:373-445`, commit b5f3c41).
  *
  * @param width - Container width in local coordinates.
  * @param height - Container height in local coordinates.
  * @param anchors - Text centroids in local coordinates.
+ * @param contour - Optional physical contour polygon to clip against.
+ * @param siblingGap - Minimum clearance gap between neighbouring sub-chambers (default SIBLING_GAP = 6).
  * @returns Non-overlapping polygon cell for each anchor.
  */
-export function anchorFlowCells(width: number, height: number, anchors: Point2D[]): Point2D[][] {
+export function anchorFlowCells(
+  width: number,
+  height: number,
+  anchors: Point2D[],
+  contour?: Point2D[],
+  siblingGap: number = SIBLING_GAP
+): Point2D[][] {
   if (anchors.length === 0) return [];
   const scale = Math.max(1.0, Math.min(width, height));
   const coincidenceDistSq = (scale * 0.0025) ** 2;
@@ -781,21 +792,26 @@ export function anchorFlowCells(width: number, height: number, anchors: Point2D[
   }
 
   // Step 2: Clip container against pairwise Voronoi perpendicular bisectors
+  const halfGap = siblingGap * 0.5;
   const cells: Point2D[][] = new Array(anchors.length);
   for (let i = 0; i < clusters.length; i++) {
-    let cell: Point2D[] = [
-      { x: 0, y: 0 },
-      { x: width, y: 0 },
-      { x: width, y: height },
-      { x: 0, y: height },
-    ];
+    let cell: Point2D[] = (contour && contour.length >= 3)
+      ? [...contour]
+      : [
+          { x: 0, y: 0 },
+          { x: width, y: 0 },
+          { x: width, y: height },
+          { x: 0, y: height },
+        ];
     const { site, indices } = clusters[i];
 
     for (let j = 0; j < clusters.length; j++) {
       if (i === j) continue;
       const other = clusters[j].site;
       const normal = { x: other.x - site.x, y: other.y - site.y };
-      const offset = (other.x * other.x + other.y * other.y - site.x * site.x - site.y * site.y) * 0.5;
+      const dist = Math.hypot(normal.x, normal.y);
+      const baseOffset = (other.x * other.x + other.y * other.y - site.x * site.x - site.y * site.y) * 0.5;
+      const offset = dist > 0 ? baseOffset - halfGap * dist : baseOffset;
       cell = clipHalfPlane(cell, normal, offset);
       if (cell.length < 3) break;
     }
@@ -838,16 +854,23 @@ export function anchorFlowCells(width: number, height: number, anchors: Point2D[
  *
  * @param container - Shared carrier box.
  * @param boxes - Sibling text boxes sharing the container.
+ * @param contour - Optional physical contour polygon.
+ * @param siblingGap - Minimum clearance gap between sub-chambers (default SIBLING_GAP = 6).
  * @returns Array of sub-chamber territories, one per text box.
  */
-export function partitionContainerByFlowCells(container: BoxRect, boxes: BoxRect[]): BoxRect[] {
+export function partitionContainerByFlowCells(
+  container: BoxRect,
+  boxes: BoxRect[],
+  contour?: Point2D[],
+  siblingGap: number = SIBLING_GAP
+): BoxRect[] {
   if (boxes.length <= 1) return [{ ...container }];
 
   const anchors: Point2D[] = boxes.map(b => ({
     x: Math.max(0, Math.min(container.w, b.x + b.w / 2 - container.x)),
     y: Math.max(0, Math.min(container.h, b.y + b.h / 2 - container.y)),
   }));
-  const cells = anchorFlowCells(container.w, container.h, anchors);
+  const cells = anchorFlowCells(container.w, container.h, anchors, contour, siblingGap);
 
   return boxes.map((box, i) => {
     const cell = cells[i];
@@ -864,17 +887,11 @@ export function partitionContainerByFlowCells(container: BoxRect, boxes: BoxRect
     const top = Math.round(container.y + minY);
     const bottom = Math.round(container.y + maxY);
 
-    // Floor invariant: preserve text box boundaries
-    const effLeft = Math.min(left, box.x);
-    const effRight = Math.max(right, box.x + box.w);
-    const effTop = Math.min(top, box.y);
-    const effBottom = Math.max(bottom, box.y + box.h);
-
     return {
-      x: effLeft,
-      y: effTop,
-      w: Math.max(box.w, effRight - effLeft),
-      h: Math.max(box.h, effBottom - effTop),
+      x: Math.min(left, box.x),
+      y: Math.min(top, box.y),
+      w: Math.max(box.w, right - left),
+      h: Math.max(box.h, bottom - top),
     };
   });
 }

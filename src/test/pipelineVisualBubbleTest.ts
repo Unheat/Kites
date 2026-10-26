@@ -322,7 +322,12 @@ async function runPipelineVisualBubbleTest() {
           });
         }
       }
-      renderTextBlocksBatch(ctx as any, textBlockItems, 'en', { width: pageWidth, height: pageHeight });
+      const renderInfos = renderTextBlocksBatch(ctx as any, textBlockItems, 'en', { width: pageWidth, height: pageHeight });
+      if (testFile === 'image6.jpg') {
+        for (let i = 0; i < renderInfos.length; i++) {
+          console.log(`[Render Info image6] #${i}: "${textBlockItems[i]?.text}" ->`, JSON.stringify(renderInfos[i]));
+        }
+      }
       const outPath = path.join(neuralDir, testFile);
       fs.writeFileSync(outPath, canvas.toBuffer('image/png'));
       console.log(`[Neural] Saved baked image: result/pipeline_bubble_neural/${testFile}`);

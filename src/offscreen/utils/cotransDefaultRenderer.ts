@@ -815,7 +815,7 @@ export function renderRegionDefault(
       ctx,
       fontFamily || DEFAULT_RENDER_FONT_FAMILY,
       {
-        minFontSize: Math.max(6, Math.floor(fontSize * 0.4)),
+        minFontSize: 6,
         maxFontSize: Math.max(16, Math.round(normV * 0.5)),
         targetLang,
         isBold
@@ -836,7 +836,7 @@ export function renderRegionDefault(
       ctx,
       fontFamily || DEFAULT_RENDER_FONT_FAMILY,
       {
-        minFontSize: Math.max(6, Math.floor(fontSize * 0.4)),
+        minFontSize: 6,
         maxFontSize: Math.max(16, Math.round(normV * 0.5)),
         targetLang,
         isBold

@@ -695,13 +695,14 @@ export function wrapTextContour(
     return (s: string) => ctx.measureText(s).width;
   };
 
-  const evaluateLayout = (size: number, allowHyphenation: boolean): LineBreakResult | null => {
+  const evaluateLayout = (size: number, allowHyphenation: boolean, allowOverflow: boolean = false): LineBreakResult | null => {
     const measure = measureAt(size);
     const segments = buildSegmentMeasures(cleanText, measure, allowHyphenation, targetLang);
     const lineHeight = size * linePitch;
     const maxLineCount = Math.max(1, Math.min(segments.length, Math.floor(containerH / lineHeight)));
 
     let bestResult: LineBreakResult | null = null;
+    let bestOverflowResult: LineBreakResult | null = null;
 
     // Test line counts from minimum required lines to max fitting lines
     for (let lines = 1; lines <= maxLineCount; lines++) {
@@ -709,14 +710,21 @@ export function wrapTextContour(
       if (!profiles) continue;
 
       const res = exactProfiledLineBreaks(segments, profiles, allowHyphenation);
-      if (res && !res.overflowed) {
-        if (!bestResult || res.cost < bestResult.cost) {
-          bestResult = res;
+      if (res) {
+        if (!res.overflowed) {
+          if (!bestResult || res.cost < bestResult.cost) {
+            bestResult = res;
+          }
+        } else {
+          if (!bestOverflowResult || res.cost < bestOverflowResult.cost) {
+            bestOverflowResult = res;
+          }
         }
       }
     }
 
-    return bestResult;
+    if (bestResult) return bestResult;
+    return allowOverflow ? bestOverflowResult : null;
   };
 
   const fits = (res: LineBreakResult | null): boolean => res !== null && !res.overflowed;
@@ -761,13 +769,13 @@ export function wrapTextContour(
     };
   }
 
-  // Fallback: evaluate at minFont
-  const fallback = evaluateLayout(minFont, true) || evaluateLayout(minFont, false);
+  // Fallback: evaluate at minFont with allowOverflow=true so words ALWAYS break across lines
+  const fallback = evaluateLayout(minFont, true, true) || evaluateLayout(minFont, false, true);
   return {
     lines: fallback?.lines || [cleanText],
     fontSize: Math.round(minFont),
     width: fallback?.width || containerW,
     height: fallback?.height || containerH,
-    overflowed: fallback?.overflowed || false
+    overflowed: true
   };
 }

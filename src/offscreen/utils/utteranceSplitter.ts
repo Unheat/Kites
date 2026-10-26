@@ -211,12 +211,17 @@ export function clusterLinesIntoUtterances(
             (vertGap >= Math.max(22.0, medianTh * 1.35) ||
               (endsWithTerm && vertGap >= Math.max(6.0, medianTh * 0.45)));
 
-          // 2a. Staggered multi-lobe split with terminal punctuation (XianScan base rule:
-          // adjacent parallel columns shifted vertically, where previous line ends with terminal punctuation)
+          const overlapY = Math.min(prevBounds.y + prevBounds.h, b.y + b.h) - Math.max(prevBounds.y, b.y);
+
+          // 2a. Staggered multi-lobe split with terminal punctuation (XianScan clustering.rs:60-63):
+          // Parallel columns sharing vertical overlap (overlapY > 0) belong to the same unified
+          // multi-column dialogue bubble. Distinct utterances are only split when there is an actual
+          // vertical gap (overlapY <= 0, vertGap >= 6px) between the end of one sentence and the start of the next.
           const isPunctuationLobeSplit =
             horizStep >= VERTICAL_COLUMN_MIN_HORIZ_STEP &&
             endsWithTerm &&
-            (topStagger >= 15 || botStagger >= 25);
+            overlapY <= 0 &&
+            vertGap >= Math.max(6.0, medianTh * 0.45);
 
           // 2b. Staggered box/lobe translation WITHOUT terminal punctuation (concordant translation:
           // handles multi-box continuous sentences where top and bottom translate in the same direction,

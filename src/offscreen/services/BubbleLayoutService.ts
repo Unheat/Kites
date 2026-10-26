@@ -231,7 +231,7 @@ export function resolveBubbleLayouts(input: BubbleLayoutInput): (BoxRect | undef
       h: Math.max(...group.map((i) => carriers[i]!.y + carriers[i]!.h)) - top,
     };
 
-    // Multi-utterance container partitioning (Koharu anchor_flow_cells & SAT separating axis):
+    // Multi-utterance container partitioning (SAT separating axis with non-overlapping walls):
     // Partitions shared container into non-overlapping sub-chambers, expanding each sibling
     // inside its dedicated territory with pairwise clearance clamping.
     const subChambers = partitionSharedContainer(container, siblings);
