@@ -352,7 +352,7 @@ export function computeTypesetBox(
           Math.min(Math.round(coreH * 0.70), Math.round(textBox.h * SHARED_CHAMBER_MAX_V_GROWTH))
         )
       )
-    : Math.min(coreH, Math.max(Math.round(textBox.h), Math.round(coreH * 0.70)));
+    : Math.min(coreH, Math.max(Math.round(textBox.h), Math.round(coreH * 0.90)));
 
   const textCx = Math.round(textBox.x + textBox.w / 2);
   const textCy = Math.round(textBox.y + textBox.h / 2);
@@ -666,9 +666,15 @@ export function pairwiseClampBox(
     const cxJ = origJ.x + origJ.w / 2;
     const cyJ = origJ.y + origJ.h / 2;
 
+    const dx = Math.abs(cxI - cxJ);
+    const dy = Math.abs(cyI - cyJ);
+    const isPrimarilyVertical = dy > dx * 1.1;
+    const isPrimarilyHorizontal = dx > dy * 1.1;
+
     // 1. Horizontal clearance: when candidate overlaps neighbor vertically
+    // (only for primarily horizontal/side-by-side neighbors to avoid crushing vertically stacked lobes)
     const yOverlap = (y + h > origJ.y) && (origJ.y + origJ.h > y);
-    if (yOverlap) {
+    if (yOverlap && !isPrimarilyVertical) {
       if (cxJ < cxI && origJ.x + origJ.w <= cxI) {
         const minLeft = origJ.x + origJ.w + siblingGap;
         if (x < minLeft) {
@@ -685,8 +691,9 @@ export function pairwiseClampBox(
     }
 
     // 2. Vertical clearance: when candidate overlaps neighbor horizontally
+    // (only for primarily vertical/stacked neighbors to avoid crushing side-by-side columns)
     const xOverlap = (x + w > origJ.x) && (origJ.x + origJ.w > x);
-    if (xOverlap) {
+    if (xOverlap && !isPrimarilyHorizontal) {
       if (cyJ < cyI && origJ.y + origJ.h <= cyI) {
         const minTop = origJ.y + origJ.h + siblingGap;
         if (y < minTop) {

@@ -4,7 +4,7 @@ import {
   boxIoU,
   computeTypesetBox,
   pairwiseClampBox,
-  partitionSharedContainer,
+  partitionContainerByFlowCells,
   SHARED_CONTAINER_IOU,
   type BoxRect
 } from '../utils/bubbleExpansion';
@@ -231,10 +231,10 @@ export function resolveBubbleLayouts(input: BubbleLayoutInput): (BoxRect | undef
       h: Math.max(...group.map((i) => carriers[i]!.y + carriers[i]!.h)) - top,
     };
 
-    // Multi-utterance container partitioning (SAT separating axis with non-overlapping walls):
-    // Partitions shared container into non-overlapping sub-chambers, expanding each sibling
-    // inside its dedicated territory with pairwise clearance clamping.
-    const subChambers = partitionSharedContainer(container, siblings);
+    // Multi-utterance container partitioning (Koharu Voronoi perpendicular bisector flow cells):
+    // Partitions shared container into non-overlapping sub-chambers along the natural Voronoi
+    // half-planes between text anchors, expanding each sibling inside its dedicated territory.
+    const subChambers = partitionContainerByFlowCells(container, siblings);
     const candidates = group.map((i, position) => {
       const isAlreadySevered = Boolean(!proposals[i] || shapes[i]?.isSeveredCarrier);
       const rawBox = computeTypesetBox(

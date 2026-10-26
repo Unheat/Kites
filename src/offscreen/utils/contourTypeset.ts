@@ -730,7 +730,10 @@ export function wrapTextContour(
   const fits = (res: LineBreakResult | null): boolean => res !== null && !res.overflowed;
 
   // Koharu LastResort Hyphenation Policy:
-  // 1. Evaluate clean unhyphenated text first.
+  // Evaluates both clean (unhyphenated) and discretionary-hyphenated layouts across candidate font sizes.
+  // At any given font size, unhyphenated text is preferred (cost penalty for hyphens in DP).
+  // However, across font sizes, a larger readable font size with hyphens takes precedence
+  // over severely downscaled/squeezed unhyphenated text that leaves speech balloons half-empty.
   const cleanFit = largestFittingFontSize(
     minFont,
     maxFont,
@@ -738,18 +741,6 @@ export function wrapTextContour(
     fits
   );
 
-  if (cleanFit && Math.floor(cleanFit.profiles[0]?.height ? cleanFit.profiles[0].height / linePitch : minFont) > Math.floor(minFont)) {
-    const finalSize = Math.round(cleanFit.profiles[0].height / linePitch);
-    return {
-      lines: cleanFit.lines,
-      fontSize: finalSize,
-      width: cleanFit.width,
-      height: cleanFit.height,
-      overflowed: cleanFit.overflowed
-    };
-  }
-
-  // 2. If clean layout pins to floor or fails, evaluate with discretionary hyphenation
   const hyphenatedFit = largestFittingFontSize(
     minFont,
     maxFont,
@@ -757,7 +748,19 @@ export function wrapTextContour(
     fits
   );
 
-  const selected = hyphenatedFit || cleanFit;
+  const cleanSize = cleanFit?.profiles[0]?.height
+    ? Math.round(cleanFit.profiles[0].height / linePitch)
+    : 0;
+  const hyphenatedSize = hyphenatedFit?.profiles[0]?.height
+    ? Math.round(hyphenatedFit.profiles[0].height / linePitch)
+    : 0;
+
+  // Use hyphenation if it unlocks a strictly larger font size (> cleanSize),
+  // otherwise prefer clean unhyphenated text when font sizes are equal.
+  const selected = (hyphenatedFit && hyphenatedSize > cleanSize)
+    ? hyphenatedFit
+    : (cleanFit || hyphenatedFit);
+
   if (selected) {
     const finalSize = Math.round(selected.profiles[0].height / linePitch);
     return {
