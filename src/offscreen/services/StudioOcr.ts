@@ -7,6 +7,7 @@ import type { InpaintManager, InpaintTier } from './InpaintManager';
 import type { TranslationManager } from './TranslationManager';
 import { SUPPORTED_INPAINT_IDS } from '../../shared/inpaintTiers';
 import { getRenderedBlockGeometry } from '../utils/canvasTypesetting';
+import { detectBlockTextColors, type DetectedTextColor } from '../utils/textColorDetection';
 
 // Preserve Studio's minimum editable text-handle dimensions.
 const MIN_TEXT_OBJECT_SIZE = 20;
@@ -37,6 +38,10 @@ export interface StudioOcrResponse {
     isVertical?: boolean;
     /** OCR block rotation in degrees; Studio rotates the unrotated box around its center. */
     rotation: number;
+    /** Detected per-bubble ink color ('#rrggbb'); undefined falls back to Studio defaults. */
+    color?: string;
+    /** Outline color derived from the detected ink; undefined falls back to Studio defaults. */
+    strokeColor?: string;
   }>;
 }
 
@@ -116,6 +121,21 @@ export async function runStudioOcr(
   console.log(`[Studio OCR] Detected ${regions.length} regions; translate=${payload.translate !== false}, inpaint=${payload.inpaint !== false}.`);
   if (regions.length === 0) return { inpaintedPatchBase64: unchangedPatch, textObjects: [] };
 
+  // Per-region ink detection on the ORIGINAL patch bytes ("Recognition uses original
+  // artwork"), so Studio text objects inherit each bubble's real text color with
+  // snap-to-pure-black/white normalization instead of assuming black-on-white.
+  let detectedTextColors: (DetectedTextColor | null)[] = [];
+  try {
+    const sourceBitmap = await createImageBitmap(new Blob([imageBuffer], { type: 'image/png' }));
+    try {
+      detectedTextColors = await detectBlockTextColors(sourceBitmap, result.boxes);
+    } finally {
+      sourceBitmap.close();
+    }
+  } catch (err) {
+    console.warn('[Studio OCR] Text color detection failed; using default colors:', err);
+  }
+
   const originalTexts = regions.map(region => region.text);
   let texts = originalTexts;
   if (payload.translate !== false) {
@@ -187,6 +207,8 @@ export async function runStudioOcr(
         : undefined,
       isVertical: detectedDirection === 'v',
       rotation,
+      color: detectedTextColors[resolvedIndex]?.textColor,
+      strokeColor: detectedTextColors[resolvedIndex]?.strokeColor,
     };
   });
   return { inpaintedPatchBase64, textObjects };

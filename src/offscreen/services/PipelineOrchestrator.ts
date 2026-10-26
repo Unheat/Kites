@@ -9,6 +9,7 @@ import type { Point2D } from '../engines/inpaint/BaseInpaintEngine';
 import { inpaintRegistry } from '../engines/inpaint/inpaintRegistry';
 import { InpaintCacheManager } from './InpaintCacheManager';
 import { renderTextBlocksBatch, measureBubbleLayoutFontSize, getRenderedBlockGeometry, LANGUAGE_ORIENTATION_PRESETS, type TextBlockItem, type RenderedBlockInfo } from '../utils/canvasTypesetting';
+import { detectBlockTextColors, type DetectedTextColor } from '../utils/textColorDetection';
 import { resolveRenderFontFamily } from '../../shared/renderFontPresets';
 import { isBubbleGpuAvailable, isColorGpuAvailable } from '../../shared/utils/hardwareUtils';
 import type { BubbleEngineOptions } from '../engines/bubble/BaseBubbleEngine';
@@ -239,6 +240,18 @@ export class PipelineOrchestrator {
         });
       }
 
+      // 3.0 Per-bubble text color detection from the ORIGINAL image (before any
+      // inpainting erases the glyphs). Best-effort: nulls and failures fall back
+      // to the render-time background-adaptive black/white picker.
+      let detectedTextColors: (DetectedTextColor | null)[] = [];
+      if (sourceBitmap && ocrResult.boxes && ocrResult.boxes.length > 0) {
+        try {
+          detectedTextColors = await detectBlockTextColors(sourceBitmap, ocrResult.boxes);
+        } catch (err) {
+          console.warn('[PipelineOrchestrator] Text color detection failed; using background-adaptive colors:', err);
+        }
+      }
+
       // 3.1 Acquire original bubble geometry only. Final layout waits for translated text/fonts.
       let bubbleGeometry: BubbleGeometry | undefined;
       const bubbleMode = popupState?.bubbleMode ?? 'heuristic';
@@ -428,13 +441,17 @@ export class PipelineOrchestrator {
         const dir = (ocrResult.directions && ocrResult.directions[i]) ? ocrResult.directions[i] : 'h';
         const typesetBox = (ocrResult.typesetBoxes && ocrResult.typesetBoxes[i]) ? ocrResult.typesetBoxes[i] : undefined;
         if (text && poly) {
+          const detectedColor = detectedTextColors[i] ?? undefined;
           textBlockItems.push({
             text,
             polygon: poly as any,
             direction: dir,
             typesetBox,
-            // Colors are decided at render time by background sampling (XianScan
-            // color.ts port) — black text on light paper, white on dark panels.
+            // Per-bubble ink color detected on the ORIGINAL artwork (snap-to-pure-
+            // black/white; colored text preserved). Blocks without a detection result
+            // keep the render-time background-adaptive fallback (XianScan color.ts port).
+            textColor: detectedColor?.textColor,
+            strokeColor: popupState?.renderFontStrokeDisabled ? 'transparent' : detectedColor?.strokeColor,
             fontSize: ocrResult.fontSizes
               ? Math.max(popupState?.renderFontMinSize ?? 6, ocrResult.fontSizes[i])
               : undefined,
@@ -447,7 +464,6 @@ export class PipelineOrchestrator {
               popupState?.renderFontAlignment && popupState.renderFontAlignment !== 'auto'
                 ? popupState.renderFontAlignment
                 : undefined,
-            strokeColor: popupState?.renderFontStrokeDisabled ? 'transparent' : undefined,
           });
           itemOcrIndices.push(i);
         }

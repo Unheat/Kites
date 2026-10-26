@@ -95,6 +95,10 @@ export async function requestStudioOcr(
       lineSpacing?: number;
       fontFamily?: string;
       typesetMode?: TextObject['typesetMode'];
+      /** Detected per-bubble ink color from the original artwork; undefined uses the default. */
+      color?: string;
+      /** Outline color derived from the detected ink; undefined uses the default. */
+      strokeColor?: string;
     }>;
     error?: string;
   }>((resolve) => {
@@ -151,8 +155,10 @@ export async function requestStudioOcr(
     lines: t.lines,
     lineSpacing: t.lineSpacing,
     typesetMode: t.typesetMode,
-    color: '#000000',
-    strokeColor: '#ffffff',
+    // Detected per-bubble colors ride in from Studio OCR; the hardcoded pair
+    // stays as the fallback for older offscreen responses and failed detection.
+    color: t.color ?? '#000000',
+    strokeColor: t.strokeColor ?? '#ffffff',
     strokeWidth: 2,
     align: 'center',
     isVertical: t.isVertical ?? false,
