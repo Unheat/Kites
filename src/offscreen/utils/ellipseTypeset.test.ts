@@ -161,5 +161,14 @@ describe('ellipseTypeset module', () => {
         expect(/^[!?,.:;]/.test(line.trim())).toBe(false);
       }
     });
+
+    it('falls back to rectangular wrap or reduced font size when text overflows container height', () => {
+      // Long dialogue inside a short vertical container with a large initial font size (30px)
+      const text = 'This is a very long sentence that cannot possibly fit into a small vertical container at thirty pixels.';
+      const result = wrapTextEllipse(text, 100, 40, 30, 'sans-serif', 1.0, mockCtx, 'en', { minFontSize: 8 });
+
+      // Must never return the 30px initial font size when overflow persists
+      expect(result.fontSize).toBeLessThan(30);
+    });
   });
 });

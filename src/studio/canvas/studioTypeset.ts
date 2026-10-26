@@ -5,7 +5,7 @@ import type { TextObject } from '../types';
 
 export type StudioTypesetMode = TypesetMode;
 
-type TypesetStyle = Pick<TextObject, 'bold' | 'italic' | 'letterSpacing' | 'lineSpacing' | 'isVertical' | 'borderRadius'>;
+type TypesetStyle = Pick<TextObject, 'bold' | 'italic' | 'letterSpacing' | 'lineSpacing' | 'isVertical' | 'borderRadius' | 'targetLang'>;
 
 /** Small boxes cannot reliably run the fitting engine. */
 export const MIN_LAYOUT_DIMENSION = 15;
@@ -28,6 +28,7 @@ export const CJK_CHARACTER_REGEX = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf9
 const LAYOUT_FIELDS = [
   'text', 'fontFamily', 'fontSize', 'bold', 'italic', 'uppercase', 'lowercase',
   'width', 'height', 'charStyles', 'letterSpacing', 'lineSpacing', 'isVertical', 'direction',
+  'targetLang',
 ] as const satisfies readonly (keyof TextObject)[];
 
 /**
@@ -340,6 +341,8 @@ export function recalculateBlockTypeset(
       return { fontSize: fallbackSize, lines };
     }
 
+    const targetLang = style.targetLang || 'en';
+
     // Ellipse Mode: Dynamic programming chord profile, soft hyphenation, and upper-limit bounds
     if (mode === 'ellipse') {
       const unhyphenated = unwrapWrappedText(text);
@@ -354,7 +357,7 @@ export function recalculateBlockTypeset(
         fontFamily || 'sans-serif',
         strength,
         ctx,
-        'en',
+        targetLang,
         { minFontSize: 6 }
       );
       return {
@@ -393,7 +396,9 @@ export function recalculateBlockTypeset(
     fallbackSize,
     MAX_FONT_SIZE_CEILING,
     fontFamily || 'sans-serif',
-    style.bold ?? false
+    style.bold ?? false,
+    undefined,
+    targetLang
   );
 
   return {

@@ -130,7 +130,7 @@ export function unwrapWrappedText(text: string): string {
  * @returns Array of width shares in [MIN_CHORD_SHARE, 1.0] for each line index.
  */
 export function ellipseProfile(lineCount: number, lineHeight: number, strength: number): number[] {
-  if (lineCount <= 0) return [];
+  if (lineCount <= 0 || lineHeight <= 0) return new Array(Math.max(0, lineCount)).fill(1.0);
   if (strength <= 0) return new Array(lineCount).fill(1.0);
 
   const halfHeight = ((lineCount + 1) * lineHeight) / 2;
@@ -342,7 +342,7 @@ export function layoutEllipseLines(
 
   for (const share of profile) {
     const slot = share * ellipseWidth * ELLIPSE_FILL_SLACK;
-    const target = share * fillWidth;
+    const target = Math.max(1, share * fillWidth);
     const next = new Array(tokenCount + 1).fill(Infinity);
     const chosen: { from: number; span: LineSpan }[] = new Array(tokenCount + 1).fill(null);
 
@@ -658,9 +658,8 @@ export function wrapTextEllipse(
         height: res.height,
       };
 
-      if (!bestCandidateOverall) {
-        bestCandidateOverall = candidateResult;
-      }
+      // Track the smallest font candidate evaluated across search iterations
+      bestCandidateOverall = candidateResult;
 
       if (!res.tooTall && res.height <= targetHeight + 0.5) {
         return candidateResult;
@@ -668,8 +667,8 @@ export function wrapTextEllipse(
     }
   }
 
-  // If no font size strictly fit height, return the smallest font candidate or rectangular fallback
-  if (bestCandidateOverall) {
+  // If ellipse candidate fit height, return it; otherwise fall back to rectangular wrap at minFontSize
+  if (bestCandidateOverall && bestCandidateOverall.height <= targetHeight + 0.5) {
     return bestCandidateOverall;
   }
 

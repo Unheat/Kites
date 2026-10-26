@@ -117,6 +117,8 @@ export interface TextObject {
   borderRadius?: number;
   /** Whether this text object is positioned inside a curved bubble or a rectangular box. */
   isRounded?: boolean;
+  /** Target language code for syllable hyphenation (e.g. 'en', 'es', 'de'). */
+  targetLang?: string;
 }
 
 export interface ImageLayer {
