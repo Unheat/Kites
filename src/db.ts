@@ -191,7 +191,7 @@ export async function cleanupOldJobs(
     // active between the eligibility check and deletion in another context.
     await db.transaction('rw', db.translationJobs, db.images, db.textBlocks, async () => {
       const oldJobKeys = await db.translationJobs.where('timestamp').below(cutoffTime)
-        .filter((job) => job.status === undefined || job.status === 'completed' || job.status === 'error')
+        .filter((job) => job.folderId === undefined && (job.status === undefined || job.status === 'completed' || job.status === 'error'))
         .primaryKeys();
       const oldJobs = oldJobKeys.filter((jobId): jobId is number => jobId !== undefined);
       if (oldJobs.length > 0) {

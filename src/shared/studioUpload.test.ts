@@ -201,5 +201,22 @@ describe('uploadStudioPagesBatch', () => {
     expect(jobs[0].status).toBe('queued');
     expect(jobs[1].status).toBe('error');
   });
+
+  it('associates uploaded pages with project folder and sets projectOrder when folderId provided', async () => {
+    sendMessage.mockResolvedValue({ status: 'queued' });
+    const files = [
+      new File(['p1'], 'page1.png', { type: 'image/png' }),
+      new File(['p2'], 'page2.png', { type: 'image/png' }),
+    ];
+
+    const jobIds = await uploadStudioPagesBatch(files, undefined, { folderId: 99 });
+    expect(jobIds).toHaveLength(2);
+
+    const jobs = await db.translationJobs.toArray();
+    expect(jobs[0].folderId).toBe(99);
+    expect(jobs[0].projectOrder).toBe(0);
+    expect(jobs[1].folderId).toBe(99);
+    expect(jobs[1].projectOrder).toBe(1);
+  });
 });
 

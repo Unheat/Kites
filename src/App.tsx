@@ -287,9 +287,13 @@ export default function App() {
 
     let firstQueuedId: number | null = null;
     try {
-      const jobIds = await uploadStudioPagesBatch(fileList, (progress) => {
-        setUploadProgress(progress);
-      });
+      const jobIds = await uploadStudioPagesBatch(
+        fileList,
+        (progress) => {
+          setUploadProgress(progress);
+        },
+        currentProjectId !== null ? { folderId: currentProjectId } : undefined
+      );
       if (jobIds.length > 0) {
         firstQueuedId = jobIds[0];
       }

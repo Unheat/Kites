@@ -52,18 +52,28 @@ export function isSupportedStudioImage(file: File): boolean {
   return (SUPPORTED_STUDIO_FILE_EXTENSIONS as readonly string[]).some((ext) => name.endsWith(ext));
 }
 
+export interface UploadBatchOptions {
+  folderId?: number;
+}
+
 /**
  * Persists a single page to IndexedDB and enqueues it with the background worker.
  *
  * @param file Validated image file.
+ * @param options Optional project association metadata.
  * @returns The persisted job ID.
  */
-async function uploadSinglePage(file: File): Promise<number> {
+async function uploadSinglePage(
+  file: File,
+  options?: { folderId?: number; projectOrder?: number }
+): Promise<number> {
   const jobId = await db.transaction('rw', db.translationJobs, db.images, async () => {
     const id = await db.translationJobs.add({
       timestamp: Date.now(),
       status: 'queued',
       srcUrl: file.name,
+      folderId: options?.folderId,
+      projectOrder: options?.projectOrder,
     });
     await db.images.add({ jobId: id as number, rawImageBlob: file });
     return id as number;
@@ -108,7 +118,8 @@ async function uploadSinglePage(file: File): Promise<number> {
  */
 export async function uploadStudioPagesBatch(
   files: File[],
-  onProgress?: (progress: BatchUploadProgress) => void
+  onProgress?: (progress: BatchUploadProgress) => void,
+  options?: UploadBatchOptions
 ): Promise<number[]> {
   if (!files || files.length === 0) {
     throw new Error('Choose a non-empty image file to upload.');
@@ -125,6 +136,12 @@ export async function uploadStudioPagesBatch(
     }
   }
 
+  let baseOrder = 0;
+  if (options?.folderId !== undefined) {
+    const existingMembers = await db.translationJobs.where('folderId').equals(options.folderId).toArray();
+    baseOrder = existingMembers.length;
+  }
+
   const queuedJobIds: number[] = [];
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
@@ -135,7 +152,10 @@ export async function uploadStudioPagesBatch(
     });
 
     try {
-      const jobId = await uploadSinglePage(file);
+      const jobId = await uploadSinglePage(file, {
+        folderId: options?.folderId,
+        projectOrder: options?.folderId !== undefined ? baseOrder + i : undefined,
+      });
       queuedJobIds.push(jobId);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

@@ -178,6 +178,26 @@ describe('translation job cleanup', () => {
     expect(await db.translationJobs.get(oldProcessing)).toBeDefined();
   });
 
+  it('never deletes completed jobs assigned to a project folder regardless of age', async () => {
+    const projectFolderId = 42;
+    const oldProjectJob = (await db.translationJobs.add({
+      timestamp: NOW - 50 * MILLISECONDS_PER_DAY,
+      status: 'completed',
+      folderId: projectFolderId,
+    }))!;
+    const oldUnassignedJob = (await db.translationJobs.add({
+      timestamp: NOW - 50 * MILLISECONDS_PER_DAY,
+      status: 'completed',
+    }))!;
+
+    await cleanupOldJobs('1week');
+
+    // Unassigned job should be deleted, project job must be preserved permanently
+    expect(await db.translationJobs.get(oldUnassignedJob)).toBeUndefined();
+    expect(await db.translationJobs.get(oldProjectJob)).toBeDefined();
+    expect((await db.translationJobs.get(oldProjectJob))?.folderId).toBe(projectFolderId);
+  });
+
   it.each([0, -1, NaN, Infinity, -Infinity])('rejects invalid numeric retention %s and deletes nothing', async (days) => {
     const jobId = (await db.translationJobs.add({
       timestamp: NOW - 365 * MILLISECONDS_PER_DAY,
