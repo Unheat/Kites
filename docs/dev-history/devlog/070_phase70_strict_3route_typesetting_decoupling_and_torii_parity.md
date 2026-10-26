@@ -25,22 +25,31 @@ Investigate and resolve why speech bubble typesetting rendered in a pinched 6-li
      - Smooth ovals (`endRatio < 0.65`): set `borderRadius = Math.round(rMax * 0.90)`.
      - Rectangular captions (`fillRatio >= 0.88` or `endRatio >= 0.95`): set `isRounded = false, borderRadius = 0`, routing directly to Route 3 Simple Wrap.
 
-2. **Torii DP Solver Hardening & Font Give-Back in `ellipseTypeset.ts`:**
+2. **Stepped / Conjoined Caption Box Expansion (XianScan & Koharu Parity):**
+   - Discovered that conjoined/stepped caption boxes (e.g. top-left in `image6.jpg`) previously failed `axisTerritories` and `connectedLobes`, triggering an all-or-nothing bailout that dropped both boxes to an unexpanded 15px OCR strip.
+   - Integrated XianScan's pairwise directional limits (`expansion.rs:230-270`): for rectangular boxes (`isRectangular === true`), each box expands within its own carrier core and is clamped against siblings via `pairwiseClampBox`.
+   - Eliminated the artificial `textBox.w * 1.35` width throttle in `computeTypesetBox`, raising off-center threshold from 10% to 20% so natural vertical columns can expand to 55–75px without suffocating text.
+
+3. **Torii DP Solver Hardening, Stem Hyphenation, & Tall Bubble Fill in `ellipseTypeset.ts`:**
+   - In `ellipsePieces`, replaced premature 85% cut threshold with `measure(word) > maxWidth` matching Torii `content.js:26898`. Words that fit on the center line remain undivided.
+   - In `wrapRectangular`, stripped trailing punctuation (`...`, `!`, `?`) before Pyphen pattern matching so words with trailing punctuation hyphenate cleanly, and enforced container width containment (`maxW <= safeWidth + 1.5`).
+   - Calibrated font ceiling for tall vertical bubbles (`targetHeight / safeWidth >= 1.4`), enabling the DP solver to scale up to 19px and fill 98% of container height.
    - Enforced strict `looksRound` on grown candidates: `} else if (looksRound && widest <= maxWidth && (!bestRoundGrown || score < bestRoundGrown.score)) {`.
    - Implemented `shrinkFontTowardWidth`: when a layout candidate grows wider than `targetWidth`, font size steps down 1px at a time toward `minFontScale = 1 - (1 - 0.8) * strength` (up to 20% font shrink at strength 1.0), pulling ink width back inside `targetWidth` before widening.
    - Guarded CJK and unspaced writing systems with `NO_SPACE_SCRIPT_RE` and `isNoSpaceScriptChar`: prevents artificial whitespace insertion between ideographs while preserving opening marks (`「`, `（`, `¿`, `¡`).
    - Restored soft hyphen healing in `unwrapWrappedText` for standard ASCII word breaks (`com-\nmunity` -> `community`) while preserving multi-newline paragraph breaks (`\n\n`).
 
-3. **Unified 3-Route Dispatch in `cotransDefaultRenderer.ts` & `canvasTypesetting.ts`:**
+4. **Unified 3-Route Dispatch in `cotransDefaultRenderer.ts` & `canvasTypesetting.ts`:**
    - Added `typesetMode?: 'balloon' | 'ellipse' | 'simple'` to `DefaultRenderRegion` and `TextBlockItem`.
    - Structured 3-way dispatch:
      - `typesetMode === 'ellipse'` or `(isRounded && typesetMode !== 'balloon' && typesetMode !== 'simple')`: Route 2 Ellipse DP.
      - `typesetMode === 'simple'`: Route 3 Simple Rectangular Greedy Wrap (`strength: 0`).
      - Default fallback: Route 1 Auto Balloon XianScan Diamond Reflow (`measureDefaultLayout`).
 
-4. **Studio Editor Dispatch & `roundFit` State Scrubbing in `studioTypeset.ts`:**
+5. **Studio Editor Dispatch & `roundFit` State Scrubbing in `studioTypeset.ts`:**
    - Added `roundFit: { width, fontSize, fittedWidth?, fittedFontSize? }` to `TextObject`.
    - In `reflowTextObject`: when scrubbing the radius slider, restores starting `width` and `fontSize` from `roundFit` before refitting, ensuring dragging back to 0 completely restores the box without ratcheting or dimension decay.
+   - Unified Studio's `mode === 'simple'` with `wrapTextEllipse(..., 0)` so editor and pipeline wrap identically.
    - Excluded `typesetMode` from `LAYOUT_FIELDS` so changing engine mode reflects editing intent without prematurely re-measuring untouched lines.
 
 ---
@@ -48,11 +57,13 @@ Investigate and resolve why speech bubble typesetting rendered in a pinched 6-li
 ### 4. Verification & Results
 
 1. **Unit Tests**:
-   - All 21 tests in `ellipseTypeset.test.ts` pass, including CJK tokenization and `shrinkFontTowardWidth`.
+   - All 23 tests in `ellipseTypeset.test.ts` pass, including CJK tokenization and `shrinkFontTowardWidth`.
    - All 48 tests in `studioTypeset.test.ts` and `TypographySettings.test.tsx` pass.
-   - Complete project test suite: **96 test files passed, 1061 unit tests passed**.
+   - All 45 tests in `BubbleLayoutService.test.ts` and `bubbleExpansion.test.ts` pass, including stepped caption box pairwise expansion.
+   - Complete project test suite: **96 test files passed, 1064 unit tests passed**.
 2. **Build Check**:
-   - `npm run build` completed in 2.56s with 0 errors.
+   - `npm run build` completed in 2.37s with 0 errors.
 3. **Pipeline Visual Bubble Test**:
-   - In `image6.jpg`, Hasumi's burst balloon (`endRatio = 0.72`) is detected with `borderRadius = 17` ($strength = 0.34$), rendering a clean 7-line layout ($15\text{px}$, $99.0\text{px} \times 131.3\text{px}$) fitting 100% inside the white bubble boundaries without spiky overflow.
+   - In `image6.jpg`, Hasumi's burst balloon (`endRatio = 0.72`) renders a clean 8-line layout ($19\text{px}$, $99.3\text{px} \times 190.0\text{px}$) filling 98.4% of the vertical space ($193\text{px}$) inside the white bubble boundaries, matching Torii Image 3 line-for-line.
+   - In `image6.jpg`, top-left stepped caption boxes expand to 57px and 90px width respectively, rendering clean 15–16px readable text without falling back to the 15px sliver, matching Torii Image 1.
    - In the `disabled` tier, Hasumi's balloon renders in Route 1 Auto Balloon XianScan reflow ($14\text{px}$, 10 lines) spanning top-to-bottom.
