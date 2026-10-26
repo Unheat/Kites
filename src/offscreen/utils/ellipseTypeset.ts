@@ -673,11 +673,16 @@ export function wrapTextEllipse(
         height: res.height,
       };
 
-      // Track the smallest font candidate evaluated across search iterations
-      bestCandidateOverall = candidateResult;
-
-      if (!res.tooTall && res.height <= targetHeight + 0.5) {
+      // If candidate fits both width and height within bubble boundaries, return it immediately
+      if (!res.tooTall && res.height <= targetHeight + 0.5 && res.width <= safeWidth + 1.5) {
         return candidateResult;
+      }
+
+      // Track the best candidate that fits height within growth budget as fallback
+      if (!res.tooTall && res.height <= targetHeight + 0.5) {
+        if (!bestCandidateOverall || candidateResult.width < bestCandidateOverall.width) {
+          bestCandidateOverall = candidateResult;
+        }
       }
     }
   }
