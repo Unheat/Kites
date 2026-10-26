@@ -93,4 +93,23 @@ describe('detectBlockTextColorsFromContext', () => {
     const result = detectBlockTextColorsFromContext(ctx as any, [box], 1200, 1600)[0];
     expect(result).toEqual({ textColor: '#000000', strokeColor: '#ffffff' });
   });
+
+  it('detects thin black text even when surrounded by wider antialiased grey halo', () => {
+    const canvas = createCanvas(CANVAS_W, CANVAS_H);
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+
+    // Draw wide grey antialiasing halo (RGB 145)
+    ctx.fillStyle = 'rgb(145, 145, 145)';
+    ctx.fillRect(BOX.x + 20, BOX.y + 10, 40, 50);
+
+    // Draw thin black core inside (RGB 20)
+    ctx.fillStyle = 'rgb(20, 20, 20)';
+    ctx.fillRect(BOX.x + 30, BOX.y + 20, 10, 30);
+
+    const result = detectBlockTextColorsFromContext(ctx as any, [BOX], CANVAS_W, CANVAS_H)[0];
+    // Koharu 1:1 color clustering rejects the grey halo as an antialiasing blend and snaps black core to #000000
+    expect(result).toEqual({ textColor: '#000000', strokeColor: '#ffffff' });
+  });
 });

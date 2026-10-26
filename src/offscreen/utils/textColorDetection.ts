@@ -2,28 +2,27 @@ import type { OcrBox } from '../engines/ocr/BaseOcrEngine';
 import {
   deriveStrokeColor,
   medianColor,
-  pickInkColor,
   rgbToHexString,
-  snapTextColor,
-  MIN_INK_PIXELS,
+  inferTextPaint,
+  colorDistanceSquared,
+  colorClusters,
+  INK_MIN_COLOR_DISTANCE_SQUARED,
   type RGBColor,
+  type MaskPixel,
 } from '../../shared/utils/textColor';
 
 /**
- * Per-bubble text color detection from the ORIGINAL (pre-inpaint) image.
+ * Per-bubble text color detection from the ORIGINAL (pre-inpaint) image using
+ * a 1:1 port of Koharu's K-Means color clustering and ink scoring.
  *
- * For each OCR box this samples a window expanded into the bubble interior,
- * seeds the background color from the median of the margin ring around the
- * box, extracts the ink color as the per-channel median of pixels far from
- * that seed, and snaps near-black/near-white tones to the pure extremes
- * (genuinely colored text passes through). Blocks whose detection is
- * inconclusive (tiny boxes, uniform regions, no canvas access) yield null so
- * the caller falls back to the render-time background-adaptive black/white
- * picker.
+ * For each OCR box, samples a tight window (with a 3px margin matching Koharu's
+ * `TYPOGRAPHY_SAMPLE_MARGIN = 2.0`), segments window pixels into 4 K-Means
+ * clusters, isolates the high-contrast ink core from any antialiasing fringe,
+ * and snaps extreme tones to pure #000000 or #ffffff.
  */
 
-/** Margin added around each OCR box, as a fraction of the box size, to reach bubble interior. */
-const BOX_SAMPLE_MARGIN_RATIO = 0.125;
+/** Margin added around each OCR box to sample immediate bubble background without bleeding into artwork. */
+const TYPOGRAPHY_SAMPLE_MARGIN_PX = 3;
 /** Upper bound on sampled pixels per box; larger windows are strided to stay bounded. */
 const MAX_SAMPLED_PIXELS = 200_000;
 /** Boxes smaller than this in either dimension are not worth sampling. */
@@ -85,7 +84,7 @@ export function detectBlockTextColorsFromContext(
 }
 
 /**
- * Detects the text color for one OCR box.
+ * Detects the text color for one OCR box using Koharu color clustering.
  *
  * @param ctx - 2D context of a canvas with the original image drawn.
  * @param box - OCR box to sample.
@@ -101,37 +100,64 @@ function detectBoxTextColor(
 ): DetectedTextColor | null {
   if (box.w < MIN_BOX_SIZE_PX || box.h < MIN_BOX_SIZE_PX) return null;
 
-  const marginW = Math.max(2, Math.round(box.w * BOX_SAMPLE_MARGIN_RATIO));
-  const marginH = Math.max(2, Math.round(box.h * BOX_SAMPLE_MARGIN_RATIO));
-  const winX = Math.max(0, Math.floor(box.x - marginW));
-  const winY = Math.max(0, Math.floor(box.y - marginH));
-  const winW = Math.min(canvasWidth, Math.ceil(box.x + box.w + marginW)) - winX;
-  const winH = Math.min(canvasHeight, Math.ceil(box.y + box.h + marginH)) - winY;
+  const margin = TYPOGRAPHY_SAMPLE_MARGIN_PX;
+  const winX = Math.max(0, Math.floor(box.x - margin));
+  const winY = Math.max(0, Math.floor(box.y - margin));
+  const winW = Math.min(canvasWidth, Math.ceil(box.x + box.w + margin)) - winX;
+  const winH = Math.min(canvasHeight, Math.ceil(box.y + box.h + margin)) - winY;
   if (winW < MIN_BOX_SIZE_PX || winH < MIN_BOX_SIZE_PX) return null;
 
   const stride = Math.max(1, Math.ceil(Math.sqrt((winW * winH) / MAX_SAMPLED_PIXELS)));
   const data = ctx.getImageData(winX, winY, winW, winH).data;
-  const ring: RGBColor[] = [];
-  const all: RGBColor[] = [];
+  const pixels: MaskPixel[] = [];
+  const backgroundPixels: RGBColor[] = [];
+
   for (let y = 0; y < winH; y += stride) {
     for (let x = 0; x < winW; x += stride) {
       const idx = (y * winW + x) * 4;
-      const pixel: RGBColor = { r: data[idx], g: data[idx + 1], b: data[idx + 2] };
-      all.push(pixel);
+      const color: RGBColor = { r: data[idx], g: data[idx + 1], b: data[idx + 2] };
       const canvasX = winX + x;
       const canvasY = winY + y;
-      const outsideBox = canvasX < box.x || canvasX >= box.x + box.w || canvasY < box.y || canvasY >= box.y + box.h;
-      if (outsideBox) ring.push(pixel);
+      const insideMask =
+        canvasX >= box.x && canvasX < box.x + box.w && canvasY >= box.y && canvasY < box.y + box.h;
+
+      pixels.push({
+        x,
+        y,
+        color,
+        insideMask,
+      });
+
+      // Outer margin ring samples immediate bubble background surrounding the text
+      if (x < margin || x >= winW - margin || y < margin || y >= winH - margin) {
+        backgroundPixels.push(color);
+      }
     }
   }
 
-  // The margin ring is the bubble interior just outside the text — its median
-  // is the background seed. Boxes clipped against the canvas edge may have a
-  // degenerate ring; the whole-window median is the safe fallback.
-  const bgSeed = medianColor(ring.length >= MIN_INK_PIXELS ? ring : all);
-  const ink = pickInkColor(all, bgSeed);
-  if (!ink) return null;
+  const backgroundSeed =
+    backgroundPixels.length >= 8
+      ? medianColor(backgroundPixels)
+      : medianColor(pixels.map((p) => p.color));
 
-  const fill = snapTextColor(ink);
-  return { textColor: rgbToHexString(fill), strokeColor: deriveStrokeColor(fill) };
+  // Check if any distinct ink candidates exist before full clustering
+  const clusters = colorClusters(pixels, backgroundSeed);
+  const hasDistinctInk = clusters.some(
+    (c) =>
+      c.pixels.length >= 4 &&
+      colorDistanceSquared(c.color, backgroundSeed) >= INK_MIN_COLOR_DISTANCE_SQUARED,
+  );
+  if (!hasDistinctInk) {
+    return null;
+  }
+
+  const paint = inferTextPaint(pixels, backgroundSeed, winW, winH);
+  const strokeColor = paint.strokeColor
+    ? rgbToHexString(paint.strokeColor)
+    : deriveStrokeColor(paint.color);
+
+  return {
+    textColor: rgbToHexString(paint.color),
+    strokeColor,
+  };
 }
