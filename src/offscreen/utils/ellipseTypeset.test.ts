@@ -8,6 +8,7 @@ import {
   tokenizeDialogue,
   wrapRectangular,
   wrapTextEllipse,
+  shrinkFontTowardWidth,
   INSERTED_HYPHEN,
 } from './ellipseTypeset';
 
@@ -169,6 +170,29 @@ describe('ellipseTypeset module', () => {
 
       // Must never return the 30px initial font size when overflow persists
       expect(result.fontSize).toBeLessThan(30);
+    });
+
+    it('shrunkFontTowardWidth steps down font size to fit container width without violating minFontScale', () => {
+      const lines = ['A short line'];
+      const targetWidth = 100;
+      const initialSize = 20;
+      // 20% max shrink allowed: minSize = ceil(20 * 0.8) = 16
+      const shrunk = shrinkFontTowardWidth(lines, initialSize, 'sans-serif', targetWidth, 0.8, mockCtx);
+      expect(shrunk.fontSize).toBeLessThanOrEqual(initialSize);
+      expect(shrunk.fontSize).toBeGreaterThanOrEqual(16);
+      expect(shrunk.width).toBeLessThanOrEqual(targetWidth + 10);
+    });
+
+    it('tokenizes CJK and unspaced scripts cleanly without inserting artificial whitespace', () => {
+      const jaText = 'ここで持ちこたえるのは私です。';
+      const tokens = tokenizeDialogue(jaText);
+      expect(tokens.length).toBeGreaterThan(1);
+      // Punctuation 。 must be bound to previous character
+      expect(tokens[tokens.length - 1]).toContain('。');
+      expect(tokens.every((t) => !/\s/.test(t))).toBe(true);
+
+      const unwrapped = unwrapWrappedText('ここで持ちこたえる\nのは私です。');
+      expect(unwrapped).toBe('ここで持ちこたえるのは私です。');
     });
   });
 });

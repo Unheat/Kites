@@ -28,7 +28,7 @@ export const CJK_CHARACTER_REGEX = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf9
 const LAYOUT_FIELDS = [
   'text', 'fontFamily', 'fontSize', 'bold', 'italic', 'uppercase', 'lowercase',
   'width', 'height', 'charStyles', 'letterSpacing', 'lineSpacing', 'isVertical', 'direction',
-  'targetLang',
+  'targetLang', 'borderRadius',
 ] as const satisfies readonly (keyof TextObject)[];
 
 /**
@@ -99,16 +99,48 @@ export interface BlockTypesetResult {
 
 /**
  * Runs the chosen existing layout engine on an object's display text.
+ * Caches roundFit starting dimensions so dragging the radius slider back to 0
+ * restores the pristine starting box without ratcheting or dimension decay.
+ *
  * @param object - Complete text object with current geometry and style.
  * @param mode - Engine to use for this layout operation.
  * @returns Object copy containing newly measured lines and font size.
  */
 function reflowTextObject(object: TextObject, mode: StudioTypesetMode): TextObject {
+  let width = object.width;
+  let fontSize = object.fontSize;
+  const startWidth = width;
+  const startFontSize = fontSize;
+
+  const fit = object.roundFit;
+  const refitting = mode === 'ellipse' && !!fit && fit.fittedWidth === width && fit.fittedFontSize === fontSize;
+  if (refitting) {
+    width = fit.width;
+    fontSize = fit.fontSize;
+  }
+
   const layout = recalculateBlockTypeset(
-    getTypesetDisplayText(object.text, object), object.fontFamily,
-    object.width, object.height, object.fontSize, mode, object
+    getTypesetDisplayText(object.text, object),
+    object.fontFamily,
+    width,
+    object.height,
+    fontSize,
+    mode,
+    object
   );
-  return { ...object, fontSize: layout.fontSize, lines: layout.lines };
+
+  const updated: TextObject = { ...object, width, fontSize: layout.fontSize, lines: layout.lines };
+  if (mode === 'ellipse') {
+    updated.roundFit = {
+      width: refitting && fit ? fit.width : startWidth,
+      fontSize: refitting && fit ? fit.fontSize : startFontSize,
+      fittedWidth: updated.width,
+      fittedFontSize: updated.fontSize,
+    };
+  } else {
+    delete updated.roundFit;
+  }
+  return updated;
 }
 
 let sharedMeasureCanvas: HTMLCanvasElement | null = null;

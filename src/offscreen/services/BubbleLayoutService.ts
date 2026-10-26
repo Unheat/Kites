@@ -59,21 +59,54 @@ export function computeMaskCurvature(
   }
 
   const fillRatio = maskArea / totalPixels;
-  // If fill ratio >= 0.88, the mask fills almost the entire bounding box including all corners (caption/narration box)
-  if (fillRatio >= 0.88) {
+  const w = shape.width;
+  const h = shape.height;
+
+  // Measure mask horizontal width at top (10%), center (50%), and bottom (90%)
+  const yTop = Math.min(h - 1, Math.max(0, Math.round(0.10 * h)));
+  const yCenter = Math.min(h - 1, Math.max(0, Math.round(0.50 * h)));
+  const yBot = Math.min(h - 1, Math.max(0, Math.round(0.90 * h)));
+
+  const getWidthAtY = (targetY: number): number => {
+    let minX = w;
+    let maxX = -1;
+    const rowOffset = targetY * w;
+    for (let x = 0; x < w; x++) {
+      if (shape.interior[rowOffset + x] > 0) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+      }
+    }
+    return maxX >= minX ? maxX - minX + 1 : 0;
+  };
+
+  const wCenter = getWidthAtY(yCenter);
+  const wTop = getWidthAtY(yTop);
+  const wBot = getWidthAtY(yBot);
+  const endRatio = wCenter > 0 ? (wTop + wBot) / (2 * wCenter) : 0.5;
+
+  // 1. Rectangular Narration / Caption Box:
+  // Fills corners evenly or width remains uniform from top to bottom (endRatio >= 0.95)
+  if (fillRatio >= 0.88 || (fillRatio >= 0.78 && endRatio >= 0.95)) {
     return { isRounded: false, borderRadius: 0 };
   }
 
-  // Corner-area formula: (4 - pi) * R^2 = W*H - maskArea
-  const diffArea = Math.max(0, (carrier.w * carrier.h) * (1 - fillRatio));
-  const rawRadius = Math.sqrt(diffArea / (4 - Math.PI));
   const rMax = Math.min(carrier.w / 2, carrier.h / 2);
-  const borderRadius = Math.max(0, Math.min(rMax, Math.round(rawRadius)));
 
-  return {
-    isRounded: borderRadius > 2,
-    borderRadius,
-  };
+  // 2. Spiky Burst / Shout Balloon:
+  // Outward spikes and wide collar spread the top or bottom wide (endRatio >= 0.65),
+  // so the interior chamber is a wide cylindrical body rather than a pinched oval.
+  // Sets strength ~0.25 - 0.30 (gently rounded corners with 88% chord width at ends matching Torii).
+  if (endRatio >= 0.65) {
+    const burstRadius = Math.max(8, Math.round(rMax * 0.30));
+    return { isRounded: true, borderRadius: burstRadius };
+  }
+
+  // 3. Smooth Oval / Round Dialogue Balloon:
+  // Natural oval contours pinch inward at top and bottom (endRatio < 0.65).
+  // Sets full oval curvature strength (0.85 - 1.0).
+  const ovalRadius = Math.max(12, Math.round(rMax * 0.90));
+  return { isRounded: true, borderRadius: ovalRadius };
 }
 
 /**

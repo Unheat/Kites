@@ -40,6 +40,16 @@ const NO_LINE_START_RE = /^[\.,!\?:;…\-—―–‒ー－～─‥）」』】
 /** Dashes that may break if intra-word. */
 const BREAKABLE_DASH_RE = /[\-‐‒–—―]/;
 
+/** Unicode script ranges for no-space writing systems (CJK, Thai, Lao, Khmer, Burmese, etc.). */
+const NO_SPACE_SCRIPT_RE = /[\u0E00-\u0EFF\u1000-\u109F\u1780-\u17FF\u2E80-\u303F\u3040-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\uFE30-\uFE4F\uFF01-\uFF0F\uFF1A-\uFF20\uFF3B-\uFF40\uFF5B-\uFF9F]/;
+
+/**
+ * Checks if a character belongs to a script without inter-word whitespace (e.g. CJK, Thai).
+ */
+export function isNoSpaceScriptChar(ch: string): boolean {
+  return !!ch && NO_SPACE_SCRIPT_RE.test(ch);
+}
+
 /**
  * Checks if a string cluster ends in an intra-word dash.
  */
@@ -86,7 +96,7 @@ export function bindWrapTokens(tokens: string[]): string[] {
         bind = true;
       } else if (!/\s/.test(prevChar) && !/\s/.test(nextChar)) {
         const dashBreak = isIntraWordDash(prev) && !BREAKABLE_DASH_RE.test(nextChar);
-        bind = !dashBreak;
+        bind = !isNoSpaceScriptChar(prevChar) && !isNoSpaceScriptChar(nextChar) && !dashBreak;
       }
     }
 
@@ -111,15 +121,40 @@ export function bindWrapTokens(tokens: string[]): string[] {
  */
 export function unwrapWrappedText(text: string): string {
   if (!text) return '';
-  // Remove inserted soft hyphens and any immediately trailing line break to heal the word
-  let clean = text.replace(new RegExp(`${INSERTED_HYPHEN}\\r?\\n?`, 'g'), '');
   // Heal standard line-break word splits (e.g. "com-\nmunity" -> "community")
-  clean = clean.replace(/(\b[a-zA-Z]+)-\s*\r?\n\s*([a-z]+)/g, '$1$2');
-  // Strip standalone invisible word joiners
-  clean = clean.replace(/\u2060/g, '');
-  // Un-break single soft newlines while preserving deliberate paragraph breaks (\n\n)
-  clean = clean.replace(/([^\r\n])\r?\n([^\r\n])/g, '$1 $2');
-  return clean.replace(/[ \t]+/g, ' ').trim();
+  const clean = text.replace(/([a-zA-Z]+)-\s*\r?\n\s*([a-z]+)/g, '$1$2');
+
+  let out = '';
+  for (let i = 0; i < clean.length; i++) {
+    const ch = clean[i];
+    if (ch !== '\n' && ch !== '\r') {
+      out += ch;
+      continue;
+    }
+    let newlineCount = 0;
+    while (i < clean.length && (clean[i] === '\n' || clean[i] === '\r')) {
+      if (clean[i] === '\n') newlineCount++;
+      i++;
+    }
+    i--;
+
+    if (newlineCount >= 2) {
+      out += '\n\n';
+      continue;
+    }
+
+    if (out.endsWith(INSERTED_HYPHEN)) {
+      out = out.slice(0, -INSERTED_HYPHEN.length);
+      continue;
+    }
+    const prevChar = out.length > 0 ? out[out.length - 1] : '';
+    const nextChar = i + 1 < clean.length ? clean[i + 1] : '';
+    if (isNoSpaceScriptChar(prevChar) && isNoSpaceScriptChar(nextChar)) continue;
+    if (nextChar && isIntraWordDash(out)) continue;
+    out += ' ';
+  }
+
+  return out.split(INSERTED_HYPHEN).join('').replace(/\u2060/g, '').replace(/[ \t]{2,}/g, ' ').trim();
 }
 
 /**
@@ -216,12 +251,54 @@ export function outlineOverflow(widths: number[], lineHeight: number, strength: 
  * @returns Array of cohesive word tokens.
  */
 export function tokenizeDialogue(text: string): string[] {
+  const hasNoSpaceScript = Array.from(text).some(isNoSpaceScriptChar);
+
+  if (hasNoSpaceScript) {
+    let rawSegments: string[] = [];
+    if (typeof Intl !== 'undefined' && (Intl as any).Segmenter) {
+      try {
+        const segmenter = new (Intl as any).Segmenter(undefined, { granularity: 'word' });
+        for (const segment of segmenter.segment(text)) {
+          const seg = segment.segment.trim();
+          if (seg) rawSegments.push(seg);
+        }
+      } catch {
+        rawSegments = [];
+      }
+    }
+    if (rawSegments.length === 0) {
+      let currentWord = '';
+      for (const char of text) {
+        if (isNoSpaceScriptChar(char)) {
+          if (currentWord) rawSegments.push(currentWord);
+          rawSegments.push(char);
+          currentWord = '';
+        } else if (/\s/.test(char)) {
+          if (currentWord) rawSegments.push(currentWord);
+          currentWord = '';
+        } else {
+          currentWord += char;
+        }
+      }
+      if (currentWord) rawSegments.push(currentWord);
+    }
+
+    const bound: string[] = [];
+    for (const seg of rawSegments) {
+      if (bound.length > 0 && (NO_LINE_START_RE.test(seg) || OPENING_MARK_RE.test(bound[bound.length - 1]))) {
+        bound[bound.length - 1] += seg;
+      } else {
+        bound.push(seg);
+      }
+    }
+    return bound.length > 0 ? bound : [text];
+  }
+
   const words = text.trim().split(/\s+/).filter(Boolean);
   const tokens: string[] = [];
 
   for (let i = 0; i < words.length; i++) {
     const w = words[i];
-    // If a standalone punctuation mark was split, bind it to previous token
     if (NO_LINE_START_RE.test(w) && tokens.length > 0 && w.length <= 2) {
       tokens[tokens.length - 1] += ` ${w}`;
     } else {
@@ -503,7 +580,7 @@ function ellipseWrap(
       if (!bestInBox || score < bestInBox.score) bestInBox = candidate;
       if (looksRound && (!bestRoundInBox || score < bestRoundInBox.score)) bestRoundInBox = candidate;
       if (looksRound && currentText && layout.lines.join('\n') === currentText) current = candidate;
-    } else if (widest <= maxWidth && (!bestRoundGrown || score < bestRoundGrown.score)) {
+    } else if (looksRound && widest <= maxWidth && (!bestRoundGrown || score < bestRoundGrown.score)) {
       bestRoundGrown = candidate;
     }
 
@@ -511,6 +588,40 @@ function ellipseWrap(
   }
 
   return current ?? bestRoundInBox ?? bestRoundGrown ?? bestInBox;
+}
+
+/**
+ * Once a grown ellipse candidate's line breaks are settled, steps font size down
+ * 1px at a time (down to minFontScale) to pull ink width back toward targetWidth.
+ *
+ * @param lines - Rendered line strings.
+ * @param size - Initial font size in pixels.
+ * @param fontFamily - Font family string.
+ * @param targetWidth - Container width in pixels.
+ * @param minFontScale - Minimum font scale permitted (e.g. 0.8).
+ * @param ctx - Canvas rendering context.
+ * @returns Shrunk font size and resulting maximum ink width.
+ */
+export function shrinkFontTowardWidth(
+  lines: string[],
+  size: number,
+  fontFamily: string,
+  targetWidth: number,
+  minFontScale: number,
+  ctx: CanvasRenderingContext2D
+): { fontSize: number; width: number } {
+  const minSize = Math.ceil(size * minFontScale);
+  let currentSize = size;
+  ctx.font = `${currentSize}px ${fontFamily || 'sans-serif'}`;
+  let widest = Math.max(...lines.map(line => ctx.measureText(line).width));
+
+  while (currentSize > minSize && widest > targetWidth + 1.5) {
+    currentSize--;
+    ctx.font = `${currentSize}px ${fontFamily || 'sans-serif'}`;
+    widest = Math.max(...lines.map(line => ctx.measureText(line).width));
+  }
+
+  return { fontSize: currentSize, width: Math.max(targetWidth, widest) };
 }
 
 /**
@@ -666,20 +777,33 @@ export function wrapTextEllipse(
     );
 
     if (res && res.lines && res.lines.length > 0) {
-      const candidateResult: WrapEllipseResult = {
+      let candidateResult: WrapEllipseResult = {
         lines: res.lines,
         fontSize: size,
         width: res.width ?? safeWidth,
         height: res.height,
       };
 
+      // If candidate grew wider than targetWidth, attempt shrinkFontTowardWidth give-back
+      if (candidateResult.width > safeWidth + 1.5 && strength > 0) {
+        const minFontScale = 1 - (1 - ELLIPSE_MIN_FONT_SCALE) * strength;
+        const shrunk = shrinkFontTowardWidth(candidateResult.lines, size, fontFamily, safeWidth, minFontScale, ctx);
+        const shrunkLineHeight = shrunk.fontSize * lineSpacing;
+        candidateResult = {
+          lines: candidateResult.lines,
+          fontSize: shrunk.fontSize,
+          width: shrunk.width,
+          height: candidateResult.lines.length * shrunkLineHeight,
+        };
+      }
+
       // If candidate fits both width and height within bubble boundaries, return it immediately
-      if (!res.tooTall && res.height <= targetHeight + 0.5 && res.width <= safeWidth + 1.5) {
+      if (!res.tooTall && candidateResult.height <= targetHeight + 0.5 && candidateResult.width <= safeWidth + 1.5) {
         return candidateResult;
       }
 
       // Track the best candidate that fits height within growth budget as fallback
-      if (!res.tooTall && res.height <= targetHeight + 0.5) {
+      if (!res.tooTall && candidateResult.height <= targetHeight + 0.5) {
         if (!bestCandidateOverall || candidateResult.width < bestCandidateOverall.width) {
           bestCandidateOverall = candidateResult;
         }

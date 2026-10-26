@@ -466,8 +466,8 @@ export class PipelineOrchestrator {
             if (!block) return false;
             const curv = bubbleGeometry?.curvatures?.[index];
             const blockWithCurvature = curv?.isRounded
-              ? { ...block, isRounded: true, borderRadius: curv.borderRadius }
-              : block;
+              ? { ...block, isRounded: true, borderRadius: curv.borderRadius, typesetMode: 'ellipse' as const }
+              : { ...block, isRounded: false, borderRadius: 0, typesetMode: 'simple' as const };
             const fitted = popupState?.renderFontMinSize !== undefined
               ? measureBubbleLayoutFontSize(
                   ctx,
@@ -494,11 +494,13 @@ export class PipelineOrchestrator {
           const typesetBox = ocrResult.typesetBoxes?.[index];
           textBlockItems[position].typesetBox = typesetBox;
           // All active bubble tiers (heuristic, neural, neural-mask) route curved speech bubbles through ellipse typesetting
+          // and rectangular caption boxes through simple wrap
           if (typesetBox) {
             const curv = bubbleGeometry?.curvatures?.[index];
             if (curv) {
               textBlockItems[position].isRounded = curv.isRounded;
               textBlockItems[position].borderRadius = curv.borderRadius;
+              textBlockItems[position].typesetMode = curv.isRounded ? 'ellipse' : 'simple';
             }
           }
         });

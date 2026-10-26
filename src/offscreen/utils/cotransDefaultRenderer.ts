@@ -81,6 +81,8 @@ export interface DefaultRenderRegion {
   isRounded?: boolean;
   /** Mathematical bubble corner radius in pixels. */
   borderRadius?: number;
+  /** Explicit typesetting engine mode: 'balloon' (XianScan), 'ellipse' (DP), or 'simple' (Rectangular wrap). */
+  typesetMode?: 'balloon' | 'ellipse' | 'simple';
 }
 
 /** Result of the default render pass for one region. */
@@ -782,10 +784,12 @@ export function renderRegionDefault(
   const fg = region.textColor || '#000000';
   const bg = region.strokeColor && region.strokeColor !== 'transparent' ? region.strokeColor : null;
 
-  // Use dynamic programming ellipse profile for curved speech bubbles (supporting arbitrary rotation),
-  // and XianScan diamond envelopes for standard text blocks.
+  // Strict 3-route typesetting engine dispatch:
+  // Route 2: Bubble Ellipse DP solver for curved bubbles
+  // Route 3: Simple Rectangular greedy wrap for captions/narration boxes
+  // Route 1: Auto Balloon XianScan diamond reflow for disabled mode on raw OCR polygons
   let fitted: { size: number; lines: string[] } | null = null;
-  if (region.isRounded) {
+  if (region.typesetMode === 'ellipse' || (region.isRounded && region.typesetMode !== 'balloon' && region.typesetMode !== 'simple')) {
     const unhyphenated = unwrapWrappedText(region.translation);
     const rMax = Math.min(normH / 2, normV / 2);
     const radius = region.borderRadius !== undefined ? region.borderRadius : rMax;
@@ -802,7 +806,22 @@ export function renderRegionDefault(
       { minFontSize: Math.max(6, Math.floor(fontSize * 0.4)) }
     );
     fitted = { size: ellipseRes.fontSize, lines: ellipseRes.lines };
+  } else if (region.typesetMode === 'simple') {
+    const unhyphenated = unwrapWrappedText(region.translation);
+    const simpleRes = wrapTextEllipse(
+      unhyphenated,
+      normH,
+      normV,
+      fontSize,
+      fontFamily || DEFAULT_RENDER_FONT_FAMILY,
+      0,
+      ctx,
+      targetLang,
+      { minFontSize: Math.max(6, Math.floor(fontSize * 0.4)) }
+    );
+    fitted = { size: simpleRes.fontSize, lines: simpleRes.lines };
   } else {
+    // Route 1: Auto Balloon XianScan Diamond Reflow
     fitted = measureDefaultLayout(ctx, region.translation, normH, normV, fontSize, maxFontSizeCap, fontFamily, isBold, measureCache, targetLang);
   }
   if (!fitted || fitted.lines.length === 0) return null;

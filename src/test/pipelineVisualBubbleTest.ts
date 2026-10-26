@@ -133,6 +133,7 @@ async function runPipelineVisualBubbleTest() {
           originalText: texts[index], sourceLineCount: ocrResult.lineCounts?.[index],
           isRounded: curv?.isRounded,
           borderRadius: curv?.borderRadius,
+          typesetMode: curv?.isRounded ? 'ellipse' : 'simple',
         };
         const fitted = measureBubbleLayoutFontSize(ctx, block, proposed, DEFAULT_RENDER_FONT_FAMILY);
         return fitted > 0;
@@ -165,6 +166,7 @@ async function runPipelineVisualBubbleTest() {
             sourceLineCount: ocrResult.lineCounts ? ocrResult.lineCounts[i] : undefined,
             isRounded: curv?.isRounded,
             borderRadius: curv?.borderRadius,
+            typesetMode: curv?.isRounded ? 'ellipse' : 'simple',
           });
         }
       }
@@ -244,6 +246,7 @@ async function runPipelineVisualBubbleTest() {
             sourceLineCount: ocrResult.lineCounts ? ocrResult.lineCounts[i] : undefined,
             isRounded: curv?.isRounded,
             borderRadius: curv?.borderRadius,
+            typesetMode: curv?.isRounded ? 'ellipse' : 'simple',
           });
         }
       }
@@ -335,6 +338,7 @@ async function runPipelineVisualBubbleTest() {
               sourceLineCount: ocrResult.lineCounts ? ocrResult.lineCounts[i] : undefined,
               isRounded: curv?.isRounded,
               borderRadius: curv?.borderRadius,
+              typesetMode: curv?.isRounded ? 'ellipse' : 'simple',
             });
           }
         }

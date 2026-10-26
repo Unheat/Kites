@@ -12,6 +12,7 @@ export type StudioTool =
   | 'paint'
   | 'inpaint'
   | 'ocr'
+  | 'color'
   | 'text'
   | 'warp'
   | 'image';
@@ -119,6 +120,13 @@ export interface TextObject {
   isRounded?: boolean;
   /** Target language code for syllable hyphenation (e.g. 'en', 'es', 'de'). */
   targetLang?: string;
+  /** Cached dimensions and font for smooth non-destructive radius slider scrubbing. */
+  roundFit?: {
+    width: number;
+    fontSize: number;
+    fittedWidth?: number;
+    fittedFontSize?: number;
+  };
 }
 
 export interface ImageLayer {
@@ -161,6 +169,10 @@ export interface UndoAction {
   imageLayers?: {
     before: ImageLayer[];
     after: ImageLayer[];
+  };
+  colorState?: {
+    before: boolean;
+    after: boolean;
   };
 }
 

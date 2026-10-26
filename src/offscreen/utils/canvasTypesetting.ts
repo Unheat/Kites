@@ -348,6 +348,8 @@ export interface TextBlockItem {
   isRounded?: boolean;
   /** Mathematical bubble corner radius in pixels. */
   borderRadius?: number;
+  /** Explicit typesetting engine mode: 'balloon' (XianScan), 'ellipse' (DP), or 'simple' (Rectangular wrap). */
+  typesetMode?: 'balloon' | 'ellipse' | 'simple';
 }
 
 /**
@@ -385,7 +387,7 @@ export function measureBubbleLayoutFontSize(
 ): number {
   if (!block.text?.trim() || !Number.isFinite(box.w) || !Number.isFinite(box.h) || box.w < 1 || box.h < 1) return 0;
 
-  if (block.isRounded) {
+  if (block.typesetMode === 'ellipse' || (block.isRounded && block.typesetMode !== 'balloon' && block.typesetMode !== 'simple')) {
     const rMax = Math.min(box.w / 2, box.h / 2);
     const radius = block.borderRadius !== undefined ? block.borderRadius : rMax;
     const strength = rMax > 0 ? Math.min(1.0, radius / rMax) : 1.0;
@@ -403,6 +405,26 @@ export function measureBubbleLayoutFontSize(
     );
     if (!res || !res.lines || res.lines.length === 0) return 0;
     if (res.height <= box.h + 0.5 && res.width <= box.w * 1.2 + 1.5) {
+      return res.fontSize;
+    }
+    return 0;
+  }
+
+  if (block.typesetMode === 'simple') {
+    const targetSize = bubbleLayoutFontTarget(block);
+    const res = wrapTextEllipse(
+      block.text.trim(),
+      box.w,
+      box.h,
+      targetSize,
+      fontFamily,
+      0, // strength 0 = rectangular wrap
+      ctx as any,
+      targetLang,
+      { minFontSize: minFontSize ?? Math.max(6, Math.floor(targetSize * 0.4)) }
+    );
+    if (!res || !res.lines || res.lines.length === 0) return 0;
+    if (res.height <= box.h + 0.5) {
       return res.fontSize;
     }
     return 0;
@@ -686,6 +708,7 @@ function renderTextBlocksDefault(
       sourceDirection: b.direction || 'h',
       isRounded: b.isRounded,
       borderRadius: b.borderRadius,
+      typesetMode: b.typesetMode,
     };
 
     try {
