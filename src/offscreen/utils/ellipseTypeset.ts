@@ -464,7 +464,6 @@ export function layoutEllipseLines(
  */
 function ellipsePieces(
   words: string[],
-  targetWidth: number,
   maxWidth: number,
   measure: (s: string) => number,
   targetLang: string = 'en'
@@ -473,17 +472,16 @@ function ellipsePieces(
   const hyphenBefore = new Set<number>();
   const wordOf: number[] = [];
 
-  // Cut threshold: in narrow bubbles, words exceeding 85% of targetWidth or exceeding maxWidth
-  // must be broken into candidate syllable pieces so the ellipse chords can fit them.
-  const cutThreshold = Math.min(maxWidth, Math.max(20, targetWidth * 0.85));
-
+  // In an ellipse container, center chords accommodate wider words.
+  // A word must only be broken into candidate syllable pieces if its width exceeds
+  // the maximum possible chord across the entire bubble (maxWidth).
   words.forEach((word, i) => {
     const punctMatch = word.match(/^(.*?)([.!?,:;~…"']+)?$/);
     const stem = punctMatch && punctMatch[1] ? punctMatch[1] : word;
     const trailingPunct = punctMatch?.[2] ?? '';
 
     const isLongWord = stem.length >= 6;
-    const needsSplit = isLongWord && measure(word) > cutThreshold;
+    const needsSplit = isLongWord && measure(word) > maxWidth;
     const points = needsSplit ? findHyphenationPoints(stem, targetLang) : [];
 
     if (points.length === 0) {
@@ -528,7 +526,7 @@ function ellipseWrap(
   const heightBound = Number.isFinite(targetHeight);
   const maxWidth = targetWidth * maxWidthGrowth + 1.5;
 
-  const { pieces, hyphenBefore, wordOf } = ellipsePieces(words, targetWidth, maxWidth, measure, targetLang);
+  const { pieces, hyphenBefore, wordOf } = ellipsePieces(words, maxWidth, measure, targetLang);
   const spans = measureLineSpans(pieces, maxWidth, measure, hyphenBefore, wordOf);
   const textWidth = measure(pieces.join(' '));
   const boxAspect = targetWidth / Math.max(1, targetHeight);
@@ -643,17 +641,23 @@ export function wrapRectangular(
   let currentLine = '';
 
   const pushWordWithHyphenation = (word: string): void => {
-    if (measure(word) > targetWidth && word.length > 5) {
-      const syls = syllables(word, targetLang);
+    const punctMatch = word.match(/^(.*?)([.!?,:;~…"']+)?$/);
+    const stem = punctMatch && punctMatch[1] ? punctMatch[1] : word;
+    const trailingPunct = punctMatch?.[2] ?? '';
+
+    if (measure(word) > targetWidth && stem.length > 4) {
+      const syls = syllables(stem, targetLang);
       if (syls.length > 1) {
         let accum = '';
         for (let s = 0; s < syls.length; s++) {
-          const candidate = accum + syls[s] + (s < syls.length - 1 ? INSERTED_HYPHEN : '');
+          const isLast = s === syls.length - 1;
+          const piece = syls[s] + (isLast ? trailingPunct : '');
+          const candidate = accum + piece + (isLast ? '' : INSERTED_HYPHEN);
           if (measure(candidate) <= targetWidth || !accum) {
-            accum += syls[s];
+            accum += syls[s] + (isLast ? trailingPunct : '');
           } else {
             lines.push(accum + INSERTED_HYPHEN);
-            accum = syls[s];
+            accum = piece;
           }
         }
         currentLine = accum;
@@ -696,6 +700,8 @@ export interface WrapEllipseOptions {
   maxWidthGrowth?: number;
   currentText?: string;
   lineSpacing?: number;
+  bold?: boolean;
+  italic?: boolean;
 }
 
 /**
@@ -737,30 +743,40 @@ export function wrapTextEllipse(
   const lineSpacing = options?.lineSpacing ?? 1.25;
   const currentText = options?.currentText ?? '';
 
+  const fontPrefix = `${options?.italic ? 'italic ' : ''}${options?.bold ? 'bold ' : ''}`;
+
   // Pure rectangular fallback for caption boxes
   if (strength <= 0) {
     for (let size = initialFontSize; size >= minFontSize; size--) {
-      ctx.font = `${size}px ${fontFamily || 'sans-serif'}`;
+      ctx.font = `${fontPrefix}${size}px ${fontFamily || 'sans-serif'}`;
       const measure = (s: string) => ctx.measureText(s).width;
       const lineHeight = size * lineSpacing;
       const lines = wrapRectangular(words, safeWidth, measure, targetLang);
       const totalH = lines.length * lineHeight;
-      if (totalH <= targetHeight + 0.01 || size === minFontSize) {
+      const maxW = Math.max(...lines.map(measure));
+      if ((totalH <= targetHeight + 0.01 && maxW <= safeWidth + 1.5) || size === minFontSize) {
         return {
           lines,
           fontSize: size,
-          width: Math.max(...lines.map(measure)),
+          width: maxW,
           height: totalH,
         };
       }
     }
   }
 
-  // Iterative font size search from initial size down to minFontSize
+  // Iterative font size search from initial size down to minFontSize.
+  // In tall vertical bubbles (aspect ratio >= 1.4), evaluate font ceiling from container height
+  // to prevent locking font size to a small initial OCR size that leaves large empty vertical space.
+  const isTallBubble = targetHeight / safeWidth >= 1.4;
+  const startFontSize = isTallBubble
+    ? Math.min(48, Math.max(initialFontSize, Math.round(targetHeight / Math.max(2, Math.ceil(words.length / 2.5)))))
+    : initialFontSize;
+
   let bestCandidateOverall: WrapEllipseResult | null = null;
 
-  for (let size = initialFontSize; size >= minFontSize; size--) {
-    ctx.font = `${size}px ${fontFamily || 'sans-serif'}`;
+  for (let size = startFontSize; size >= minFontSize; size--) {
+    ctx.font = `${fontPrefix}${size}px ${fontFamily || 'sans-serif'}`;
     const measure = (s: string) => ctx.measureText(s).width;
     const lineHeight = size * lineSpacing;
 

@@ -305,7 +305,7 @@ function axisTerritories(container: BoxRect, boxes: BoxRect[]): BoxRect[] | unde
  * @returns Optional fixed boxes; undefined entries retain the untouched Disabled renderer path.
  */
 export function resolveBubbleLayouts(input: BubbleLayoutInput): (BoxRect | undefined)[] {
-  const { boxes, carriers, proposals, shapes, directions, angles, pageWidth, pageHeight, accept } = input;
+  const { boxes, carriers, proposals, shapes, curvatures, directions, angles, pageWidth, pageHeight, accept } = input;
   /** @param box - Candidate/source rectangle. @returns Finite positive geometry inside the page. */
   const validBox = (box: BoxRect): boolean => [box.x, box.y, box.w, box.h].every(Number.isFinite)
     && box.w > 0 && box.h > 0 && box.x >= 0 && box.y >= 0
@@ -342,6 +342,24 @@ export function resolveBubbleLayouts(input: BubbleLayoutInput): (BoxRect | undef
       continue;
     }
     const siblings = group.map((i) => boxes[i]);
+    const isRectangular = group.every((i) => curvatures?.[i] && !curvatures[i].isRounded);
+
+    if (isRectangular) {
+      // Rectangular caption/narration boxes (Koharu anchor_flow_cells & XianScan expansion.rs:230-270):
+      // Rectangular boxes have no organic bubble neck or curved lobes. Each sibling expands into its own
+      // carrier safe core, protected from neighbor collisions via pairwise clearance clamping.
+      const pairwiseCandidates = group.map((i) => {
+        const isAlreadySevered = Boolean(!proposals[i] || shapes[i]?.isSeveredCarrier);
+        const rawBox = computeTypesetBox(boxes[i], carriers[i]!, directions?.[i] === 'v', pageHeight, isAlreadySevered);
+        return pairwiseClampBox(rawBox, boxes[i], boxes, i);
+      });
+
+      if (pairwiseCandidates.every((box, pos) => validBox(box) && accept(group[pos], box, MIN_SHARED_FONT_RATIO))) {
+        group.forEach((i, pos) => { result[i] = pairwiseCandidates[pos]; });
+      }
+      continue;
+    }
+
     const left = Math.min(...group.map((i) => carriers[i]!.x));
     const top = Math.min(...group.map((i) => carriers[i]!.y));
     const container = { x: left, y: top, w: Math.max(...group.map((i) => carriers[i]!.x + carriers[i]!.w)) - left,

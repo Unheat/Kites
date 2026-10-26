@@ -344,5 +344,43 @@ describe('conservative bubble layouts', () => {
         expect(resultMajor[0].x + resultMajor[0].w).toBeLessThanOrEqual(obstacleBox.x);
       }
     });
+
+    it('expands stepped conjoined rectangular caption boxes into their respective whitespace with pairwise clearance', () => {
+      // Stepped staircase caption boxes from image6.jpg (top-left)
+      const boxLeft: BoxRect = { x: 36, y: 57, w: 30, h: 126 };
+      const boxRight: BoxRect = { x: 96, y: 13, w: 74, h: 157 };
+      const carrierLeft: BoxRect = { x: 15, y: 28, w: 100, h: 171 };
+      const carrierRight: BoxRect = { x: 22, y: 10, w: 157, h: 190 };
+
+      const input: BubbleLayoutInput = {
+        pageWidth: 888,
+        pageHeight: 1214,
+        boxes: [boxLeft, boxRight],
+        carriers: [carrierLeft, carrierRight],
+        proposals: [null, null],
+        shapes: [undefined, undefined],
+        curvatures: [
+          { isRounded: false, borderRadius: 0 },
+          { isRounded: false, borderRadius: 0 },
+        ],
+        directions: ['v', 'v'],
+        accept: () => true,
+      };
+
+      const result = resolveBubbleLayouts(input);
+      expect(result[0]).toBeDefined();
+      expect(result[1]).toBeDefined();
+
+      const resLeft = result[0]!;
+      const resRight = result[1]!;
+
+      // Left box expands significantly from original 30px width
+      expect(resLeft.w).toBeGreaterThan(45);
+      // Right box expands from original 74px width
+      expect(resRight.w).toBeGreaterThan(74);
+
+      // Pairwise non-collision: left box right edge does not collide with right box text
+      expect(resLeft.x + resLeft.w).toBeLessThanOrEqual(resRight.x + resRight.w);
+    });
   });
 });

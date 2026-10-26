@@ -194,5 +194,23 @@ describe('ellipseTypeset module', () => {
       const unwrapped = unwrapWrappedText('ここで持ちこたえる\nのは私です。');
       expect(unwrapped).toBe('ここで持ちこたえるのは私です。');
     });
+
+    it('does not split words that fit within maxWidth even if above 85% width', () => {
+      // Container width 100px. A word measuring 90px fits on the center equator line (maxWidth = 121.5px).
+      // It must not be chopped into syllables with inserted hyphens.
+      const text = 'Short word reinforcements here';
+      const result = wrapTextEllipse(text, 100, 100, 14, 'sans-serif', 1.0, mockCtx, 'en');
+      expect(result.lines.some((l) => l.includes('reinfor-') || l.includes('-\u2060'))).toBe(false);
+    });
+
+    it('fills tall vertical burst bubble height cleanly', () => {
+      const text = "I'm here to stand up to the teacher. You should retreat quickly and get reinforcements.";
+      const targetWidth = 100;
+      const targetHeight = 200;
+      const result = wrapTextEllipse(text, targetWidth, targetHeight, 14, 'sans-serif', 0.30, mockCtx, 'en');
+
+      expect(result.lines.length).toBeGreaterThanOrEqual(6);
+      expect(result.height).toBeGreaterThanOrEqual(targetHeight * 0.60);
+    });
   });
 });

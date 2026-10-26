@@ -166,7 +166,7 @@ export const MAX_FONT_SIZE_CEILING = 48;
 /**
  * Fast, greedy word-wrapping without diamond balancing (Torii ported mode).
  */
-function wrapSimpleGreedy(
+export function wrapSimpleGreedy(
   ctx: CanvasRenderingContext2D,
   text: string,
   width: number,
@@ -367,19 +367,34 @@ export function recalculateBlockTypeset(
   const previousLetterSpacing = ctx.letterSpacing;
   ctx.letterSpacing = `${style.letterSpacing ?? 0}px`;
   try {
-    // Simple Mode: Greedy rectangular wrap without auto font scaling or diamond reflow.
-    if (mode === 'simple') {
-      const lines = wrapSimpleGreedy(ctx, text, width, fallbackSize, fontFamily, style);
-      return { fontSize: fallbackSize, lines };
-    }
-
     const targetLang = style.targetLang || 'en';
+
+    // Simple Mode: Rectangular wrap with soft hyphenation and height adaptation (Route 3).
+    // Uses wrapTextEllipse with strength 0, matching the pipeline cotransDefaultRenderer.
+    if (mode === 'simple') {
+      const unhyphenated = unwrapWrappedText(text);
+      const result = wrapTextEllipse(
+        unhyphenated,
+        width,
+        height,
+        fallbackSize,
+        fontFamily || 'sans-serif',
+        0, // strength 0 = flat rectangle
+        ctx,
+        targetLang,
+        { minFontSize: 6, bold: style.bold, italic: style.italic }
+      );
+      return {
+        fontSize: result.fontSize,
+        lines: result.lines && result.lines.length > 0 ? result.lines : [unhyphenated],
+      };
+    }
 
     // Ellipse Mode: Dynamic programming chord profile, soft hyphenation, and upper-limit bounds
     if (mode === 'ellipse') {
       const unhyphenated = unwrapWrappedText(text);
       const rMax = Math.min(width / 2, height / 2);
-      const radius = style.borderRadius !== undefined ? style.borderRadius : rMax;
+      const radius = style.borderRadius !== undefined && style.borderRadius > 0 ? style.borderRadius : rMax;
       const strength = rMax > 0 ? Math.min(1.0, radius / rMax) : 1.0;
       const result = wrapTextEllipse(
         unhyphenated,
@@ -390,7 +405,7 @@ export function recalculateBlockTypeset(
         strength,
         ctx,
         targetLang,
-        { minFontSize: 6 }
+        { minFontSize: 6, bold: style.bold, italic: style.italic }
       );
       return {
         fontSize: result.fontSize,

@@ -359,13 +359,18 @@ export function computeTypesetBox(
   // For unpartitioned carriers, solitary vertical CJK text centers at carrierCx.
   // But if the text is noticeably off-center (>10% deviation, e.g. conjoined staircase boxes or
   // multi-utterance bubbles), keep it anchored at textCx to prevent dragging it toward boundary seams.
-  const isOffCenter = Math.abs(textCx - carrierCx) / Math.max(1, carrier.w) > 0.10;
+  // For pre-partitioned sub-chambers, the territory has already been carved for this utterance,
+  // so center within the territory (carrierCx).
+  // For unpartitioned carriers, solitary vertical CJK text centers at carrierCx.
+  // But if the text is significantly off-center (>20% deviation, e.g. text hugging a corner while
+  // another speaker occupies the opposite side), keep it anchored at textCx to prevent dragging it toward seams.
+  const isOffCenter = Math.abs(textCx - carrierCx) / Math.max(1, carrier.w) > 0.20;
   const targetCx = isSubChamber
     ? carrierCx
     : (isVertical && !isOffCenter ? carrierCx : textCx);
 
   const targetW = (!isSubChamber && isOffCenter)
-    ? Math.min(expandedW, Math.round(textBox.w * 1.35))
+    ? Math.min(expandedW, Math.round(textBox.w * 1.40))
     : expandedW;
 
   const centered: BoxRect = {
