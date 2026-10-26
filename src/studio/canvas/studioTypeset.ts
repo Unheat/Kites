@@ -1,5 +1,5 @@
 import { measureDefaultLayout } from '../../offscreen/utils/cotransDefaultRenderer';
-import { wrapTextContour } from '../../offscreen/utils/contourTypeset';
+import { wrapTextContour, generateBubbleContour } from '../../offscreen/utils/contourTypeset';
 import { wrapRectangular } from '../../offscreen/utils/ellipseTypeset';
 import { unwrapWrappedText } from '../../offscreen/utils/typography';
 import type { TypesetMode } from '../../shared/constants';
@@ -386,17 +386,12 @@ export function recalculateBlockTypeset(
       };
     }
 
-    // Contour / Ellipse Mode: Koharu 2D scanline ray-casting on bubble polygon or rectangular box (Route 2)
+    // Contour / Ellipse Mode: Koharu 2D scanline ray-casting on bubble polygon or curved contour (Route 2)
     if (mode === 'contour' || mode === 'ellipse') {
       const unhyphenated = unwrapWrappedText(text);
       const contour = (style.contourPoints && style.contourPoints.length >= 3)
         ? style.contourPoints
-        : [
-            { x: 0, y: 0 },
-            { x: width, y: 0 },
-            { x: width, y: height },
-            { x: 0, y: height }
-          ];
+        : generateBubbleContour(width, height, style.borderRadius);
 
       const result = wrapTextContour(
         unhyphenated,

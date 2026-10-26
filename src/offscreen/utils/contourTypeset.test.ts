@@ -5,7 +5,8 @@ import {
   exactProfiledLineBreaks,
   buildSegmentMeasures,
   largestFittingFontSize,
-  wrapTextContour
+  wrapTextContour,
+  generateBubbleContour
 } from './contourTypeset';
 import type { Point2D } from '../../shared/utils/geometry';
 
@@ -135,5 +136,35 @@ describe('Koharu contourTypeset', () => {
     expect(result.lines.length).toBeGreaterThanOrEqual(4);
     expect(result.fontSize).toBeGreaterThanOrEqual(10);
     expect(result.overflowed).toBe(false);
+  });
+
+  describe('generateBubbleContour', () => {
+    it('generates a smooth 32-vertex ellipse when radius is omitted or spans half dimension', () => {
+      const ellipse = generateBubbleContour(200, 100);
+      expect(ellipse).toHaveLength(32);
+      // Min X and Max X should be close to 0 and 200
+      const xs = ellipse.map(p => p.x);
+      expect(Math.min(...xs)).toBeCloseTo(0, 1);
+      expect(Math.max(...xs)).toBeCloseTo(200, 1);
+    });
+
+    it('generates a rounded rectangle when radius is smaller than half dimension', () => {
+      const rounded = generateBubbleContour(200, 100, 20);
+      expect(rounded.length).toBeGreaterThanOrEqual(32);
+      const xs = rounded.map(p => p.x);
+      expect(Math.min(...xs)).toBeGreaterThanOrEqual(0);
+      expect(Math.max(...xs)).toBeLessThanOrEqual(200);
+    });
+
+    it('generates a sharp 4-vertex rectangle when radius is 0', () => {
+      const rect = generateBubbleContour(200, 100, 0);
+      expect(rect).toHaveLength(4);
+      expect(rect).toEqual([
+        { x: 0, y: 0 },
+        { x: 200, y: 0 },
+        { x: 200, y: 100 },
+        { x: 0, y: 100 },
+      ]);
+    });
   });
 });

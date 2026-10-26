@@ -47,6 +47,12 @@ export const MIN_HYPHEN_WORD_LENGTH = 6;
 /** Minimum syllable side length required before or after a hyphen. */
 export const MIN_HYPHEN_SIDE_LENGTH = 3;
 
+/** Number of discrete vertices used to approximate a continuous ellipse contour. */
+export const CONTOUR_ELLIPSE_POINTS = 32;
+
+/** Number of discrete segments used per corner when contouring a rounded rectangle. */
+export const CORNER_CONTOUR_SEGMENTS = 8;
+
 /**
  * Geometric horizontal scanline interval allowed for text placement.
  */
@@ -120,6 +126,69 @@ function extractStemAndPunct(word: string): { stem: string; trailingPunct: strin
     return { stem: match[1], trailingPunct: match[2] };
   }
   return { stem: word, trailingPunct: '' };
+}
+
+/**
+ * Generates polygon boundary points for a speech bubble or ellipse container.
+ * When radius is omitted or >= min(w, h)/2, generates a smooth 32-vertex ellipse.
+ * When 0 < radius < min(w, h)/2, generates a rounded rectangle contour.
+ * When radius <= 0, generates a sharp 4-vertex rectangle.
+ *
+ * @param width - Available bubble width in pixels.
+ * @param height - Available bubble height in pixels.
+ * @param radius - Optional corner curvature radius in pixels.
+ * @returns Array of 2D polygon vertices in clockwise boundary order.
+ */
+export function generateBubbleContour(width: number, height: number, radius?: number): Point2D[] {
+  const maxR = Math.min(width, height) / 2;
+  const r = radius !== undefined ? Math.max(0, Math.min(maxR, radius)) : maxR;
+
+  if (r <= 0) {
+    return [
+      { x: 0, y: 0 },
+      { x: width, y: 0 },
+      { x: width, y: height },
+      { x: 0, y: height },
+    ];
+  }
+
+  // Smooth ellipse when radius spans the full half-dimension
+  if (r >= maxR * 0.95) {
+    const cx = width / 2;
+    const cy = height / 2;
+    const rx = width / 2;
+    const ry = height / 2;
+    const points: Point2D[] = [];
+    for (let i = 0; i < CONTOUR_ELLIPSE_POINTS; i++) {
+      const angle = (2 * Math.PI * i) / CONTOUR_ELLIPSE_POINTS;
+      points.push({
+        x: cx + rx * Math.cos(angle),
+        y: cy + ry * Math.sin(angle),
+      });
+    }
+    return points;
+  }
+
+  // Rounded rectangle with curved corners
+  const points: Point2D[] = [];
+  const corners = [
+    { cx: width - r, cy: r, start: -Math.PI / 2 },
+    { cx: width - r, cy: height - r, start: 0 },
+    { cx: r, cy: height - r, start: Math.PI / 2 },
+    { cx: r, cy: r, start: Math.PI },
+  ];
+
+  for (const corner of corners) {
+    for (let i = 0; i <= CORNER_CONTOUR_SEGMENTS; i++) {
+      const angle = corner.start + (Math.PI / 2) * (i / CORNER_CONTOUR_SEGMENTS);
+      points.push({
+        x: corner.cx + r * Math.cos(angle),
+        y: corner.cy + r * Math.sin(angle),
+      });
+    }
+  }
+
+  return points;
 }
 
 /**

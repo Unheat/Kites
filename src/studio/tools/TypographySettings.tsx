@@ -294,10 +294,10 @@ export const TypographySettings: React.FC = () => {
       ...(globalEditMode ? { globalTypesetMode: newMode } : {}),
     });
     const modeLabels: Record<TypesetMode, string> = {
-      contour: 'Bubble Ellipse',
-      ellipse: 'Bubble Ellipse',
-      balloon: 'Auto Balloon',
-      simple: 'Simple Wrap',
+      contour: 'Bubble Contour',
+      ellipse: 'Bubble Contour',
+      balloon: 'Balanced Fit',
+      simple: 'Caption Box',
     };
     studioUndoStack.push({
       id: `typeset-mode-${Date.now()}`,
@@ -679,16 +679,16 @@ export const TypographySettings: React.FC = () => {
         <div className="flex p-0.5 rounded-lg bg-[#090a0f] border border-[#282d3f] text-xs">
           <button
             type="button"
-            onClick={() => handleToggleTypesetMode('ellipse')}
+            onClick={() => handleToggleTypesetMode('contour')}
             className={`flex-1 py-1.5 px-1.5 rounded-md font-semibold transition-all flex items-center justify-center gap-1 cursor-pointer text-[11px] ${
               effectiveTypesetMode === 'contour' || effectiveTypesetMode === 'ellipse'
                 ? 'bg-[#1c1f2e] text-[#f4446d] shadow-xs'
                 : 'text-slate-400 hover:text-white'
             }`}
-            title="Bubble Ellipse: 2D contour scanline fitted to speech bubble curves with auto-snapping height"
+            title="Bubble Contour: 2D scanline engine fitted to speech bubble curves and ovals with dynamic font sizing (Koharu engine)"
           >
             <CircleDot size={12} className={effectiveTypesetMode === 'contour' || effectiveTypesetMode === 'ellipse' ? 'text-[#f4446d]' : ''} />
-            <span className="truncate">Bubble Ellipse</span>
+            <span className="truncate">Bubble Contour</span>
           </button>
           <button
             type="button"
@@ -698,10 +698,10 @@ export const TypographySettings: React.FC = () => {
                 ? 'bg-[#1c1f2e] text-[#f4446d] shadow-xs'
                 : 'text-slate-400 hover:text-white'
             }`}
-            title="Auto Balloon: Balances lines into speech bubble diamond envelopes and auto-fits font size (Pipeline typesystem)"
+            title="Balanced Fit: Balances dialogue line lengths into diamond envelopes with auto font scaling (Cotrans / XianScan engine)"
           >
             <Sparkles size={12} className={effectiveTypesetMode === 'balloon' ? 'text-[#f4446d]' : ''} />
-            <span className="truncate">Auto Balloon</span>
+            <span className="truncate">Balanced Fit</span>
           </button>
           <button
             type="button"
@@ -711,10 +711,10 @@ export const TypographySettings: React.FC = () => {
                 ? 'bg-[#1c1f2e] text-[#f4446d] shadow-xs'
                 : 'text-slate-400 hover:text-white'
             }`}
-            title="Simple Wrap: Greedy line wrapping without auto font scaling on subsequent edits"
+            title="Caption Box: Fixed font rectangular text wrap for square caption and narration panels"
           >
             <AlignLeft size={12} className={effectiveTypesetMode === 'simple' ? 'text-[#f4446d]' : ''} />
-            <span className="truncate">Simple Wrap</span>
+            <span className="truncate">Caption Box</span>
           </button>
         </div>
         <p className="mt-1 text-[10px] text-slate-500">

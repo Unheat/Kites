@@ -175,6 +175,30 @@ describe('Studio Algorithmic Typeset & Line Reflow', () => {
     expect(resizedHeight.height).toBe(350);
   });
 
+  it('fits dialogue into Koharu contour using generated bubble contour when contourPoints is omitted', () => {
+    const text = 'Wait... Teacher, please stop right now before it is too late!';
+    const result = recalculateBlockTypeset(text, 'sans-serif', 220, 160, 16, 'contour', {
+      borderRadius: 40,
+    });
+    expect(result.lines.length).toBeGreaterThanOrEqual(2);
+    expect(result.fontSize).toBeGreaterThanOrEqual(8);
+  });
+
+  it('fits dialogue into exact custom contour polygon when contourPoints are provided', () => {
+    const text = 'Hello world from custom contour';
+    const customContour = [
+      { x: 10, y: 10 },
+      { x: 200, y: 10 },
+      { x: 200, y: 150 },
+      { x: 10, y: 150 },
+    ];
+    const result = recalculateBlockTypeset(text, 'sans-serif', 200, 150, 16, 'contour', {
+      contourPoints: customContour,
+    });
+    expect(result.lines.length).toBeGreaterThanOrEqual(1);
+    expect(result.fontSize).toBeGreaterThanOrEqual(8);
+  });
+
   describe('CJK Vertical Layout & Column Wrapping', () => {
     const japaneseDialogue = 'こんにちは、元気ですか？今日もいい天気ですね。';
 
