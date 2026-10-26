@@ -26,6 +26,7 @@ export interface TranslationJob {
   tabId?: number; // Tracks which tab requested this job for the Pub/Sub response
   ocrEngineId?: string;
   inpaintTier?: string;
+  colorTier?: string;
   translationEngineId?: string;
   bubbleMode?: string;
   renderFontPresetId?: string;

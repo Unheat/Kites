@@ -21,6 +21,7 @@ export type MessageType =
   | 'CAPTURE_TRANSLATION_ERROR' // Background -> Content
   | 'STUDIO_INPAINT' // Studio -> Background -> Offscreen
   | 'STUDIO_OCR' // Studio -> Background -> Offscreen
+  | 'STUDIO_COLORIZE' // Studio -> Background -> Offscreen
   | 'ENQUEUE_STUDIO_JOB'; // Studio -> Background serialized queue
 
 export interface TranslateImageMessage {
@@ -89,7 +90,12 @@ export interface StudioOcrPayload {
   inpaintEngineId?: string;
   translationEngineId?: string;
 }
-export type ModelCategory = 'translation' | 'inpaint' | 'ocr' | 'bubble';
+export type ModelCategory = 'translation' | 'inpaint' | 'ocr' | 'bubble' | 'color';
+
+export interface StudioColorizePayload {
+  imageBase64: string;
+  colorTier?: string;
+}
 
 export interface ViewportSelection {
   left: number;

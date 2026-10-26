@@ -170,3 +170,47 @@ function loadImageFromDataUrl(dataUrl: string): Promise<HTMLImageElement> {
     img.src = dataUrl;
   });
 }
+
+/**
+ * Dispatches a full manga page colorization request to the offscreen document.
+ *
+ * @param canvas - Canvas containing the image to colorize.
+ * @param colorTier - Requested colorization engine tier.
+ * @returns HTMLImageElement loaded with the colorized image.
+ */
+export async function requestStudioColorize(
+  canvas: HTMLCanvasElement,
+  colorTier?: string
+): Promise<HTMLImageElement> {
+  const imageBase64 = canvas.toDataURL('image/png');
+
+  const response = await new Promise<{ status: string; colorizedBase64?: string; error?: string }>(
+    (resolve) => {
+      chrome.runtime.sendMessage(
+        {
+          target: 'background',
+          source: 'studio',
+          request: true,
+          type: 'STUDIO_COLORIZE',
+          payload: {
+            imageBase64,
+            colorTier,
+          },
+        },
+        (res) => {
+          if (chrome.runtime.lastError) {
+            resolve({ status: 'error', error: chrome.runtime.lastError.message });
+          } else {
+            resolve(res || { status: 'error', error: 'No response from colorization engine' });
+          }
+        }
+      );
+    }
+  );
+
+  if (response.status !== 'success' || !response.colorizedBase64) {
+    throw new Error(response.error || 'Studio Colorize failed in offscreen document');
+  }
+
+  return await loadImageFromDataUrl(response.colorizedBase64);
+}

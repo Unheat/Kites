@@ -33,7 +33,7 @@ import {
 import { db } from '../db';
 import { studioStore, useStudioStore } from './state/studioStore';
 import { studioUndoStack } from './state/undoStack';
-import { requestStudioOcr } from './bridge/offscreenStudioBridge';
+import { requestStudioOcr, requestStudioColorize } from './bridge/offscreenStudioBridge';
 import {
   renderFullCompositeCanvas,
   downloadCanvasAsFile,
@@ -45,6 +45,7 @@ import { EraseSettings } from './tools/EraseSettings';
 import { PaintSettings } from './tools/PaintSettings';
 import { InpaintSettings } from './tools/InpaintSettings';
 import { OcrSettings } from './tools/OcrSettings';
+import { ColorSettings } from './tools/ColorSettings';
 import { TypographySettings } from './tools/TypographySettings';
 import { WarpSettings } from './tools/WarpSettings';
 import { ImageLayerSettings } from './tools/ImageLayerSettings';
@@ -86,6 +87,7 @@ const TOOLS: { id: StudioTool; label: string; icon: React.ComponentType<{ classN
   { id: 'paint', label: 'Freehand Paint Brush', icon: Brush, shortcut: 'Ctrl+2' },
   { id: 'inpaint', label: 'Local AI Inpaint', icon: Sparkles, shortcut: 'Ctrl+3' },
   { id: 'ocr', label: 'Manual Translate OCR', icon: ScanText, shortcut: 'Ctrl+4' },
+  { id: 'color', label: 'Manga Colorizer', icon: Palette, shortcut: 'Ctrl+7' },
   { id: 'warp', label: 'Warp & Perspective', icon: Maximize2, shortcut: 'Ctrl+5' },
   { id: 'image', label: 'Stickers & Layers', icon: ImageIcon, shortcut: 'Ctrl+6' },
 ];
@@ -122,6 +124,8 @@ export const Studio: React.FC<StudioProps> = ({
   const [zoomDropdownOpen, setZoomDropdownOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isRetranslating, setIsRetranslating] = useState(false);
+  const [isColorizing, setIsColorizing] = useState(false);
+  const [isPageColorized, setIsPageColorized] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [exportDropdownOpen, setExportDropdownOpen] = useState(false);
   const [copiedImageToast, setCopiedImageToast] = useState(false);
@@ -171,16 +175,32 @@ export const Studio: React.FC<StudioProps> = ({
 
   // Subscribe to undo stack updates
   useEffect(() => {
-    (studioUndoStack as any).listeners = {
-      onStackChange: (u: boolean, r: boolean) => {
-        setCanUndo(u);
-        setCanRedo(r);
-      },
-    };
-    return () => {
-      (studioUndoStack as any).listeners = {};
-    };
+    return studioUndoStack.subscribe((u: boolean, r: boolean) => {
+      setCanUndo(u);
+      setCanRedo(r);
+    });
   }, []);
+
+  // Reset undo history when switching manga pages or unmounting
+  useEffect(() => {
+    studioUndoStack.clear();
+    return () => {
+      studioUndoStack.clear();
+    };
+  }, [jobId]);
+
+  // Hydrate initial colorized status from database record
+  useEffect(() => {
+    if (!jobId) {
+      setIsPageColorized(false);
+      return;
+    }
+    db.translationJobs.get(jobId).then((job) => {
+      setIsPageColorized(Boolean(job?.colorTier && job.colorTier !== 'none'));
+    }).catch(() => {
+      setIsPageColorized(false);
+    });
+  }, [jobId]);
 
   // Studio Keyboard shortcuts
   useEffect(() => {
@@ -224,6 +244,9 @@ export const Studio: React.FC<StudioProps> = ({
       } else if ((e.ctrlKey || e.metaKey) && e.key === '6') {
         e.preventDefault();
         studioStore.setState({ activeTool: 'image', isInfoPanelOpen: false });
+      } else if ((e.ctrlKey || e.metaKey) && e.key === '7') {
+        e.preventDefault();
+        studioStore.setState({ activeTool: 'color', isInfoPanelOpen: false });
       }
     };
 
@@ -248,10 +271,18 @@ export const Studio: React.FC<StudioProps> = ({
         if (ctx) ctx.putImageData(patch.patchImageData, patch.x, patch.y);
       },
       applyTextObjects: (objs: TextObject[]) => {
-        studioStore.setState({ textObjects: objs });
+        const selectedId = studioStore.getState().selectedTextId;
+        const stillExists = objs.some((t) => t.id === selectedId);
+        studioStore.setState({
+          textObjects: objs,
+          selectedTextId: stillExists ? selectedId : null,
+        });
       },
       applyImageLayers: (layers: ImageLayer[]) => {
         studioStore.setState({ imageLayers: layers });
+      },
+      applyColorState: (isColorized: boolean) => {
+        setIsPageColorized(isColorized);
       },
     });
   };
@@ -264,10 +295,18 @@ export const Studio: React.FC<StudioProps> = ({
         if (ctx) ctx.putImageData(patch.patchImageData, patch.x, patch.y);
       },
       applyTextObjects: (objs: TextObject[]) => {
-        studioStore.setState({ textObjects: objs });
+        const selectedId = studioStore.getState().selectedTextId;
+        const stillExists = objs.some((t) => t.id === selectedId);
+        studioStore.setState({
+          textObjects: objs,
+          selectedTextId: stillExists ? selectedId : null,
+        });
       },
       applyImageLayers: (layers: ImageLayer[]) => {
         studioStore.setState({ imageLayers: layers });
+      },
+      applyColorState: (isColorized: boolean) => {
+        setIsPageColorized(isColorized);
       },
     });
   };
@@ -397,6 +436,16 @@ export const Studio: React.FC<StudioProps> = ({
       bgCanvas.toBlob(async (blob) => {
         if (blob) {
           await onSave(blob, textObjects);
+          if (jobId) {
+            try {
+              const currentColorTier = isPageColorized
+                ? (studioStore.getState().selectedColorEngineId || 'manga-colorization-v2')
+                : 'none';
+              await db.translationJobs.update(jobId, { colorTier: currentColorTier });
+            } catch (err) {
+              console.warn('[Studio] Failed to update colorTier on save:', err);
+            }
+          }
         }
         setIsSaving(false);
         setToastMessage('Saved changes to library!');
@@ -405,6 +454,90 @@ export const Studio: React.FC<StudioProps> = ({
     } catch (err) {
       console.error('[Studio] Save failed:', err);
       setIsSaving(false);
+    }
+  };
+
+  const handleColorizePage = async () => {
+    if (isColorizing) return;
+    const bgCanvas = getWorkingCanvas();
+    if (!bgCanvas) {
+      setToastMessage('Working canvas not found');
+      return;
+    }
+
+    const ctx = bgCanvas.getContext('2d');
+    if (!ctx) return;
+
+    setIsColorizing(true);
+    setToastMessage('Colorizing manga page with AI…');
+
+    try {
+      const prevImageData = ctx.getImageData(0, 0, imageWidth, imageHeight);
+      const selectedColorId = studioStore.getState().selectedColorEngineId || 'manga-colorization-v2';
+
+      // Draw working background onto canvas patch for colorization
+      const patchCanvas = document.createElement('canvas');
+      patchCanvas.width = imageWidth;
+      patchCanvas.height = imageHeight;
+      const pCtx = patchCanvas.getContext('2d');
+      if (pCtx) {
+        pCtx.drawImage(bgCanvas, 0, 0, imageWidth, imageHeight);
+      }
+
+      const colorizedImage = await requestStudioColorize(patchCanvas, selectedColorId);
+      ctx.drawImage(colorizedImage, 0, 0, imageWidth, imageHeight);
+      const nextImageData = ctx.getImageData(0, 0, imageWidth, imageHeight);
+
+      // Record in undo stack for instant Ctrl+Z / Ctrl+Shift+Z recovery
+      studioUndoStack.push({
+        id: `colorize-${Date.now()}`,
+        timestamp: Date.now(),
+        description: 'Colorize manga page',
+        rasterPatch: {
+          before: {
+            x: 0,
+            y: 0,
+            width: imageWidth,
+            height: imageHeight,
+            patchImageData: prevImageData,
+          },
+          after: {
+            x: 0,
+            y: 0,
+            width: imageWidth,
+            height: imageHeight,
+            patchImageData: nextImageData,
+          },
+        },
+        colorState: {
+          before: false,
+          after: true,
+        },
+      });
+
+      setIsPageColorized(true);
+
+      // Persist color tier to database job record
+      if (jobId) {
+        try {
+          await db.translationJobs.update(jobId, {
+            colorTier: selectedColorId,
+          });
+        } catch (dbErr) {
+          console.warn('[Studio] Failed to sync colorTier to IndexedDB:', dbErr);
+        }
+      }
+
+      setToastMessage('Page colorized · Press Ctrl+Z to undo');
+      setTimeout(() => {
+        setToastMessage((curr) => (curr?.includes('colorized') ? null : curr));
+      }, 4500);
+    } catch (err: any) {
+      console.error('[Studio] Colorization failed:', err);
+      setToastMessage(`Colorization failed: ${err?.message || 'Inference error'}`);
+      setTimeout(() => setToastMessage(null), 4000);
+    } finally {
+      setIsColorizing(false);
     }
   };
 
@@ -593,8 +726,8 @@ export const Studio: React.FC<StudioProps> = ({
             </div>
           </div>
 
-          {/* Tools Grid (7 tool buttons in 1 row) */}
-          <div className="grid grid-cols-7 gap-1 p-1 bg-[#090a0f] border border-[#262a3b] rounded-lg shrink-0">
+          {/* Tools Grid (8 tool buttons in 1 row) */}
+          <div className="grid grid-cols-8 gap-1 p-1 bg-[#090a0f] border border-[#262a3b] rounded-lg shrink-0">
             {TOOLS.map((t) => (
               <button
                 key={t.id}
@@ -621,6 +754,13 @@ export const Studio: React.FC<StudioProps> = ({
                 {activeTool === 'paint' && <PaintSettings />}
                 {activeTool === 'inpaint' && <InpaintSettings />}
                 {activeTool === 'ocr' && <OcrSettings />}
+                {activeTool === 'color' && (
+                  <ColorSettings
+                    onColorize={handleColorizePage}
+                    isColorizing={isColorizing}
+                    isPageColorized={isPageColorized}
+                  />
+                )}
                 {(activeTool === 'text' || (activeTool as any) === 'select') && <TypographySettings />}
                 {activeTool === 'warp' && <WarpSettings />}
                 {activeTool === 'image' && (

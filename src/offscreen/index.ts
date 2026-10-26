@@ -5,9 +5,11 @@ import type {
   ProcessJobMessage,
   StudioInpaintPayload,
   StudioOcrPayload,
+  StudioColorizePayload,
   PopupState,
 } from '../shared/types';
 import type { Point2D } from './engines/inpaint/BaseInpaintEngine';
+import type { ColorEngineOptions } from './engines/color/BaseColorEngine';
 import { extractMaskPolygons } from './utils/maskPolygonExtractor';
 import { pipelineOrchestrator } from './services/PipelineOrchestrator';
 import { translationManager } from './services/TranslationManager';
@@ -18,7 +20,8 @@ import { CustomApiEngine } from './engines/translation/CustomApiEngine';
 import { inpaintRegistry } from './engines/inpaint/inpaintRegistry';
 import { BUILTIN_INPAINT_IDS } from '../shared/inpaintTiers';
 import { colorRegistry } from './engines/color/colorRegistry';
-import { BUILTIN_COLOR_IDS } from '../shared/colorTiers';
+import { BUILTIN_COLOR_IDS, type ColorTierId } from '../shared/colorTiers';
+import { isColorGpuAvailable } from '../shared/utils/hardwareUtils';
 import { ocrRegistry, resolveOcrTier } from './engines/ocr/ocrRegistry';
 import { bubbleRegistry } from './engines/bubble/bubbleRegistry';
 import { InpaintCacheManager } from './services/InpaintCacheManager';
@@ -134,6 +137,13 @@ chrome.runtime.onMessage.addListener((message: ProcessJobMessage | any, _sender:
 
   if (message.type === 'STUDIO_OCR' && message.payload) {
     handleStudioOcr(message.payload)
+      .then((res) => sendResponse({ status: 'success', ...res }))
+      .catch((err) => sendResponse({ status: 'error', error: err instanceof Error ? err.message : String(err) }));
+    return true;
+  }
+
+  if (message.type === 'STUDIO_COLORIZE' && message.payload) {
+    handleStudioColorize(message.payload)
       .then((res) => sendResponse({ status: 'success', ...res }))
       .catch((err) => sendResponse({ status: 'error', error: err instanceof Error ? err.message : String(err) }));
     return true;
@@ -639,6 +649,53 @@ async function handleStudioInpaint(payload: StudioInpaintPayload): Promise<{ inp
   const cleanedBase64 = await blobToBase64(cleanedBlob);
 
   return { inpaintedPatchBase64: cleanedBase64 };
+}
+
+/**
+ * Executes full manga page colorization in the offscreen document for Studio V2.
+ * @param payload - Canvas image base64 and requested color tier.
+ * @returns Colorized image as base64 PNG data URL.
+ */
+async function handleStudioColorize(payload: StudioColorizePayload): Promise<{ colorizedBase64: string }> {
+  const imageRes = await fetch(payload.imageBase64);
+  const imageBuf = await imageRes.arrayBuffer();
+
+  let colorTier: string = payload.colorTier || '';
+  const popupState = await new Promise<any>((resolve) => {
+    chrome.runtime.sendMessage(
+      { type: 'GET_POPUP_STATE', target: 'background', source: 'offscreen', request: true },
+      (res) => resolve(res || {})
+    );
+  });
+
+  if (!colorTier || colorTier === 'none') {
+    colorTier = popupState.activeColorId || 'manga-colorization-v2';
+  }
+
+  const entry = colorRegistry[colorTier];
+  if (entry && !BUILTIN_COLOR_IDS.has(colorTier)) {
+    const isCached = await ColorCacheManager.isModelCached(entry.onnxUrl);
+    if (!isCached) {
+      throw new Error(`Color model "${colorTier}" is not downloaded yet. Please download it first.`);
+    }
+  }
+
+  const colorOptions: ColorEngineOptions = {
+    preferGpu: popupState ? isColorGpuAvailable(popupState) : false,
+  };
+
+  const colorizedBuffer = await pipelineOrchestrator.getColorManager().colorize(
+    imageBuf,
+    undefined,
+    colorTier as ColorTierId,
+    undefined,
+    colorOptions
+  );
+
+  const colorizedBlob = new Blob([colorizedBuffer], { type: 'image/png' });
+  const colorizedBase64 = await blobToBase64(colorizedBlob);
+
+  return { colorizedBase64 };
 }
 
 /**

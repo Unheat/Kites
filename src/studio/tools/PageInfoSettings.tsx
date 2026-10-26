@@ -12,6 +12,7 @@ import { liveQuery } from 'dexie';
 import { db, type TranslationJob, type ImageRecord, type TextBlock } from '../../db';
 import { useStudioStore } from '../state/studioStore';
 import { RENDER_FONT_PRESETS } from '../../shared/renderFontPresets';
+import { COLOR_TIER_CATALOG } from '../../shared/colorTiers';
 
 export interface PageInfoSettingsProps {
   jobId?: number;
@@ -40,6 +41,19 @@ function resolveOcrLabel(id?: string): string {
     default:
       return id || 'Paddle OCR v6';
   }
+}
+
+/**
+ * Resolves a human-readable display label for the Color tier ID.
+ * @param id - Color tier identifier from database.
+ * @returns Formatted label.
+ */
+function resolveColorLabel(id?: string): string {
+  if (!id || id === 'none') {
+    return 'Disabled (Original B&W)';
+  }
+  const found = COLOR_TIER_CATALOG.find((t) => t.id === id);
+  return found ? found.name : id;
 }
 
 /**
@@ -248,6 +262,11 @@ export const PageInfoSettings: React.FC<PageInfoSettingsProps> = ({ jobId, onBac
           <div className="flex items-center justify-between">
             <span className="text-slate-400">OCR Recognition</span>
             <span className="text-slate-200 font-medium">{resolveOcrLabel(job?.ocrEngineId)}</span>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <span className="text-slate-400">Colorization Engine</span>
+            <span className="text-slate-200 font-medium">{resolveColorLabel(job?.colorTier)}</span>
           </div>
 
           <div className="flex items-center justify-between">

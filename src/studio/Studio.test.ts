@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { studioStore } from './state/studioStore';
 import { studioUndoStack } from './state/undoStack';
+import { COLOR_ENGINE_OPTIONS } from './tools/StudioEngineSelector';
 import type { TextObject } from './types';
 
 describe('Studio State Management', () => {
@@ -524,5 +525,73 @@ describe('Studio State Management', () => {
     });
 
     expect(studioStore.getState().textObjects[0].text).toBe('Manual user correction');
+  });
+
+  it('switches to color tool and manages selectedColorEngineId state', () => {
+    studioStore.setState({ activeTool: 'color' });
+    expect(studioStore.getState().activeTool).toBe('color');
+
+    expect(studioStore.getState().selectedColorEngineId).toBe('manga-colorization-v2');
+    studioStore.setEngineSelection('color', 'none');
+    expect(studioStore.getState().selectedColorEngineId).toBe('none');
+  });
+
+  it('subscribes to undoStack availability changes with clean unsubscribe', () => {
+    const listener = vi.fn();
+    const unsubscribe = studioUndoStack.subscribe(listener);
+
+    // Initial invocation on subscribe
+    expect(listener).toHaveBeenCalledWith(false, false);
+
+    studioUndoStack.push({
+      id: 'test-action',
+      timestamp: Date.now(),
+      description: 'Test action',
+    });
+
+    expect(listener).toHaveBeenCalledWith(true, false);
+
+    unsubscribe();
+    studioUndoStack.clear();
+    // Listener should not be called after unsubscribe
+    expect(listener).toHaveBeenCalledTimes(2);
+  });
+
+  it('tracks colorState in undoStack and restores before and after across undo/redo', () => {
+    let currentColorState = false;
+
+    studioUndoStack.push({
+      id: 'colorize-1',
+      timestamp: Date.now(),
+      description: 'Colorize manga page',
+      colorState: {
+        before: false,
+        after: true,
+      },
+    });
+
+    currentColorState = true;
+
+    // Undo reverts colorState to before (false)
+    studioUndoStack.undo({
+      applyColorState: (isColorized) => {
+        currentColorState = isColorized;
+      },
+    });
+    expect(currentColorState).toBe(false);
+
+    // Redo restores colorState to after (true)
+    studioUndoStack.redo({
+      applyColorState: (isColorized) => {
+        currentColorState = isColorized;
+      },
+    });
+    expect(currentColorState).toBe(true);
+  });
+
+  it('derives COLOR_ENGINE_OPTIONS from canonical color tier catalog', () => {
+    expect(COLOR_ENGINE_OPTIONS.length).toBeGreaterThanOrEqual(2);
+    expect(COLOR_ENGINE_OPTIONS.some((opt) => opt.id === 'manga-colorization-v2')).toBe(true);
+    expect(COLOR_ENGINE_OPTIONS.some((opt) => opt.id === 'none')).toBe(true);
   });
 });

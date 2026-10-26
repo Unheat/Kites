@@ -573,7 +573,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   // ownership, background and offscreen both handled the popup request and competed to
   // answer, producing closed message ports and silent model downloads. Do not remove
   // these route guards or forward the original unaddressed message. See devlog 015.
-  if (message.target === 'background' && message.request === true && (message.type === 'PROCESS_JOB' || message.type === 'START_MODEL_DOWNLOAD' || message.type === 'CHECK_MODEL_STATUS' || message.type === 'GET_MODEL_STATUSES' || message.type === 'CHECK_WEBGPU_SUPPORT' || message.type === 'PRELOAD_ACTIVE_ENGINE' || message.type === 'GET_ACTIVE_DOWNLOADS' || message.type === 'VALIDATE_CUSTOM_API' || message.type === 'STUDIO_INPAINT' || message.type === 'STUDIO_OCR')) {
+  if (message.target === 'background' && message.request === true && (message.type === 'PROCESS_JOB' || message.type === 'START_MODEL_DOWNLOAD' || message.type === 'CHECK_MODEL_STATUS' || message.type === 'GET_MODEL_STATUSES' || message.type === 'CHECK_WEBGPU_SUPPORT' || message.type === 'PRELOAD_ACTIVE_ENGINE' || message.type === 'GET_ACTIVE_DOWNLOADS' || message.type === 'VALIDATE_CUSTOM_API' || message.type === 'STUDIO_INPAINT' || message.type === 'STUDIO_OCR' || message.type === 'STUDIO_COLORIZE')) {
     console.log(`[Background] Received ${message.type}. Forwarding to Offscreen...`);
     sendMessageToOffscreen(message)
       .then((res) => sendResponse(res))

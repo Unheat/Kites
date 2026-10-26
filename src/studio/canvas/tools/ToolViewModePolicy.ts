@@ -14,6 +14,7 @@ export class ToolViewModePolicy {
   private static readonly ALLOWED_MODES: Record<StudioTool, readonly StudioViewMode[]> = {
     ocr: ['original', 'inpainted', 'translated'],
     inpaint: ['original', 'inpainted', 'translated'],
+    color: ['original', 'inpainted', 'translated'],
     erase: ['inpainted', 'translated'],
     paint: ['inpainted', 'translated'],
     select: ['translated'],

@@ -117,6 +117,7 @@ export interface StudioState {
   selectedInpaintEngineId: string;
   selectedOcrEngineId: string;
   selectedTranslationEngineId: string;
+  selectedColorEngineId: string;
   modelDownloads: Record<string, { progress: number; status: string }>;
   downloadedModelIds: string[];
 
@@ -177,6 +178,7 @@ const initialState: StudioState = {
   selectedInpaintEngineId: 'lama-manga',
   selectedOcrEngineId: 'v6-small',
   selectedTranslationEngineId: 'gg-translate',
+  selectedColorEngineId: 'manga-colorization-v2',
   modelDownloads: {},
   downloadedModelIds: ['none', 'simple', 'telea', 'gg-translate', 'cloudflare-translate'],
 
@@ -339,7 +341,7 @@ class StudioStore {
    * Updates an engine selection, optionally persisting to chrome.storage.local (popupState) if syncWithGlobal is enabled.
    */
   public setEngineSelection = (
-    category: 'inpaint' | 'ocr' | 'translation',
+    category: 'inpaint' | 'ocr' | 'translation' | 'color',
     engineId: string
   ): void => {
     const { syncWithGlobal } = this.state;
@@ -358,6 +360,11 @@ class StudioStore {
       if (syncWithGlobal) {
         this.persistGlobalEngine({ activeEngineId: engineId });
       }
+    } else if (category === 'color') {
+      this.setState({ selectedColorEngineId: engineId });
+      if (syncWithGlobal) {
+        this.persistGlobalEngine({ activeColorId: engineId });
+      }
     }
   };
 
@@ -373,6 +380,7 @@ class StudioStore {
           selectedInpaintEngineId: state.activeInpaintId || this.state.selectedInpaintEngineId,
           selectedOcrEngineId: state.activeOcrId || this.state.selectedOcrEngineId,
           selectedTranslationEngineId: state.activeEngineId || this.state.selectedTranslationEngineId,
+          selectedColorEngineId: state.activeColorId || this.state.selectedColorEngineId,
         });
       }
     });
