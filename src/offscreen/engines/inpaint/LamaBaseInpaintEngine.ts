@@ -27,6 +27,7 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
   protected session: any = null;
   protected ort: any = null;
   protected activeProvider: LamaProvider | null = null;
+  protected forcedProvider: LamaProvider | null = null;
   protected browserModelBuffer: ArrayBuffer | null = null;
   protected browserExternalData: Array<{ data: ArrayBuffer; path: string }> | undefined;
 
@@ -119,6 +120,9 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
    * @returns True when the cached session provider remains current.
    */
   async isProviderCurrent(): Promise<boolean> {
+    if (this.forcedProvider) {
+      return this.activeProvider === this.forcedProvider;
+    }
     const requestedProvider = await this.getRequestedProvider();
     return this.activeProvider === requestedProvider;
   }
@@ -149,7 +153,14 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
     if (this.activeProvider !== 'webgpu') return;
     const failedSession = this.session;
     this.session = null;
-    if (typeof failedSession?.release === 'function') await failedSession.release();
+    this.forcedProvider = 'wasm';
+    if (typeof failedSession?.release === 'function') {
+      try {
+        await failedSession.release();
+      } catch (err) {
+        console.warn('[LamaBaseInpaintEngine] Non-fatal session release error during fallback:', err);
+      }
+    }
     await this.createBrowserSession('wasm');
   }
 
@@ -650,6 +661,7 @@ export class LamaBaseInpaintEngine implements IInpaintEngine {
     }
     this.session = null;
     this.activeProvider = null;
+    this.forcedProvider = null;
     this.browserModelBuffer = null;
     this.browserExternalData = undefined;
   }

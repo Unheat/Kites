@@ -326,7 +326,7 @@ export const Studio: React.FC<StudioProps> = ({
       setToastMessage('Generating Layered PSD...');
       const [{ exportCanvasToPsdBlob }, { triggerBrowserDownload }] = await Promise.all([
         import('./export/psdExport'),
-        import('./export/batchExport'),
+        import('../shared/utils/download'),
       ]);
 
       const bgCanvas = getWorkingCanvas();

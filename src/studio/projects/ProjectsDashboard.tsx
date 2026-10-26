@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { db, type ProjectFolder } from '../../db';
 import { createProject, deleteProject, renameProject } from '../state/projectStore';
-import { exportProjectBundle, type BatchExportFormat } from '../export/batchExport';
+import type { BatchExportFormat } from '../export/batchExport';
 import { LibrarySidebar } from './LibrarySidebar';
 import { ProjectsGrid } from './ProjectsGrid';
 import { ProjectDetailsPane } from './ProjectDetailsPane';
@@ -85,7 +85,8 @@ export const ProjectsDashboard: React.FC<ProjectsDashboardProps> = ({
     setIsExporting(true);
     setExportProgressText('Preparing export bundle...');
     try {
-      await exportProjectBundle(selectedProjectId, format, (_cur, _tot, status) => {
+      const { exportProjectBundle } = await import('../export/batchExport');
+      await exportProjectBundle(selectedProjectId, format, (_cur: number, _tot: number, status: string) => {
         setExportProgressText(status);
       });
     } catch (err) {

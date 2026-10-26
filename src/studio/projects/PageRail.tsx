@@ -13,7 +13,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { db, type TranslationJob } from '../../db';
-import { exportProjectBundle, type BatchExportFormat } from '../export/batchExport';
+import type { BatchExportFormat } from '../export/batchExport';
 import { getTranslatedPageThumbnailUrl } from '../canvas/thumbnailRenderer';
 
 export interface PageRailProps {
@@ -76,6 +76,7 @@ export const PageRail: React.FC<PageRailProps> = ({
     setExportMenuOpen(false);
     setIsExporting(true);
     try {
+      const { exportProjectBundle } = await import('../export/batchExport');
       await exportProjectBundle(projectId, format);
     } catch (err) {
       console.error('[PageRail] Export failed:', err);

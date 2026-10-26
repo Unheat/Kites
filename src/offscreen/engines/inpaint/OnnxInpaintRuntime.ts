@@ -25,6 +25,7 @@ export class OnnxInpaintRuntime {
   private session: any = null;
   private ort: any = null;
   private activeProvider: OnnxInpaintProvider | null = null;
+  private forcedProvider: OnnxInpaintProvider | null = null;
   private browserModelBuffer: ArrayBuffer | null = null;
   private browserExternalData: Array<{ data: ArrayBuffer; path: string }> | undefined;
   private config: OnnxInpaintRuntimeConfig;
@@ -89,6 +90,9 @@ export class OnnxInpaintRuntime {
    * @returns True when the cached session provider remains current.
    */
   async isProviderCurrent(): Promise<boolean> {
+    if (this.forcedProvider) {
+      return this.activeProvider === this.forcedProvider;
+    }
     const requested = await this.getRequestedProvider();
     return this.activeProvider === requested;
   }
@@ -161,9 +165,17 @@ export class OnnxInpaintRuntime {
    */
   async fallbackToWasm(): Promise<void> {
     if (this.activeProvider !== 'webgpu') return;
+    const tag = this.config.logTag || `[OnnxInpaintRuntime:${this.config.modelId}]`;
     const failedSession = this.session;
     this.session = null;
-    if (typeof failedSession?.release === 'function') await failedSession.release();
+    this.forcedProvider = 'wasm';
+    if (typeof failedSession?.release === 'function') {
+      try {
+        await failedSession.release();
+      } catch (e) {
+        console.warn(`${tag} Non-fatal session release error during fallback:`, e);
+      }
+    }
     await this.createBrowserSession('wasm');
   }
 
@@ -193,10 +205,15 @@ export class OnnxInpaintRuntime {
    */
   async destroy(): Promise<void> {
     if (this.session && typeof this.session.release === 'function') {
-      await this.session.release();
+      try {
+        await this.session.release();
+      } catch (err) {
+        console.warn(`[OnnxInpaintRuntime] Error releasing session:`, err);
+      }
     }
     this.session = null;
     this.activeProvider = null;
+    this.forcedProvider = null;
     this.browserModelBuffer = null;
     this.browserExternalData = undefined;
   }

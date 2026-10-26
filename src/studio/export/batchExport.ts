@@ -1,30 +1,13 @@
 import { db } from '../../db';
+import { triggerBrowserDownload } from '../../shared/utils/download';
+
+export { triggerBrowserDownload };
 
 /** Supported batch archive export variants. */
 export type BatchExportFormat = 'images' | 'cbz' | 'psd';
 
 /** Callback progress function reporting completed page count and total. */
 export type BatchExportProgressCallback = (current: number, total: number, statusText: string) => void;
-
-/**
- * Initiates an automatic file download in the browser.
- *
- * @param blob - Binary blob payload to save.
- * @param filename - Target filename for the saved file.
- */
-export function triggerBrowserDownload(blob: Blob, filename: string): void {
-  if (typeof document === 'undefined') return;
-
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = filename;
-  document.body.appendChild(anchor);
-  anchor.click();
-  document.body.removeChild(anchor);
-
-  setTimeout(() => URL.revokeObjectURL(url), 10000);
-}
 
 /**
  * Formats a sequential page index into a 3-digit zero-padded number (e.g. 001, 002).

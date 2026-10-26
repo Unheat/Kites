@@ -10,6 +10,23 @@ const ZN = 1.08883;
 const EPSILON = 0.0088564516790356308; // (6/29)^3
 const KAPPA = 903.296296296296296;      // (29/3)^3
 
+/** Precomputed 256-entry lookup table for sRGB to linear conversion (eliminates millions of Math.pow calls). */
+export const SRGB_TO_LINEAR_LUT = new Float32Array(256);
+for (let i = 0; i < 256; i++) {
+  const s = i / 255;
+  SRGB_TO_LINEAR_LUT[i] = s <= 0.04045 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+}
+
+/**
+ * Converts linear RGB channel [0..1] to clamped sRGB byte [0..255].
+ */
+export function toSrgbFast(c: number): number {
+  const clamped = c < 0 ? 0 : c > 1 ? 1 : c;
+  const s = clamped <= 0.0031308 ? 12.92 * clamped : 1.055 * Math.pow(clamped, 1 / 2.4) - 0.055;
+  const val = Math.round(s * 255);
+  return val < 0 ? 0 : val > 255 ? 255 : val;
+}
+
 /**
  * Converts sRGB [0..255] to CIELAB [L*, a*, b*].
  *
@@ -99,13 +116,49 @@ export function fuseLightnessChannel(
   const totalPixels = color.length;
 
   for (let i = 0; i < totalPixels; i += 4) {
-    const origL = rgbToLab(orig[i], orig[i + 1], orig[i + 2])[0];
-    const [, colorA, colorB] = rgbToLab(color[i], color[i + 1], color[i + 2]);
+    // 1. Extract only L* from original image using LUT (skipping unused X, Z, a*, b*)
+    const lrOrig = SRGB_TO_LINEAR_LUT[orig[i]];
+    const lgOrig = SRGB_TO_LINEAR_LUT[orig[i + 1]];
+    const lbOrig = SRGB_TO_LINEAR_LUT[orig[i + 2]];
+    const yOrig = 0.2126729 * lrOrig + 0.7151522 * lgOrig + 0.0721750 * lbOrig;
+    const fyOrig = yOrig > EPSILON ? Math.cbrt(yOrig) : (KAPPA * yOrig + 16) / 116;
+    const origL = Math.max(0, 116 * fyOrig - 16);
 
-    const [r, g, b] = labToRgb(origL, colorA, colorB);
-    color[i] = r;
-    color[i + 1] = g;
-    color[i + 2] = b;
-    // Keep alpha intact
+    // 2. Extract a* and b* from neural colorization output
+    const lrCol = SRGB_TO_LINEAR_LUT[color[i]];
+    const lgCol = SRGB_TO_LINEAR_LUT[color[i + 1]];
+    const lbCol = SRGB_TO_LINEAR_LUT[color[i + 2]];
+    const xCol = (0.4124564 * lrCol + 0.3575761 * lgCol + 0.1804375 * lbCol) / XN;
+    const yCol = 0.2126729 * lrCol + 0.7151522 * lgCol + 0.0721750 * lbCol;
+    const zCol = (0.0193339 * lrCol + 0.1191920 * lgCol + 0.9503041 * lbCol) / ZN;
+
+    const fxCol = xCol > EPSILON ? Math.cbrt(xCol) : (KAPPA * xCol + 16) / 116;
+    const fyCol = yCol > EPSILON ? Math.cbrt(yCol) : (KAPPA * yCol + 16) / 116;
+    const fzCol = zCol > EPSILON ? Math.cbrt(zCol) : (KAPPA * zCol + 16) / 116;
+
+    const colorA = 500 * (fxCol - fyCol);
+    const colorB = 200 * (fyCol - fzCol);
+
+    // 3. Inlined labToRgb(origL, colorA, colorB) without array allocations
+    const fy = (origL + 16) / 116;
+    const fx = colorA / 500 + fy;
+    const fz = fy - colorB / 200;
+
+    const fx3 = fx * fx * fx;
+    const fz3 = fz * fz * fz;
+
+    const x = (fx3 > EPSILON ? fx3 : (116 * fx - 16) / KAPPA) * XN;
+    const y = (origL > KAPPA * EPSILON ? Math.pow((origL + 16) / 116, 3) : origL / KAPPA) * YN;
+    const z = (fz3 > EPSILON ? fz3 : (116 * fz - 16) / KAPPA) * ZN;
+
+    const lr =  3.2404542 * x - 1.5371385 * y - 0.4985314 * z;
+    const lg = -0.9692660 * x + 1.8760108 * y + 0.0415560 * z;
+    const lb =  0.0556434 * x - 0.2040259 * y + 1.0572252 * z;
+
+    color[i] = toSrgbFast(lr);
+    color[i + 1] = toSrgbFast(lg);
+    color[i + 2] = toSrgbFast(lb);
+    // Preserve source alpha channel (transparent PNGs, stickers)
+    color[i + 3] = orig[i + 3];
   }
 }

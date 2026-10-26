@@ -25,6 +25,7 @@ export class OnnxColorRuntime {
   private session: any = null;
   private ort: any = null;
   private activeProvider: OnnxColorProvider | null = null;
+  private forcedProvider: OnnxColorProvider | null = null;
   private browserModelBuffer: ArrayBuffer | null = null;
   private config: OnnxColorRuntimeConfig;
 
@@ -72,6 +73,9 @@ export class OnnxColorRuntime {
    * @returns True when the cached session provider remains current.
    */
   async isProviderCurrent(): Promise<boolean> {
+    if (this.forcedProvider) {
+      return this.activeProvider === this.forcedProvider;
+    }
     const requested = await this.getRequestedProvider();
     return this.activeProvider === requested;
   }
@@ -135,9 +139,17 @@ export class OnnxColorRuntime {
    */
   async fallbackToWasm(): Promise<void> {
     if (this.activeProvider !== 'webgpu') return;
+    const tag = this.config.logTag || `[OnnxColorRuntime:${this.config.modelId}]`;
     const failedSession = this.session;
     this.session = null;
-    if (typeof failedSession?.release === 'function') await failedSession.release();
+    this.forcedProvider = 'wasm';
+    if (typeof failedSession?.release === 'function') {
+      try {
+        await failedSession.release();
+      } catch (e) {
+        console.warn(`${tag} Non-fatal session release error during fallback:`, e);
+      }
+    }
     await this.createBrowserSession('wasm');
   }
 
@@ -181,5 +193,6 @@ export class OnnxColorRuntime {
     }
     this.browserModelBuffer = null;
     this.activeProvider = null;
+    this.forcedProvider = null;
   }
 }

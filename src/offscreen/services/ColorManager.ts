@@ -15,8 +15,26 @@ export class ColorManager {
   private usersDrained: Promise<void> | null = null;
   private resolveUsersDrained: (() => void) | null = null;
   private lifecycleQueue: Promise<void> = Promise.resolve();
+  private inferenceQueue: Promise<any> = Promise.resolve();
 
   constructor() {}
+
+  /**
+   * Serializes model inference runs sequentially to protect shared WebGPU command buffers.
+   */
+  private async serializeInference<T>(operation: () => Promise<T>): Promise<T> {
+    const previous = this.inferenceQueue;
+    let releaseQueue!: () => void;
+    this.inferenceQueue = new Promise<void>((resolve) => {
+      releaseQueue = resolve;
+    });
+    await previous.catch(() => {});
+    try {
+      return await operation();
+    } finally {
+      releaseQueue();
+    }
+  }
 
   /**
    * Serializes engine lifecycle mutations to avoid race conditions.
@@ -193,7 +211,7 @@ export class ColorManager {
     try {
       if (!engine) return imageBuffer;
       console.log(`[ColorManager] Executing manga colorization using tier: ${tier}...`);
-      return await engine.colorize(imageBuffer, bubblePolygons, options);
+      return await this.serializeInference(() => engine.colorize(imageBuffer, bubblePolygons, options));
     } finally {
       release();
     }

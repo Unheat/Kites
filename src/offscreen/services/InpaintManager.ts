@@ -45,6 +45,24 @@ export class InpaintManager {
   private usersDrained: Promise<void> | null = null;
   private resolveUsersDrained: (() => void) | null = null;
   private lifecycleQueue: Promise<void> = Promise.resolve();
+  private inferenceQueue: Promise<any> = Promise.resolve();
+
+  /**
+   * Serializes model inference runs sequentially to protect shared WebGPU command buffers.
+   */
+  private async serializeInference<T>(operation: () => Promise<T>): Promise<T> {
+    const previous = this.inferenceQueue;
+    let releaseQueue!: () => void;
+    this.inferenceQueue = new Promise<void>((resolve) => {
+      releaseQueue = resolve;
+    });
+    await previous.catch(() => {});
+    try {
+      return await operation();
+    } finally {
+      releaseQueue();
+    }
+  }
 
   /**
    * Initializes a manager with no loaded engine.
@@ -252,7 +270,7 @@ export class InpaintManager {
     try {
       console.log(`[InpaintManager] Executing inpainting using tier: ${this.canonicalizeTier(tier)}...`);
       // v1 contract: engines build their own masks FROM polygons. DBNet raw mask is not forwarded.
-      return await engine.inpaint(imageBuffer, maskPolygons);
+      return await this.serializeInference(() => engine.inpaint(imageBuffer, maskPolygons));
     } finally {
       release();
     }

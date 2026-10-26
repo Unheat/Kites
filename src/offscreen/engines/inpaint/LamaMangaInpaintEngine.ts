@@ -145,12 +145,15 @@ export class LamaMangaInpaintEngine extends LamaBaseInpaintEngine {
     const startTime = performance.now();
     console.log(`[LamaMangaInpaintEngine] Starting localized patch inpainting for ${boxes.length} bubble components using ${this.activeProvider}.`);
 
-    // Scratch canvases are allocated once per inpaint call and resized dynamically to avoid DOM canvas churn.
+    // Scratch canvases and typed arrays are allocated once per inpaint call and resized dynamically to avoid churn.
     const imageScratch = await this.createCanvas(1, 1);
     const maskScratch = await this.createCanvas(1, 1);
     const outputScratch = await this.createCanvas(1, 1);
     let scratchWidth = 1;
     let scratchHeight = 1;
+    let scratchImgFloat: Float32Array | null = null;
+    let scratchMaskFloat: Float32Array | null = null;
+    let scratchFloatPx = 0;
 
     try {
       // 3. Process each speech bubble component independently at 1:1 native resolution
@@ -228,8 +231,14 @@ export class LamaMangaInpaintEngine extends LamaBaseInpaintEngine {
         const imgData = patchCtx.getImageData(0, 0, snapW, snapH).data;
         const maskData = maskCtx.getImageData(0, 0, snapW, snapH).data;
 
-        const imgFloat = new Float32Array(1 * 3 * totalPx);
-        const maskFloat = new Float32Array(1 * 1 * totalPx);
+        if (!scratchImgFloat || !scratchMaskFloat || scratchFloatPx !== totalPx) {
+          scratchImgFloat = new Float32Array(1 * 3 * totalPx);
+          scratchMaskFloat = new Float32Array(1 * 1 * totalPx);
+          scratchFloatPx = totalPx;
+        }
+
+        const imgFloat = scratchImgFloat;
+        const maskFloat = scratchMaskFloat;
 
         for (let p = 0; p < totalPx; p++) {
           const off = p * 4;
@@ -244,12 +253,20 @@ export class LamaMangaInpaintEngine extends LamaBaseInpaintEngine {
         const maskTensor = new this.ort.Tensor('float32', maskFloat, [1, 1, snapH, snapW]);
         const feeds = { image: imageTensor, mask: maskTensor };
 
+        const outImgData = outCtx.createImageData(snapW, snapH);
         let results: any;
-        let outData: Float32Array;
         try {
           results = await this.runPatch(feeds);
           const outName = this.session.outputNames[0];
-          outData = new Float32Array(results[outName].data as Float32Array);
+          const outData = results[outName].data as Float32Array;
+
+          for (let p = 0; p < totalPx; p++) {
+            const idx = p * 4;
+            outImgData.data[idx] = Math.max(0, Math.min(255, this.denormalizeImagePixel(outData[0 * totalPx + p])));
+            outImgData.data[idx + 1] = Math.max(0, Math.min(255, this.denormalizeImagePixel(outData[1 * totalPx + p])));
+            outImgData.data[idx + 2] = Math.max(0, Math.min(255, this.denormalizeImagePixel(outData[2 * totalPx + p])));
+            outImgData.data[idx + 3] = 255;
+          }
         } finally {
           imageTensor.dispose();
           maskTensor.dispose();
@@ -260,16 +277,6 @@ export class LamaMangaInpaintEngine extends LamaBaseInpaintEngine {
           }
         }
 
-        // Transfer output to patch canvas
-        const outImgData = outCtx.createImageData(snapW, snapH);
-
-        for (let p = 0; p < totalPx; p++) {
-          const idx = p * 4;
-          outImgData.data[idx] = Math.max(0, Math.min(255, this.denormalizeImagePixel(outData[0 * totalPx + p])));
-          outImgData.data[idx + 1] = Math.max(0, Math.min(255, this.denormalizeImagePixel(outData[1 * totalPx + p])));
-          outImgData.data[idx + 2] = Math.max(0, Math.min(255, this.denormalizeImagePixel(outData[2 * totalPx + p])));
-          outImgData.data[idx + 3] = 255;
-        }
         outCtx.putImageData(outImgData, 0, 0);
 
         // Composite patch back to finalCanvas strictly where mask is active
