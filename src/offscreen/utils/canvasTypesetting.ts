@@ -7,6 +7,7 @@ import {
   defaultLayoutFits,
   type DefaultRenderRegion
 } from './cotransDefaultRenderer';
+import type { PositionedLine } from './contourTypeset';
 import { fitFontSizeWithLines, decollideBoxes, fontSpec, createMeasureCache } from './typesetLayout';
 import { pickTextColor } from '../../shared/utils/textColor';
 import { getFontSizeMinimumBase } from '../engines/ocr/tallStripTiling';
@@ -14,7 +15,7 @@ import {
   sanitizeTypesetText,
   compactSpecialSymbols,
 } from '../../shared/utils/textCleaning';
-import { wrapTextEllipse } from './ellipseTypeset';
+import { TypesetStrategyFactory } from '../engines/typeset';
 
 /**
  * Batch driver for translated-text rendering.
@@ -348,6 +349,10 @@ export interface TextBlockItem {
   isRounded?: boolean;
   /** Mathematical bubble corner radius in pixels. */
   borderRadius?: number;
+  /** Explicit typesetting engine mode: 'balloon' (XianScan), 'contour' (Koharu DP), 'ellipse' (alias), or 'simple' (Rectangular wrap). */
+  typesetMode?: 'balloon' | 'contour' | 'ellipse' | 'simple';
+  /** Optional bubble contour polygon (in region coordinates). */
+  contourPoints?: Point2D[];
 }
 
 /**
@@ -385,27 +390,43 @@ export function measureBubbleLayoutFontSize(
 ): number {
   if (!block.text?.trim() || !Number.isFinite(box.w) || !Number.isFinite(box.h) || box.w < 1 || box.h < 1) return 0;
 
-  if (block.isRounded) {
-    const rMax = Math.min(box.w / 2, box.h / 2);
-    const radius = block.borderRadius !== undefined ? block.borderRadius : rMax;
-    const strength = rMax > 0 ? Math.min(1.0, radius / rMax) : 1.0;
-    const targetSize = bubbleLayoutFontTarget(block);
-    const res = wrapTextEllipse(
-      block.text.trim(),
-      box.w,
-      box.h,
-      targetSize,
-      fontFamily,
-      strength,
-      ctx as any,
-      targetLang,
-      { minFontSize: minFontSize ?? Math.max(6, Math.floor(targetSize * 0.4)) }
-    );
-    if (!res || !res.lines || res.lines.length === 0) return 0;
-    if (res.height <= box.h + 0.5 && res.width <= box.w * 1.2 + 1.5) {
-      return res.fontSize;
+  const hasContour = Boolean(block.contourPoints && block.contourPoints.length >= 3);
+  const isFixed = true;
+  const isContour = hasContour || block.typesetMode === 'contour' || block.typesetMode === 'ellipse' || (block.isRounded && block.typesetMode !== 'balloon' && block.typesetMode !== 'simple');
+  const isSimple = !isContour && block.typesetMode === 'simple';
+
+  if (isContour || isSimple) {
+    const strategy = TypesetStrategyFactory.resolve({
+      typesetMode: block.typesetMode,
+      isFixed,
+      hasContour,
+      isRounded: block.isRounded
+    });
+
+    let targetCenterY: number | undefined;
+    if (block.polygon && block.polygon.length >= 3) {
+      const polyCentroidY = block.polygon.reduce((sum, p) => sum + p.y, 0) / block.polygon.length;
+      targetCenterY = polyCentroidY - box.y;
     }
-    return 0;
+
+    const res = strategy.typeset(
+      block.text.trim(),
+      box,
+      block.contourPoints,
+      ctx as any,
+      {
+        fontFamily,
+        minFontSize: minFontSize ?? 6,
+        maxFontSize: Math.max(16, Math.round(box.h * 0.5)),
+        targetLang,
+        isBold,
+        targetCenterY
+      }
+    );
+    if (!res || !res.lines || res.lines.length === 0) {
+      return 0;
+    }
+    return res.fontSize;
   }
 
   const fitted = measureDefaultLayout(ctx, block.text.trim(), box.w, box.h, bubbleLayoutFontTarget(block), undefined, fontFamily, isBold, undefined, targetLang);
@@ -432,6 +453,8 @@ export interface RenderedBlockInfo {
   angle: number;
   /** Actual baseline step divided by font size. */
   lineSpacing: number;
+  /** Koharu scanline placements drawn for contour typeset blocks (box-local space). */
+  positionedLines?: PositionedLine[];
 }
 
 /**
@@ -684,8 +707,11 @@ function renderTextBlocksDefault(
       strokeColor: b.strokeColor || '#FFFFFF',
       alignment: b.alignment || 'center',
       sourceDirection: b.direction || 'h',
-      isRounded: b.isRounded,
-      borderRadius: b.borderRadius,
+      isRounded: fixed ? Boolean(b.isRounded) : false,
+      borderRadius: fixed ? (b.borderRadius ?? 0) : 0,
+      typesetMode: fixed ? (b.typesetMode ?? (b.isRounded ? 'contour' : undefined)) : 'balloon',
+      contourPoints: fixed ? b.contourPoints : undefined,
+      fixed,
     };
 
     try {
@@ -754,10 +780,11 @@ function renderTextBlocksDefault(
 
   for (const plan of planned) {
     try {
-      // XianScan clamp: only short non-shout bubbles follow the page baseline; dense
-      // paragraphs and exclamations keep their fitted size.
-      const isShortNonShout = plan.wordCount <= 2 && !/[!！]/.test(plan.region.translation);
-      const baselineCap = !plan.fixed && pageDialogueBaseline > 0 && isShortNonShout
+      // Dialogue font balance: short non-scream utterances follow the page baseline; dense
+      // paragraphs and genuine screams/SFX keep their fitted size.
+      const isScream = plan.wordCount === 1 && /^[A-Z0-9\s!！?？]+$/.test(plan.region.translation);
+      const isShortNonScream = plan.wordCount <= 3 && !isScream;
+      const baselineCap = pageDialogueBaseline > 0 && isShortNonScream
         ? Math.max(18, Math.round(pageDialogueBaseline * 1.25))
         : undefined;
       const info = renderRegionDefault(ctx, plan.region, plan.dstPoints, plan.targetFontSize, baselineCap, fontFamily, isBold, pageMeasureCache, targetLang);
@@ -767,11 +794,12 @@ function renderTextBlocksDefault(
           lineCount: info.lineCount,
           lines: info.lines,
           textColor: plan.region.textColor,
-          strokeColor: plan.region.strokeColor,
+          strokeColor: plan.region.strokeColor || '#FFFFFF',
           dstPoints: plan.dstPoints,
           direction: 'h',
           angle: (calculateRotationAngle(plan.dstPoints) * 180) / Math.PI,
           lineSpacing: info.lineSpacing,
+          positionedLines: info.positionedLines,
         };
       }
     } catch (e) {

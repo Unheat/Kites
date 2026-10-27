@@ -35,12 +35,16 @@ export interface BubbleShapeEvidence {
   x: number;
   y: number;
   scale: number;
+  scaleX?: number;
+  scaleY?: number;
   width: number;
   height: number;
   interior: Uint8Array;
   /** Observed paper pixels (light or dark depending on polarity), excluding force-filled OCR rectangles. */
   observedInterior: Uint8Array;
   eroded: Uint8Array;
+  /** Reconstructed carrier chamber mask (1 inside chamber, 0 outside) after tail severing and dilation. */
+  reconstructed?: Uint8Array;
   carrierBox?: BoxRect;
   isSeveredCarrier?: boolean;
 }
@@ -205,11 +209,14 @@ export class HeuristicBubbleExtractor {
       x: minX,
       y: minY,
       scale,
+      scaleX: patchW / origPatchW,
+      scaleY: patchH / origPatchH,
       width: patchW,
       height: patchH,
       interior: mask,
       observedInterior: observedInterior!,
       eroded: severed.eroded,
+      reconstructed: severed.reconstructed,
       carrierBox: severed.carrier,
       isSeveredCarrier: true,
     });

@@ -52,9 +52,10 @@ The developer of this project is a beginner learning full-stack, web extension, 
 
 ### 3.1 Advanced OOP & Subsystem Boundaries
 
-1. **No Inheritance for Code Reuse:**
-   - Class inheritance (`extends`) is strictly prohibited across distinct ML models or domain entities.
-   - `AotInpaintEngine` must NOT inherit from `LamaBaseInpaintEngine`. Share ONNX utilities via a composed `OnnxSessionRunner` or helper functions.
+1. **No Inheritance for Code Reuse (Composition Over Inheritance):**
+   - Class inheritance (`extends`) is strictly prohibited across distinct ML models or domain entities. Never use inheritance for code reuse between different ML models.
+   - Extract shared algorithms (e.g. 64px patch bucketing, tensor normalization math) into standalone helper functions or composed utility runners.
+   - `AotInpaintEngine` must NOT inherit from `LamaBaseInpaintEngine`. Composed runners (`OnnxSessionRunner`) and pure functions preserve clean boundaries and eliminate fragile-base-class bugs.
 
 2. **No Downcasting / Instanceof Leaks (LSP):**
    - Service managers must never check `instanceof ConcreteEngine` to call unexposed methods.

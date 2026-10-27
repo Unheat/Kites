@@ -5,6 +5,7 @@ import { InpaintCacheManager } from './InpaintCacheManager';
 import { createCanvas, Canvas } from 'canvas';
 import { resolveRenderFontFamily } from '../../shared/renderFontPresets';
 import * as canvasTypesetting from '../utils/canvasTypesetting';
+import * as textColorDetection from '../utils/textColorDetection';
 
 // vi.hoisted lifts the mock above the module imports. PipelineOrchestrator.ts constructs an
 // OcrManager at module scope (`export const pipelineOrchestrator = ...`), so the mock class
@@ -299,7 +300,7 @@ describe('PipelineOrchestrator', () => {
     bitmapSpy.mockRestore(); blobSpy.mockRestore(); measureSpy.mockRestore(); renderSpy.mockRestore();
   });
 
-  it('persists typesetMode: ellipse for Heuristic tier when speech bubble is rounded', async () => {
+  it('persists canonical typesetMode contour for Heuristic tier when speech bubble is rounded', async () => {
     ((db.images as any).first as any).mockResolvedValue({ id: 15, jobId: 1500,
       rawImageBlob: new Blob(['fake image data'], { type: 'image/png' }) });
     vi.spyOn(chrome.runtime, 'sendMessage').mockImplementation((_message: any, callback: any) => {
@@ -317,7 +318,7 @@ describe('PipelineOrchestrator', () => {
     const blobSpy = vi.spyOn(pipelineOrchestrator as any, 'blobToArrayBuffer').mockResolvedValue(new ArrayBuffer(8));
     await pipelineOrchestrator.runPipeline(1500);
     expect(db.textBlocks.bulkAdd).toHaveBeenCalledWith(expect.arrayContaining([expect.objectContaining({
-      typesetMode: 'ellipse', isRounded: true,
+      typesetMode: 'contour', isRounded: true,
     })]));
     bitmapSpy.mockRestore(); blobSpy.mockRestore();
   });
@@ -349,6 +350,39 @@ describe('PipelineOrchestrator', () => {
     expect(saved[1]).toMatchObject({ posX: 15, posY: 25, width: 35, height: 45,
       direction: 'h', angle: 0, fontSize: 17, lines: info.lines, lineSpacing: 1.2, color: '#123456', strokeColor: '#abcdef' });
     renderSpy.mockRestore(); blobSpy.mockRestore();
+  });
+
+  it('detects per-bubble text colors on the original image and feeds them to the renderer', async () => {
+    ((db.images as any).first as any).mockResolvedValue({ id: 21, jobId: 2100,
+      rawImageBlob: new Blob(['fake image data'], { type: 'image/png' }) });
+    vi.spyOn(chrome.runtime, 'sendMessage').mockImplementation((_message: any, callback: any) => {
+      callback?.({ activeInpaintId: 'none', bubbleMode: 'off', targetLang: 'en' });
+    });
+    processImageMock.mockResolvedValue({
+      texts: ['Blue', 'Plain'],
+      boxes: [{ x: 10, y: 20, w: 30, h: 40 }, { x: 60, y: 20, w: 30, h: 40 }],
+      polygons: [
+        [{ x: 10, y: 20 }, { x: 40, y: 20 }, { x: 40, y: 60 }, { x: 10, y: 60 }],
+        [{ x: 60, y: 20 }, { x: 90, y: 20 }, { x: 90, y: 60 }, { x: 60, y: 60 }],
+      ],
+    });
+    const detectSpy = vi.spyOn(textColorDetection, 'detectBlockTextColorsFromContext').mockReturnValue([
+      { textColor: '#1473eb', strokeColor: '#ffffff' }, null,
+    ]);
+    const renderSpy = vi.spyOn(canvasTypesetting, 'renderTextBlocksBatch').mockReturnValue([]);
+    const blobSpy = vi.spyOn(pipelineOrchestrator as any, 'blobToArrayBuffer').mockResolvedValue(new ArrayBuffer(8));
+    await pipelineOrchestrator.runPipeline(2100);
+    // Detection ran once against the shared pre-inpaint original raster with the OCR boxes.
+    expect(detectSpy).toHaveBeenCalledTimes(1);
+    expect(detectSpy.mock.calls[0][1]).toEqual([
+      { x: 10, y: 20, w: 30, h: 40 }, { x: 60, y: 20, w: 30, h: 40 },
+    ]);
+    const renderedBlocks = renderSpy.mock.calls[0][1] as any[];
+    // Detected color rides into the block; null detection keeps the renderer fallback.
+    expect(renderedBlocks[0]).toMatchObject({ textColor: '#1473eb', strokeColor: '#ffffff' });
+    expect(renderedBlocks[1].textColor).toBeUndefined();
+    expect(renderedBlocks[1].strokeColor).toBeUndefined();
+    detectSpy.mockRestore(); renderSpy.mockRestore(); blobSpy.mockRestore();
   });
 
   it.each(['en', 'zh'])('persists final %s renderer geometry and layout instead of OCR proposals', async (targetLang) => {

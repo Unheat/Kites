@@ -293,5 +293,38 @@ describe('utteranceSplitter', () => {
       expect(result[0][0].text).toBe('下側のセリフ');
       expect(result[1][0].text).toBe('上側に続くセリフ');
     });
+
+    it('splits conjoined figure-8 double bubble with vertical overlap when line ends with terminal punctuation', () => {
+      // Top lobe (right): '……我知道了！' (y: 599..714)
+      // Bottom lobe (left): '但是千万不要勉强自己！' (y: 625..818)
+      // They overlap in Y from 625 to 714 (overlapY = 89px > 0), but have large topStagger (26px) and botStagger (104px)
+      const lines: InputLine[] = [
+        {
+          id: 0,
+          polygon: [
+            { x: 254, y: 599 },
+            { x: 285, y: 599 },
+            { x: 285, y: 714 },
+            { x: 254, y: 714 }
+          ],
+          text: '……我知道了！'
+        },
+        {
+          id: 1,
+          polygon: [
+            { x: 222, y: 625 },
+            { x: 252, y: 625 },
+            { x: 252, y: 818 },
+            { x: 222, y: 818 }
+          ],
+          text: '但是千万不要勉强自己！'
+        }
+      ];
+
+      const result = clusterLinesIntoUtterances(lines, true, true);
+      expect(result).toHaveLength(2);
+      expect(result[0][0].text).toBe('……我知道了！');
+      expect(result[1][0].text).toBe('但是千万不要勉强自己！');
+    });
   });
 });

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { ChevronDown, Check, Download, Globe, Lock } from 'lucide-react';
 import { studioStore, useStudioStore } from '../state/studioStore';
 import { INPAINT_TIER_CATALOG } from '../../shared/inpaintTiers';
+import { COLOR_TIER_CATALOG } from '../../shared/colorTiers';
 
 export interface EngineOption {
   id: string;
@@ -12,6 +13,8 @@ export interface EngineOption {
 }
 
 export const INPAINT_ENGINE_OPTIONS: EngineOption[] = INPAINT_TIER_CATALOG as EngineOption[];
+
+export const COLOR_ENGINE_OPTIONS: EngineOption[] = COLOR_TIER_CATALOG as unknown as EngineOption[];
 
 export const OCR_ENGINE_OPTIONS: EngineOption[] = [
   { id: 'v6-small', name: 'PaddleOCR v6 Small (Default)', tag: 'Recommended', isModel: true, sizeEstimate: '~4 MB' },
@@ -27,21 +30,32 @@ export const OCR_ENGINE_OPTIONS: EngineOption[] = [
 ];
 
 interface StudioEngineSelectorProps {
-  category: 'inpaint' | 'ocr';
+  category: 'inpaint' | 'ocr' | 'color';
 }
 
 export const StudioEngineSelector: React.FC<StudioEngineSelectorProps> = ({ category }) => {
   const syncWithGlobal = useStudioStore((s) => s.syncWithGlobal);
   const selectedInpaint = useStudioStore((s) => s.selectedInpaintEngineId);
   const selectedOcr = useStudioStore((s) => s.selectedOcrEngineId);
+  const selectedColor = useStudioStore((s) => s.selectedColorEngineId);
   const downloadedIds = useStudioStore((s) => s.downloadedModelIds);
   const downloads = useStudioStore((s) => s.modelDownloads);
 
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  const options = category === 'inpaint' ? INPAINT_ENGINE_OPTIONS : OCR_ENGINE_OPTIONS;
-  const currentEngineId = category === 'inpaint' ? selectedInpaint : selectedOcr;
+  const options =
+    category === 'inpaint'
+      ? INPAINT_ENGINE_OPTIONS
+      : category === 'ocr'
+      ? OCR_ENGINE_OPTIONS
+      : COLOR_ENGINE_OPTIONS;
+  const currentEngineId =
+    category === 'inpaint'
+      ? selectedInpaint
+      : category === 'ocr'
+      ? selectedOcr
+      : selectedColor;
   const activeOption = options.find((o) => o.id === currentEngineId) || options[0];
 
   // Hydrate initial download statuses from background
@@ -135,7 +149,11 @@ export const StudioEngineSelector: React.FC<StudioEngineSelectorProps> = ({ cate
       {/* Header with Global Sync Switch */}
       <div className="flex items-center justify-between text-[11px]">
         <label className="text-slate-400 font-medium">
-          {category === 'inpaint' ? 'Inpaint Model Tier' : 'OCR Recognition Tier'}
+          {category === 'inpaint'
+            ? 'Inpaint Model Tier'
+            : category === 'ocr'
+            ? 'OCR Recognition Tier'
+            : 'Colorization Model Tier'}
         </label>
         <button
           type="button"

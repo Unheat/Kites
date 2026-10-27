@@ -26,6 +26,7 @@ export interface TranslationJob {
   tabId?: number; // Tracks which tab requested this job for the Pub/Sub response
   ocrEngineId?: string;
   inpaintTier?: string;
+  colorTier?: string;
   translationEngineId?: string;
   bubbleMode?: string;
   renderFontPresetId?: string;
@@ -79,6 +80,10 @@ export interface TextBlock {
   borderRadius?: number;
   /** Whether this text block was fitted to a rounded speech bubble. */
   isRounded?: boolean;
+  /** Organic bubble contour relative to (posX, posY) for scanline contour typesetting in Studio. */
+  contourPoints?: Array<{ x: number; y: number }>;
+  /** Koharu scanline placements (box-local) so Studio paints the exact baked layout before any edit. */
+  positionedLines?: Array<{ text: string; x: number; y: number; width: number; height: number }>;
   bold?: boolean;
   italic?: boolean;
   align?: 'left' | 'center' | 'right';

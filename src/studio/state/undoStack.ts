@@ -12,13 +12,28 @@ export interface UndoStackListeners {
   onStackChange?: (canUndo: boolean, canRedo: boolean) => void;
 }
 
+export type UndoStackListener = (canUndo: boolean, canRedo: boolean) => void;
+
 export class UndoStack {
   private undoEntries: UndoAction[] = [];
   private redoEntries: UndoAction[] = [];
+  private subscriberSet = new Set<UndoStackListener>();
   private listeners: UndoStackListeners;
 
   constructor(listeners: UndoStackListeners = {}) {
     this.listeners = listeners;
+  }
+
+  /**
+   * Subscribes a listener to stack availability transitions.
+   * Immediately calls the listener with current state and returns an unsubscribe cleanup.
+   */
+  public subscribe(listener: UndoStackListener): () => void {
+    this.subscriberSet.add(listener);
+    listener(this.canUndo(), this.canRedo());
+    return () => {
+      this.subscriberSet.delete(listener);
+    };
   }
 
   /**
@@ -59,6 +74,7 @@ export class UndoStack {
     applyRasterPatch?: (patch: BoundedDirtyRectPatch) => void;
     applyTextObjects?: (objects: TextObject[]) => void;
     applyImageLayers?: (layers: ImageLayer[]) => void;
+    applyColorState?: (isColorized: boolean) => void;
   }): UndoAction | null {
     const action = this.undoEntries.pop();
     if (!action) return null;
@@ -71,6 +87,9 @@ export class UndoStack {
     }
     if (action.imageLayers && handlers.applyImageLayers) {
       handlers.applyImageLayers(action.imageLayers.before);
+    }
+    if (action.colorState && handlers.applyColorState) {
+      handlers.applyColorState(action.colorState.before);
     }
 
     this.redoEntries.push(action);
@@ -88,6 +107,7 @@ export class UndoStack {
     applyRasterPatch?: (patch: BoundedDirtyRectPatch) => void;
     applyTextObjects?: (objects: TextObject[]) => void;
     applyImageLayers?: (layers: ImageLayer[]) => void;
+    applyColorState?: (isColorized: boolean) => void;
   }): UndoAction | null {
     const action = this.redoEntries.pop();
     if (!action) return null;
@@ -100,6 +120,9 @@ export class UndoStack {
     }
     if (action.imageLayers && handlers.applyImageLayers) {
       handlers.applyImageLayers(action.imageLayers.after);
+    }
+    if (action.colorState && handlers.applyColorState) {
+      handlers.applyColorState(action.colorState.after);
     }
 
     this.undoEntries.push(action);
@@ -117,9 +140,12 @@ export class UndoStack {
   }
 
   private notify(): void {
+    const u = this.canUndo();
+    const r = this.canRedo();
     if (this.listeners.onStackChange) {
-      this.listeners.onStackChange(this.canUndo(), this.canRedo());
+      this.listeners.onStackChange(u, r);
     }
+    this.subscriberSet.forEach((listener) => listener(u, r));
   }
 }
 

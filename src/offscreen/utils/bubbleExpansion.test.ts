@@ -6,6 +6,7 @@ import {
   dampedSlackExpansion,
   computeTypesetBox,
   partitionSharedContainer,
+  partitionBalloonFlowCells,
   groupBoxesBySharedContainer,
   pairwiseClampBox,
   SHARED_CHAMBER_MAX_V_GROWTH,
@@ -316,6 +317,34 @@ describe('bubbleExpansion', () => {
       // Must remain anchored close to original text centroid, NOT dragged to carrier center (100)
       expect(Math.abs(resultCx - textCx)).toBeLessThanOrEqual(8);
       expect(result.x).toBeGreaterThanOrEqual(textBox.x - 15);
+    });
+
+    it('topologically decomposes an hourglass figure-8 bubble at reflex-vertex constriction necks', () => {
+      // 10-point hourglass polygon with inward reflex notches at (60, 50) and (40, 50)
+      const hourglass = [
+        { x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 40 },
+        { x: 60, y: 50 }, // reflex 3
+        { x: 100, y: 60 }, { x: 100, y: 100 }, { x: 0, y: 100 }, { x: 0, y: 60 },
+        { x: 40, y: 50 }, // reflex 8
+        { x: 0, y: 40 }
+      ];
+      const container: BoxRect = { x: 0, y: 0, w: 100, h: 100 };
+      const boxes: BoxRect[] = [
+        { x: 30, y: 10, w: 40, h: 20 },
+        { x: 30, y: 70, w: 40, h: 20 }
+      ];
+
+      const res = partitionBalloonFlowCells(container, boxes, hourglass);
+      expect(res.subChambers).toHaveLength(2);
+      expect(res.cellContours).toHaveLength(2);
+
+      // Top lobe stays in upper half (y <= 50)
+      expect(res.subChambers[0].y).toBe(0);
+      expect(res.subChambers[0].y + res.subChambers[0].h).toBeLessThanOrEqual(51);
+
+      // Bottom lobe stays in lower half (y >= 50)
+      expect(res.subChambers[1].y).toBeGreaterThanOrEqual(49);
+      expect(res.subChambers[1].y + res.subChambers[1].h).toBe(100);
     });
   });
 });

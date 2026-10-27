@@ -8,8 +8,6 @@ import type { BubbleShapeEvidence } from './HeuristicBubbleExtractor';
 export interface BubbleEngineOptions {
   /** Whether WebGPU hardware acceleration should be preferred over WASM/CPU. */
   preferGpu?: boolean;
-  /** Neural detection mode: 'box' for bounding boxes, 'mask' for instance segmentation masks. */
-  mode?: 'box' | 'mask';
 }
 
 /**

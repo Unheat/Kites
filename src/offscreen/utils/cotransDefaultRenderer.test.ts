@@ -210,4 +210,58 @@ describe('font family propagation', () => {
     expect(Math.abs(c)).toBeGreaterThan(0.1);
     expect(a * d - b * c).toBeCloseTo(1.0, 2); // Rigid rotation determinant is 1.0
   });
+
+  it('unfixed region strictly takes Route 1 Auto Balloon XianScan and ignores simple mode', () => {
+    const drawCtx = createCanvas(400, 400).getContext('2d');
+    const metadata: any = {
+      translation: 'If this continues, we cannot win.',
+      originalText: 'テスト',
+      fontSize: 16,
+      angle: 0,
+      sourceLineCount: 1,
+      polygon: [{ x: 5, y: 5 }, { x: 35, y: 5 }, { x: 35, y: 120 }, { x: 5, y: 120 }],
+      textColor: '#000000',
+      strokeColor: '#ffffff',
+      alignment: 'center',
+      fixed: false, // NOT fixed
+      typesetMode: 'simple', // Stale or erroneous 'simple' flag must be ignored
+      isRounded: false,
+    };
+
+    const result = renderRegionDefault(drawCtx, metadata, metadata.polygon, 16);
+    expect(result).not.toBeNull();
+    // Route 1 Auto Balloon XianScan fits with minSize = floor(16 * 0.5) = 8
+    expect(result!.fontSize).toBe(8);
+    expect(result!.lines.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('clamps left-edge line positioning to prevent off-canvas clipping', () => {
+    const drawCtx = createCanvas(200, 200).getContext('2d');
+    const fillSpy = vi.spyOn(drawCtx, 'fillText');
+    const tlX = -2; // Polygon extends beyond or right at canvas boundary
+    const metadata: any = {
+      translation: 'Believe me',
+      originalText: '信じて',
+      fontSize: 16,
+      angle: 0,
+      sourceLineCount: 1,
+      polygon: [{ x: tlX, y: 10 }, { x: tlX + 48, y: 10 }, { x: tlX + 48, y: 80 }, { x: tlX, y: 80 }],
+      textColor: '#000000',
+      strokeColor: '#ffffff',
+      alignment: 'center',
+      fixed: true,
+      typesetMode: 'contour',
+      isRounded: true,
+      borderRadius: 15,
+    };
+
+    const result = renderRegionDefault(drawCtx, metadata, metadata.polygon, 16);
+    expect(result).not.toBeNull();
+    // Verify all fillText draws have screen X (tl.x + lineX) >= 4
+    for (const call of fillSpy.mock.calls) {
+      const drawnX = call[1] as number;
+      const screenX = tlX + drawnX;
+      expect(screenX).toBeGreaterThanOrEqual(4);
+    }
+  });
 });

@@ -76,23 +76,23 @@ afterEach(async () => {
 });
 
 describe('TypographySettings editing intent and reflow', () => {
-  it('preserves pipeline lines on mount and selection changes under global Simple Wrap', async () => {
+  it('preserves pipeline lines on mount and selection changes under global Caption Box', async () => {
     studioStore.setState({ globalTypesetMode: 'simple' });
     const original = studioStore.getState().textObjects;
     await render();
     await act(async () => { studioStore.setState({ selectedTextId: 'second' }); });
     expect(studioStore.getState().textObjects).toBe(original);
     expect(measureDefaultLayout).not.toHaveBeenCalled();
-    const simple = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Simple Wrap');
+    const simple = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Caption Box');
     expect(simple?.className).toContain('text-[#f4446d]');
   });
 
-  it('switches mode to Bubble Ellipse without immediate reflow until edit', async () => {
+  it('switches mode to Bubble Contour without immediate reflow until edit', async () => {
     const original = studioStore.getState().textObjects;
     await render();
-    await click('Bubble Ellipse');
+    await click('Bubble Contour');
     const toggled = studioStore.getState().textObjects;
-    expect(toggled[0].typesetMode).toBe('ellipse');
+    expect(toggled[0].typesetMode).toBe('contour');
     expect(toggled[0].lines).toBe(original[0].lines);
     expect(toggled[0].fontSize).toBe(18);
   });
@@ -100,7 +100,7 @@ describe('TypographySettings editing intent and reflow', () => {
   it('changes only selected mode without touching lines or font size, then reflows its edit', async () => {
     const original = studioStore.getState().textObjects;
     await render();
-    await click('Simple Wrap');
+    await click('Caption Box');
     const toggled = studioStore.getState().textObjects;
     expect(toggled[0].typesetMode).toBe('simple');
     expect(toggled[0].lines).toBe(original[0].lines);
@@ -117,7 +117,7 @@ describe('TypographySettings editing intent and reflow', () => {
     studioStore.setState({ globalEditMode: true });
     const original = studioStore.getState().textObjects;
     await render();
-    await click('Simple Wrap');
+    await click('Caption Box');
     expect(studioStore.getState().globalTypesetMode).toBe('simple');
     studioStore.getState().textObjects.forEach((object, index) => {
       expect(object.typesetMode).toBe('simple');
@@ -143,7 +143,7 @@ describe('TypographySettings editing intent and reflow', () => {
     expect(measureDefaultLayout).toHaveBeenCalledTimes(1);
   });
 
-  it.each(['Bold', 'Italic', 'Uppercase'])('reflows actual %s edits through Auto Balloon', async (label) => {
+  it.each(['Bold', 'Italic', 'Uppercase'])('reflows actual %s edits through Balanced Fit', async (label) => {
     await render();
     await click(label);
     expect(measureDefaultLayout).toHaveBeenCalledTimes(1);
@@ -221,7 +221,7 @@ describe('TypographySettings editing intent and reflow', () => {
   it('keeps global mode meaningful before any boxes exist', async () => {
     studioStore.setState({ textObjects: [], selectedTextId: null, globalEditMode: true });
     await render();
-    await click('Simple Wrap');
+    await click('Caption Box');
     expect(studioStore.getState().globalTypesetMode).toBe('simple');
     expect(studioStore.getState().textObjects).toEqual([]);
     await click('Add Text Box');
@@ -237,7 +237,7 @@ describe('TypographySettings editing intent and reflow', () => {
     expect(measureDefaultLayout).not.toHaveBeenCalled();
   });
 
-  it('initializes manual dialogue with Auto Balloon despite Simple Wrap editing default', async () => {
+  it('initializes manual dialogue with Balanced Fit despite Caption Box editing default', async () => {
     studioStore.setState({ globalTypesetMode: 'simple' });
     await render();
     await click('Add Text Box');

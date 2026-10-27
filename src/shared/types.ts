@@ -3,6 +3,10 @@
  */
 export type MessageType = 
   | 'TRANSLATE_IMAGE'    // Content -> Background
+  | 'PROCESS_JOB'        // Background -> Offscreen (job queue dispatch)
+  | 'JOB_COMPLETED'      // Offscreen -> Background/App (job queue completion)
+  | 'JOB_ERROR'          // Offscreen -> Background/App (job queue failure)
+  | 'IMAGE_TRANSLATED'   // Background -> Content (finished page bitmap)
   | 'PROCESS_PROJECT'    // Background -> Offscreen
   | 'PROCESS_COMPLETE'   // Offscreen -> Background
   | 'PROCESS_ERROR'      // Offscreen -> Background
@@ -21,6 +25,7 @@ export type MessageType =
   | 'CAPTURE_TRANSLATION_ERROR' // Background -> Content
   | 'STUDIO_INPAINT' // Studio -> Background -> Offscreen
   | 'STUDIO_OCR' // Studio -> Background -> Offscreen
+  | 'STUDIO_COLORIZE' // Studio -> Background -> Offscreen
   | 'ENQUEUE_STUDIO_JOB'; // Studio -> Background serialized queue
 
 export interface TranslateImageMessage {
@@ -89,7 +94,12 @@ export interface StudioOcrPayload {
   inpaintEngineId?: string;
   translationEngineId?: string;
 }
-export type ModelCategory = 'translation' | 'inpaint' | 'ocr' | 'bubble';
+export type ModelCategory = 'translation' | 'inpaint' | 'ocr' | 'bubble' | 'color';
+
+export interface StudioColorizePayload {
+  imageBase64: string;
+  colorTier?: string;
+}
 
 export interface ViewportSelection {
   left: number;
@@ -192,7 +202,7 @@ import type { RenderFontPresetId } from './renderFontPresets';
 import type { GlossaryEntry } from './glossary';
 import type { ColorTierId } from './colorTiers';
 
-export type BubbleDetectionMode = 'off' | 'heuristic' | 'neural' | 'neural-mask';
+export type BubbleDetectionMode = 'off' | 'heuristic' | 'neural';
 export type HistoryRetentionPeriod = '1day' | '1week' | '1month' | 'never';
 
 /** Custom CSS image selector rule for tricky or non-standard manga reader sites. */

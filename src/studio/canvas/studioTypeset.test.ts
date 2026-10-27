@@ -16,13 +16,16 @@ describe('Studio layout ownership', () => {
     expect(initial.fontSize).toBe(16);
   });
 
-  it('initializes missing layout with balloon, never simple preference', () => {
-    const initial = { ...object, lines: undefined, typesetMode: 'simple' as const };
-    const prepared = prepareInitialTextObject(initial);
-    expect(prepared).toMatchObject(recalculateBlockTypeset(
-      initial.text, initial.fontFamily, initial.width, initial.height, initial.fontSize, 'balloon'
+  it('initializes missing layout with the object own engine, defaulting to balloon', () => {
+    const simple = { ...object, lines: undefined, typesetMode: 'simple' as const };
+    expect(prepareInitialTextObject(simple)).toMatchObject(recalculateBlockTypeset(
+      simple.text, simple.fontFamily, simple.width, simple.height, simple.fontSize, 'simple'
     ));
-    expect(prepared.typesetMode).toBe('simple');
+    expect(prepareInitialTextObject(simple).typesetMode).toBe('simple');
+    const noMode = { ...object, lines: undefined };
+    expect(prepareInitialTextObject(noMode)).toMatchObject(recalculateBlockTypeset(
+      noMode.text, noMode.fontFamily, noMode.width, noMode.height, noMode.fontSize, 'balloon'
+    ));
   });
 
   it('does not reflow selection, paint, no-op edits, or engine changes', () => {
@@ -156,6 +159,18 @@ describe('Studio Algorithmic Typeset & Line Reflow', () => {
     expect(ellipseJoined).toContain('community');
   });
 
+  it('un-hyphenates INSERTED_HYPHEN marker splits when box is widened in Auto Balloon mode', () => {
+    // Regression: the Balanced Fit route used to run a lowercase-only regex that missed
+    // the Word Joiner marker, letting wrapText glue "Every-\u2060" + "one" into a
+    // permanently hyphenated "Every-one" on a single line after widening.
+    const markerText = 'Every-\u2060\none else is also\nin a state of being\nunable to fight.';
+    const wide = recalculateBlockTypeset(markerText, 'sans-serif', 300, 200, 18, 'balloon');
+    const joined = wide.lines.join(' ');
+    expect(joined).not.toContain('\u2060');
+    expect(joined).not.toContain('Every-');
+    expect(joined.replace(/\s+/g, ' ')).toContain('Everyone else is also');
+  });
+
   it('preserves box height on manual resize and updates reflowed lines when width changes', () => {
     const multiLineObject: TextObject = {
       ...object,
@@ -173,6 +188,46 @@ describe('Studio Algorithmic Typeset & Line Reflow', () => {
     // Height can be resized independently in any direction
     const resizedHeight = applyTextObjectUpdates(multiLineObject, { height: 350 });
     expect(resizedHeight.height).toBe(350);
+  });
+
+  it('fits dialogue into Koharu contour using generated bubble contour when contourPoints is omitted', () => {
+    const text = 'Wait... Teacher, please stop right now before it is too late!';
+    const result = recalculateBlockTypeset(text, 'sans-serif', 220, 160, 16, 'contour', {
+      borderRadius: 40,
+    });
+    expect(result.lines.length).toBeGreaterThanOrEqual(2);
+    expect(result.fontSize).toBeGreaterThanOrEqual(8);
+  });
+
+  it('fits dialogue into exact custom contour polygon when contourPoints are provided', () => {
+    const text = 'Hello world from custom contour';
+    const customContour = [
+      { x: 10, y: 10 },
+      { x: 200, y: 10 },
+      { x: 200, y: 150 },
+      { x: 10, y: 150 },
+    ];
+    const result = recalculateBlockTypeset(text, 'sans-serif', 200, 150, 16, 'contour', {
+      contourPoints: customContour,
+    });
+    expect(result.lines.length).toBeGreaterThanOrEqual(1);
+    expect(result.fontSize).toBeGreaterThanOrEqual(8);
+  });
+
+  it('returns Koharu scanline placements from contour routes and drops them elsewhere', () => {
+    const text = 'Wait... Teacher, please stop right now before it is too late!';
+    const contour = recalculateBlockTypeset(text, 'sans-serif', 220, 160, 16, 'contour', {
+      borderRadius: 40,
+    });
+    expect(contour.positionedLines).toBeDefined();
+    expect(contour.positionedLines!.length).toBe(contour.lines.length);
+    for (const pl of contour.positionedLines!) {
+      expect(pl.text).toBeTypeOf('string');
+      expect([pl.x, pl.y, pl.width, pl.height].every((v) => Number.isFinite(v))).toBe(true);
+    }
+    // Simple/balloon routes keep even spacing (Koharu's non-balloon fallback).
+    const simple = recalculateBlockTypeset(text, 'sans-serif', 220, 160, 16, 'simple');
+    expect(simple.positionedLines).toBeUndefined();
   });
 
   describe('CJK Vertical Layout & Column Wrapping', () => {

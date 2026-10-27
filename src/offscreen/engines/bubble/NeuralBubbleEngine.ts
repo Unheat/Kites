@@ -19,11 +19,11 @@ export class NeuralBubbleEngine implements IBubbleEngine {
 
   /**
    * Detects speech bubbles on the source canvas using the neural vision model.
-   * In neural-mask mode, decodes prototype masks and severs narrow pointing tails on AI contours.
+   * Decodes prototype masks and severs narrow pointing tails on AI contours.
    *
    * @param canvas - Source image canvas.
    * @param textBoxes - Optional array of detected OCR text boxes.
-   * @param options - Runtime detection options (mode, preferGpu).
+   * @param options - Runtime detection options (preferGpu).
    * @returns Detection result with bubble proposals and optional severed chamber shapes.
    */
   async detect(
@@ -31,10 +31,8 @@ export class NeuralBubbleEngine implements IBubbleEngine {
     textBoxes?: BoxRect[],
     options?: BubbleEngineOptions
   ): Promise<BubbleDetectionResult | null> {
-    const isMaskMode = options?.mode === 'mask';
-
-    // In fast box mode or when no text boxes are supplied, query detect directly
-    if (!isMaskMode || !textBoxes || textBoxes.length === 0) {
+    // When no text boxes are supplied, query detect directly
+    if (!textBoxes || textBoxes.length === 0) {
       const bubbles = await NeuralBubbleDetector.detect(canvas, options);
       if (!bubbles) return null;
       return { bubbles };
@@ -48,7 +46,7 @@ export class NeuralBubbleEngine implements IBubbleEngine {
       return { bubbles, scores };
     }
 
-    // Process AI masks for each text box in neural-mask mode
+    // Process AI masks for each text box in neural mode
     const shapes: (BubbleShapeEvidence | undefined)[] = new Array(textBoxes.length).fill(undefined);
     const imgW = canvas.width;
     const imgH = canvas.height;
@@ -97,6 +95,8 @@ export class NeuralBubbleEngine implements IBubbleEngine {
           x: minX,
           y: minY,
           scale: avgScale,
+          scaleX,
+          scaleY,
           width: pw,
           height: ph,
           interior: mask,
@@ -104,6 +104,21 @@ export class NeuralBubbleEngine implements IBubbleEngine {
           eroded: severed.eroded,
           carrierBox: severed.carrier,
           isSeveredCarrier: true,
+        };
+      } else {
+        shapes[i] = {
+          x: minX,
+          y: minY,
+          scale: avgScale,
+          scaleX,
+          scaleY,
+          width: pw,
+          height: ph,
+          interior: mask,
+          observedInterior: mask,
+          eroded: mask,
+          carrierBox: bubbles[matchedIdx],
+          isSeveredCarrier: false,
         };
       }
     }

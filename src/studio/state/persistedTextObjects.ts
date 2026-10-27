@@ -1,6 +1,7 @@
 import type { TextBlock } from '../../db';
 import type { TextObject } from '../types';
 import { prepareInitialTextObject } from '../canvas/studioTypeset';
+import { healLineBreakHyphens } from '../../offscreen/utils/typography';
 
 /**
  * Restores exact renderer output, initializing legacy records only when measured lines are absent.
@@ -10,8 +11,11 @@ import { prepareInitialTextObject } from '../canvas/studioTypeset';
 export function restoreTextObject(block: TextBlock): TextObject {
   const isCjk = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/.test(block.translatedText);
   const rawText = block.lines?.length ? block.lines.join('\n') : (block.translatedText || '');
-  // Un-hyphenate soft line-break hyphens so resizing boxes does not bake broken syllables
-  const unhyphenatedText = rawText.replace(/(\b[a-zA-Z]+)-\s*\r?\n\s*([a-z]+)/g, '$1$2');
+  // Un-hyphenate typesetter-inserted soft line-break hyphens (marked with INSERTED_HYPHEN)
+  // so resizing boxes does not bake broken syllables into the editable text. The
+  // structure-preserving heal keeps the persisted line layout (incl. CJK line breaks)
+  // while rejoining both marked and legacy plain-hyphen splits, case-insensitively.
+  const unhyphenatedText = healLineBreakHyphens(rawText);
   return prepareInitialTextObject({
     id: String(block.id || `tb-${block.posX}-${block.posY}`),
     x: block.posX,
@@ -21,9 +25,11 @@ export function restoreTextObject(block: TextBlock): TextObject {
     text: unhyphenatedText,
     lines: block.lines,
     lineSpacing: block.lineSpacing,
-    typesetMode: block.typesetMode || 'balloon',
+    typesetMode: block.typesetMode === 'ellipse' ? 'contour' : (block.typesetMode || 'balloon'),
     borderRadius: block.borderRadius,
     isRounded: block.isRounded,
+    contourPoints: block.contourPoints,
+    positionedLines: block.positionedLines,
     originalText: block.originalText,
     fontSize: block.fontSize || 16,
     fontFamily: block.fontFamily || 'WildWords, CCWildWords, sans-serif',

@@ -51,6 +51,16 @@
   font-display: swap;
 }
 
+@font-face {
+  /* Bundled so the Comic Hand preset renders identically on every machine
+     instead of falling back to a wide system font (e.g. Comic Sans MS). */
+  font-family: 'Patrick Hand SC';
+  src: url('/fonts/patrick-hand-sc.woff2') format('woff2');
+  font-weight: normal;
+  font-style: normal;
+  font-display: block;
+}
+
 @theme {
   /* Kites Design Tokens - Editor's Light Table */
   --color-paper: #E4E0D9;

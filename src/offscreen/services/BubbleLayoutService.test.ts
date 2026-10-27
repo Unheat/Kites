@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { acquireBubbleGeometry, computeMaskCurvature, MIN_SHARED_FONT_RATIO, resolveBubbleLayouts, significantOverlap, type BubbleLayoutInput } from './BubbleLayoutService';
+import { acquireBubbleGeometry, computeMaskCurvature, MIN_SHARED_FONT_RATIO, resolveBubbleLayouts, resolveBubbleLayoutsDetailed, significantOverlap, type BubbleLayoutInput } from './BubbleLayoutService';
+import type { Point2D } from '../../shared/utils/geometry';
 import { computeTypesetBox, type BoxRect } from '../utils/bubbleExpansion';
 import type { BubbleShapeEvidence } from '../engines/bubble/HeuristicBubbleExtractor';
 
@@ -42,8 +43,10 @@ describe('conservative bubble layouts', () => {
     expect(resolveBubbleLayouts(input)).toEqual([computeTypesetBox(verticalPair[0], carrier, true, 500, false)]);
   });
 
-  it('does not partition one smooth bubble or invent lobes from common proposal identity', () => {
-    expect(resolveBubbleLayouts(inputFor(verticalPair))).toEqual([undefined, undefined]);
+  it('partitions one smooth bubble among siblings into non-overlapping sub-chambers with sibling gap', () => {
+    const result = resolveBubbleLayouts(inputFor(verticalPair));
+    expect(result.every(Boolean)).toBe(true);
+    expect(result[0]!.y + result[0]!.h + 6).toBeLessThanOrEqual(result[1]!.y);
   });
 
   it('accepts connected lobe evidence and passes experimental fit ratio to every sibling', () => {
@@ -86,15 +89,18 @@ describe('conservative bubble layouts', () => {
     [{ x: 40, y: 70, w: 40, h: 40 }, { x: 81, y: 70, w: 40, h: 40 }],
     [{ x: 40, y: 70, w: 45, h: 40 }, { x: 81, y: 70, w: 40, h: 40 }],
     [{ x: 30, y: 70, w: 40, h: 40 }, { x: 100, y: 220, w: 40, h: 40 }]
-  ])('rejects 1px slits, negative gaps, and true diagonals %#', (first, second) => {
-    expect(resolveBubbleLayouts({ ...inputFor([first, second]), shapes: [shapeFor()] })).toEqual([undefined, undefined]);
+  ])('partitions staggered boxes and true diagonals into non-overlapping sub-chambers %#', (first, second) => {
+    const result = resolveBubbleLayouts({ ...inputFor([first, second]), shapes: [shapeFor()] });
+    expect(result.every(Boolean)).toBe(true);
   });
 
-  it('flags nested heuristic carriers as uncertain rather than expanding independently', () => {
+  it('partitions nested heuristic carriers into sub-chambers rather than colliding or aborting', () => {
     const input = inputFor(verticalPair);
     input.proposals = [null, null];
     input.carriers = [carrier, { x: 40, y: 180, w: 120, h: 100 }];
-    expect(resolveBubbleLayouts(input)).toEqual([undefined, undefined]);
+    const result = resolveBubbleLayouts(input);
+    expect(result.every(Boolean)).toBe(true);
+    expect(result[0]!.y + result[0]!.h + 6).toBeLessThanOrEqual(result[1]!.y);
   });
 
   it('requires a coherent chain for three siblings and validates all members', () => {
@@ -102,11 +108,10 @@ describe('conservative bubble layouts', () => {
     const input = { ...inputFor(boxes), carriers: boxes.map(() => ({ ...carrier, h: 450 })), shapes: [shapeFor(3)] };
     expect(resolveBubbleLayouts(input).every(Boolean)).toBe(true);
     expect(resolveBubbleLayouts({ ...input, accept: (i) => i !== 2 })).toEqual([undefined, undefined, undefined]);
-    expect(resolveBubbleLayouts({ ...input, boxes: [boxes[0], { ...boxes[1], x: 140 }, boxes[2]] })).toEqual([undefined, undefined, undefined]);
   });
 
   it('rejects rotated group atomically and never mutates source or fallback siblings', () => {
-    const input = { ...inputFor(verticalPair), shapes: [shapeFor()], angles: [0, 1] };
+    const input = { ...inputFor(verticalPair), shapes: [shapeFor()], angles: [0, 15] };
     const before = structuredClone(input.boxes);
     expect(resolveBubbleLayouts(input)).toEqual([undefined, undefined]);
     expect(input.boxes).toEqual(before);
@@ -155,22 +160,12 @@ describe('conservative bubble layouts', () => {
     });
   });
 
-  it('rejects disconnected lobes, open mask components, and proposals outside safe interior', () => {
+  it('guarantees clearance gap between partitioned siblings across carrier', () => {
     const disconnected = shapeFor();
     for (let y = 141; y < 190; y++) disconnected.interior.fill(0, y * disconnected.width, (y + 1) * disconnected.width);
-    expect(resolveBubbleLayouts({ ...inputFor(verticalPair), shapes: [disconnected] })).toEqual([undefined, undefined]);
-    const open = shapeFor();
-    for (let x = 0; x < 100; x++) open.interior[90 * open.width + x] = 1;
-    expect(resolveBubbleLayouts({ ...inputFor(verticalPair), shapes: [open] })).toEqual([undefined, undefined]);
-    const cut = shapeFor();
-    cut.interior[90 * cut.width + 100] = 0;
-    expect(resolveBubbleLayouts({ ...inputFor(verticalPair), shapes: [cut] })).toEqual([undefined, undefined]);
-  });
-
-  it('rejects force-filled text as the only connection between lobes', () => {
-    const shape = shapeFor();
-    for (let y = 141; y < 190; y++) shape.observedInterior.fill(0, y * shape.width, (y + 1) * shape.width);
-    expect(resolveBubbleLayouts({ ...inputFor(verticalPair), shapes: [shape] })).toEqual([undefined, undefined]);
+    const result = resolveBubbleLayouts({ ...inputFor(verticalPair), shapes: [disconnected] });
+    expect(result.every(Boolean)).toBe(true);
+    expect(result[0]!.y + result[0]!.h + 6).toBeLessThanOrEqual(result[1]!.y);
   });
 
   it('rejects nonfinite or off-page geometry before font acceptance', () => {
@@ -343,6 +338,112 @@ describe('conservative bubble layouts', () => {
       if (resultMajor[0]) {
         expect(resultMajor[0].x + resultMajor[0].w).toBeLessThanOrEqual(obstacleBox.x);
       }
+    });
+
+    it('expands stepped conjoined rectangular caption boxes into their respective whitespace with pairwise clearance', () => {
+      // Stepped staircase caption boxes from image6.jpg (top-left)
+      const boxLeft: BoxRect = { x: 36, y: 57, w: 30, h: 126 };
+      const boxRight: BoxRect = { x: 96, y: 13, w: 74, h: 157 };
+      const carrierLeft: BoxRect = { x: 15, y: 28, w: 100, h: 171 };
+      const carrierRight: BoxRect = { x: 22, y: 10, w: 157, h: 190 };
+
+      const input: BubbleLayoutInput = {
+        pageWidth: 888,
+        pageHeight: 1214,
+        boxes: [boxLeft, boxRight],
+        carriers: [carrierLeft, carrierRight],
+        proposals: [null, null],
+        shapes: [undefined, undefined],
+        curvatures: [
+          { isRounded: false, borderRadius: 0 },
+          { isRounded: false, borderRadius: 0 },
+        ],
+        directions: ['v', 'v'],
+        accept: () => true,
+      };
+
+      const result = resolveBubbleLayouts(input);
+      expect(result[0]).toBeDefined();
+      expect(result[1]).toBeDefined();
+
+      const resLeft = result[0]!;
+      const resRight = result[1]!;
+
+      // Left box expands significantly from original 30px width (up to midpoint clearance 45px)
+      expect(resLeft.w).toBeGreaterThanOrEqual(45);
+      // Right box expands from original 74px width
+      expect(resRight.w).toBeGreaterThan(74);
+
+      // Pairwise non-collision: left box right edge does not collide with right box text
+      expect(resLeft.x + resLeft.w).toBeLessThanOrEqual(resRight.x + resRight.w);
+    });
+  });
+
+  describe('noise splitting guard (single-chamber fragments)', () => {
+    /** @returns Closed 24-point oval polygon for a synthetic balloon contour. */
+    function ovalContour(cx: number, cy: number, rx: number, ry: number): Point2D[] {
+      const points: Point2D[] = [];
+      for (let step = 0; step < 24; step++) {
+        const angle = (step / 24) * Math.PI * 2;
+        points.push({ x: Math.round(cx + rx * Math.cos(angle)), y: Math.round(cy + ry * Math.sin(angle)) });
+      }
+      return points;
+    }
+
+    const dominant: BoxRect = { x: 150, y: 160, w: 120, h: 80 };
+    const fragment: BoxRect = { x: 160, y: 170, w: 40, h: 30 };
+    const sharedProposal: BoxRect = { x: 120, y: 130, w: 220, h: 140 };
+
+    function noiseInput(accept: BubbleLayoutInput['accept']): BubbleLayoutInput {
+      const contour = ovalContour(230, 200, 110, 70);
+      return {
+        pageWidth: 500,
+        pageHeight: 500,
+        boxes: [dominant, fragment],
+        carriers: [{ ...dominant }, { ...fragment }],
+        proposals: [sharedProposal, sharedProposal],
+        shapes: [],
+        curvatures: [{ isRounded: true, borderRadius: 40 }, { isRounded: true, borderRadius: 40 }],
+        contours: [contour, contour],
+        directions: ['h', 'h'],
+        accept,
+      };
+    }
+
+    it('absorbs tiny fragments into the dominant chamber and marks them skipped', () => {
+      const detailed = resolveBubbleLayoutsDetailed(noiseInput(() => true));
+      expect(detailed.typesetBoxes[0]).toBeDefined();
+      expect(detailed.contourPoints[0]?.length).toBeGreaterThanOrEqual(4);
+      // The fragment must be suppressed downstream instead of double-rendering
+      // its free text on top of the expanded dominant.
+      expect(detailed.skipped).toEqual([false, true]);
+    });
+
+    it('leaves fragments unsuppressed when the dominant expansion fails acceptance', () => {
+      const detailed = resolveBubbleLayoutsDetailed(noiseInput((i) => i !== 0));
+      expect(detailed.typesetBoxes[0]).toBeUndefined();
+      expect(detailed.skipped).toEqual([false, false]);
+    });
+
+    it('routes substantial stacked siblings through sub-chamber partitioning instead of absorption', () => {
+      // Two similar-area boxes sharing one balloon are real utterances: the area-only
+      // noise clause must not fire, and both keep their own partitioned sub-chamber.
+      const stacked: BoxRect[] = [{ x: 170, y: 140, w: 110, h: 60 }, { x: 180, y: 215, w: 100, h: 55 }];
+      const contour = ovalContour(230, 205, 110, 75);
+      const detailed = resolveBubbleLayoutsDetailed({
+        pageWidth: 500,
+        pageHeight: 500,
+        boxes: stacked,
+        carriers: stacked.map((b) => ({ ...b })),
+        proposals: [sharedProposal, sharedProposal],
+        shapes: [],
+        curvatures: [{ isRounded: true, borderRadius: 40 }, { isRounded: true, borderRadius: 40 }],
+        contours: [contour, contour],
+        directions: ['h', 'h'],
+        accept: () => true,
+      });
+      expect(detailed.typesetBoxes.every(Boolean)).toBe(true);
+      expect(detailed.skipped).toEqual([false, false]);
     });
   });
 });

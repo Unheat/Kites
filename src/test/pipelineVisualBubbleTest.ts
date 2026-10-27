@@ -9,8 +9,9 @@ import { createCanvas, loadImage } from 'canvas';
 import type { Point2D } from '../shared/utils/geometry';
 import { NeuralBubbleDetector } from '../offscreen/engines/bubble/NeuralBubbleDetector';
 import { HeuristicBubbleExtractor } from '../offscreen/engines/bubble/HeuristicBubbleExtractor';
-import { acquireBubbleGeometry, resolveBubbleLayouts, type BubbleGeometry } from '../offscreen/services/BubbleLayoutService';
+import { acquireBubbleGeometry, resolveBubbleLayoutsDetailed, type BubbleGeometry } from '../offscreen/services/BubbleLayoutService';
 import { DEFAULT_RENDER_FONT_FAMILY } from '../offscreen/utils/canvasTypesetting';
+import { HyphenationService } from '../offscreen/utils/hyphenation/HyphenationService';
 import * as ort from 'onnxruntime-node';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -23,10 +24,9 @@ async function runPipelineVisualBubbleTest() {
   const baseResultDir = path.join(__dirname, 'result');
   const heuristicDir = path.join(baseResultDir, 'pipeline_bubble_heuristic');
   const neuralDir = path.join(baseResultDir, 'pipeline_bubble_neural');
-  const smartMaskDir = path.join(baseResultDir, 'pipeline_bubble_smart_mask');
 
   // Ensure result directories exist and clean stale outputs
-  [heuristicDir, neuralDir, smartMaskDir].forEach((dir) => {
+  [heuristicDir, neuralDir].forEach((dir) => {
     if (fs.existsSync(dir)) {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -37,6 +37,16 @@ async function runPipelineVisualBubbleTest() {
   const inpaintManager = new InpaintManager();
   const translator = new GoogleTranslateEngine();
   await translator.init();
+
+  // Register local filesystem pattern loader for Node test environment and preload English patterns
+  HyphenationService.setCustomLoader(async (dictName: string) => {
+    const filePath = path.resolve(process.cwd(), 'public/assets/hyphenation', `${dictName}.txt`);
+    if (fs.existsSync(filePath)) {
+      return fs.readFileSync(filePath, 'utf-8');
+    }
+    return null;
+  });
+  await HyphenationService.getInstance().loadLanguage('en');
 
   // Load Neural Bubble Detector model if available in test/models or models/
   const candidateBubblePaths = [
@@ -123,7 +133,7 @@ async function runPipelineVisualBubbleTest() {
      * @param ctx - Actual output measurement context. @param geometry - Original carrier evidence.
      * @returns Accepted fixed boxes, with the same source-font and complete-text fit guard as production.
      */
-    const resolveLayouts = (ctx: any, geometry: BubbleGeometry) => resolveBubbleLayouts({
+    const resolveLayouts = (ctx: any, geometry: BubbleGeometry) => resolveBubbleLayoutsDetailed({
       ...geometry, boxes, directions: ocrResult.directions, angles: ocrResult.angles, pageWidth, pageHeight,
       accept: (index, proposed) => {
         const curv = geometry.curvatures?.[index];
@@ -133,6 +143,7 @@ async function runPipelineVisualBubbleTest() {
           originalText: texts[index], sourceLineCount: ocrResult.lineCounts?.[index],
           isRounded: curv?.isRounded,
           borderRadius: curv?.borderRadius,
+          typesetMode: curv?.isRounded ? 'contour' : 'simple',
         };
         const fitted = measureBubbleLayoutFontSize(ctx, block, proposed, DEFAULT_RENDER_FONT_FAMILY);
         return fitted > 0;
@@ -146,25 +157,36 @@ async function runPipelineVisualBubbleTest() {
       const ctx = canvas.getContext('2d');
       ctx.drawImage(cleanedImage, 0, 0);
       if (typeof document !== 'undefined' && document.fonts) await document.fonts.ready;
-      const heuristicTypesetBoxes = resolveLayouts(ctx, heuristicGeometry);
+      const heuristicLayout = resolveLayouts(ctx, heuristicGeometry);
+      const heuristicTypesetBoxes = heuristicLayout.typesetBoxes;
+      const heuristicContours = heuristicLayout.contourPoints;
+      if (testFile === 'image6.jpg') {
+        for (let i = 0; i < texts.length; i++) {
+          console.log(`[image6 Heuristic] #${i}: "${texts[i]}" -> "${translatedTexts[i]}" box=${JSON.stringify(boxes[i])} carrier=${JSON.stringify(heuristicGeometry.carriers[i])} typeset=${JSON.stringify(heuristicTypesetBoxes[i])}`);
+        }
+      }
 
       const textBlockItems: TextBlockItem[] = [];
       for (let i = 0; i < translatedTexts.length; i++) {
         const text = translatedTexts[i];
         const poly = polygons[i];
         if (text && poly) {
-          const curv = heuristicGeometry.curvatures?.[i];
+          const typesetBox = heuristicTypesetBoxes[i];
+          const fixed = typesetBox !== undefined;
+          const curv = fixed ? heuristicGeometry.curvatures?.[i] : undefined;
           textBlockItems.push({
             text,
             polygon: poly,
             direction: ocrResult.directions ? ocrResult.directions[i] : 'h',
-            typesetBox: heuristicTypesetBoxes[i],
+            typesetBox,
             fontSize: ocrResult.fontSizes ? ocrResult.fontSizes[i] : undefined,
             angle: ocrResult.angles ? ocrResult.angles[i] : undefined,
             originalText: texts[i],
             sourceLineCount: ocrResult.lineCounts ? ocrResult.lineCounts[i] : undefined,
-            isRounded: curv?.isRounded,
-            borderRadius: curv?.borderRadius,
+            isRounded: fixed ? Boolean(curv?.isRounded) : false,
+            borderRadius: fixed ? (curv?.borderRadius ?? 0) : 0,
+            typesetMode: fixed ? (curv?.isRounded ? 'contour' : 'simple') : 'balloon',
+            contourPoints: fixed ? heuristicContours?.[i] : undefined,
           });
         }
       }
@@ -218,45 +240,10 @@ async function runPipelineVisualBubbleTest() {
       const detectedBubbles = parsedNeural.bubbles;
       console.log(`[Neural] Detected ${detectedBubbles.length} bubble proposals across image.`);
 
-      // Pass 2: YOLO Box (raw bounding proposals)
-      const neuralGeometry = acquireBubbleGeometry(rawImageData, boxes, detectedBubbles);
+      // Pass 2: Unified YOLO (AI) Bubble Expansion with morphological tail severing on prototype masks
+      const neuralShapes: (any | undefined)[] = new Array(boxes.length).fill(undefined);
 
-      const canvas = createCanvas(pageWidth, pageHeight);
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(cleanedImage, 0, 0);
-      if (typeof document !== 'undefined' && document.fonts) await document.fonts.ready;
-      const neuralTypesetBoxes = resolveLayouts(ctx, neuralGeometry);
-
-      const textBlockItems: TextBlockItem[] = [];
-      for (let i = 0; i < translatedTexts.length; i++) {
-        const text = translatedTexts[i];
-        const poly = polygons[i];
-        if (text && poly) {
-          const curv = neuralGeometry.curvatures?.[i];
-          textBlockItems.push({
-            text,
-            polygon: poly,
-            direction: ocrResult.directions ? ocrResult.directions[i] : 'h',
-            typesetBox: neuralTypesetBoxes[i],
-            fontSize: ocrResult.fontSizes ? ocrResult.fontSizes[i] : undefined,
-            angle: ocrResult.angles ? ocrResult.angles[i] : undefined,
-            originalText: texts[i],
-            sourceLineCount: ocrResult.lineCounts ? ocrResult.lineCounts[i] : undefined,
-            isRounded: curv?.isRounded,
-            borderRadius: curv?.borderRadius,
-          });
-        }
-      }
-      renderTextBlocksBatch(ctx as any, textBlockItems, 'en', { width: pageWidth, height: pageHeight });
-      const outPath = path.join(neuralDir, testFile);
-      fs.writeFileSync(outPath, canvas.toBuffer('image/png'));
-      console.log(`[Neural] Saved baked image: result/pipeline_bubble_neural/${testFile}`);
-
-      // Pass 3: YOLO Smart Mask (neural-mask with morphological tail severing on AI mask)
       if (parsedNeural.items && parsedNeural.items.length > 0) {
-        console.log(`\n--- [Pass 3] Tier 3 YOLO Smart Mask Expansion ---`);
-        const neuralShapes: (any | undefined)[] = new Array(boxes.length).fill(undefined);
-
         for (let i = 0; i < boxes.length; i++) {
           const textBox = boxes[i];
           const matchedIdx = NeuralBubbleDetector.matchBubbleIndex(textBox, detectedBubbles);
@@ -301,6 +288,8 @@ async function runPipelineVisualBubbleTest() {
               x: minX,
               y: minY,
               scale: avgScale,
+              scaleX,
+              scaleY,
               width: pw,
               height: ph,
               interior: mask,
@@ -309,40 +298,73 @@ async function runPipelineVisualBubbleTest() {
               carrierBox: severed.carrier,
               isSeveredCarrier: true,
             };
+          } else {
+            neuralShapes[i] = {
+              x: minX,
+              y: minY,
+              scale: avgScale,
+              scaleX,
+              scaleY,
+              width: pw,
+              height: ph,
+              interior: mask,
+              observedInterior: mask,
+              eroded: mask,
+              carrierBox: detectedBubbles[matchedIdx],
+              isSeveredCarrier: false,
+            };
           }
         }
-
-        const maskGeometry = acquireBubbleGeometry(rawImageData, boxes, detectedBubbles, neuralShapes);
-        const maskCanvas = createCanvas(pageWidth, pageHeight);
-        const maskCtx = maskCanvas.getContext('2d');
-        maskCtx.drawImage(cleanedImage, 0, 0);
-        const maskTypesetBoxes = resolveLayouts(maskCtx, maskGeometry);
-
-        const maskTextBlockItems: TextBlockItem[] = [];
-        for (let i = 0; i < translatedTexts.length; i++) {
-          const text = translatedTexts[i];
-          const poly = polygons[i];
-          if (text && poly) {
-            const curv = maskGeometry.curvatures?.[i];
-            maskTextBlockItems.push({
-              text,
-              polygon: poly,
-              direction: ocrResult.directions ? ocrResult.directions[i] : 'h',
-              typesetBox: maskTypesetBoxes[i],
-              fontSize: ocrResult.fontSizes ? ocrResult.fontSizes[i] : undefined,
-              angle: ocrResult.angles ? ocrResult.angles[i] : undefined,
-              originalText: texts[i],
-              sourceLineCount: ocrResult.lineCounts ? ocrResult.lineCounts[i] : undefined,
-              isRounded: curv?.isRounded,
-              borderRadius: curv?.borderRadius,
-            });
-          }
-        }
-        renderTextBlocksBatch(maskCtx as any, maskTextBlockItems, 'en', { width: pageWidth, height: pageHeight });
-        const maskOutPath = path.join(smartMaskDir, testFile);
-        fs.writeFileSync(maskOutPath, maskCanvas.toBuffer('image/png'));
-        console.log(`[SmartMask] Saved baked image: result/pipeline_bubble_smart_mask/${testFile}`);
       }
+
+      const neuralGeometry = acquireBubbleGeometry(rawImageData, boxes, detectedBubbles, neuralShapes);
+      const canvas = createCanvas(pageWidth, pageHeight);
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(cleanedImage, 0, 0);
+      if (typeof document !== 'undefined' && document.fonts) await document.fonts.ready;
+      const neuralLayout = resolveLayouts(ctx, neuralGeometry);
+      const neuralTypesetBoxes = neuralLayout.typesetBoxes;
+      const neuralContours = neuralLayout.contourPoints;
+
+      if (testFile === 'image6.jpg') {
+        for (let i = 0; i < texts.length; i++) {
+          console.log(`[image6 Neural] #${i}: "${texts[i]}" -> "${translatedTexts[i]}" box=${JSON.stringify(boxes[i])} proposal=${JSON.stringify(neuralGeometry.proposals[i])} carrier=${JSON.stringify(neuralGeometry.carriers[i])} typeset=${JSON.stringify(neuralTypesetBoxes[i])} contourLen=${neuralContours?.[i]?.length ?? 0}`);
+        }
+      }
+
+      const textBlockItems: TextBlockItem[] = [];
+      for (let i = 0; i < translatedTexts.length; i++) {
+        const text = translatedTexts[i];
+        const poly = polygons[i];
+        if (text && poly) {
+          const typesetBox = neuralTypesetBoxes[i];
+          const fixed = typesetBox !== undefined;
+          const curv = fixed ? neuralGeometry.curvatures?.[i] : undefined;
+          textBlockItems.push({
+            text,
+            polygon: poly,
+            direction: ocrResult.directions ? ocrResult.directions[i] : 'h',
+            typesetBox,
+            fontSize: ocrResult.fontSizes ? ocrResult.fontSizes[i] : undefined,
+            angle: ocrResult.angles ? ocrResult.angles[i] : undefined,
+            originalText: texts[i],
+            sourceLineCount: ocrResult.lineCounts ? ocrResult.lineCounts[i] : undefined,
+            isRounded: fixed ? Boolean(curv?.isRounded) : false,
+            borderRadius: fixed ? (curv?.borderRadius ?? 0) : 0,
+            typesetMode: fixed ? (curv?.isRounded ? 'contour' : 'simple') : 'balloon',
+            contourPoints: fixed ? neuralContours?.[i] : undefined,
+          });
+        }
+      }
+      const renderInfos = renderTextBlocksBatch(ctx as any, textBlockItems, 'en', { width: pageWidth, height: pageHeight });
+      if (testFile === 'image6.jpg') {
+        for (let i = 0; i < renderInfos.length; i++) {
+          console.log(`[Render Info image6] #${i}: "${textBlockItems[i]?.text}" ->`, JSON.stringify(renderInfos[i]));
+        }
+      }
+      const outPath = path.join(neuralDir, testFile);
+      fs.writeFileSync(outPath, canvas.toBuffer('image/png'));
+      console.log(`[Neural] Saved baked image: result/pipeline_bubble_neural/${testFile}`);
     }
   }
 
@@ -353,7 +375,6 @@ async function runPipelineVisualBubbleTest() {
   console.log('Outputs:');
   console.log('  Heuristic  -> result/pipeline_bubble_heuristic/');
   console.log('  Neural     -> result/pipeline_bubble_neural/');
-  console.log('  Smart Mask -> result/pipeline_bubble_smart_mask/');
   console.log('======================================================\n');
 }
 

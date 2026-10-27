@@ -373,7 +373,11 @@ export default function App() {
           direction: obj.isVertical ? 'v' : 'h',
           lines: obj.lines,
           lineSpacing: obj.lineSpacing,
+          positionedLines: obj.positionedLines,
           typesetMode: obj.typesetMode,
+          borderRadius: obj.borderRadius,
+          isRounded: obj.isRounded,
+          contourPoints: obj.contourPoints,
           isSkipped: obj.isSkipped,
           angle: obj.rotation ?? 0,
         }));

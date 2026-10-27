@@ -211,20 +211,26 @@ export function clusterLinesIntoUtterances(
             (vertGap >= Math.max(22.0, medianTh * 1.35) ||
               (endsWithTerm && vertGap >= Math.max(6.0, medianTh * 0.45)));
 
-          // 2a. Staggered multi-lobe split with terminal punctuation (XianScan base rule:
-          // adjacent parallel columns shifted vertically, where previous line ends with terminal punctuation)
-          const isPunctuationLobeSplit =
-            horizStep >= VERTICAL_COLUMN_MIN_HORIZ_STEP &&
-            endsWithTerm &&
-            (topStagger >= 15 || botStagger >= 25);
+          const overlapY = Math.min(prevBounds.y + prevBounds.h, b.y + b.h) - Math.max(prevBounds.y, b.y);
 
-          // 2b. Staggered box/lobe translation WITHOUT terminal punctuation (concordant translation:
-          // handles multi-box continuous sentences where top and bottom translate in the same direction,
-          // with large vertical centroid shift, distinguishing separate boxes from symmetric oval shrinkage).
+          // 2. Staggered box/lobe translation parameters (XianScan clustering.rs:60-63)
           const minCenterShift = Math.max(BOX_TRANSLATION_MIN_CENTER_SHIFT, medianTh * BOX_TRANSLATION_CENTER_SHIFT_RATIO);
           const minTopStagger = Math.max(BOX_TRANSLATION_MIN_TOP_STAGGER, medianTh * BOX_TRANSLATION_TOP_STAGGER_RATIO);
           const maxOpposingShrink = medianTh * BOX_TRANSLATION_OPPOSING_SHRINK_TOLERANCE_RATIO;
 
+          // 2a. Staggered multi-lobe split with terminal punctuation (XianScan clustering.rs:60-63):
+          // Distinct utterances in conjoined/staggered double-bubbles (e.g. figure-8 lobes) are split
+          // when the preceding line ends with terminal punctuation AND the column translates vertically
+          // with a significant physical center shift (distinguishing separate lobes from multi-line text).
+          const isPunctuationLobeSplit =
+            horizStep >= VERTICAL_COLUMN_MIN_HORIZ_STEP &&
+            endsWithTerm &&
+            Math.abs(centerShiftY) >= minCenterShift &&
+            (topStagger >= 15 || botStagger >= 25 || (overlapY <= 0 && vertGap >= Math.max(6.0, medianTh * 0.45)));
+
+          // 2b. Staggered box/lobe translation WITHOUT terminal punctuation (concordant translation:
+          // handles multi-box continuous sentences where top and bottom translate in the same direction,
+          // with large vertical centroid shift, distinguishing separate boxes from symmetric oval shrinkage).
           const isDownwardBoxTranslation =
             topStagger >= minTopStagger &&
             botStagger >= -maxOpposingShrink &&

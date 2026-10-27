@@ -16,9 +16,9 @@ export const HYPHEN_MIN_LETTERS = 6;
 
 /**
  * Minimum visible characters required on each side of an inserted hyphen.
- * Prevents awkward 1- or 2-letter orphan fragments.
+ * Matches Koharu's COMPACT_HYPHENATION_FRAGMENT_LEN = 2 for comic speech balloons.
  */
-export const HYPHEN_MIN_SIDE = 3;
+export const HYPHEN_MIN_SIDE = 2;
 
 /** Maximum length of a word processed by the hyphenation trie. */
 export const HYPHEN_MAX_WORD_LENGTH = 64;

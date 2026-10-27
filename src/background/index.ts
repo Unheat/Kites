@@ -108,11 +108,13 @@ export function normalizePopupState(popupState: Partial<PopupState> | undefined)
   const activeOcrId = resolveOcrTier(completedState.activeOcrId);
   const renderFontPresetId = normalizeRenderFontPresetId(completedState.renderFontPresetId);
   const bubbleMode: BubbleDetectionMode =
-    completedState.bubbleMode === 'heuristic' ||
-    completedState.bubbleMode === 'neural' ||
-    completedState.bubbleMode === 'neural-mask'
+    completedState.bubbleMode === 'heuristic' || completedState.bubbleMode === 'neural'
       ? completedState.bubbleMode
-      : 'off';
+      : // Legacy 'neural-mask' selections behave identically to 'neural' since the YOLO
+        // tier unification; normalize at the storage boundary like other legacy values.
+        (completedState.bubbleMode as string) === 'neural-mask'
+        ? 'neural'
+        : 'off';
   const historyRetention: HistoryRetentionPeriod =
     completedState.historyRetention === '1day' ||
     completedState.historyRetention === '1month' ||
@@ -573,7 +575,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   // ownership, background and offscreen both handled the popup request and competed to
   // answer, producing closed message ports and silent model downloads. Do not remove
   // these route guards or forward the original unaddressed message. See devlog 015.
-  if (message.target === 'background' && message.request === true && (message.type === 'PROCESS_JOB' || message.type === 'START_MODEL_DOWNLOAD' || message.type === 'CHECK_MODEL_STATUS' || message.type === 'GET_MODEL_STATUSES' || message.type === 'CHECK_WEBGPU_SUPPORT' || message.type === 'PRELOAD_ACTIVE_ENGINE' || message.type === 'GET_ACTIVE_DOWNLOADS' || message.type === 'VALIDATE_CUSTOM_API' || message.type === 'STUDIO_INPAINT' || message.type === 'STUDIO_OCR')) {
+  if (message.target === 'background' && message.request === true && (message.type === 'PROCESS_JOB' || message.type === 'START_MODEL_DOWNLOAD' || message.type === 'CHECK_MODEL_STATUS' || message.type === 'GET_MODEL_STATUSES' || message.type === 'CHECK_WEBGPU_SUPPORT' || message.type === 'PRELOAD_ACTIVE_ENGINE' || message.type === 'GET_ACTIVE_DOWNLOADS' || message.type === 'VALIDATE_CUSTOM_API' || message.type === 'STUDIO_INPAINT' || message.type === 'STUDIO_OCR' || message.type === 'STUDIO_COLORIZE')) {
     console.log(`[Background] Received ${message.type}. Forwarding to Offscreen...`);
     sendMessageToOffscreen(message)
       .then((res) => sendResponse(res))

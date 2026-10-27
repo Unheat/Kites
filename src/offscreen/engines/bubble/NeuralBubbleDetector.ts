@@ -1,7 +1,5 @@
 import type { BoxRect } from '../../utils/bubbleExpansion';
-import type { PopupState } from '../../../shared/types';
 import type { BubbleEngineOptions } from './BaseBubbleEngine';
-import { isBubbleGpuAvailable } from '../../../shared/utils/hardwareUtils';
 import { bubbleRegistry } from './bubbleRegistry';
 import { BubbleCacheManager } from '../../services/BubbleCacheManager';
 
@@ -65,7 +63,7 @@ export class NeuralBubbleDetector {
    * @param options - Execution options or extension settings state.
    * @returns True if session provider matches requested options, or if no session is active.
    */
-  static isProviderCurrent(options?: BubbleEngineOptions | PopupState): boolean {
+  static isProviderCurrent(options?: BubbleEngineOptions): boolean {
     if (!this.session) return true;
     const wantGpu = this.resolvePreferGpu(options);
     const requestedProvider = wantGpu ? 'webgpu' : 'wasm';
@@ -376,21 +374,19 @@ export class NeuralBubbleDetector {
    * @returns Detailed detection result with bubble boxes and optional decoded prototype masks, or null if model unavailable.
    */
   /**
-   * Resolves whether GPU execution is preferred from either dedicated options or legacy popup state.
+   * Resolves whether GPU execution is preferred from dedicated engine options.
    */
-  private static resolvePreferGpu(options?: BubbleEngineOptions | PopupState): boolean {
-    if (!options) return false;
-    if ('preferGpu' in options) return Boolean(options.preferGpu);
-    return isBubbleGpuAvailable(options as PopupState);
+  private static resolvePreferGpu(options?: BubbleEngineOptions): boolean {
+    return Boolean(options?.preferGpu);
   }
 
   /**
    * Bootstraps and caches the ONNX Runtime session for the YOLO bubble detector if cached weights exist.
    *
-   * @param options - Execution options or extension settings state to read GPU acceleration overrides.
+   * @param options - Execution options with optional preferGpu acceleration setting.
    * @returns True if session is ready for inference, false if model is uninstalled/uncached.
    */
-  static async ensureSession(options?: BubbleEngineOptions | PopupState): Promise<boolean> {
+  static async ensureSession(options?: BubbleEngineOptions): Promise<boolean> {
     const entry = bubbleRegistry['bubble-yolo'];
     if (!entry) return false;
 
@@ -438,7 +434,7 @@ export class NeuralBubbleDetector {
 
   static async detectFull(
     canvas: OffscreenCanvas | HTMLCanvasElement,
-    options?: BubbleEngineOptions | PopupState
+    options?: BubbleEngineOptions
   ): Promise<NeuralBubbleDetectionResult | null> {
     const entry = bubbleRegistry['bubble-yolo'];
     if (!entry) return null;
@@ -522,12 +518,12 @@ export class NeuralBubbleDetector {
    * Executes neural bubble detection on an image canvas, returning bubble proposals.
    *
    * @param canvas - The source image canvas.
-   * @param options - Execution options or settings state to read GPU acceleration overrides.
+   * @param options - Execution options with optional preferGpu acceleration setting.
    * @returns Detected speech bubble boxes across the image, or null if model unavailable.
    */
   static async detect(
     canvas: OffscreenCanvas | HTMLCanvasElement,
-    options?: BubbleEngineOptions | PopupState
+    options?: BubbleEngineOptions
   ): Promise<BoxRect[] | null> {
     const res = await this.detectFull(canvas, options);
     return res ? res.bubbles : null;

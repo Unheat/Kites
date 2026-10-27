@@ -6,7 +6,7 @@ import { OcrManager } from '../offscreen/services/OcrManager';
 import { InpaintManager } from '../offscreen/services/InpaintManager';
 import { ColorManager } from '../offscreen/services/ColorManager';
 import { GoogleTranslateEngine } from '../offscreen/engines/translation/GoogleTranslateEngine';
-import { acquireBubbleGeometry, resolveBubbleLayouts } from '../offscreen/services/BubbleLayoutService';
+import { acquireBubbleGeometry, resolveBubbleLayouts, resolveBubbleLayoutsDetailed } from '../offscreen/services/BubbleLayoutService';
 import {
   renderTextBlocksBatch,
   measureBubbleLayoutFontSize,
@@ -196,15 +196,20 @@ export async function runPipelineSmokeMatrix(): Promise<void> {
   }
 
   // -----------------------------------------------------------------
-  // Combo 3: Neural Curvature & Two-Phase DP Ellipse Typeset
+  // Combo 3: Koharu Contour DP Typeset & Curvature (2D Scanline DP Solver)
   // -----------------------------------------------------------------
-  console.log('\n--- [Combo 3] Ellipse DP Typeset & Curvature (Two-Phase DP Solver) ---');
+  console.log('\n--- [Combo 3] Koharu Contour DP Typeset & Curvature (2D Scanline DP Solver) ---');
   {
     const imgName = 'image1.jpg';
     const imgPath = path.join(TEST_IMG_DIR, imgName);
     const buffer = fs.readFileSync(imgPath);
     const arrayBuffer = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) as ArrayBuffer;
     const probe = await loadImage(buffer);
+
+    const rawCanvas = createCanvas(probe.width, probe.height);
+    const rawCtx = rawCanvas.getContext('2d');
+    rawCtx.drawImage(probe, 0, 0);
+    const imgData = rawCtx.getImageData(0, 0, probe.width, probe.height);
 
     const ocrResult = await ocrManager.processImage(arrayBuffer, 'v6-small', {
       sourceLang: 'ja',
@@ -214,30 +219,61 @@ export async function runPipelineSmokeMatrix(): Promise<void> {
     const cleaned = await inpaintManager.eraseText(arrayBuffer, ocrResult.polygons as any, 'simple');
     const translated = await translator.translate(ocrResult.texts, 'auto', 'en');
 
+    const bubbleGeom = acquireBubbleGeometry(
+      { data: imgData.data, width: probe.width, height: probe.height },
+      ocrResult.boxes
+    );
+
     const cleanImg = await loadImage(Buffer.from(cleaned));
     const canvas = createCanvas(cleanImg.width, cleanImg.height);
     const ctx = canvas.getContext('2d');
     ctx.drawImage(cleanImg, 0, 0);
 
-    // Test ellipse curvature typesetting
     const items: TextBlockItem[] = translated.map((text, i) => ({
       text,
       polygon: (ocrResult.polygons?.[i] || []) as any,
-      direction: 'h',
+      direction: ocrResult.directions ? ocrResult.directions[i] : 'h',
       fontSize: ocrResult.fontSizes?.[i],
       originalText: ocrResult.texts[i],
-      isRounded: true,
-      borderRadius: 24,
     }));
+
+    const detailed = resolveBubbleLayoutsDetailed({
+      ...bubbleGeom,
+      boxes: ocrResult.boxes,
+      directions: ocrResult.directions,
+      angles: ocrResult.angles,
+      pageWidth: probe.width,
+      pageHeight: probe.height,
+      accept: (index, proposed) => {
+        const block = items[index];
+        if (!block) return false;
+        const curv = bubbleGeom?.curvatures?.[index];
+        const blockWithCurv = curv?.isRounded
+          ? { ...block, isRounded: true, borderRadius: curv.borderRadius, typesetMode: 'contour' as const }
+          : { ...block, isRounded: false, borderRadius: 0, typesetMode: 'simple' as const };
+        return measureBubbleLayoutFontSize(ctx as any, blockWithCurv, proposed, DEFAULT_RENDER_FONT_FAMILY) > 0;
+      },
+    });
+
+    items.forEach((item, i) => {
+      item.typesetBox = detailed.typesetBoxes[i];
+      item.contourPoints = detailed.contourPoints[i];
+      const curv = bubbleGeom?.curvatures?.[i];
+      if (curv) {
+        item.isRounded = curv.isRounded;
+        item.borderRadius = curv.borderRadius;
+        item.typesetMode = curv.isRounded ? 'contour' : 'simple';
+      }
+    });
 
     const renderInfos = renderTextBlocksBatch(ctx as any, items, 'en', { width: cleanImg.width, height: cleanImg.height });
     if (renderInfos.filter(Boolean).length === 0) {
-      throw new Error('[Combo 3] Ellipse DP typesetting produced 0 rendered blocks');
+      throw new Error('[Combo 3] Contour DP typesetting produced 0 rendered blocks');
     }
 
-    const outPath = path.join(SMOKE_RESULT_DIR, `combo3_ellipse_dp_${imgName}.png`);
+    const outPath = path.join(SMOKE_RESULT_DIR, `combo3_contour_dp_${imgName}.png`);
     fs.writeFileSync(outPath, canvas.toBuffer('image/png'));
-    console.log(`  ✅ Passed: saved ${path.basename(outPath)} (ellipse DP fitted without overflow)`);
+    console.log(`  ✅ Passed: saved ${path.basename(outPath)} (Koharu contour DP fitted without overflow)`);
   }
 
   // -----------------------------------------------------------------

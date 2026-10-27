@@ -113,4 +113,41 @@ describe('SettingsView', () => {
     });
     container.remove();
   });
+
+  it('renders integration action buttons with the edit icon using color-editorial', async () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const updateState = vi.fn();
+
+    await act(async () => {
+      root.render(<SettingsView state={DEFAULT_POPUP_STATE} updateState={updateState} />);
+    });
+
+    const labels = [
+      'Manage Custom APIs',
+      'Configure Fallback Chain',
+      'Name Dictionary',
+      'Custom Prompt',
+      'Site Rules & Domains',
+    ];
+
+    for (const label of labels) {
+      const labelSpan = Array.from(container.querySelectorAll('span')).find(
+        (span) => span.textContent?.trim() === label
+      );
+      expect(labelSpan).toBeDefined();
+      const button = labelSpan?.closest('button');
+      expect(button).toBeDefined();
+
+      const pencilSvg = button?.querySelector('svg.lucide-pencil');
+      expect(pencilSvg).toBeDefined();
+      expect(pencilSvg?.classList.contains('text-[var(--color-editorial)]')).toBe(true);
+    }
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
 });

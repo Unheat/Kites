@@ -37,6 +37,7 @@ import { ToolViewModePolicy } from './tools/ToolViewModePolicy';
 import { requestStudioInpaint, requestStudioOcr } from '../bridge/offscreenStudioBridge';
 import { computeRotatedBounds, getHandleCursor } from './transformMath';
 import { applyTextObjectUpdates, prepareInitialTextObject, CJK_CHARACTER_REGEX } from './studioTypeset';
+import { unwrapWrappedText } from '../../offscreen/utils/typography';
 import { extractTypographyStyle } from '../state/studioStore';
 import type {
   BoundingBox,
@@ -1515,7 +1516,9 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
                 ref={inlineTextareaRef}
                 value={
                   (!isVerticalMode && !editingObj.text.includes('\n') && editingObj.lines && editingObj.lines.length > 1)
-                    ? editingObj.lines.join('\n')
+                    // Heal typesetter hyphen markers so finishing the edit never bakes
+                    // line-wrap syllable breaks into the canonical text.
+                    ? unwrapWrappedText(editingObj.lines.join('\n'))
                     : editingObj.text
                 }
                 onChange={(e) => handleInlineTextChange(e.target.value)}

@@ -1,11 +1,13 @@
 import { measureDefaultLayout } from '../../offscreen/utils/cotransDefaultRenderer';
-import { wrapTextEllipse, unwrapWrappedText } from '../../offscreen/utils/ellipseTypeset';
+import { wrapTextContour, generateBubbleContour } from '../../offscreen/utils/contourTypeset';
+import { wrapRectangular } from '../../offscreen/utils/ellipseTypeset';
+import { unwrapWrappedText } from '../../offscreen/utils/typography';
 import type { TypesetMode } from '../../shared/constants';
 import type { TextObject } from '../types';
 
 export type StudioTypesetMode = TypesetMode;
 
-type TypesetStyle = Pick<TextObject, 'bold' | 'italic' | 'letterSpacing' | 'lineSpacing' | 'isVertical' | 'borderRadius' | 'targetLang'>;
+type TypesetStyle = Pick<TextObject, 'bold' | 'italic' | 'letterSpacing' | 'lineSpacing' | 'isVertical' | 'borderRadius' | 'targetLang' | 'contourPoints'>;
 
 /** Small boxes cannot reliably run the fitting engine. */
 export const MIN_LAYOUT_DIMENSION = 15;
@@ -28,7 +30,7 @@ export const CJK_CHARACTER_REGEX = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf9
 const LAYOUT_FIELDS = [
   'text', 'fontFamily', 'fontSize', 'bold', 'italic', 'uppercase', 'lowercase',
   'width', 'height', 'charStyles', 'letterSpacing', 'lineSpacing', 'isVertical', 'direction',
-  'targetLang',
+  'targetLang', 'borderRadius',
 ] as const satisfies readonly (keyof TextObject)[];
 
 /**
@@ -49,11 +51,14 @@ export function getTypesetDisplayText(
 /**
  * Keeps canonical pipeline/authored lines on first display, independent of editing preference.
  * @param object - Newly restored or created text object.
- * @returns Original object when layout exists, otherwise an auto-balloon initialized copy.
+ * @returns Original object when layout exists, otherwise a copy initialized with the
+ *          object's own typesetting engine (balloon when unset).
  */
 export function prepareInitialTextObject(object: TextObject): TextObject {
   if (object.lines?.length) return object;
-  return reflowTextObject(object, 'balloon');
+  // Reflow with the object's own engine so legacy imports keep their typesetting route
+  // instead of being silently re-laid-out as auto-balloon.
+  return reflowTextObject(object, object.typesetMode ?? 'balloon');
 }
 
 /**
@@ -95,20 +100,55 @@ export interface BlockTypesetResult {
   fontSize: number;
   lines: string[];
   height?: number;
+  /** Koharu scanline placements (box-local) from contour routes; undefined keeps even spacing. */
+  positionedLines?: TextObject['positionedLines'];
 }
 
 /**
  * Runs the chosen existing layout engine on an object's display text.
+ * Caches roundFit starting dimensions so dragging the radius slider back to 0
+ * restores the pristine starting box without ratcheting or dimension decay.
+ *
  * @param object - Complete text object with current geometry and style.
  * @param mode - Engine to use for this layout operation.
  * @returns Object copy containing newly measured lines and font size.
  */
 function reflowTextObject(object: TextObject, mode: StudioTypesetMode): TextObject {
+  let width = object.width;
+  let fontSize = object.fontSize;
+  const startWidth = width;
+  const startFontSize = fontSize;
+
+  const isContourMode = mode === 'contour' || mode === 'ellipse';
+  const fit = object.roundFit;
+  const refitting = isContourMode && !!fit && fit.fittedWidth === width && fit.fittedFontSize === fontSize;
+  if (refitting) {
+    width = fit.width;
+    fontSize = fit.fontSize;
+  }
+
   const layout = recalculateBlockTypeset(
-    getTypesetDisplayText(object.text, object), object.fontFamily,
-    object.width, object.height, object.fontSize, mode, object
+    getTypesetDisplayText(object.text, object),
+    object.fontFamily,
+    width,
+    object.height,
+    fontSize,
+    mode,
+    object
   );
-  return { ...object, fontSize: layout.fontSize, lines: layout.lines };
+
+  const updated: TextObject = { ...object, width, fontSize: layout.fontSize, lines: layout.lines, positionedLines: layout.positionedLines };
+  if (isContourMode) {
+    updated.roundFit = {
+      width: refitting && fit ? fit.width : startWidth,
+      fontSize: refitting && fit ? fit.fontSize : startFontSize,
+      fittedWidth: updated.width,
+      fittedFontSize: updated.fontSize,
+    };
+  } else {
+    delete updated.roundFit;
+  }
+  return updated;
 }
 
 let sharedMeasureCanvas: HTMLCanvasElement | null = null;
@@ -134,7 +174,7 @@ export const MAX_FONT_SIZE_CEILING = 48;
 /**
  * Fast, greedy word-wrapping without diamond balancing (Torii ported mode).
  */
-function wrapSimpleGreedy(
+export function wrapSimpleGreedy(
   ctx: CanvasRenderingContext2D,
   text: string,
   width: number,
@@ -335,43 +375,59 @@ export function recalculateBlockTypeset(
   const previousLetterSpacing = ctx.letterSpacing;
   ctx.letterSpacing = `${style.letterSpacing ?? 0}px`;
   try {
-    // Simple Mode: Greedy rectangular wrap without auto font scaling or diamond reflow.
-    if (mode === 'simple') {
-      const lines = wrapSimpleGreedy(ctx, text, width, fallbackSize, fontFamily, style);
-      return { fontSize: fallbackSize, lines };
-    }
-
     const targetLang = style.targetLang || 'en';
 
-    // Ellipse Mode: Dynamic programming chord profile, soft hyphenation, and upper-limit bounds
-    if (mode === 'ellipse') {
+    // Simple Mode: Rectangular greedy wrap without auto font scaling on subsequent edits (Route 3).
+    if (mode === 'simple') {
       const unhyphenated = unwrapWrappedText(text);
-      const rMax = Math.min(width / 2, height / 2);
-      const radius = style.borderRadius !== undefined ? style.borderRadius : rMax;
-      const strength = rMax > 0 ? Math.min(1.0, radius / rMax) : 1.0;
-      const result = wrapTextEllipse(
+      const stylePrefix = `${style.italic ? 'italic ' : ''}${style.bold ? 'bold ' : ''}`;
+      ctx.font = `${stylePrefix}${Math.round(fallbackSize)}px "${fontFamily || 'sans-serif'}"`;
+      const measure = (s: string) => ctx.measureText(s).width;
+      const words = unhyphenated.split(/\s+/).filter(Boolean);
+      const lines = wrapRectangular(words, width, measure, targetLang);
+      return {
+        fontSize: fallbackSize,
+        lines: lines.length > 0 ? lines : [unhyphenated],
+      };
+    }
+
+    // Contour / Ellipse Mode: Koharu 2D scanline ray-casting on bubble polygon or curved contour (Route 2)
+    if (mode === 'contour' || mode === 'ellipse') {
+      const unhyphenated = unwrapWrappedText(text);
+      const contour = (style.contourPoints && style.contourPoints.length >= 3)
+        ? style.contourPoints
+        : generateBubbleContour(width, height, style.borderRadius);
+
+      const result = wrapTextContour(
         unhyphenated,
-        width,
-        height,
-        fallbackSize,
-        fontFamily || 'sans-serif',
-        strength,
+        contour,
         ctx,
-        targetLang,
-        { minFontSize: 6 }
+        fontFamily || 'sans-serif',
+        {
+          minFontSize: 6,
+          // Match the ContourDpTypesetter bake ceiling (container height * 0.6) so the
+          // live preview picks the same font size the rendered page will.
+          maxFontSize: Math.max(16, Math.round(height * 0.6)),
+          targetLang,
+          isBold: style.bold,
+          isItalic: style.italic
+        }
       );
       return {
         fontSize: result.fontSize,
         lines: result.lines && result.lines.length > 0 ? result.lines : [unhyphenated],
         height: result.height,
+        positionedLines: result.positionedLines,
       };
     }
 
     // Auto Balloon Mode: full pipeline diamond envelopes, hyphenation, and auto font fitting
     const isList = /^\s*[-*•\d+.]/m.test(text);
-  // Rejoin soft line-break hyphens (e.g. "com-\nmunity" -> "community") so resizing
-  // does not permanently bake line-wrap syllable breaks into the dialogue text.
-  const unhyphenated = text.replace(/(\b[a-zA-Z]+)-\s*\r?\n\s*([a-z]+)/g, '$1$2');
+  // Marker-aware unwrapper (shared with the contour route) rejoins soft line-break hyphens
+  // so resizing does not permanently bake line-wrap syllable breaks into the dialogue text.
+  // The inline regex previously used here missed the INSERTED_HYPHEN Word Joiner marker,
+  // letting wrapText glue "Every-\u2060" + "one" back into a permanently hyphenated word.
+  const unhyphenated = unwrapWrappedText(text);
   const normalizedText = isList || unhyphenated.includes('\n\n')
     ? unhyphenated
     : unhyphenated.replace(/\r?\n/g, ' ').replace(/\s+/g, ' ').trim();

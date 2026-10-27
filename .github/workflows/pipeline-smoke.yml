@@ -47,10 +47,15 @@ jobs:
       - name: Run Pipeline Smoke Matrix
         run: npm run test:pipeline:smoke
 
-      - name: Upload Baked Smoke Images
+      - name: Run Pipeline Visual Test Suite
+        run: npm run test:visual:pipeline
+
+      - name: Upload Baked Smoke and Pipeline Images
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: pipeline-smoke-results
-          path: src/test/result/pipeline_smoke/
+          name: pipeline-smoke-and-visual-results
+          path: |
+            src/test/result/pipeline_smoke/
+            src/test/result/pipeline/
           retention-days: 7

@@ -9,11 +9,12 @@ import type { Point2D } from '../engines/inpaint/BaseInpaintEngine';
 import { inpaintRegistry } from '../engines/inpaint/inpaintRegistry';
 import { InpaintCacheManager } from './InpaintCacheManager';
 import { renderTextBlocksBatch, measureBubbleLayoutFontSize, getRenderedBlockGeometry, LANGUAGE_ORIENTATION_PRESETS, type TextBlockItem, type RenderedBlockInfo } from '../utils/canvasTypesetting';
+import { detectBlockTextColorsFromContext, type DetectedTextColor } from '../utils/textColorDetection';
 import { resolveRenderFontFamily } from '../../shared/renderFontPresets';
 import { isBubbleGpuAvailable, isColorGpuAvailable } from '../../shared/utils/hardwareUtils';
 import type { BubbleEngineOptions } from '../engines/bubble/BaseBubbleEngine';
 import { BubbleManager, bubbleManager as defaultBubbleManager } from './BubbleManager';
-import { acquireBubbleGeometry, resolveBubbleLayouts, type BubbleGeometry } from './BubbleLayoutService';
+import { acquireBubbleGeometry, resolveBubbleLayoutsDetailed, type BubbleGeometry } from './BubbleLayoutService';
 import { loadHyphenationLanguage } from '../utils/hyphenation';
 import type { ColorTierId } from '../../shared/colorTiers';
 import { ColorManager } from './ColorManager';
@@ -239,8 +240,51 @@ export class PipelineOrchestrator {
         });
       }
 
+      // 3.0 Shared original-pixel raster. One full-page canvas feeds BOTH per-bubble
+      // text color detection and bubble carrier extraction (both must sample the
+      // ORIGINAL pre-inpaint ink), halving the previous two full-page allocations.
+      let rawCanvas: OffscreenCanvas | null = null;
+      let rawCtx: OffscreenCanvasRenderingContext2D | null = null;
+      const rawWidth = sourceBitmap?.width ?? (pageWidth || 0);
+      const rawHeight = sourceBitmap?.height ?? (pageHeight || 0);
+      if (rawWidth > 0 && rawHeight > 0 && ocrResult.boxes && ocrResult.boxes.length > 0) {
+        try {
+          rawCanvas = new OffscreenCanvas(rawWidth, rawHeight);
+          rawCtx = rawCanvas.getContext('2d', { willReadFrequently: true });
+          if (rawCtx) {
+            if (sourceBitmap) {
+              rawCtx.drawImage(sourceBitmap, 0, 0);
+            } else {
+              const tempBitmap = await createImageBitmap(imageRecord.rawImageBlob);
+              rawCtx.drawImage(tempBitmap, 0, 0);
+              tempBitmap.close();
+            }
+          }
+        } catch (err) {
+          // Environments without OffscreenCanvas (or failed raster) degrade both
+          // consumers to their null-color / raw-box fallbacks instead of failing the page.
+          rawCanvas = null;
+          rawCtx = null;
+          console.warn('[PipelineOrchestrator] Original-pixel raster unavailable; using fallback colors and boxes:', err);
+        }
+      }
+
+      // Per-bubble text color detection from the ORIGINAL image (before any
+      // inpainting erases the glyphs). Best-effort: nulls and failures fall back
+      // to the render-time background-adaptive black/white picker.
+      let detectedTextColors: (DetectedTextColor | null)[] = [];
+      if (rawCtx && ocrResult.boxes && ocrResult.boxes.length > 0) {
+        try {
+          detectedTextColors = detectBlockTextColorsFromContext(rawCtx, ocrResult.boxes, rawWidth, rawHeight);
+        } catch (err) {
+          console.warn('[PipelineOrchestrator] Text color detection failed; using background-adaptive colors:', err);
+        }
+      }
+
       // 3.1 Acquire original bubble geometry only. Final layout waits for translated text/fonts.
       let bubbleGeometry: BubbleGeometry | undefined;
+      // OCR-index-aligned flags for fragments absorbed into a dominant chamber (noise guard).
+      let bubbleSkipped: boolean[] | undefined;
       const bubbleMode = popupState?.bubbleMode ?? 'heuristic';
       // Cleanly evict cached bubble engine if mode is disabled
       if (bubbleMode === 'off') {
@@ -248,42 +292,26 @@ export class PipelineOrchestrator {
       }
       // Legacy CJK/RTL rendering does not honor fixed bubble rectangles.
       const supportsBubbleLayout = (LANGUAGE_ORIENTATION_PRESETS[targetLang.toLowerCase().trim()] ?? 'h') === 'h';
-      if (bubbleMode !== 'off' && supportsBubbleLayout && ocrResult.boxes && ocrResult.boxes.length > 0 && !ocrResult.typesetBoxes) {
+      if (bubbleMode !== 'off' && supportsBubbleLayout && rawCanvas && rawCtx && ocrResult.boxes && ocrResult.boxes.length > 0 && !ocrResult.typesetBoxes) {
         try {
-          const rawWidth = sourceBitmap?.width ?? (pageWidth || 0);
-          const rawHeight = sourceBitmap?.height ?? (pageHeight || 0);
-          if (rawWidth > 0 && rawHeight > 0) {
-            const rawCanvas = new OffscreenCanvas(rawWidth, rawHeight);
-            const rawCtx = rawCanvas.getContext('2d', { willReadFrequently: true });
-            if (rawCtx) {
-              if (sourceBitmap) {
-                rawCtx.drawImage(sourceBitmap, 0, 0);
-              } else {
-                const tempBitmap = await createImageBitmap(imageRecord.rawImageBlob);
-                rawCtx.drawImage(tempBitmap, 0, 0);
-                tempBitmap.close();
-              }
-              // Acquire engine through BubbleManager (OOP lifecycle & clean eviction)
-              const { engine, release } = await this.services.bubbleManager.acquireEngine(bubbleMode, popupState, makeLifecycle('bubble', bubbleMode));
-              try {
-                const isNeuralMode = bubbleMode === 'neural' || bubbleMode === 'neural-mask';
-                const bubbleOptions: BubbleEngineOptions = {
-                  preferGpu: popupState ? isBubbleGpuAvailable(popupState) : false,
-                  mode: isNeuralMode ? 'mask' : 'box',
-                };
-                const neuralResult = isNeuralMode && engine
-                  ? await engine.detect(rawCanvas, ocrResult.boxes, bubbleOptions)
-                  : undefined;
-                bubbleGeometry = acquireBubbleGeometry(
-                  rawCtx.getImageData(0, 0, rawWidth, rawHeight),
-                  ocrResult.boxes,
-                  neuralResult?.bubbles,
-                  neuralResult?.shapes
-                );
-              } finally {
-                release();
-              }
-            }
+          // Acquire engine through BubbleManager (OOP lifecycle & clean eviction)
+          const { engine, release } = await this.services.bubbleManager.acquireEngine(bubbleMode, popupState, makeLifecycle('bubble', bubbleMode));
+          try {
+            const isNeuralMode = bubbleMode === 'neural';
+            const bubbleOptions: BubbleEngineOptions = {
+              preferGpu: popupState ? isBubbleGpuAvailable(popupState) : false,
+            };
+            const neuralResult = isNeuralMode && engine
+              ? await engine.detect(rawCanvas, ocrResult.boxes, bubbleOptions)
+              : undefined;
+            bubbleGeometry = acquireBubbleGeometry(
+              rawCtx.getImageData(0, 0, rawWidth, rawHeight),
+              ocrResult.boxes,
+              neuralResult?.bubbles,
+              neuralResult?.shapes
+            );
+          } finally {
+            release();
           }
         } catch (err) {
           console.warn('[PipelineOrchestrator] Bubble carrier extraction failed, falling back to default text boxes:', err);
@@ -397,17 +425,25 @@ export class PipelineOrchestrator {
       console.log(`[PipelineOrchestrator] Baking translated text into Canvas for Live Web...`);
 
       // Ensure all custom @font-face rules are loaded before canvas text measurements.
+      // fonts.ready only waits for faces already triggered to load, so explicitly
+      // resolve the preset family — otherwise measurement can silently run with a
+      // fallback font and collapse the fit (font metrics drive every line break).
       if (typeof document !== 'undefined' && document.fonts) {
+        await document.fonts.load(`16px ${resolvedFontFamily}`).catch((err) => {
+          console.warn('[PipelineOrchestrator] Preset font preload failed; using availability fallback:', err);
+        });
         await document.fonts.ready;
       }
       await hyphenationPromise;
       
       const cleanedBlob = new Blob([cleanedImageBuffer], { type: 'image/png' });
       const bitmap = await createImageBitmap(cleanedBlob);
+      pageWidth = bitmap.width;
+      pageHeight = bitmap.height;
       let canvas: OffscreenCanvas;
       let ctx: OffscreenCanvasRenderingContext2D;
       try {
-        canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+        canvas = new OffscreenCanvas(pageWidth, pageHeight);
         ctx = canvas.getContext('2d', { willReadFrequently: true }) as OffscreenCanvasRenderingContext2D;
         // Draw the clean inpainted image
         ctx.drawImage(bitmap, 0, 0);
@@ -428,13 +464,17 @@ export class PipelineOrchestrator {
         const dir = (ocrResult.directions && ocrResult.directions[i]) ? ocrResult.directions[i] : 'h';
         const typesetBox = (ocrResult.typesetBoxes && ocrResult.typesetBoxes[i]) ? ocrResult.typesetBoxes[i] : undefined;
         if (text && poly) {
+          const detectedColor = detectedTextColors[i] ?? undefined;
           textBlockItems.push({
             text,
             polygon: poly as any,
             direction: dir,
             typesetBox,
-            // Colors are decided at render time by background sampling (XianScan
-            // color.ts port) — black text on light paper, white on dark panels.
+            // Per-bubble ink color detected on the ORIGINAL artwork (snap-to-pure-
+            // black/white; colored text preserved). Blocks without a detection result
+            // keep the render-time background-adaptive fallback (XianScan color.ts port).
+            textColor: detectedColor?.textColor,
+            strokeColor: popupState?.renderFontStrokeDisabled ? 'transparent' : detectedColor?.strokeColor,
             fontSize: ocrResult.fontSizes
               ? Math.max(popupState?.renderFontMinSize ?? 6, ocrResult.fontSizes[i])
               : undefined,
@@ -447,27 +487,26 @@ export class PipelineOrchestrator {
               popupState?.renderFontAlignment && popupState.renderFontAlignment !== 'auto'
                 ? popupState.renderFontAlignment
                 : undefined,
-            strokeColor: popupState?.renderFontStrokeDisabled ? 'transparent' : undefined,
           });
           itemOcrIndices.push(i);
         }
       }
       if (bubbleGeometry) {
         const blockByOcrIndex = new Map(itemOcrIndices.map((index, position) => [index, textBlockItems[position]]));
-        ocrResult.typesetBoxes = resolveBubbleLayouts({
+        const detailed = resolveBubbleLayoutsDetailed({
           ...bubbleGeometry,
           boxes: ocrResult.boxes,
           directions: ocrResult.directions,
           angles: ocrResult.angles,
-          pageWidth: bitmap.width,
-          pageHeight: bitmap.height,
+          pageWidth,
+          pageHeight,
           accept: (index, proposed) => {
             const block = blockByOcrIndex.get(index);
             if (!block) return false;
             const curv = bubbleGeometry?.curvatures?.[index];
             const blockWithCurvature = curv?.isRounded
-              ? { ...block, isRounded: true, borderRadius: curv.borderRadius }
-              : block;
+              ? { ...block, isRounded: true, borderRadius: curv.borderRadius, typesetMode: 'contour' as const }
+              : { ...block, isRounded: false, borderRadius: 0, typesetMode: 'simple' as const };
             const fitted = popupState?.renderFontMinSize !== undefined
               ? measureBubbleLayoutFontSize(
                   ctx,
@@ -490,15 +529,25 @@ export class PipelineOrchestrator {
           },
           onDiagnostics: (counts) => console.log('[PipelineOrchestrator] Bubble layouts:', counts)
         });
+        ocrResult.typesetBoxes = detailed.typesetBoxes;
+        ocrResult.contourPoints = detailed.contourPoints;
+        bubbleSkipped = detailed.skipped;
         itemOcrIndices.forEach((index, position) => {
           const typesetBox = ocrResult.typesetBoxes?.[index];
           textBlockItems[position].typesetBox = typesetBox;
-          // All active bubble tiers (heuristic, neural, neural-mask) route curved speech bubbles through ellipse typesetting
+          textBlockItems[position].contourPoints = detailed.contourPoints?.[index];
+          // Fragments absorbed into a dominant chamber by the noise guard must not
+          // render standalone (they would double-paint over the expanded dominant).
+          // Only flagged when true so ordinary blocks keep their exact object shape.
+          if (detailed.skipped?.[index]) textBlockItems[position].isSkipped = true;
+          // All active bubble tiers (heuristic, neural) route curved speech bubbles through Koharu contour typesetting
+          // and rectangular caption boxes through simple wrap
           if (typesetBox) {
             const curv = bubbleGeometry?.curvatures?.[index];
             if (curv) {
               textBlockItems[position].isRounded = curv.isRounded;
               textBlockItems[position].borderRadius = curv.borderRadius;
+              textBlockItems[position].typesetMode = curv.isRounded ? 'contour' : 'simple';
             }
           }
         });
@@ -508,8 +557,8 @@ export class PipelineOrchestrator {
         textBlockItems,
         targetLang,
         {
-          width: bitmap.width,
-          height: bitmap.height
+          width: pageWidth,
+          height: pageHeight
         },
         resolvedFontFamily,
         renderFontBold
@@ -559,10 +608,12 @@ export class PipelineOrchestrator {
         const renderColors = renderInfo;
         const curvature = bubbleGeometry?.curvatures?.[i];
         const hasBubbleBox = Boolean(bubbleGeometry && ocrResult.typesetBoxes?.[i]);
-        // All active bubble tiers (heuristic, neural, neural-mask) use 'ellipse' for rounded speech bubbles,
-        // and 'simple' for rectangular caption boxes. Disabled tier ('off') uses 'balloon' (Auto Balloon) on OCR bounds.
+        // All active bubble tiers (heuristic, neural) use the canonical 'contour'
+        // for rounded speech bubbles (legacy 'ellipse' rows stay loadable via restore
+        // normalization) and 'simple' for rectangular caption boxes. Disabled tier ('off')
+        // uses 'balloon' (Auto Balloon) on OCR bounds.
         const typesetMode: TypesetMode = hasBubbleBox
-          ? (curvature?.isRounded ? 'ellipse' : 'simple')
+          ? (curvature?.isRounded ? 'contour' : 'simple')
           : 'balloon';
         const borderRadius = hasBubbleBox ? (curvature?.borderRadius ?? 0) : 0;
         const isRounded = hasBubbleBox ? Boolean(curvature?.isRounded) : false;
@@ -588,9 +639,16 @@ export class PipelineOrchestrator {
           direction: renderInfo?.direction ?? dir,
           lines: renderInfo?.lines,
           lineSpacing: renderInfo?.lineSpacing,
+          positionedLines: renderInfo?.positionedLines,
           typesetMode,
           borderRadius,
           isRounded,
+          // Box-relative organic contour for the typeset box, so Studio contour mode
+          // restores the real bubble shape instead of a synthetic oval fallback.
+          contourPoints: ocrResult.contourPoints?.[i],
+          // Noise-guard absorbed fragments stay in the DB (editable) but flag the
+          // suppressed standalone render.
+          isSkipped: Boolean(bubbleSkipped?.[i]),
           angle: renderInfo?.angle ?? ((ocrResult.angles && ocrResult.angles[i] !== undefined)
             ? Math.round(ocrResult.angles[i])
             : undefined),

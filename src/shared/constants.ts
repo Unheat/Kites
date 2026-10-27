@@ -25,9 +25,9 @@ export type StorageKey = (typeof STORAGE_KEYS)[keyof typeof STORAGE_KEYS];
  * Canonical Typesetting Modes supported across pipeline and Studio.
  * Derived from Single Source of Truth as per AGENTS.md rules.
  */
-export const TYPESET_MODES = ['ellipse', 'balloon', 'simple'] as const;
+export const TYPESET_MODES = ['contour', 'ellipse', 'balloon', 'simple'] as const;
 export type TypesetMode = (typeof TYPESET_MODES)[number];
-export const DEFAULT_TYPESET_MODE: TypesetMode = 'balloon';
+export const DEFAULT_TYPESET_MODE: TypesetMode = 'contour';
 
 /**
  * Canonical image formats supported for Studio uploads and processing pipeline.

@@ -96,7 +96,7 @@ export function findHyphenationPoints(rawWord: string, targetLang: string = 'en'
   const servicePoints = service.findHyphenationPoints(rawWord, targetLang);
   if (servicePoints.length > 0) {
     return servicePoints
-      .filter((p) => p >= 3 && len - p >= 3 && word[p - 1] !== "'" && word[p] !== "'" && word[p - 1] !== '’' && word[p] !== '’')
+      .filter((p) => p >= 2 && len - p >= 2 && word[p - 1] !== "'" && word[p] !== "'" && word[p - 1] !== '’' && word[p] !== '’')
       .sort((a, b) => a - b);
   }
 
@@ -165,7 +165,7 @@ export function findHyphenationPoints(rawWord: string, targetLang: string = 'en'
   }
 
   return Array.from(points)
-    .filter((p) => p >= 3 && len - p >= 3 && word[p - 1] !== "'" && word[p] !== "'" && word[p - 1] !== '’' && word[p] !== '’')
+    .filter((p) => p >= 2 && len - p >= 2 && word[p - 1] !== "'" && word[p] !== "'" && word[p - 1] !== '’' && word[p] !== '’')
     .sort((a, b) => a - b);
 }
 
@@ -727,8 +727,8 @@ export function fitFontSizeWithLines(
   }
 
   // Pass 3: Vertical-fill hyphenation for tall boxes (aspect ratio >= 1.5)
-  // Scan downward from effectiveCap to find the largest fitting font size that cleanly fills the tall container
-  if (aspectRatio >= TALL_FILL_MIN_ASPECT) {
+  // Only engage when clean unhyphenated layout could not reach a readable font size floor (cleanBest < 14)
+  if ((!foundClean || cleanBest < 14) && aspectRatio >= TALL_FILL_MIN_ASPECT) {
     const searchCeil = Math.min(effectiveCap, Math.max(finalSize, 36));
     for (let mid = searchCeil; mid >= Math.max(finalSize, MIN_FONT_SIZE); mid--) {
       mCtx.font = fontSpec(mid, fontFamily, text, customCjk, isBold);

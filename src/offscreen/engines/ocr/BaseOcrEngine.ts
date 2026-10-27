@@ -1,3 +1,5 @@
+import type { Point2D } from '../../../shared/utils/geometry';
+
 export interface OcrBox {
   x: number;
   y: number;
@@ -47,6 +49,9 @@ export interface OcrResult {
 
   /** Optional expanded bubble chamber boxes for comfortable word-wrapping and visual centering. */
   typesetBoxes?: (OcrBox | undefined)[];
+
+  /** Optional closed 2D polygon contour points per region for scanline typesetting. */
+  contourPoints?: (Point2D[] | undefined)[];
 }
 
 export interface IOcrEngine {

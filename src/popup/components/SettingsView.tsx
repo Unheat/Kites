@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { PopupState, HistoryRetentionPeriod } from '../../shared/types';
 import { DEFAULT_POPUP_STATE } from '../../shared/types';
-import { KeyRound, Network, BookOpen, Globe, MessageSquare } from 'lucide-react';
+import { KeyRound, Network, BookOpen, Globe, MessageSquare, Pencil } from 'lucide-react';
 import GlossaryPanel from './GlossaryPanel';
 import CustomPromptPanel from './CustomPromptPanel';
 import SiteRulesPanel from './SiteRulesPanel';
@@ -172,7 +172,7 @@ export default function SettingsView({ state, updateState }: SettingsViewProps) 
                 <KeyRound size={16} className="text-[var(--color-dust)]" />
                 <span className="font-medium text-sm">Manage Custom APIs</span>
               </div>
-              <span className="text-xs text-[var(--color-editorial)] font-medium">Edit</span>
+              <Pencil size={14} className="text-[var(--color-editorial)] shrink-0" aria-hidden="true" />
             </button>
           ) : (
             <ApiManagerPanel state={state} updateState={updateState} onClose={() => setShowApiManager(false)} />
@@ -187,7 +187,7 @@ export default function SettingsView({ state, updateState }: SettingsViewProps) 
                 <Network size={16} className="text-[var(--color-dust)]" />
                 <span className="font-medium text-sm">Configure Fallback Chain</span>
               </div>
-              <span className="text-xs text-[var(--color-editorial)] font-medium">Edit</span>
+              <Pencil size={14} className="text-[var(--color-editorial)] shrink-0" aria-hidden="true" />
             </button>
           ) : (
             <FallbackConfigPanel state={state} updateState={updateState} onClose={() => setShowFallbackConfig(false)} />
@@ -202,7 +202,7 @@ export default function SettingsView({ state, updateState }: SettingsViewProps) 
                 <BookOpen size={16} className="text-[var(--color-dust)]" />
                 <span className="font-medium text-sm">Name Dictionary</span>
               </div>
-              <span className="text-xs text-[var(--color-editorial)] font-medium">Edit</span>
+              <Pencil size={14} className="text-[var(--color-editorial)] shrink-0" aria-hidden="true" />
             </button>
           ) : (
             <GlossaryPanel
@@ -222,7 +222,7 @@ export default function SettingsView({ state, updateState }: SettingsViewProps) 
                 <MessageSquare size={16} className="text-[var(--color-dust)]" />
                 <span className="font-medium text-sm">Custom Prompt</span>
               </div>
-              <span className="text-xs text-[var(--color-editorial)] font-medium">Edit</span>
+              <Pencil size={14} className="text-[var(--color-editorial)] shrink-0" aria-hidden="true" />
             </button>
           ) : (
             <CustomPromptPanel
@@ -241,7 +241,7 @@ export default function SettingsView({ state, updateState }: SettingsViewProps) 
                 <Globe size={16} className="text-[var(--color-dust)]" />
                 <span className="font-medium text-sm">Site Rules & Domains</span>
               </div>
-              <span className="text-xs text-[var(--color-editorial)] font-medium">Edit</span>
+              <Pencil size={14} className="text-[var(--color-editorial)] shrink-0" aria-hidden="true" />
             </button>
           ) : (
             <SiteRulesPanel
