@@ -417,10 +417,12 @@ export class PipelineOrchestrator {
       
       const cleanedBlob = new Blob([cleanedImageBuffer], { type: 'image/png' });
       const bitmap = await createImageBitmap(cleanedBlob);
+      pageWidth = bitmap.width;
+      pageHeight = bitmap.height;
       let canvas: OffscreenCanvas;
       let ctx: OffscreenCanvasRenderingContext2D;
       try {
-        canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+        canvas = new OffscreenCanvas(pageWidth, pageHeight);
         ctx = canvas.getContext('2d', { willReadFrequently: true }) as OffscreenCanvasRenderingContext2D;
         // Draw the clean inpainted image
         ctx.drawImage(bitmap, 0, 0);
@@ -475,8 +477,8 @@ export class PipelineOrchestrator {
           boxes: ocrResult.boxes,
           directions: ocrResult.directions,
           angles: ocrResult.angles,
-          pageWidth: bitmap.width,
-          pageHeight: bitmap.height,
+          pageWidth,
+          pageHeight,
           accept: (index, proposed) => {
             const block = blockByOcrIndex.get(index);
             if (!block) return false;
@@ -529,8 +531,8 @@ export class PipelineOrchestrator {
         textBlockItems,
         targetLang,
         {
-          width: bitmap.width,
-          height: bitmap.height
+          width: pageWidth,
+          height: pageHeight
         },
         resolvedFontFamily,
         renderFontBold
