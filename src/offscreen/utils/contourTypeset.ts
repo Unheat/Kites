@@ -287,12 +287,26 @@ export function computeContourProfiles(
       const sampleY = lineTop + (inkHeight * sample) / 4.0;
       const spans = polygonInlineSpans(contour, sampleY);
       if (spans.length === 0) return null;
-      maxLeft = Math.max(maxLeft, spans[0][0]);
-      minRight = Math.min(minRight, spans[0][1]);
+
+      // Koharu layout.rs:1951-1958: filter each span by inlineAir and select the widest valid span
+      let bestSpan: [number, number] | null = null;
+      let maxSpanW = 0;
+      for (const [sl, sr] of spans) {
+        const al = sl + inlineAir;
+        const ar = sr - inlineAir;
+        if (ar > al && ar - al > maxSpanW) {
+          maxSpanW = ar - al;
+          bestSpan = [al, ar];
+        }
+      }
+      if (!bestSpan) return null;
+
+      maxLeft = Math.max(maxLeft, bestSpan[0]);
+      minRight = Math.min(minRight, bestSpan[1]);
     }
 
-    const left = maxLeft + inlineAir;
-    const right = minRight - inlineAir;
+    const left = maxLeft;
+    const right = minRight;
     const width = right - left;
 
     if (width <= 0) {
@@ -370,6 +384,39 @@ export function buildSegmentMeasures(
   for (let i = 0; i < rawTokens.length; i++) {
     const token = rawTokens[i];
     const isLastToken = i === rawTokens.length - 1;
+
+    // Words with explicit internal hyphens (e.g. "UN-DER-STOOD!", "well-known") split along their hyphens
+    if (token.includes('-') && !token.startsWith('-') && !token.endsWith('-')) {
+      const subWords = token.split('-');
+      for (let sIdx = 0; sIdx < subWords.length; sIdx++) {
+        const isLastSub = sIdx === subWords.length - 1;
+        const subText = subWords[sIdx];
+        if (!subText) continue;
+        if (isLastSub) {
+          segments.push({
+            text: subText,
+            advance: measure(subText) + (isLastToken ? 0 : spaceAdvance),
+            trailingAdvance: isLastToken ? 0 : spaceAdvance,
+            breakSuffixAdvance: 0,
+            isMandatory: false,
+            isHyphenBreak: false,
+            breakPenalty: comicBreakPenalty(text, charOffset + token.length)
+          });
+        } else {
+          segments.push({
+            text: subText,
+            advance: measure(subText),
+            trailingAdvance: 0,
+            breakSuffixAdvance: hyphenAdvance,
+            isMandatory: false,
+            isHyphenBreak: true,
+            breakPenalty: 10.0
+          });
+        }
+      }
+      charOffset += token.length + 1;
+      continue;
+    }
 
     if (allowHyphenation && token.length >= MIN_HYPHEN_WORD_LENGTH && /^[a-zA-Z]+[.,!?:;…]*$/.test(token)) {
       const { stem, trailingPunct } = extractStemAndPunct(token);

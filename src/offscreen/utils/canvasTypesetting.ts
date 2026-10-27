@@ -411,7 +411,7 @@ export function measureBubbleLayoutFontSize(
         isBold
       }
     );
-    if (!res || !res.lines || res.lines.length === 0 || res.overflowed) {
+    if (!res || !res.lines || res.lines.length === 0) {
       return 0;
     }
     return res.fontSize;
@@ -436,7 +436,7 @@ export function measureBubbleLayoutFontSize(
         isBold
       }
     );
-    if (!res || !res.lines || res.lines.length === 0 || res.overflowed) return 0;
+    if (!res || !res.lines || res.lines.length === 0) return 0;
     return res.fontSize;
   }
 
