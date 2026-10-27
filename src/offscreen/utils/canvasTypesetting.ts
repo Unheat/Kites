@@ -14,7 +14,7 @@ import {
   sanitizeTypesetText,
   compactSpecialSymbols,
 } from '../../shared/utils/textCleaning';
-import { wrapTextContour } from './contourTypeset';
+import { TypesetStrategyFactory } from '../engines/typeset';
 
 /**
  * Batch driver for translated-text rendering.
@@ -390,53 +390,41 @@ export function measureBubbleLayoutFontSize(
   if (!block.text?.trim() || !Number.isFinite(box.w) || !Number.isFinite(box.h) || box.w < 1 || box.h < 1) return 0;
 
   const hasContour = Boolean(block.contourPoints && block.contourPoints.length >= 3);
-  if (hasContour || block.typesetMode === 'contour' || block.typesetMode === 'ellipse' || (block.isRounded && block.typesetMode !== 'balloon' && block.typesetMode !== 'simple')) {
-    const contour = (block.contourPoints && block.contourPoints.length >= 3)
-      ? block.contourPoints
-      : [
-          { x: 0, y: 0 },
-          { x: box.w, y: 0 },
-          { x: box.w, y: box.h },
-          { x: 0, y: box.h }
-        ];
-    const res = wrapTextContour(
+  const isFixed = true;
+  const isContour = hasContour || block.typesetMode === 'contour' || block.typesetMode === 'ellipse' || (block.isRounded && block.typesetMode !== 'balloon' && block.typesetMode !== 'simple');
+  const isSimple = !isContour && block.typesetMode === 'simple';
+
+  if (isContour || isSimple) {
+    const strategy = TypesetStrategyFactory.resolve({
+      typesetMode: block.typesetMode,
+      isFixed,
+      hasContour,
+      isRounded: block.isRounded
+    });
+
+    let targetCenterY: number | undefined;
+    if (block.polygon && block.polygon.length >= 3) {
+      const polyCentroidY = block.polygon.reduce((sum, p) => sum + p.y, 0) / block.polygon.length;
+      targetCenterY = polyCentroidY - box.y;
+    }
+
+    const res = strategy.typeset(
       block.text.trim(),
-      contour,
+      box,
+      block.contourPoints,
       ctx as any,
-      fontFamily,
       {
+        fontFamily,
         minFontSize: minFontSize ?? 6,
         maxFontSize: Math.max(16, Math.round(box.h * 0.5)),
         targetLang,
-        isBold
+        isBold,
+        targetCenterY
       }
     );
     if (!res || !res.lines || res.lines.length === 0) {
       return 0;
     }
-    return res.fontSize;
-  }
-
-  if (block.typesetMode === 'simple') {
-    const rectContour = [
-      { x: 0, y: 0 },
-      { x: box.w, y: 0 },
-      { x: box.w, y: box.h },
-      { x: 0, y: box.h }
-    ];
-    const res = wrapTextContour(
-      block.text.trim(),
-      rectContour,
-      ctx as any,
-      fontFamily,
-      {
-        minFontSize: minFontSize ?? 6,
-        maxFontSize: Math.max(16, Math.round(box.h * 0.5)),
-        targetLang,
-        isBold
-      }
-    );
-    if (!res || !res.lines || res.lines.length === 0) return 0;
     return res.fontSize;
   }
 
@@ -803,7 +791,7 @@ function renderTextBlocksDefault(
           lineCount: info.lineCount,
           lines: info.lines,
           textColor: plan.region.textColor,
-          strokeColor: plan.region.strokeColor,
+          strokeColor: plan.region.strokeColor || '#FFFFFF',
           dstPoints: plan.dstPoints,
           direction: 'h',
           angle: (calculateRotationAngle(plan.dstPoints) * 180) / Math.PI,

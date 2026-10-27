@@ -26,8 +26,8 @@ export const FONT_PROBE_STEPS = 8;
 /** Maximum binary search iterations when refining the highest fitting font size. */
 export const FONT_BINARY_SEARCH_MAX_ITER = 10;
 
-/** Minimum allowed raster font size floor in pixels. */
-export const MINIMUM_READABLE_FONT_SIZE = 8.0;
+/** Minimum allowed raster font size floor in pixels (matches Koharu MINIMUM_FONT_SIZE = 9.0 in renderer.rs:53). */
+export const MINIMUM_READABLE_FONT_SIZE = 9.0;
 
 /** Maximum font size evaluated when sizing against container dimensions. */
 export const MAXIMUM_EVALUATED_FONT_SIZE = 48.0;
@@ -91,10 +91,23 @@ export interface LineBreakResult {
 }
 
 /**
+ * Individual text line positioned at its exact computed contour scanline.
+ * Matches Koharu's LayoutRun lines positioned via placement_offset (layout.rs:885-894).
+ */
+export interface PositionedLine {
+  text: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
  * Result returned from the Koharu contour typesetter.
  */
 export interface WrapContourResult {
   lines: string[];
+  positionedLines?: PositionedLine[];
   fontSize: number;
   width: number;
   height: number;
@@ -112,6 +125,7 @@ export interface WrapContourOptions {
   targetLang?: string;
   isBold?: boolean;
   isItalic?: boolean;
+  targetCenterY?: number;
 }
 
 /**
@@ -251,7 +265,8 @@ export function computeContourProfiles(
   lineCount: number,
   fontSize: number,
   linePitch: number = DEFAULT_LINE_PITCH,
-  inlineAir: number = DEFAULT_INLINE_AIR
+  inlineAir: number = DEFAULT_INLINE_AIR,
+  targetCenterY?: number
 ): LineProfile[] | null {
   if (lineCount <= 0 || contour.length < 3) return null;
 
@@ -271,8 +286,16 @@ export function computeContourProfiles(
     return null;
   }
 
-  // Vertically center the text block inside the contour height
-  const startY = minY + (contourHeight - totalTextHeight) / 2;
+  const minStart = minY + inlineAir;
+  const maxStart = maxY - inlineAir - totalTextHeight;
+  let startY: number;
+
+  if (typeof targetCenterY === 'number' && Number.isFinite(targetCenterY) && maxStart >= minStart) {
+    const desiredStart = targetCenterY - totalTextHeight / 2;
+    startY = Math.max(minStart, Math.min(maxStart, desiredStart));
+  } else {
+    startY = minY + (contourHeight - totalTextHeight) / 2;
+  }
 
   const rawProfiles: LineProfile[] = [];
 
@@ -756,19 +779,34 @@ export function wrapTextContour(
     let bestResult: LineBreakResult | null = null;
     let bestOverflowResult: LineBreakResult | null = null;
 
+    // Koharu line-breaker candidate selection comparator (crates/koharu-renderer/src/layout.rs:1606-1611):
+    // 1. Non-overflowed strictly beats overflowed.
+    // 2. Fewer lines strictly beats more lines (profiles.len().cmp()).
+    // 3. Lower penalty cost breaks ties.
+    const isBetterCandidate = (cand: LineBreakResult, current: LineBreakResult | null): boolean => {
+      if (!current) return true;
+      if (cand.overflowed !== current.overflowed) {
+        return !cand.overflowed;
+      }
+      if (cand.lines.length !== current.lines.length) {
+        return cand.lines.length < current.lines.length;
+      }
+      return cand.cost < current.cost;
+    };
+
     // Test line counts from minimum required lines to max fitting lines
     for (let lines = 1; lines <= maxLineCount; lines++) {
-      const profiles = computeContourProfiles(contour, lines, size, linePitch, inlineAir);
+      const profiles = computeContourProfiles(contour, lines, size, linePitch, inlineAir, options.targetCenterY);
       if (!profiles) continue;
 
       const res = exactProfiledLineBreaks(segments, profiles, allowHyphenation);
       if (res) {
         if (!res.overflowed) {
-          if (!bestResult || res.cost < bestResult.cost) {
+          if (isBetterCandidate(res, bestResult)) {
             bestResult = res;
           }
         } else {
-          if (!bestOverflowResult || res.cost < bestOverflowResult.cost) {
+          if (isBetterCandidate(res, bestOverflowResult)) {
             bestOverflowResult = res;
           }
         }
@@ -777,6 +815,39 @@ export function wrapTextContour(
 
     if (bestResult) return bestResult;
     return allowOverflow ? bestOverflowResult : null;
+  };
+
+  const toResult = (res: LineBreakResult | null, fallbackSize: number, overflowedFallback: boolean = false): WrapContourResult => {
+    if (!res) {
+      return {
+        lines: [cleanText],
+        fontSize: Math.round(fallbackSize),
+        width: containerW,
+        height: containerH,
+        overflowed: overflowedFallback
+      };
+    }
+    const finalSize = res.profiles.length > 0
+      ? Math.round(res.profiles[0].height / linePitch)
+      : Math.round(fallbackSize);
+    const positionedLines: PositionedLine[] = res.lines.map((text, idx) => {
+      const p = res.profiles[idx];
+      return {
+        text,
+        x: p ? p.left : 0,
+        y: p ? p.y : idx * finalSize * linePitch,
+        width: p ? p.width : res.width,
+        height: p ? p.height : finalSize * linePitch
+      };
+    });
+    return {
+      lines: res.lines,
+      positionedLines,
+      fontSize: finalSize,
+      width: res.width,
+      height: res.height,
+      overflowed: res.overflowed
+    };
   };
 
   const fits = (res: LineBreakResult | null): boolean => res !== null && !res.overflowed;
@@ -795,17 +866,11 @@ export function wrapTextContour(
     : 0;
 
   // Koharu LastResort Hyphenation Policy (layout.rs:400-408 & 2892-2924):
-  // If clean unhyphenated text fits above the minimum font floor, strictly keep clean
+  // If clean unhyphenated text fits at or above the minimum font floor, strictly keep clean
   // whole words without hyphenation. Discretionary hyphenation is only evaluated as a last resort
-  // when clean text cannot fit or is pinned to the minimum readable font floor.
-  if (cleanFit && cleanSize > Math.floor(minFont)) {
-    return {
-      lines: cleanFit.lines,
-      fontSize: cleanSize,
-      width: cleanFit.width,
-      height: cleanFit.height,
-      overflowed: cleanFit.overflowed
-    };
+  // when clean text cannot fit at all.
+  if (cleanFit && cleanSize >= Math.floor(minFont)) {
+    return toResult(cleanFit, cleanSize);
   }
 
   // 2. If clean text overflows at minFont or long words choke font size below 14px,
@@ -821,30 +886,20 @@ export function wrapTextContour(
     ? Math.round(hyphenatedFit.profiles[0].height / linePitch)
     : 0;
 
-  // Use hyphenation if it unlocks a strictly larger font size (> cleanSize),
-  // otherwise prefer clean unhyphenated text when font sizes are equal.
-  const selected = (hyphenatedFit && hyphenatedSize > cleanSize)
+  // Koharu LastResort Hyphenation Policy (layout.rs:416-424 & 2779-2809):
+  // Discretionary hyphenation is only used if it unlocks a STRICTLY LARGER font size (> cleanSize).
+  // If font size remains at or below the minimum readable floor (minFont), clean unhyphenated
+  // text is strictly preferred to avoid breaking words into single-word line towers.
+  const selected = (hyphenatedFit && hyphenatedSize > Math.max(cleanSize, minFont))
     ? hyphenatedFit
-    : (cleanFit || hyphenatedFit);
+    : (cleanFit || evaluateLayout(minFont, false, true) || evaluateLayout(minFont, true, true));
 
   if (selected) {
     const finalSize = Math.round(selected.profiles[0].height / linePitch);
-    return {
-      lines: selected.lines,
-      fontSize: finalSize,
-      width: selected.width,
-      height: selected.height,
-      overflowed: selected.overflowed
-    };
+    return toResult(selected, finalSize);
   }
 
-  // Fallback: evaluate at minFont with allowOverflow=true so words ALWAYS break across lines
-  const fallback = evaluateLayout(minFont, true, true) || evaluateLayout(minFont, false, true);
-  return {
-    lines: fallback?.lines || [cleanText],
-    fontSize: Math.round(minFont),
-    width: fallback?.width || containerW,
-    height: fallback?.height || containerH,
-    overflowed: true
-  };
+  // Fallback: evaluate at minFont with allowOverflow=true
+  const fallback = evaluateLayout(minFont, false, true) || evaluateLayout(minFont, true, true);
+  return toResult(fallback, minFont, true);
 }

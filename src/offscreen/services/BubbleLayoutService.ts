@@ -336,6 +336,54 @@ export function resolveBubbleLayoutsDetailed(input: BubbleLayoutInput): Resolved
         });
       }
     } else {
+      // Noise Splitting Guard:
+      // When OCR detects multiple fragments inside a curved balloon (e.g. exclamation marks
+      // misdetected as 1-character strokes like "电", or unmerged lines in the same column),
+      // we check whether the bubble exhibits a genuine constriction neck (like a figure-8 double bubble).
+      // If topologicalFlowCells finds no neck, and secondary boxes are small noise fragments (area <= 35%)
+      // or vertically stacked lines in the same speech column (horizontal overlap >= 50%),
+      // the balloon represents a single coherent speech chamber. The dominant box receives the full balloon contour.
+      let dominantPos = 0;
+      let maxArea = -1;
+      for (let p = 0; p < siblings.length; p++) {
+        const area = siblings[p].w * siblings[p].h;
+        if (area > maxArea) {
+          maxArea = area;
+          dominantPos = p;
+        }
+      }
+      const dominantBox = siblings[dominantPos];
+      const isSingleChamberWithNoise = siblings.every((b, p) => {
+        if (p === dominantPos) return true;
+        const areaRatio = (b.w * b.h) / Math.max(1, maxArea);
+        const xOverlap = Math.max(0, Math.min(b.x + b.w, dominantBox.x + dominantBox.w) - Math.max(b.x, dominantBox.x));
+        const horizOverlapRatio = xOverlap / Math.max(1, Math.min(b.w, dominantBox.w));
+        return areaRatio <= 0.35 || horizOverlapRatio >= 0.50;
+      });
+
+      if (isSingleChamberWithNoise) {
+        const dominantIdx = group[dominantPos];
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        for (const pt of sharedContour) {
+          if (pt.x < minX) minX = pt.x;
+          if (pt.x > maxX) maxX = pt.x;
+          if (pt.y < minY) minY = pt.y;
+          if (pt.y > maxY) maxY = pt.y;
+        }
+        const contourBox: BoxRect = {
+          x: Math.max(0, minX),
+          y: Math.max(0, minY),
+          w: Math.min(pageWidth - minX, maxX - minX),
+          h: Math.min(pageHeight - minY, maxY - minY)
+        };
+        const box = pairwiseClampBox(contourBox, boxes[dominantIdx], boxes, dominantIdx, undefined, SIBLING_GAP, group);
+        if (validBox(box) && accept(dominantIdx, box, MIN_SHARED_FONT_RATIO)) {
+          result[dominantIdx] = box;
+          resultContours[dominantIdx] = sharedContour.map((p) => ({ x: p.x - box.x, y: p.y - box.y }));
+        }
+        continue;
+      }
+
       const partition = partitionBalloonFlowCells(container, siblings, sharedContour);
       const subChambers = partition.subChambers;
       const cellContours = partition.cellContours;

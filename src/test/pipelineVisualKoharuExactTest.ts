@@ -194,6 +194,11 @@ async function runKoharuExactTest() {
   const neuralTypesetBoxes = neuralLayout.typesetBoxes;
   const neuralContours = neuralLayout.contourPoints;
 
+  console.log('DEBUG neuralContours #13 and #14:', {
+    c13: neuralContours?.[13],
+    c14: neuralContours?.[14],
+  });
+
   const textBlockItems: TextBlockItem[] = [];
   for (let i = 0; i < translatedTexts.length; i++) {
     const text = translatedTexts[i];
