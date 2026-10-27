@@ -425,7 +425,13 @@ export class PipelineOrchestrator {
       console.log(`[PipelineOrchestrator] Baking translated text into Canvas for Live Web...`);
 
       // Ensure all custom @font-face rules are loaded before canvas text measurements.
+      // fonts.ready only waits for faces already triggered to load, so explicitly
+      // resolve the preset family — otherwise measurement can silently run with a
+      // fallback font and collapse the fit (font metrics drive every line break).
       if (typeof document !== 'undefined' && document.fonts) {
+        await document.fonts.load(`16px ${resolvedFontFamily}`).catch((err) => {
+          console.warn('[PipelineOrchestrator] Preset font preload failed; using availability fallback:', err);
+        });
         await document.fonts.ready;
       }
       await hyphenationPromise;
