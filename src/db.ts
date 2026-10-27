@@ -80,6 +80,8 @@ export interface TextBlock {
   borderRadius?: number;
   /** Whether this text block was fitted to a rounded speech bubble. */
   isRounded?: boolean;
+  /** Organic bubble contour relative to (posX, posY) for scanline contour typesetting in Studio. */
+  contourPoints?: Array<{ x: number; y: number }>;
   bold?: boolean;
   italic?: boolean;
   align?: 'left' | 'center' | 'right';

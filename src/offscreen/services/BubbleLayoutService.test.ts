@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { acquireBubbleGeometry, computeMaskCurvature, MIN_SHARED_FONT_RATIO, resolveBubbleLayouts, significantOverlap, type BubbleLayoutInput } from './BubbleLayoutService';
+import { acquireBubbleGeometry, computeMaskCurvature, MIN_SHARED_FONT_RATIO, resolveBubbleLayouts, resolveBubbleLayoutsDetailed, significantOverlap, type BubbleLayoutInput } from './BubbleLayoutService';
+import type { Point2D } from '../../shared/utils/geometry';
 import { computeTypesetBox, type BoxRect } from '../utils/bubbleExpansion';
 import type { BubbleShapeEvidence } from '../engines/bubble/HeuristicBubbleExtractor';
 
@@ -375,6 +376,74 @@ describe('conservative bubble layouts', () => {
 
       // Pairwise non-collision: left box right edge does not collide with right box text
       expect(resLeft.x + resLeft.w).toBeLessThanOrEqual(resRight.x + resRight.w);
+    });
+  });
+
+  describe('noise splitting guard (single-chamber fragments)', () => {
+    /** @returns Closed 24-point oval polygon for a synthetic balloon contour. */
+    function ovalContour(cx: number, cy: number, rx: number, ry: number): Point2D[] {
+      const points: Point2D[] = [];
+      for (let step = 0; step < 24; step++) {
+        const angle = (step / 24) * Math.PI * 2;
+        points.push({ x: Math.round(cx + rx * Math.cos(angle)), y: Math.round(cy + ry * Math.sin(angle)) });
+      }
+      return points;
+    }
+
+    const dominant: BoxRect = { x: 150, y: 160, w: 120, h: 80 };
+    const fragment: BoxRect = { x: 160, y: 170, w: 40, h: 30 };
+    const sharedProposal: BoxRect = { x: 120, y: 130, w: 220, h: 140 };
+
+    function noiseInput(accept: BubbleLayoutInput['accept']): BubbleLayoutInput {
+      const contour = ovalContour(230, 200, 110, 70);
+      return {
+        pageWidth: 500,
+        pageHeight: 500,
+        boxes: [dominant, fragment],
+        carriers: [{ ...dominant }, { ...fragment }],
+        proposals: [sharedProposal, sharedProposal],
+        shapes: [],
+        curvatures: [{ isRounded: true, borderRadius: 40 }, { isRounded: true, borderRadius: 40 }],
+        contours: [contour, contour],
+        directions: ['h', 'h'],
+        accept,
+      };
+    }
+
+    it('absorbs tiny fragments into the dominant chamber and marks them skipped', () => {
+      const detailed = resolveBubbleLayoutsDetailed(noiseInput(() => true));
+      expect(detailed.typesetBoxes[0]).toBeDefined();
+      expect(detailed.contourPoints[0]?.length).toBeGreaterThanOrEqual(4);
+      // The fragment must be suppressed downstream instead of double-rendering
+      // its free text on top of the expanded dominant.
+      expect(detailed.skipped).toEqual([false, true]);
+    });
+
+    it('leaves fragments unsuppressed when the dominant expansion fails acceptance', () => {
+      const detailed = resolveBubbleLayoutsDetailed(noiseInput((i) => i !== 0));
+      expect(detailed.typesetBoxes[0]).toBeUndefined();
+      expect(detailed.skipped).toEqual([false, false]);
+    });
+
+    it('routes substantial stacked siblings through sub-chamber partitioning instead of absorption', () => {
+      // Two similar-area boxes sharing one balloon are real utterances: the area-only
+      // noise clause must not fire, and both keep their own partitioned sub-chamber.
+      const stacked: BoxRect[] = [{ x: 170, y: 140, w: 110, h: 60 }, { x: 180, y: 215, w: 100, h: 55 }];
+      const contour = ovalContour(230, 205, 110, 75);
+      const detailed = resolveBubbleLayoutsDetailed({
+        pageWidth: 500,
+        pageHeight: 500,
+        boxes: stacked,
+        carriers: stacked.map((b) => ({ ...b })),
+        proposals: [sharedProposal, sharedProposal],
+        shapes: [],
+        curvatures: [{ isRounded: true, borderRadius: 40 }, { isRounded: true, borderRadius: 40 }],
+        contours: [contour, contour],
+        directions: ['h', 'h'],
+        accept: () => true,
+      });
+      expect(detailed.typesetBoxes.every(Boolean)).toBe(true);
+      expect(detailed.skipped).toEqual([false, false]);
     });
   });
 });

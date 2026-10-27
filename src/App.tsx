@@ -376,6 +376,7 @@ export default function App() {
           typesetMode: obj.typesetMode,
           borderRadius: obj.borderRadius,
           isRounded: obj.isRounded,
+          contourPoints: obj.contourPoints,
           isSkipped: obj.isSkipped,
           angle: obj.rotation ?? 0,
         }));

@@ -9,7 +9,6 @@ import {
   wrapRectangular,
   wrapTextEllipse,
   shrinkFontTowardWidth,
-  INSERTED_HYPHEN,
 } from './ellipseTypeset';
 
 describe('ellipseTypeset module', () => {

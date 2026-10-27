@@ -254,6 +254,8 @@ export class PipelineOrchestrator {
 
       // 3.1 Acquire original bubble geometry only. Final layout waits for translated text/fonts.
       let bubbleGeometry: BubbleGeometry | undefined;
+      // OCR-index-aligned flags for fragments absorbed into a dominant chamber (noise guard).
+      let bubbleSkipped: boolean[] | undefined;
       const bubbleMode = popupState?.bubbleMode ?? 'heuristic';
       // Cleanly evict cached bubble engine if mode is disabled
       if (bubbleMode === 'off') {
@@ -510,10 +512,15 @@ export class PipelineOrchestrator {
         });
         ocrResult.typesetBoxes = detailed.typesetBoxes;
         ocrResult.contourPoints = detailed.contourPoints;
+        bubbleSkipped = detailed.skipped;
         itemOcrIndices.forEach((index, position) => {
           const typesetBox = ocrResult.typesetBoxes?.[index];
           textBlockItems[position].typesetBox = typesetBox;
           textBlockItems[position].contourPoints = detailed.contourPoints?.[index];
+          // Fragments absorbed into a dominant chamber by the noise guard must not
+          // render standalone (they would double-paint over the expanded dominant).
+          // Only flagged when true so ordinary blocks keep their exact object shape.
+          if (detailed.skipped?.[index]) textBlockItems[position].isSkipped = true;
           // All active bubble tiers (heuristic, neural, neural-mask) route curved speech bubbles through Koharu contour typesetting
           // and rectangular caption boxes through simple wrap
           if (typesetBox) {
@@ -614,6 +621,12 @@ export class PipelineOrchestrator {
           typesetMode,
           borderRadius,
           isRounded,
+          // Box-relative organic contour for the typeset box, so Studio contour mode
+          // restores the real bubble shape instead of a synthetic oval fallback.
+          contourPoints: ocrResult.contourPoints?.[i],
+          // Noise-guard absorbed fragments stay in the DB (editable) but flag the
+          // suppressed standalone render.
+          isSkipped: Boolean(bubbleSkipped?.[i]),
           angle: renderInfo?.angle ?? ((ocrResult.angles && ocrResult.angles[i] !== undefined)
             ? Math.round(ocrResult.angles[i])
             : undefined),

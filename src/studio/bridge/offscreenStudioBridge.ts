@@ -97,6 +97,10 @@ export async function requestStudioOcr(
       typesetMode?: TextObject['typesetMode'];
       borderRadius?: number;
       isRounded?: boolean;
+      /** Organic bubble contour in box-relative coordinates for contour typesetting. */
+      contourPoints?: Array<{ x: number; y: number }>;
+      /** Noise-guard absorbed fragment; Studio renders it as a dashed box without text. */
+      isSkipped?: boolean;
       /** Detected per-bubble ink color from the original artwork; undefined uses the default. */
       color?: string;
       /** Outline color derived from the detected ink; undefined uses the default. */
@@ -159,6 +163,11 @@ export async function requestStudioOcr(
     typesetMode: t.typesetMode,
     borderRadius: t.borderRadius,
     isRounded: t.isRounded,
+    // Organic contours ride in box-relative so contour mode typesets on the real
+    // bubble shape instead of a synthetic oval fallback.
+    contourPoints: t.contourPoints,
+    // Absorbed noise fragments stay editable in Studio but do not double-paint.
+    isSkipped: t.isSkipped ?? false,
     // Detected per-bubble colors ride in from Studio OCR; the hardcoded pair
     // stays as the fallback for older offscreen responses and failed detection.
     color: t.color ?? '#000000',

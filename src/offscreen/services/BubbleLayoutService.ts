@@ -18,6 +18,13 @@ import {
 export const MIN_SHARED_FONT_RATIO = 0.85;
 /** Production and visual harness intentionally share the same association threshold. */
 export const BUBBLE_MATCH_COVERAGE = 0.50;
+/**
+ * Fragments up to this fraction of the dominant box's area are OCR noise
+ * (stray punctuation strokes, unmerged column slivers) rather than real utterances.
+ * Larger stacked siblings are genuine utterances sharing the balloon and keep
+ * their own sub-chamber through normal flow-cell partitioning.
+ */
+export const NOISE_AREA_RATIO = 0.35;
 
 export interface BubbleGeometry {
   pageWidth: number;
@@ -230,6 +237,8 @@ export function significantOverlap(a: BoxRect, b: BoxRect, thresholdRatio: numbe
 export interface ResolvedBubbleLayout {
   typesetBoxes: (BoxRect | undefined)[];
   contourPoints: (Point2D[] | undefined)[];
+  /** Boxes absorbed into a dominant chamber by the noise guard; downstream must not render them. */
+  skipped?: boolean[];
 }
 
 /**
@@ -246,6 +255,7 @@ export function resolveBubbleLayoutsDetailed(input: BubbleLayoutInput): Resolved
     && box.x + box.w <= pageWidth && box.y + box.h <= pageHeight;
   const result: (BoxRect | undefined)[] = new Array(boxes.length).fill(undefined);
   const resultContours: (Point2D[] | undefined)[] = new Array(boxes.length).fill(undefined);
+  const skipped: boolean[] = new Array(boxes.length).fill(false);
   const groups = boxes.map((_, index) => [index]);
   // True multi-utterance container grouping: identical proposal or high-overlap / nested container.
   // Distinct adjacent bubbles must not be falsely grouped as multi-lobe balloons.
@@ -342,9 +352,10 @@ export function resolveBubbleLayoutsDetailed(input: BubbleLayoutInput): Resolved
       // When OCR detects multiple fragments inside a curved balloon (e.g. exclamation marks
       // misdetected as 1-character strokes like "电", or unmerged lines in the same column),
       // we check whether the bubble exhibits a genuine constriction neck (like a figure-8 double bubble).
-      // If topologicalFlowCells finds no neck, and secondary boxes are small noise fragments (area <= 35%)
-      // or vertically stacked lines in the same speech column (horizontal overlap >= 50%),
-      // the balloon represents a single coherent speech chamber. The dominant box receives the full balloon contour.
+      // If topologicalFlowCells finds no neck and every secondary box is a tiny noise fragment
+      // (see NOISE_AREA_RATIO), the balloon represents a single coherent speech chamber: the
+      // dominant box receives the full balloon contour and the fragments are marked skipped.
+      // Substantial stacked siblings are real utterances and take the partition path below.
       let dominantPos = 0;
       let maxArea = -1;
       for (let p = 0; p < siblings.length; p++) {
@@ -354,13 +365,12 @@ export function resolveBubbleLayoutsDetailed(input: BubbleLayoutInput): Resolved
           dominantPos = p;
         }
       }
-      const dominantBox = siblings[dominantPos];
+      // Noise Splitting Guard (split clause): only TINY fragments (area ratio) count as
+      // noise. Stacked siblings with substantial area are real utterances sharing the
+      // balloon and fall through to flow-cell partitioning so their text keeps rendering.
       const isSingleChamberWithNoise = siblings.every((b, p) => {
         if (p === dominantPos) return true;
-        const areaRatio = (b.w * b.h) / Math.max(1, maxArea);
-        const xOverlap = Math.max(0, Math.min(b.x + b.w, dominantBox.x + dominantBox.w) - Math.max(b.x, dominantBox.x));
-        const horizOverlapRatio = xOverlap / Math.max(1, Math.min(b.w, dominantBox.w));
-        return areaRatio <= 0.35 || horizOverlapRatio >= 0.50;
+        return (b.w * b.h) / Math.max(1, maxArea) <= NOISE_AREA_RATIO;
       });
 
       if (isSingleChamberWithNoise) {
@@ -382,6 +392,10 @@ export function resolveBubbleLayoutsDetailed(input: BubbleLayoutInput): Resolved
         if (validBox(box) && accept(dominantIdx, box, MIN_SHARED_FONT_RATIO)) {
           result[dominantIdx] = box;
           resultContours[dominantIdx] = sharedContour.map((p) => ({ x: p.x - box.x, y: p.y - box.y }));
+          // Absorbed fragments belong to the same speech chamber; suppress their
+          // standalone render (previously left undefined and double-rendered on top
+          // of the expanded dominant text). Their text stays saved and editable.
+          group.forEach((i) => { if (i !== dominantIdx) skipped[i] = true; });
         }
         continue;
       }
@@ -430,6 +444,8 @@ export function resolveBubbleLayoutsDetailed(input: BubbleLayoutInput): Resolved
       group.forEach((i) => {
         result[i] = undefined;
         resultContours[i] = undefined;
+        // A rolled-back dominant no longer absorbs its fragments; they render freely again.
+        skipped[i] = false;
       });
     }
   }
@@ -443,7 +459,7 @@ export function resolveBubbleLayoutsDetailed(input: BubbleLayoutInput): Resolved
     xy: groups.filter((group) => group.length > 1).reduce((sum, group) => sum + group.filter((i) => result[i]).length, 0),
     fallback: result.filter((box) => !box).length
   });
-  return { typesetBoxes: result, contourPoints: resultContours };
+  return { typesetBoxes: result, contourPoints: resultContours, skipped };
 }
 
 /**

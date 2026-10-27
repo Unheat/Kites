@@ -28,6 +28,7 @@ export function restoreTextObject(block: TextBlock): TextObject {
     typesetMode: block.typesetMode === 'ellipse' ? 'contour' : (block.typesetMode || 'balloon'),
     borderRadius: block.borderRadius,
     isRounded: block.isRounded,
+    contourPoints: block.contourPoints,
     originalText: block.originalText,
     fontSize: block.fontSize || 16,
     fontFamily: block.fontFamily || 'WildWords, CCWildWords, sans-serif',

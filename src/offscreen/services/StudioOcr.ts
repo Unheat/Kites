@@ -206,6 +206,8 @@ export async function runStudioOcr(
   let resolvedLayouts: (BoxRect | undefined)[] = [];
   let bubbleContours: (Point2D[] | undefined)[] = [];
   let bubbleGeometry: BubbleGeometry | undefined = undefined;
+  // OCR-index-aligned flags for fragments absorbed into a dominant chamber (noise guard).
+  let bubbleSkipped: boolean[] = [];
 
   const bubbleMode = popupState.bubbleMode;
   if (bubbleMode && bubbleMode !== 'off' && dependencies.getBubbleManager && typeof createImageBitmap !== 'undefined') {
@@ -232,7 +234,10 @@ export async function runStudioOcr(
           }
 
           bubbleGeometry = acquireBubbleGeometry(
-            safeCanvas.ctx as any,
+            // ImagePatchData contract (same as PipelineOrchestrator): a real pixel
+            // buffer, not the 2D context — passing the ctx made heuristic carrier
+            // extraction throw on the missing .data buffer and silently skip layout.
+            safeCanvas.ctx.getImageData(0, 0, payload.width, payload.height),
             result.boxes,
             neuralResult?.bubbles,
             neuralResult?.shapes
@@ -248,6 +253,7 @@ export async function runStudioOcr(
             accept: () => true
           });
           resolvedLayouts = detailed.typesetBoxes;
+          bubbleSkipped = detailed.skipped ?? [];
 
           bubbleContours = result.boxes.map((_, bIdx) => {
             if (detailed.contourPoints?.[bIdx]) return detailed.contourPoints[bIdx];
@@ -347,6 +353,9 @@ export async function runStudioOcr(
       isRounded,
       contourPoints,
       isVertical,
+      // Noise-guard absorbed fragments stay as editable dashed boxes in Studio
+      // (StudioCanvas renders skipped objects without painting their text).
+      isSkipped: bubbleSkipped[resolvedIndex] ?? false,
       rotation,
       color: detectedTextColors[resolvedIndex]?.textColor,
       strokeColor: detectedTextColors[resolvedIndex]?.strokeColor,
