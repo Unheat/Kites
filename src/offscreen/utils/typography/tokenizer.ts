@@ -8,11 +8,14 @@ import { isNoSpaceScriptChar, NO_LINE_START_RE, OPENING_MARK_RE } from './kinsok
 /** Penalty added when breaking mid-sentence across comma, colon, semicolon, or dash. */
 const COMMA_BREAK_PENALTY = 20.0;
 
-/** Penalty added when breaking immediately before an ASCII punctuation mark. */
-const PUNCTUATION_PREFIX_PENALTY = 120.0;
+/** Penalty added when breaking before a natural conjunction clause (matches Koharu layout.rs:2012). */
+const CONJUNCTION_BREAK_PENALTY = 40.0;
 
-/** Base penalty for an ordinary inter-word break. */
-const DEFAULT_WORD_BREAK_PENALTY = 40.0;
+/** High penalty preventing line breaks immediately after articles and prepositions (matches Koharu layout.rs:2022). */
+const PREPOSITION_ORPHAN_PENALTY = 300.0;
+
+/** Base penalty for an ordinary inter-word break (matches Koharu layout.rs:2024). */
+const DEFAULT_WORD_BREAK_PENALTY = 100.0;
 
 /**
  * Tokenizes dialogue into layout units, clustering punctuation and respecting non-spaced scripts.
@@ -81,7 +84,7 @@ export function tokenizeDialogue(text: string): string[] {
 
 /**
  * Computes a linguistic break penalty for breaking dialogue at a specific character boundary.
- * Port of Koharu's comic_break_penalty.
+ * 1:1 port of Koharu's `comic_break_penalty` (`crates/koharu-renderer/src/layout.rs:1995-2026`).
  *
  * @param text - Full dialogue string.
  * @param boundary - Character offset where the line break would occur.
@@ -102,9 +105,16 @@ export function comicBreakPenalty(text: string, boundary: number): number {
     }
   }
 
-  const firstAfter = after.length > 0 ? after[0] : '';
-  if (firstAfter && /[!\"#$%&'()*+,-./:;<=>?@[\\\]^_`{|}~]/.test(firstAfter)) {
-    return PUNCTUATION_PREFIX_PENALTY;
+  const nextWordMatch = after.match(/^[a-zA-Z]+/);
+  const nextWord = nextWordMatch ? nextWordMatch[0].toLowerCase() : '';
+  if (['and', 'but', 'or', 'so', 'because', 'although', 'while', 'then'].includes(nextWord)) {
+    return CONJUNCTION_BREAK_PENALTY;
+  }
+
+  const prevWordMatch = before.match(/[a-zA-Z]+$/);
+  const prevWord = prevWordMatch ? prevWordMatch[0].toLowerCase() : '';
+  if (['a', 'an', 'the', 'to', 'of', 'for', 'in', 'on', 'at', 'with', 'from'].includes(prevWord)) {
+    return PREPOSITION_ORPHAN_PENALTY;
   }
 
   return DEFAULT_WORD_BREAK_PENALTY;

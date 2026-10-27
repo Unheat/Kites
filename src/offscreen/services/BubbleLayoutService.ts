@@ -385,7 +385,8 @@ export function resolveBubbleLayoutsDetailed(input: BubbleLayoutInput): Resolved
   }
 
   // Deterministic final sibling clearance barrier (XianScan expansion.rs:230-269 parity)
-  applySiblingBoundaryConstraints(boxes, result);
+  // Preserves multi-utterance sub-chamber boundaries by excluding co-members of the same partitioned group.
+  applySiblingBoundaryConstraints(boxes, result, SIBLING_GAP, groups);
 
   input.onDiagnostics?.({
     single: groups.filter((group) => group.length === 1 && result[group[0]]).length,

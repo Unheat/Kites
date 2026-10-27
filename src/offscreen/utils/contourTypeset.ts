@@ -35,11 +35,11 @@ export const MAXIMUM_EVALUATED_FONT_SIZE = 48.0;
 /** Penalty weight applied to line length slack in DP optimization. */
 export const LINE_SLACK_WEIGHT = 1000.0;
 
-/** Penalty weight applied to boundary overflow in DP optimization. */
-export const LINE_OVERFLOW_WEIGHT = 100000.0;
+/** Penalty weight applied to boundary overflow in DP optimization (matches Koharu COMIC_LINE_OVERFLOW_PENALTY = 1_000_000.0). */
+export const LINE_OVERFLOW_WEIGHT = 1000000.0;
 
-/** Penalty added when a line break breaks a word using discretionary hyphenation. */
-export const DISCRETIONARY_HYPHEN_PENALTY = 350.0;
+/** Penalty added when a line break breaks a word using discretionary hyphenation (matches Koharu LINE_BREAK_HYPHEN_PENALTY = 2_000.0). */
+export const DISCRETIONARY_HYPHEN_PENALTY = 2000.0;
 
 /** Minimum word length considered for discretionary syllable hyphenation. */
 export const MIN_HYPHEN_WORD_LENGTH = 6;
@@ -308,25 +308,38 @@ export function computeContourProfiles(
     });
   }
 
-  // Koharu Shared Typographic Center Axis:
-  // Prevents text lines from snaking erratically inside asymmetric shapes.
+  // Koharu Shared Typographic Center Axis (layout.rs:1867-1895):
+  // A phrase has one visual axis. The contour controls the usable width of each line,
+  // while the common center keeps the setting typographically coherent.
+  let commonLeft = -Infinity;
+  let commonRight = Infinity;
   let sumCenter = 0;
   for (const p of rawProfiles) {
+    commonLeft = Math.max(commonLeft, p.left);
+    commonRight = Math.min(commonRight, p.right);
     sumCenter += (p.left + p.right) * 0.5;
   }
-  const sharedCenter = sumCenter / rawProfiles.length;
+  if (commonRight <= commonLeft) {
+    return null;
+  }
 
-  const symmetricProfiles: LineProfile[] = rawProfiles.map((p) => {
+  const contourCenter = sumCenter / rawProfiles.length;
+  const sharedCenter = Math.max(commonLeft, Math.min(commonRight, contourCenter));
+
+  const symmetricProfiles: LineProfile[] = [];
+  for (const p of rawProfiles) {
     const halfWidth = Math.min(sharedCenter - p.left, p.right - sharedCenter);
-    const safeWidth = Math.max(0, halfWidth * 2);
-    return {
+    if (halfWidth <= 0) {
+      return null;
+    }
+    symmetricProfiles.push({
       y: p.y,
       height: p.height,
       left: sharedCenter - halfWidth,
       right: sharedCenter + halfWidth,
-      width: safeWidth
-    };
-  });
+      width: halfWidth * 2
+    });
+  }
 
   return symmetricProfiles;
 }
@@ -494,10 +507,12 @@ export function exactProfiledLineBreaks(
     }
   }
 
-  const finalCost = dp[lineCount][len];
+  let finalCost = dp[lineCount][len];
   if (!Number.isFinite(finalCost)) {
     return null;
   }
+  // Koharu layout.rs:1693 line count cost normalization
+  finalCost = finalCost / lineCount + lineCount * 8.0;
 
   // Backtrack to recover line break indices
   const breaks: number[] = [];

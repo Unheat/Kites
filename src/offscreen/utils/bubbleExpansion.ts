@@ -565,7 +565,8 @@ export function partitionSharedContainer(
 export function applySiblingBoundaryConstraints(
   originalBoxes: BoxRect[],
   typesetBoxes: (BoxRect | undefined)[],
-  siblingGap: number = SIBLING_GAP
+  siblingGap: number = SIBLING_GAP,
+  groups?: number[][]
 ): void {
   const halfGap = Math.round(siblingGap / 2);
 
@@ -578,6 +579,9 @@ export function applySiblingBoundaryConstraints(
 
     for (let j = 0; j < typesetBoxes.length; j++) {
       if (i === j) continue;
+      // Exclude co-members of the same multi-utterance bubble container whose spatial division
+      // was already resolved by balloon flow cells or shared container partitioning.
+      if (groups && groups.some((g) => g.includes(i) && g.includes(j))) continue;
       const tbJ = typesetBoxes[j];
       if (!tbJ) continue;
       const origJ = originalBoxes[j];
