@@ -12,6 +12,22 @@ import { isIntraWordDash, isNoSpaceScriptChar } from './kinsokuShori';
 export const INSERTED_HYPHEN = '-\u2060';
 
 /**
+ * Heals typesetter line-break word splits while preserving the overall line structure.
+ * Rejoins "com-\nmunity" -> "community", tolerating the INSERTED_HYPHEN Word Joiner
+ * marker and uppercase lettering, so legacy rows whose lines carry only a plain
+ * trailing hyphen are healed too. A hyphen immediately before a line break is treated
+ * as a wrap split (pre-existing semantic) and rejoined without it; authored inline
+ * dashes are untouched because no line break follows them. Unlike
+ * {@link unwrapWrappedText}, single newlines are kept.
+ *
+ * @param text - Multi-line text potentially containing hyphenated line breaks.
+ * @returns Text with hyphenated word splits rejoined, newline structure intact.
+ */
+export function healLineBreakHyphens(text: string): string {
+  return text.replace(/([a-zA-Z]+)-\u2060?\s*\r?\n\s*\u2060?([a-zA-Z]+)/g, '$1$2');
+}
+
+/**
  * Strips inserted soft hyphens and unwraps soft newlines into a continuous sentence.
  * Preserves intentional paragraph breaks (\n\n) and intra-word dashes.
  *
@@ -20,8 +36,7 @@ export const INSERTED_HYPHEN = '-\u2060';
  */
 export function unwrapWrappedText(text: string): string {
   if (!text) return '';
-  // Heal standard line-break word splits (e.g. "com-\nmunity" -> "community")
-  const clean = text.replace(/([a-zA-Z]+)-\s*\r?\n\s*([a-z]+)/g, '$1$2');
+  const clean = healLineBreakHyphens(text);
 
   let out = '';
   for (let i = 0; i < clean.length; i++) {

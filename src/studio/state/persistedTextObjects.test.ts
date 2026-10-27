@@ -60,4 +60,28 @@ describe('persisted renderer layout restoration', () => {
     expect(restored.text).toContain('community');
     expect(restored.text).not.toContain('com-');
   });
+
+  it('heals INSERTED_HYPHEN Word Joiner marker splits and uppercase lettering without touching lines', () => {
+    const markerBlock: TextBlock = {
+      imageId: 1, originalText: '皆',
+      translatedText: 'Everyone else is also in a state of being unable to fight.',
+      lines: ['Every-\u2060', 'one else is also', 'in a state', 'of being', 'unable to', 'fight.'],
+      posX: 10, posY: 20, width: 140, height: 220,
+      fontSize: 16, fontFamily: 'sans-serif', color: '#000',
+    };
+    const restored = restoreTextObject(markerBlock);
+    // Persisted layout lines stay byte-identical (markers included) for exact display
+    expect(restored.lines).toEqual(markerBlock.lines);
+    // Editable text is healed so a later resize re-wraps from the clean word
+    expect(restored.text).toContain('Everyone else is also');
+    expect(restored.text).not.toContain('\u2060');
+    expect(restored.text).not.toContain('Every-');
+  });
+
+  it('heals uppercase plain-hyphen splits from legacy pre-marker rows', () => {
+    const upperBlock: TextBlock = {
+      ...block, translatedText: 'EVERYONE ELSE IS HERE', lines: ['EVERY-', 'ONE ELSE IS HERE'],
+    };
+    expect(restoreTextObject(upperBlock).text).toBe('EVERYONE ELSE IS HERE');
+  });
 });

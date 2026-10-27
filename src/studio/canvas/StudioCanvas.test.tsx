@@ -63,7 +63,9 @@ describe('Studio canvas layout routing', () => {
   it('keeps pipeline lines untouched on selection, entering edit, and leaving unchanged', () => {
     act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
     const textarea = container.querySelector('textarea')!;
-    expect(textarea.value).toBe('Pipeline fitted\ntext');
+    // Inline editor shows the marker-healed flowing text so finishing an edit
+    // can never bake typesetter hyphens into the canonical text.
+    expect(textarea.value).toBe('Pipeline fitted text');
     act(() => { textarea.setSelectionRange(0, 4); textarea.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })); });
     act(() => textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
     expect(layout.apply).not.toHaveBeenCalled();

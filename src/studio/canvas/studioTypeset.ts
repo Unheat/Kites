@@ -51,11 +51,14 @@ export function getTypesetDisplayText(
 /**
  * Keeps canonical pipeline/authored lines on first display, independent of editing preference.
  * @param object - Newly restored or created text object.
- * @returns Original object when layout exists, otherwise an auto-balloon initialized copy.
+ * @returns Original object when layout exists, otherwise a copy initialized with the
+ *          object's own typesetting engine (balloon when unset).
  */
 export function prepareInitialTextObject(object: TextObject): TextObject {
   if (object.lines?.length) return object;
-  return reflowTextObject(object, 'balloon');
+  // Reflow with the object's own engine so legacy imports keep their typesetting route
+  // instead of being silently re-laid-out as auto-balloon.
+  return reflowTextObject(object, object.typesetMode ?? 'balloon');
 }
 
 /**
@@ -415,9 +418,11 @@ export function recalculateBlockTypeset(
 
     // Auto Balloon Mode: full pipeline diamond envelopes, hyphenation, and auto font fitting
     const isList = /^\s*[-*•\d+.]/m.test(text);
-  // Rejoin soft line-break hyphens (e.g. "com-\nmunity" -> "community") so resizing
-  // does not permanently bake line-wrap syllable breaks into the dialogue text.
-  const unhyphenated = text.replace(/(\b[a-zA-Z]+)-\s*\r?\n\s*([a-z]+)/g, '$1$2');
+  // Marker-aware unwrapper (shared with the contour route) rejoins soft line-break hyphens
+  // so resizing does not permanently bake line-wrap syllable breaks into the dialogue text.
+  // The inline regex previously used here missed the INSERTED_HYPHEN Word Joiner marker,
+  // letting wrapText glue "Every-\u2060" + "one" back into a permanently hyphenated word.
+  const unhyphenated = unwrapWrappedText(text);
   const normalizedText = isList || unhyphenated.includes('\n\n')
     ? unhyphenated
     : unhyphenated.replace(/\r?\n/g, ' ').replace(/\s+/g, ' ').trim();

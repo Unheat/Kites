@@ -13,27 +13,7 @@ import {
 } from './ellipseTypeset';
 
 describe('ellipseTypeset module', () => {
-  describe('unwrapWrappedText', () => {
-    it('removes inserted soft hyphens and heals syllables', () => {
-      const text = `com${INSERTED_HYPHEN}\nmunity is im${INSERTED_HYPHEN}\nportant`;
-      expect(unwrapWrappedText(text)).toBe('community is important');
-    });
-
-    it('unwraps single soft newlines to spaces', () => {
-      const text = 'Hello\nworld\nthis is a\ntest';
-      expect(unwrapWrappedText(text)).toBe('Hello world this is a test');
-    });
-
-    it('preserves multi-newline paragraph breaks', () => {
-      const text = 'Paragraph 1.\n\nParagraph 2.';
-      expect(unwrapWrappedText(text)).toBe('Paragraph 1.\n\nParagraph 2.');
-    });
-
-    it('handles empty or blank string gracefully', () => {
-      expect(unwrapWrappedText('')).toBe('');
-      expect(unwrapWrappedText('   ')).toBe('');
-    });
-  });
+  // unwrapWrappedText tests live in typography/textUnwrap.test.ts
 
   describe('ellipseProfile', () => {
     it('returns empty array for zero lines', () => {

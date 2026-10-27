@@ -16,13 +16,16 @@ describe('Studio layout ownership', () => {
     expect(initial.fontSize).toBe(16);
   });
 
-  it('initializes missing layout with balloon, never simple preference', () => {
-    const initial = { ...object, lines: undefined, typesetMode: 'simple' as const };
-    const prepared = prepareInitialTextObject(initial);
-    expect(prepared).toMatchObject(recalculateBlockTypeset(
-      initial.text, initial.fontFamily, initial.width, initial.height, initial.fontSize, 'balloon'
+  it('initializes missing layout with the object own engine, defaulting to balloon', () => {
+    const simple = { ...object, lines: undefined, typesetMode: 'simple' as const };
+    expect(prepareInitialTextObject(simple)).toMatchObject(recalculateBlockTypeset(
+      simple.text, simple.fontFamily, simple.width, simple.height, simple.fontSize, 'simple'
     ));
-    expect(prepared.typesetMode).toBe('simple');
+    expect(prepareInitialTextObject(simple).typesetMode).toBe('simple');
+    const noMode = { ...object, lines: undefined };
+    expect(prepareInitialTextObject(noMode)).toMatchObject(recalculateBlockTypeset(
+      noMode.text, noMode.fontFamily, noMode.width, noMode.height, noMode.fontSize, 'balloon'
+    ));
   });
 
   it('does not reflow selection, paint, no-op edits, or engine changes', () => {
@@ -154,6 +157,18 @@ describe('Studio Algorithmic Typeset & Line Reflow', () => {
     const ellipseWide = recalculateBlockTypeset(textWithHyphen, 'sans-serif', 300, 200, 18, 'ellipse');
     const ellipseJoined = ellipseWide.lines.join(' ');
     expect(ellipseJoined).toContain('community');
+  });
+
+  it('un-hyphenates INSERTED_HYPHEN marker splits when box is widened in Auto Balloon mode', () => {
+    // Regression: the Balanced Fit route used to run a lowercase-only regex that missed
+    // the Word Joiner marker, letting wrapText glue "Every-\u2060" + "one" into a
+    // permanently hyphenated "Every-one" on a single line after widening.
+    const markerText = 'Every-\u2060\none else is also\nin a state of being\nunable to fight.';
+    const wide = recalculateBlockTypeset(markerText, 'sans-serif', 300, 200, 18, 'balloon');
+    const joined = wide.lines.join(' ');
+    expect(joined).not.toContain('\u2060');
+    expect(joined).not.toContain('Every-');
+    expect(joined.replace(/\s+/g, ' ')).toContain('Everyone else is also');
   });
 
   it('preserves box height on manual resize and updates reflowed lines when width changes', () => {
