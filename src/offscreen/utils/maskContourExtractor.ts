@@ -34,7 +34,7 @@ function perpendicularDistance(p: Point2D, a: Point2D, b: Point2D): number {
 /**
  * Douglas-Peucker polygon simplification.
  */
-export function simplifyDouglasPeucker(points: Point2D[], tolerance: number): Point2D[] {
+function simplifyDouglasPeucker(points: Point2D[], tolerance: number): Point2D[] {
   if (points.length <= 2) return points.slice();
 
   let maxDist = 0;
@@ -62,7 +62,7 @@ export function simplifyDouglasPeucker(points: Point2D[], tolerance: number): Po
 /**
  * Simplifies a closed polygon contour with Douglas-Peucker.
  */
-export function simplifyClosedContour(contour: Point2D[], tolerance: number): Point2D[] {
+function simplifyClosedContour(contour: Point2D[], tolerance: number): Point2D[] {
   if (contour.length <= 4) return contour.slice();
 
   // Find two points that are farthest apart to anchor the DP simplification

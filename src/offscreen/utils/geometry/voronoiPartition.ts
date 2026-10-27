@@ -239,16 +239,3 @@ export function partitionBalloonFlowCells(
 
   return { subChambers, cellContours };
 }
-
-/**
- * Partitions a shared container among multiple text boxes using Voronoi flow cells,
- * mapping each non-overlapping cell back to an axis-aligned sub-chamber territory.
- */
-export function partitionContainerByFlowCells(
-  container: BoxRect,
-  boxes: BoxRect[],
-  contour?: Point2D[],
-  siblingGap: number = SIBLING_GAP
-): BoxRect[] {
-  return partitionBalloonFlowCells(container, boxes, contour, siblingGap).subChambers;
-}

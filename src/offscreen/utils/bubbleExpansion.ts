@@ -73,6 +73,5 @@ export {
   anchorFlowCells,
   flowCells,
   partitionBalloonFlowCells,
-  partitionContainerByFlowCells,
   type BalloonFlowPartitionResult
 } from './geometry/voronoiPartition';

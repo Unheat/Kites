@@ -8,7 +8,7 @@
 import type { Point2D } from '../../../shared/utils/geometry';
 import type { BoxRect } from '../../utils/bubbleExpansion';
 import { wrapTextContour, MINIMUM_READABLE_FONT_SIZE } from '../../utils/contourTypeset';
-import { unwrapWrappedText } from '../../utils/ellipseTypeset';
+import { unwrapWrappedText } from '../../utils/typography';
 import type { ITypesetStrategy, TypesetMode, TypesetOptions, TypesetResult } from './ITypesetStrategy';
 
 export class ContourDpTypesetter implements ITypesetStrategy {

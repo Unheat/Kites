@@ -6,16 +6,19 @@
 
 import type { Point2D } from '../../../shared/utils/geometry';
 
+/** Cross product of vectors p1->p2 and p1->p3: positive when p1,p2,p3 turn counter-clockwise. */
 export function turn(p1: Point2D, p2: Point2D, p3: Point2D): number {
   return (p2.x - p1.x) * (p3.y - p1.y) - (p2.y - p1.y) * (p3.x - p1.x);
 }
 
+/** Squared Euclidean distance between two points (avoids sqrt for comparisons). */
 export function distSq(p1: Point2D, p2: Point2D): number {
   const dx = p2.x - p1.x;
   const dy = p2.y - p1.y;
   return dx * dx + dy * dy;
 }
 
+/** @param point - Query point. @param a @param b - Segment endpoints. @returns Shortest distance from the point to segment a-b. */
 export function pointSegmentDistance(point: Point2D, a: Point2D, b: Point2D): number {
   const l2 = distSq(a, b);
   if (l2 <= 1e-6) return Math.sqrt(distSq(point, a));
@@ -23,6 +26,14 @@ export function pointSegmentDistance(point: Point2D, a: Point2D, b: Point2D): nu
   return Math.sqrt(distSq(point, { x: a.x + t * (b.x - a.x), y: a.y + t * (b.y - a.y) }));
 }
 
+/**
+ * Signed shoelace area: positive for counter-clockwise winding, negative for clockwise.
+ * The sign carries winding order for Koharu reflex-vertex detection, so callers that
+ * only need magnitude must wrap with Math.abs — do not swap in an unsigned area helper.
+ *
+ * @param poly - Polygon vertices in boundary order.
+ * @returns Signed area (half the shoelace sum).
+ */
 export function polygonArea(poly: Point2D[]): number {
   let a = 0;
   for (let i = 0; i < poly.length; i++) {
@@ -32,6 +43,7 @@ export function polygonArea(poly: Point2D[]): number {
   return a * 0.5;
 }
 
+/** @param poly - Polygon vertices. @param pt - Query point. @param epsilon - Boundary tolerance. @returns True when the point is inside or within epsilon of the boundary. */
 export function pointInPolygon(poly: Point2D[], pt: Point2D, epsilon = 1e-4): boolean {
   let inside = false;
   for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
@@ -44,10 +56,12 @@ export function pointInPolygon(poly: Point2D[], pt: Point2D, epsilon = 1e-4): bo
   return inside;
 }
 
+/** Counter-clockwise orientation test: twice the signed triangle area of a,b,c. */
 export function ccw(a: Point2D, b: Point2D, c: Point2D): number {
   return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
 }
 
+/** @returns True when segments a1-a2 and b1-b2 strictly cross (touching endpoints within eps do not count). */
 export function segmentsIntersect(a1: Point2D, a2: Point2D, b1: Point2D, b2: Point2D, eps = 1e-4): boolean {
   const d1 = ccw(a1, a2, b1);
   const d2 = ccw(a1, a2, b2);
@@ -57,6 +71,7 @@ export function segmentsIntersect(a1: Point2D, a2: Point2D, b1: Point2D, b2: Poi
     ((d3 > eps && d4 < -eps) || (d3 < -eps && d4 > eps)));
 }
 
+/** @param points - Arbitrary point set. @returns Convex hull vertices in counter-clockwise order (Andrew's monotone chain). */
 export function convexHull(points: Point2D[]): Point2D[] {
   const pts = [...points].sort((a, b) => a.x === b.x ? a.y - b.y : a.x - b.x);
   if (pts.length <= 2) return pts;
@@ -76,6 +91,7 @@ export function convexHull(points: Point2D[]): Point2D[] {
   return lower.concat(upper);
 }
 
+/** @returns Minimum distance from the point to any polygon edge. */
 export function distanceToPolygonBoundary(point: Point2D, poly: Point2D[]): number {
   let minD = Infinity;
   for (let i = 0; i < poly.length; i++) {
@@ -85,6 +101,7 @@ export function distanceToPolygonBoundary(point: Point2D, poly: Point2D[]): numb
   return minD;
 }
 
+/** @param first @param second - Vertex indices of the splitting diagonal. @returns The two vertex chains between the indices, both inclusive. */
 export function splitPolygon(poly: Point2D[], first: number, second: number): [Point2D[], Point2D[]] {
   const [f, s] = first <= second ? [first, second] : [second, first];
   const part1 = poly.slice(f, s + 1);
@@ -92,6 +109,7 @@ export function splitPolygon(poly: Point2D[], first: number, second: number): [P
   return [part1, part2];
 }
 
+/** @returns True when the vertex diagonal stays inside the polygon: no edge crossings and interior sample points at 20%, 50%, 80%. */
 export function validDiagonal(poly: Point2D[], first: number, second: number, tol: number): boolean {
   const len = poly.length;
   if (first === second || (first + 1) % len === second || (second + 1) % len === first) return false;
@@ -111,6 +129,7 @@ export function validDiagonal(poly: Point2D[], first: number, second: number, to
   );
 }
 
+/** Douglas-Peucker simplification of an open vertex-index chain. @returns Retained indices including both chain endpoints. */
 export function simplifyChainIndices(polygon: Point2D[], chain: number[], tolerance: number): number[] {
   if (chain.length <= 2) return [...chain];
   const start = polygon[chain[0]];
@@ -132,6 +151,7 @@ export function simplifyChainIndices(polygon: Point2D[], chain: number[], tolera
   return first.concat(second);
 }
 
+/** Douglas-Peucker simplification of a closed contour, split at the vertex farthest from vertex 0. @returns Retained indices (>= 3, else the original set). */
 export function simplifyClosedIndices(polygon: Point2D[], tolerance: number): number[] {
   let split = 0;
   let maxD = 0;
@@ -153,6 +173,7 @@ export function simplifyClosedIndices(polygon: Point2D[], tolerance: number): nu
   return res.length >= 3 ? res : polygon.map((_, i) => i);
 }
 
+/** Signed shoelace area of the sub-polygon selected by vertex indices (sign carries winding, see polygonArea). */
 export function polygonAreaFromIndices(polygon: Point2D[], indices: number[]): number {
   let a = 0;
   for (let i = 0; i < indices.length; i++) {
@@ -163,6 +184,16 @@ export function polygonAreaFromIndices(polygon: Point2D[], indices: number[]): n
   return a * 0.5;
 }
 
+/**
+ * Recursively splits a joined balloon polygon at reflex-vertex diagonals until every
+ * lobe contains exactly one anchor. Candidates are ranked by reflex corner strength
+ * scaled by hull recession and diagonal length.
+ *
+ * @param poly - Joined balloon contour vertices.
+ * @param anchors - Text-box anchor points with their balloon indices.
+ * @param tolerance - Scale-relative geometric tolerance.
+ * @returns One polygon per anchor, or null when no clean decomposition exists.
+ */
 export function decomposeLobes(
   poly: Point2D[],
   anchors: { index: number; pt: Point2D }[],

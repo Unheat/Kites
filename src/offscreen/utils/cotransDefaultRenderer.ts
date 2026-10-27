@@ -14,15 +14,10 @@ import type { PositionedLine } from './contourTypeset';
 import { TypesetStrategyFactory, measureDefaultLayout } from '../engines/typeset';
 import { compactSpecialSymbols } from '../../shared/utils/textCleaning';
 import { DEFAULT_RENDER_FONT_FAMILY, calcHorizontal, makeMeasurer } from './renderer/cotransLineBreaker';
-import {
-  STROKE_WIDTH_RATIO,
-  LINE_SPACING_RATIO,
-  putTextHorizontal,
-  putTextLines,
-  cropToContent,
-  makeCanvas,
-  type AnyCanvas
-} from './renderer/cotransTextRasterizer';
+/** Stroke width as a multiple of font size for the comic lettering outline. */
+export const STROKE_WIDTH_RATIO = 0.07;
+/** Extra line advance as a multiple of font size added by the rasterizer. */
+export const LINE_SPACING_RATIO = 0.01;
 import {
   dist,
   rotatePoint,
@@ -40,12 +35,6 @@ export {
   DEFAULT_RENDER_FONT_FAMILY,
   calcHorizontal,
   makeMeasurer,
-  STROKE_WIDTH_RATIO,
-  LINE_SPACING_RATIO,
-  putTextHorizontal,
-  putTextLines,
-  cropToContent,
-  makeCanvas,
   dist,
   rotatePoint,
   polygonCenter,
@@ -55,7 +44,6 @@ export {
   DEFAULT_FIT_LINE_HEIGHT,
   FONT_SIZE_MINIMUM_DIVISOR
 };
-export type { AnyCanvas };
 
 /** Region metadata needed by the default renderer (subset of Cotrans TextBlock). */
 export interface DefaultRenderRegion {
