@@ -9,7 +9,7 @@ import type { BubbleManager } from './BubbleManager';
 import { SUPPORTED_INPAINT_IDS } from '../../shared/inpaintTiers';
 import { getRenderedBlockGeometry } from '../utils/canvasTypesetting';
 import { detectBlockTextColors, type DetectedTextColor } from '../utils/textColorDetection';
-import { acquireBubbleGeometry, resolveBubbleLayouts, type BubbleGeometry } from './BubbleLayoutService';
+import { acquireBubbleGeometry, resolveBubbleLayoutsDetailed, type BubbleGeometry } from './BubbleLayoutService';
 import { wrapTextContour } from '../utils/contourTypeset';
 import type { BoxRect } from '../utils/bubbleExpansion';
 
@@ -238,7 +238,7 @@ export async function runStudioOcr(
             neuralResult?.shapes
           );
 
-          resolvedLayouts = resolveBubbleLayouts({
+          const detailed = resolveBubbleLayoutsDetailed({
             ...bubbleGeometry,
             boxes: result.boxes,
             directions: result.directions,
@@ -247,8 +247,10 @@ export async function runStudioOcr(
             pageHeight: payload.height,
             accept: () => true
           });
+          resolvedLayouts = detailed.typesetBoxes;
 
           bubbleContours = result.boxes.map((_, bIdx) => {
+            if (detailed.contourPoints?.[bIdx]) return detailed.contourPoints[bIdx];
             const carrier = bubbleGeometry?.carriers[bIdx];
             if (!carrier) return undefined;
             return [

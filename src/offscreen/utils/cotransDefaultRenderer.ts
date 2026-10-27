@@ -795,8 +795,9 @@ export function renderRegionDefault(
   // Route 1: Auto Balloon XianScan diamond reflow for disabled mode on raw OCR polygons
   let fitted: { size: number; lines: string[] } | null = null;
   const isFixed = region.fixed ?? (region.typesetMode !== 'balloon' && region.typesetMode !== undefined);
-  const isContourRoute = isFixed && (region.typesetMode === 'contour' || region.typesetMode === 'ellipse' || (region.isRounded && region.typesetMode !== 'simple'));
-  const isSimpleRoute = isFixed && region.typesetMode === 'simple';
+  const hasContour = Boolean(region.contourPoints && region.contourPoints.length >= 3);
+  const isContourRoute = isFixed && (hasContour || region.typesetMode === 'contour' || region.typesetMode === 'ellipse' || (region.isRounded && region.typesetMode !== 'simple'));
+  const isSimpleRoute = isFixed && !isContourRoute && region.typesetMode === 'simple';
 
   if (isContourRoute) {
     const unhyphenated = unwrapWrappedText(region.translation);

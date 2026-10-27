@@ -12,7 +12,7 @@ import { comicBreakPenalty, tokenizeDialogue } from './typography/tokenizer';
 import { findHyphenationPoints } from './typesetLayout';
 
 /** Safety margin in pixels kept between glyph bounds and bubble wall. */
-export const DEFAULT_INLINE_AIR = 5.0;
+export const DEFAULT_INLINE_AIR = 4.0;
 
 /** Default line pitch ratio relative to font size. */
 export const DEFAULT_LINE_PITCH = 1.25;
@@ -738,10 +738,13 @@ export function wrapTextContour(
     ? Math.round(cleanFit.profiles[0].height / linePitch)
     : 0;
 
-  // Koharu LastResort Hyphenation Policy (layout.rs:400-408):
-  // Avoiding a word break is strictly preferred as long as clean text fits above the minimum readability floor.
-  // Never break words across lines just to artificially inflate font size.
-  if (cleanFit && cleanSize > minFont) {
+  // Koharu LastResort Hyphenation Policy (layout.rs:400-408 & 2892-2924):
+  // 1. If clean unhyphenated text fits comfortably at or above readable body font size (>= 12px),
+  // strictly keep clean whole words without hyphenation.
+  // 2. If clean text is squeezed below the 12px readability floor (e.g. 9px or 10px),
+  // evaluate with discretionary hyphenation to recover readable body typography (12px - 15px).
+  const readabilityFloor = Math.max(12.0, minFont);
+  if (cleanFit && cleanSize >= readabilityFloor) {
     return {
       lines: cleanFit.lines,
       fontSize: cleanSize,

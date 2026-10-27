@@ -103,6 +103,19 @@ export class NeuralBubbleEngine implements IBubbleEngine {
           carrierBox: severed.carrier,
           isSeveredCarrier: true,
         };
+      } else {
+        shapes[i] = {
+          x: minX,
+          y: minY,
+          scale: avgScale,
+          width: pw,
+          height: ph,
+          interior: mask,
+          observedInterior: mask,
+          eroded: mask,
+          carrierBox: bubbles[matchedIdx],
+          isSeveredCarrier: false,
+        };
       }
     }
 

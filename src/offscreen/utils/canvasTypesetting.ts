@@ -389,7 +389,8 @@ export function measureBubbleLayoutFontSize(
 ): number {
   if (!block.text?.trim() || !Number.isFinite(box.w) || !Number.isFinite(box.h) || box.w < 1 || box.h < 1) return 0;
 
-  if (block.typesetMode === 'contour' || block.typesetMode === 'ellipse' || (block.isRounded && block.typesetMode !== 'balloon' && block.typesetMode !== 'simple')) {
+  const hasContour = Boolean(block.contourPoints && block.contourPoints.length >= 3);
+  if (hasContour || block.typesetMode === 'contour' || block.typesetMode === 'ellipse' || (block.isRounded && block.typesetMode !== 'balloon' && block.typesetMode !== 'simple')) {
     const contour = (block.contourPoints && block.contourPoints.length >= 3)
       ? block.contourPoints
       : [
@@ -398,20 +399,21 @@ export function measureBubbleLayoutFontSize(
           { x: box.w, y: box.h },
           { x: 0, y: box.h }
         ];
-    const targetSize = bubbleLayoutFontTarget(block);
     const res = wrapTextContour(
       block.text.trim(),
       contour,
       ctx as any,
       fontFamily,
       {
-        minFontSize: minFontSize ?? Math.max(6, Math.floor(targetSize * 0.4)),
+        minFontSize: minFontSize ?? 6,
         maxFontSize: Math.max(16, Math.round(box.h * 0.5)),
         targetLang,
         isBold
       }
     );
-    if (!res || !res.lines || res.lines.length === 0 || res.overflowed) return 0;
+    if (!res || !res.lines || res.lines.length === 0 || res.overflowed) {
+      return 0;
+    }
     return res.fontSize;
   }
 
@@ -422,14 +424,13 @@ export function measureBubbleLayoutFontSize(
       { x: box.w, y: box.h },
       { x: 0, y: box.h }
     ];
-    const targetSize = bubbleLayoutFontTarget(block);
     const res = wrapTextContour(
       block.text.trim(),
       rectContour,
       ctx as any,
       fontFamily,
       {
-        minFontSize: minFontSize ?? Math.max(6, Math.floor(targetSize * 0.4)),
+        minFontSize: minFontSize ?? 6,
         maxFontSize: Math.max(16, Math.round(box.h * 0.5)),
         targetLang,
         isBold

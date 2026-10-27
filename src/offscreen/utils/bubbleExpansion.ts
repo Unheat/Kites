@@ -587,6 +587,7 @@ export function applySiblingBoundaryConstraints(
       const dx = Math.abs(cxI - cxJ);
       const dy = Math.abs(cyI - cyJ);
       const isPrimarilyVertical = dy > dx * 1.25;
+      const isPrimarilyHorizontal = dx > dy * 1.25;
 
       // 1. Horizontal influence: only for primarily side-by-side sibling boxes (e.g. separate bubbles)
       const yOverlap = (tbI.y + tbI.h) > tbJ.y && (tbJ.y + tbJ.h) > tbI.y;
@@ -613,7 +614,7 @@ export function applySiblingBoundaryConstraints(
 
       // 2. Vertical influence: when boxes share vertical space (e.g. top and bottom utterances in the same bubble)
       const xOverlap = (tbI.x + tbI.w) > tbJ.x && (tbJ.x + tbJ.w) > tbI.x;
-      if ((xOverlap || isPrimarilyVertical) && cyJ !== cyI) {
+      if (xOverlap && !isPrimarilyHorizontal && cyJ !== cyI) {
         // If box J is above box I
         if (cyJ < cyI) {
           const minTop = tbJ.y + tbJ.h + siblingGap;
@@ -654,7 +655,8 @@ export function pairwiseClampBox(
   allOriginals: BoxRect[],
   myIndex: number,
   containerOrGap?: BoxRect | number,
-  siblingGapParam: number = SIBLING_GAP
+  siblingGapParam: number = SIBLING_GAP,
+  excludedIndices?: number[]
 ): BoxRect {
   let { x, y, w, h } = candidate;
   const cxI = original.x + original.w / 2;
@@ -663,7 +665,7 @@ export function pairwiseClampBox(
   const siblingGap = typeof containerOrGap === 'number' ? containerOrGap : siblingGapParam;
 
   for (let j = 0; j < allOriginals.length; j++) {
-    if (j === myIndex) continue;
+    if (j === myIndex || (excludedIndices && excludedIndices.includes(j))) continue;
     const origJ = allOriginals[j];
     const cxJ = origJ.x + origJ.w / 2;
     const cyJ = origJ.y + origJ.h / 2;
@@ -1035,6 +1037,27 @@ function decomposeLobes(
       }
 
       if (!assignsCleanly || firstAnchors.length === 0 || secondAnchors.length === 0) continue;
+
+      // A structural neck separating two anchor groups must be transverse (predominantly perpendicular)
+      // to the anchor displacement vector. A diagonal cut that is nearly parallel to the anchor line
+      // slices lengthwise down the spine of the bubble rather than cutting across the constriction neck.
+      const c1x = firstAnchors.reduce((sum, a) => sum + a.pt.x, 0) / firstAnchors.length;
+      const c1y = firstAnchors.reduce((sum, a) => sum + a.pt.y, 0) / firstAnchors.length;
+      const c2x = secondAnchors.reduce((sum, a) => sum + a.pt.x, 0) / secondAnchors.length;
+      const c2y = secondAnchors.reduce((sum, a) => sum + a.pt.y, 0) / secondAnchors.length;
+      const ax = c2x - c1x;
+      const ay = c2y - c1y;
+      const aLen = Math.hypot(ax, ay);
+
+      const dx = poly[v2].x - poly[v1].x;
+      const dy = poly[v2].y - poly[v1].y;
+      const dLen = Math.hypot(dx, dy);
+
+      if (aLen > 1e-4 && dLen > 1e-4) {
+        const cosAngle = Math.abs(ax * dx + ay * dy) / (aLen * dLen);
+        if (cosAngle > 0.65) continue;
+      }
+
       const lenSq = distSq(poly[v1], poly[v2]);
       if (lenSq <= 1e-5) continue;
       candidates.push({

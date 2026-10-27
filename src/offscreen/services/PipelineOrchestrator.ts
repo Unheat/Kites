@@ -14,7 +14,7 @@ import { resolveRenderFontFamily } from '../../shared/renderFontPresets';
 import { isBubbleGpuAvailable, isColorGpuAvailable } from '../../shared/utils/hardwareUtils';
 import type { BubbleEngineOptions } from '../engines/bubble/BaseBubbleEngine';
 import { BubbleManager, bubbleManager as defaultBubbleManager } from './BubbleManager';
-import { acquireBubbleGeometry, resolveBubbleLayouts, type BubbleGeometry } from './BubbleLayoutService';
+import { acquireBubbleGeometry, resolveBubbleLayoutsDetailed, type BubbleGeometry } from './BubbleLayoutService';
 import { loadHyphenationLanguage } from '../utils/hyphenation';
 import type { ColorTierId } from '../../shared/colorTiers';
 import { ColorManager } from './ColorManager';
@@ -470,7 +470,7 @@ export class PipelineOrchestrator {
       }
       if (bubbleGeometry) {
         const blockByOcrIndex = new Map(itemOcrIndices.map((index, position) => [index, textBlockItems[position]]));
-        ocrResult.typesetBoxes = resolveBubbleLayouts({
+        const detailed = resolveBubbleLayoutsDetailed({
           ...bubbleGeometry,
           boxes: ocrResult.boxes,
           directions: ocrResult.directions,
@@ -506,9 +506,12 @@ export class PipelineOrchestrator {
           },
           onDiagnostics: (counts) => console.log('[PipelineOrchestrator] Bubble layouts:', counts)
         });
+        ocrResult.typesetBoxes = detailed.typesetBoxes;
+        ocrResult.contourPoints = detailed.contourPoints;
         itemOcrIndices.forEach((index, position) => {
           const typesetBox = ocrResult.typesetBoxes?.[index];
           textBlockItems[position].typesetBox = typesetBox;
+          textBlockItems[position].contourPoints = detailed.contourPoints?.[index];
           // All active bubble tiers (heuristic, neural, neural-mask) route curved speech bubbles through Koharu contour typesetting
           // and rectangular caption boxes through simple wrap
           if (typesetBox) {

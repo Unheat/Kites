@@ -9,7 +9,7 @@ import { createCanvas, loadImage } from 'canvas';
 import type { Point2D } from '../shared/utils/geometry';
 import { NeuralBubbleDetector } from '../offscreen/engines/bubble/NeuralBubbleDetector';
 import { HeuristicBubbleExtractor } from '../offscreen/engines/bubble/HeuristicBubbleExtractor';
-import { acquireBubbleGeometry, resolveBubbleLayouts, type BubbleGeometry } from '../offscreen/services/BubbleLayoutService';
+import { acquireBubbleGeometry, resolveBubbleLayoutsDetailed, type BubbleGeometry } from '../offscreen/services/BubbleLayoutService';
 import { DEFAULT_RENDER_FONT_FAMILY } from '../offscreen/utils/canvasTypesetting';
 import * as ort from 'onnxruntime-node';
 
@@ -122,7 +122,7 @@ async function runPipelineVisualBubbleTest() {
      * @param ctx - Actual output measurement context. @param geometry - Original carrier evidence.
      * @returns Accepted fixed boxes, with the same source-font and complete-text fit guard as production.
      */
-    const resolveLayouts = (ctx: any, geometry: BubbleGeometry) => resolveBubbleLayouts({
+    const resolveLayouts = (ctx: any, geometry: BubbleGeometry) => resolveBubbleLayoutsDetailed({
       ...geometry, boxes, directions: ocrResult.directions, angles: ocrResult.angles, pageWidth, pageHeight,
       accept: (index, proposed) => {
         const curv = geometry.curvatures?.[index];
@@ -146,7 +146,9 @@ async function runPipelineVisualBubbleTest() {
       const ctx = canvas.getContext('2d');
       ctx.drawImage(cleanedImage, 0, 0);
       if (typeof document !== 'undefined' && document.fonts) await document.fonts.ready;
-      const heuristicTypesetBoxes = resolveLayouts(ctx, heuristicGeometry);
+      const heuristicLayout = resolveLayouts(ctx, heuristicGeometry);
+      const heuristicTypesetBoxes = heuristicLayout.typesetBoxes;
+      const heuristicContours = heuristicLayout.contourPoints;
       if (testFile === 'image6.jpg') {
         for (let i = 0; i < texts.length; i++) {
           console.log(`[image6 Heuristic] #${i}: "${texts[i]}" -> "${translatedTexts[i]}" box=${JSON.stringify(boxes[i])} carrier=${JSON.stringify(heuristicGeometry.carriers[i])} typeset=${JSON.stringify(heuristicTypesetBoxes[i])}`);
@@ -173,6 +175,7 @@ async function runPipelineVisualBubbleTest() {
             isRounded: fixed ? Boolean(curv?.isRounded) : false,
             borderRadius: fixed ? (curv?.borderRadius ?? 0) : 0,
             typesetMode: fixed ? (curv?.isRounded ? 'contour' : 'simple') : 'balloon',
+            contourPoints: fixed ? heuristicContours?.[i] : undefined,
           });
         }
       }
@@ -282,6 +285,19 @@ async function runPipelineVisualBubbleTest() {
               carrierBox: severed.carrier,
               isSeveredCarrier: true,
             };
+          } else {
+            neuralShapes[i] = {
+              x: minX,
+              y: minY,
+              scale: avgScale,
+              width: pw,
+              height: ph,
+              interior: mask,
+              observedInterior: mask,
+              eroded: mask,
+              carrierBox: detectedBubbles[matchedIdx],
+              isSeveredCarrier: false,
+            };
           }
         }
       }
@@ -291,11 +307,13 @@ async function runPipelineVisualBubbleTest() {
       const ctx = canvas.getContext('2d');
       ctx.drawImage(cleanedImage, 0, 0);
       if (typeof document !== 'undefined' && document.fonts) await document.fonts.ready;
-      const neuralTypesetBoxes = resolveLayouts(ctx, neuralGeometry);
+      const neuralLayout = resolveLayouts(ctx, neuralGeometry);
+      const neuralTypesetBoxes = neuralLayout.typesetBoxes;
+      const neuralContours = neuralLayout.contourPoints;
 
       if (testFile === 'image6.jpg') {
         for (let i = 0; i < texts.length; i++) {
-          console.log(`[image6 Neural] #${i}: "${texts[i]}" -> "${translatedTexts[i]}" box=${JSON.stringify(boxes[i])} proposal=${JSON.stringify(neuralGeometry.proposals[i])} carrier=${JSON.stringify(neuralGeometry.carriers[i])} typeset=${JSON.stringify(neuralTypesetBoxes[i])}`);
+          console.log(`[image6 Neural] #${i}: "${texts[i]}" -> "${translatedTexts[i]}" box=${JSON.stringify(boxes[i])} proposal=${JSON.stringify(neuralGeometry.proposals[i])} carrier=${JSON.stringify(neuralGeometry.carriers[i])} typeset=${JSON.stringify(neuralTypesetBoxes[i])} contourLen=${neuralContours?.[i]?.length ?? 0}`);
         }
       }
 
@@ -319,6 +337,7 @@ async function runPipelineVisualBubbleTest() {
             isRounded: fixed ? Boolean(curv?.isRounded) : false,
             borderRadius: fixed ? (curv?.borderRadius ?? 0) : 0,
             typesetMode: fixed ? (curv?.isRounded ? 'contour' : 'simple') : 'balloon',
+            contourPoints: fixed ? neuralContours?.[i] : undefined,
           });
         }
       }

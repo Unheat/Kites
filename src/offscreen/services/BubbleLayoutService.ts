@@ -1,5 +1,7 @@
+import type { Point2D } from '../../shared/utils/geometry';
 import { HeuristicBubbleExtractor, type BubbleShapeEvidence, type ImagePatchData } from '../engines/bubble/HeuristicBubbleExtractor';
 import { NeuralBubbleDetector } from '../engines/bubble/NeuralBubbleDetector';
+import { extractMaskContour } from '../utils/maskContourExtractor';
 import {
   applySiblingBoundaryConstraints,
   boxIoU,
@@ -8,6 +10,7 @@ import {
   partitionBalloonFlowCells,
   partitionSharedContainer,
   SHARED_CONTAINER_IOU,
+  SIBLING_GAP,
   type BoxRect
 } from '../utils/bubbleExpansion';
 
@@ -24,6 +27,8 @@ export interface BubbleGeometry {
   shapes: (BubbleShapeEvidence | undefined)[];
   /** Calculated corner curvature radius and roundness per box. */
   curvatures?: { isRounded: boolean; borderRadius: number }[];
+  /** Closed 2D polygon contour in native page coordinates. */
+  contours?: (Point2D[] | undefined)[];
 }
 
 export interface BubbleLayoutInput extends BubbleGeometry {
@@ -136,6 +141,7 @@ export function acquireBubbleGeometry(
   const proposals: (BoxRect | null)[] = [];
   const shapes: (BubbleShapeEvidence | undefined)[] = [];
   const curvatures: { isRounded: boolean; borderRadius: number }[] = [];
+  const contours: (Point2D[] | undefined)[] = [];
   const isNeuralMode = neuralProposals !== undefined && neuralProposals !== null;
   boxes.forEach((box, index) => {
     const proposal = isNeuralMode
@@ -161,8 +167,30 @@ export function acquireBubbleGeometry(
       carriers[index] = heuristic;
     }
     curvatures[index] = computeMaskCurvature(shapes[index], carriers[index]);
+
+    // Extract closed 2D polygon contour from shape evidence if available
+    const shape = shapes[index];
+    if (shape && shape.interior && shape.width > 0 && shape.height > 0) {
+      const mask = shape.reconstructed ?? shape.interior;
+      const textCenterX = (box.x + box.w / 2 - shape.x) * shape.scale;
+      const textCenterY = (box.y + box.h / 2 - shape.y) * shape.scale;
+      const poly = extractMaskContour(
+        mask,
+        shape.width,
+        shape.height,
+        shape.x,
+        shape.y,
+        shape.scale,
+        shape.scale,
+        textCenterX,
+        textCenterY
+      );
+      contours[index] = poly ?? undefined;
+    } else {
+      contours[index] = undefined;
+    }
   });
-  return { pageWidth: image.width, carriers, proposals, shapes, curvatures };
+  return { pageWidth: image.width, carriers, proposals, shapes, curvatures, contours };
 }
 
 /** @param a - Outer rectangle. @param b - Inner rectangle. @returns Whether all inner edges are contained. */
@@ -197,13 +225,25 @@ export function significantOverlap(a: BoxRect, b: BoxRect, thresholdRatio: numbe
  * @param input - Aligned original geometry, proposal identity, masks, and actual renderer fit gate.
  * @returns Optional fixed boxes; undefined entries retain the untouched Disabled renderer path.
  */
-export function resolveBubbleLayouts(input: BubbleLayoutInput): (BoxRect | undefined)[] {
-  const { boxes, carriers, proposals, shapes, curvatures, directions, angles, pageWidth, pageHeight, accept } = input;
+export interface ResolvedBubbleLayout {
+  typesetBoxes: (BoxRect | undefined)[];
+  contourPoints: (Point2D[] | undefined)[];
+}
+
+/**
+ * Resolves fixed bubble rectangles and exact local contour polygons after translation/font readiness.
+ * Uncertain candidate groups roll back atomically to undefined (exact Disabled), without moving any sibling or source box.
+ * @param input - Aligned original geometry, proposal identity, masks, and actual renderer fit gate.
+ * @returns Object with typeset boxes and local contour polygons.
+ */
+export function resolveBubbleLayoutsDetailed(input: BubbleLayoutInput): ResolvedBubbleLayout {
+  const { boxes, carriers, proposals, shapes, curvatures, contours, directions, angles, pageWidth, pageHeight, accept } = input;
   /** @param box - Candidate/source rectangle. @returns Finite positive geometry inside the page. */
   const validBox = (box: BoxRect): boolean => [box.x, box.y, box.w, box.h].every(Number.isFinite)
     && box.w > 0 && box.h > 0 && box.x >= 0 && box.y >= 0
     && box.x + box.w <= pageWidth && box.y + box.h <= pageHeight;
   const result: (BoxRect | undefined)[] = new Array(boxes.length).fill(undefined);
+  const resultContours: (Point2D[] | undefined)[] = new Array(boxes.length).fill(undefined);
   const groups = boxes.map((_, index) => [index]);
   // True multi-utterance container grouping: identical proposal or high-overlap / nested container.
   // Distinct adjacent bubbles must not be falsely grouped as multi-lobe balloons.
@@ -226,11 +266,38 @@ export function resolveBubbleLayouts(input: BubbleLayoutInput): (BoxRect | undef
     if (group.length === 1) {
       const i = group[0];
       const isAlreadySevered = Boolean(!proposals[i] || shapes[i]?.isSeveredCarrier);
-      const rawBox = computeTypesetBox(boxes[i], carriers[i]!, directions?.[i] === 'v', pageHeight, isAlreadySevered);
-      // XianScan expansion.rs:235-276 pairwise clearance clamping against neighboring boxes
-      const box = pairwiseClampBox(rawBox, boxes[i], boxes, i);
+      const contour = contours?.[i];
+
+      let box: BoxRect;
+      let localContour: Point2D[] | undefined = undefined;
+
+      if (proposals[i] && contour && contour.length >= 3) {
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        for (const pt of contour) {
+          if (pt.x < minX) minX = pt.x;
+          if (pt.x > maxX) maxX = pt.x;
+          if (pt.y < minY) minY = pt.y;
+          if (pt.y > maxY) maxY = pt.y;
+        }
+        const contourBox: BoxRect = {
+          x: Math.max(0, minX),
+          y: Math.max(0, minY),
+          w: Math.min(pageWidth - minX, maxX - minX),
+          h: Math.min(pageHeight - minY, maxY - minY)
+        };
+        box = pairwiseClampBox(contourBox, boxes[i], boxes, i);
+        localContour = contour.map((p) => ({ x: p.x - box.x, y: p.y - box.y }));
+      } else {
+        const rawBox = computeTypesetBox(boxes[i], carriers[i]!, directions?.[i] === 'v', pageHeight, isAlreadySevered);
+        box = pairwiseClampBox(rawBox, boxes[i], boxes, i);
+        localContour = (contour && contour.length >= 3)
+          ? contour.map((p) => ({ x: p.x - box.x, y: p.y - box.y }))
+          : undefined;
+      }
+
       if (validBox(box) && accept(i, box, MIN_SHARED_FONT_RATIO)) {
         result[i] = box;
+        resultContours[i] = localContour;
       }
       continue;
     }
@@ -245,29 +312,53 @@ export function resolveBubbleLayouts(input: BubbleLayoutInput): (BoxRect | undef
       h: Math.max(...group.map((i) => carriers[i]!.y + carriers[i]!.h)) - top,
     };
 
-    // Multi-utterance container partitioning:
-    // For rectangular caption/narration panels: use XianScan axis-dominant midpoint partitioning.
-    // For curved speech bubbles: use Koharu 2-stage reflex-neck and flow cell partitioning.
-    const subChambers = isRectangular
-      ? partitionSharedContainer(container, siblings)
-      : partitionBalloonFlowCells(container, siblings).subChambers;
-    const candidates = group.map((i, position) => {
-      const isAlreadySevered = Boolean(!proposals[i] || shapes[i]?.isSeveredCarrier);
-      const rawBox = computeTypesetBox(
-        boxes[i],
-        subChambers[position],
-        directions?.[i] === 'v',
-        pageHeight,
-        isAlreadySevered,
-        true
-      );
-      return pairwiseClampBox(rawBox, boxes[i], boxes, i, subChambers[position]);
-    });
+    const sharedContour = group.map((i) => contours?.[i]).find((c) => Boolean(c && c.length >= 4));
 
-    if (candidates.every((box, position) => validBox(box) && accept(group[position], box, MIN_SHARED_FONT_RATIO))) {
-      group.forEach((i, position) => {
-        result[i] = candidates[position];
+    if (isRectangular || !sharedContour) {
+      const subChambers = partitionSharedContainer(container, siblings);
+      const candidates = group.map((i, position) => {
+        const isAlreadySevered = Boolean(!proposals[i] || shapes[i]?.isSeveredCarrier);
+        const rawBox = computeTypesetBox(
+          boxes[i],
+          subChambers[position],
+          directions?.[i] === 'v',
+          pageHeight,
+          isAlreadySevered,
+          true
+        );
+        return pairwiseClampBox(rawBox, boxes[i], boxes, i, subChambers[position], SIBLING_GAP, group);
       });
+
+      if (candidates.every((box, position) => validBox(box) && accept(group[position], box, MIN_SHARED_FONT_RATIO))) {
+        group.forEach((i, position) => {
+          result[i] = candidates[position];
+          resultContours[i] = undefined;
+        });
+      }
+    } else {
+      const partition = partitionBalloonFlowCells(container, siblings, sharedContour);
+      const subChambers = partition.subChambers;
+      const cellContours = partition.cellContours;
+
+      const candidates = group.map((i, position) => {
+        const chamber = subChambers[position];
+        return pairwiseClampBox(chamber, boxes[i], boxes, i, chamber, SIBLING_GAP, group);
+      });
+
+      if (candidates.every((box, position) => validBox(box) && accept(group[position], box, MIN_SHARED_FONT_RATIO))) {
+        group.forEach((i, position) => {
+          result[i] = candidates[position];
+          const rawCellContour = cellContours[position];
+          if (rawCellContour && rawCellContour.length >= 3) {
+            resultContours[i] = rawCellContour.map((p) => ({
+              x: p.x - candidates[position].x,
+              y: p.y - candidates[position].y
+            }));
+          } else {
+            resultContours[i] = undefined;
+          }
+        });
+      }
     }
   }
   // Validate against fixed candidates AND untouched originals.
@@ -286,7 +377,10 @@ export function resolveBubbleLayouts(input: BubbleLayoutInput): (BoxRect | undef
       });
     });
     if (hasSignificantCollision) {
-      group.forEach((i) => { result[i] = undefined; });
+      group.forEach((i) => {
+        result[i] = undefined;
+        resultContours[i] = undefined;
+      });
     }
   }
 
@@ -298,5 +392,15 @@ export function resolveBubbleLayouts(input: BubbleLayoutInput): (BoxRect | undef
     xy: groups.filter((group) => group.length > 1).reduce((sum, group) => sum + group.filter((i) => result[i]).length, 0),
     fallback: result.filter((box) => !box).length
   });
-  return result;
+  return { typesetBoxes: result, contourPoints: resultContours };
+}
+
+/**
+ * Resolves fixed bubble rectangles after translation/font readiness. Uncertain candidate groups
+ * roll back atomically to undefined (exact Disabled), without moving any sibling or source box.
+ * @param input - Aligned original geometry, proposal identity, masks, and actual renderer fit gate.
+ * @returns Optional fixed boxes; undefined entries retain the untouched Disabled renderer path.
+ */
+export function resolveBubbleLayouts(input: BubbleLayoutInput): (BoxRect | undefined)[] {
+  return resolveBubbleLayoutsDetailed(input).typesetBoxes;
 }
