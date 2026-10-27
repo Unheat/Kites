@@ -357,6 +357,7 @@ export function computeTypesetBox(
   const textCx = Math.round(textBox.x + textBox.w / 2);
   const textCy = Math.round(textBox.y + textBox.h / 2);
   const carrierCx = Math.round(carrier.x + carrier.w / 2);
+  const carrierCy = Math.round(carrier.y + carrier.h / 2);
 
   // For pre-partitioned sub-chambers, the territory has already been carved for this utterance,
   // so center within the territory (carrierCx).
@@ -373,13 +374,17 @@ export function computeTypesetBox(
     ? carrierCx
     : (isVertical && !isOffCenter ? carrierCx : textCx);
 
+  const targetCy = isSubChamber
+    ? carrierCy
+    : textCy;
+
   const targetW = (!isSubChamber && isOffCenter)
     ? Math.min(expandedW, Math.round(textBox.w * 1.40))
     : expandedW;
 
   const centered: BoxRect = {
     x: targetCx - Math.round(targetW / 2),
-    y: textCy - Math.round(expandedH / 2),
+    y: targetCy - Math.round(expandedH / 2),
     w: targetW,
     h: expandedH
   };
@@ -493,57 +498,53 @@ export function partitionSharedContainer(
 
       const overlapY = curr.y + curr.h > other.y && other.y + other.h > curr.y;
       const overlapX = curr.x + curr.w > other.x && other.x + other.w > curr.x;
+      // Overlapping on both axes: no divider — floor invariant keeps the original box.
+      if (overlapX && overlapY) {
+        continue;
+      }
 
-      // SAT Rule 1: staggered diagonal lobes — Y stamped over, X cleanly separated -> vertical wall.
-      if (overlapY && !overlapX) {
-        if (other.x + other.w <= curr.x) {
-          // Other sits entirely to the left -> block curr's left edge at the midpoint gap
+      const cxI = curr.x + curr.w / 2;
+      const cyI = curr.y + curr.h / 2;
+      const cxJ = other.x + other.w / 2;
+      const cyJ = other.y + other.h / 2;
+      const dx = Math.abs(cxI - cxJ);
+      const dy = Math.abs(cyI - cyJ);
+      const isPrimarilyVertical = dy > dx;
+
+      if (isPrimarilyVertical) {
+        // Vertical dominance (figure-8 lobes or vertical column chains):
+        // Divide along horizontal boundary in Y.
+        if (cyJ < cyI) {
+          const divY = Math.round((cyJ + cyI) / 2);
+          topLimit = Math.max(topLimit, divY + halfGap);
+        } else if (cyJ > cyI) {
+          const divY = Math.round((cyI + cyJ) / 2);
+          bottomLimit = Math.min(bottomLimit, divY - halfGap);
+        }
+      } else {
+        // Horizontal dominance (side-by-side caption panels or horizontal speech bubbles):
+        // Divide along vertical boundary in X using shared midpoint plane.
+        if (cxJ < cxI) {
           const divX = Math.round((other.x + other.w + curr.x) / 2);
           leftLimit = Math.max(leftLimit, divX + halfGap);
-        } else if (curr.x + curr.w <= other.x) {
-          // Other sits entirely to the right -> block curr's right edge
+        } else if (cxJ > cxI) {
           const divX = Math.round((curr.x + curr.w + other.x) / 2);
           rightLimit = Math.min(rightLimit, divX - halfGap);
         }
       }
-      // SAT Rule 2: vertical chain — X shared, Y cleanly separated -> horizontal wall.
-      else if (overlapX && !overlapY) {
-        if (other.y + other.h <= curr.y) {
-          // Other sits entirely above -> block curr's top edge
-          const divY = Math.round((other.y + other.h + curr.y) / 2);
-          topLimit = Math.max(topLimit, divY + halfGap);
-        } else if (curr.y + curr.h <= other.y) {
-          // Other sits entirely below -> block curr's bottom edge
-          const divY = Math.round((curr.y + curr.h + other.y) / 2);
-          bottomLimit = Math.min(bottomLimit, divY - halfGap);
-        }
-      }
-      // SAT Rule 3: fully diagonal (disjoint on both axes) -> wall on the Y side only.
-      else if (!overlapX && !overlapY) {
-        if (other.y + other.h <= curr.y) {
-          const divY = Math.round((other.y + other.h + curr.y) / 2);
-          topLimit = Math.max(topLimit, divY + halfGap);
-        } else if (curr.y + curr.h <= other.y) {
-          const divY = Math.round((curr.y + curr.h + other.y) / 2);
-          bottomLimit = Math.min(bottomLimit, divY - halfGap);
-        }
-      }
-      // Overlapping on both axes: no divider (see docstring) — floor invariant keeps the original box.
     }
 
-    // Floor invariant: a sub-chamber must always fully contain its own original text box, even when
-    // the divider midpoint falls inside it (overlapping originals). Expansion is constrained; the
-    // original extent is never cut.
-    leftLimit = Math.min(leftLimit, curr.x);
-    rightLimit = Math.max(rightLimit, curr.x + curr.w);
-    topLimit = Math.min(topLimit, curr.y);
-    bottomLimit = Math.max(bottomLimit, curr.y + curr.h);
+    // Floor invariant: a sub-chamber must always fully contain its own original text box.
+    const finalLeft = Math.min(leftLimit, curr.x);
+    const finalRight = Math.max(rightLimit, curr.x + curr.w);
+    const finalTop = Math.min(topLimit, curr.y);
+    const finalBottom = Math.max(bottomLimit, curr.y + curr.h);
 
     subChambers[i] = {
-      x: leftLimit,
-      y: topLimit,
-      w: Math.max(curr.w, rightLimit - leftLimit),
-      h: Math.max(curr.h, bottomLimit - topLimit),
+      x: finalLeft,
+      y: finalTop,
+      w: Math.max(curr.w, finalRight - finalLeft),
+      h: Math.max(curr.h, finalBottom - finalTop),
     };
   }
 
@@ -636,17 +637,15 @@ export function applySiblingBoundaryConstraints(
 }
 
 /**
- * Clamps a candidate expanded typeset box against all neighboring original OCR boxes.
+ * Bounds a candidate typeset box so it never expands across neighbor OCR boxes.
+ * 1:1 port of XianScan `expansion.rs:230-269` sibling clearance limits.
  *
- * 1:1 port of XianScan `expansion.rs:235-276` pairwise boundary limits.
- * Guarantees that an expanded box never grows into an adjacent dialogue region,
- * maintaining at least SIBLING_GAP pixels of clearance on all axes.
- *
- * @param candidate - The proposed expanded BoxRect.
- * @param original - The original unexpanded OCR BoxRect for this block.
- * @param allOriginals - Array of all original unexpanded OCR boxes on the page.
- * @param myIndex - The index of the current block in allOriginals.
- * @param siblingGap - Minimum clearance gap in pixels (default SIBLING_GAP = 6).
+ * @param candidate - Typeset box candidate from computeTypesetBox.
+ * @param original - Original unexpanded OCR box for this block.
+ * @param allOriginals - Array of all original unexpanded OCR boxes on page.
+ * @param myIndex - Index of this block in allOriginals.
+ * @param containerOrGap - Optional container box for strict core bounding, or sibling clearance gap.
+ * @param siblingGapParam - Minimum clearance gap in pixels between sibling boxes. Default SIBLING_GAP = 6.
  * @returns Bounded BoxRect with sibling clearance guaranteed.
  */
 export function pairwiseClampBox(
@@ -654,11 +653,14 @@ export function pairwiseClampBox(
   original: BoxRect,
   allOriginals: BoxRect[],
   myIndex: number,
-  siblingGap: number = SIBLING_GAP
+  containerOrGap?: BoxRect | number,
+  siblingGapParam: number = SIBLING_GAP
 ): BoxRect {
   let { x, y, w, h } = candidate;
   const cxI = original.x + original.w / 2;
   const cyI = original.y + original.h / 2;
+  const container = (containerOrGap && typeof containerOrGap === 'object') ? containerOrGap : undefined;
+  const siblingGap = typeof containerOrGap === 'number' ? containerOrGap : siblingGapParam;
 
   for (let j = 0; j < allOriginals.length; j++) {
     if (j === myIndex) continue;
@@ -671,8 +673,7 @@ export function pairwiseClampBox(
     const isPrimarilyVertical = dy > dx * 1.1;
     const isPrimarilyHorizontal = dx > dy * 1.1;
 
-    // 1. Horizontal clearance: when candidate overlaps neighbor vertically
-    // (only for primarily horizontal/side-by-side neighbors to avoid crushing vertically stacked lobes)
+    // 1. Horizontal clearance: when candidate overlaps neighbor vertically (XianScan expansion.rs:250-258 parity)
     const yOverlap = (y + h > origJ.y) && (origJ.y + origJ.h > y);
     if (yOverlap && !isPrimarilyVertical) {
       if (cxJ < cxI && origJ.x + origJ.w <= cxI) {
@@ -690,8 +691,7 @@ export function pairwiseClampBox(
       }
     }
 
-    // 2. Vertical clearance: when candidate overlaps neighbor horizontally
-    // (only for primarily vertical/stacked neighbors to avoid crushing side-by-side columns)
+    // 2. Vertical clearance: when candidate overlaps neighbor horizontally (XianScan expansion.rs:260-268 parity)
     const xOverlap = (x + w > origJ.x) && (origJ.x + origJ.w > x);
     if (xOverlap && !isPrimarilyHorizontal) {
       if (cyJ < cyI && origJ.y + origJ.h <= cyI) {
@@ -710,7 +710,19 @@ export function pairwiseClampBox(
     }
   }
 
-  return { x, y, w, h };
+  // 3. Strict container boundary clamping: a typeset box must NEVER exceed its container limits.
+  if (container) {
+    x = Math.max(container.x, x);
+    y = Math.max(container.y, y);
+    if (x + w > container.x + container.w) {
+      w = Math.max(20, container.x + container.w - x);
+    }
+    if (y + h > container.y + container.h) {
+      h = Math.max(20, container.y + container.h - y);
+    }
+  }
+
+  return { x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h) };
 }
 
 const EPSILON = 1e-5;

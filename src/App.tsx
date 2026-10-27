@@ -374,6 +374,8 @@ export default function App() {
           lines: obj.lines,
           lineSpacing: obj.lineSpacing,
           typesetMode: obj.typesetMode,
+          borderRadius: obj.borderRadius,
+          isRounded: obj.isRounded,
           isSkipped: obj.isSkipped,
           angle: obj.rotation ?? 0,
         }));

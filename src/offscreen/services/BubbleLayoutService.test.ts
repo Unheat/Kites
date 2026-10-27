@@ -368,8 +368,8 @@ describe('conservative bubble layouts', () => {
       const resLeft = result[0]!;
       const resRight = result[1]!;
 
-      // Left box expands significantly from original 30px width
-      expect(resLeft.w).toBeGreaterThan(45);
+      // Left box expands significantly from original 30px width (up to midpoint clearance 45px)
+      expect(resLeft.w).toBeGreaterThanOrEqual(45);
       // Right box expands from original 74px width
       expect(resRight.w).toBeGreaterThan(74);
 

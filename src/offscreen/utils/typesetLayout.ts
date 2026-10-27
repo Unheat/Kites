@@ -727,8 +727,8 @@ export function fitFontSizeWithLines(
   }
 
   // Pass 3: Vertical-fill hyphenation for tall boxes (aspect ratio >= 1.5)
-  // Scan downward from effectiveCap to find the largest fitting font size that cleanly fills the tall container
-  if (aspectRatio >= TALL_FILL_MIN_ASPECT) {
+  // Only engage when clean unhyphenated layout could not reach a readable font size floor (cleanBest < 14)
+  if ((!foundClean || cleanBest < 14) && aspectRatio >= TALL_FILL_MIN_ASPECT) {
     const searchCeil = Math.min(effectiveCap, Math.max(finalSize, 36));
     for (let mid = searchCeil; mid >= Math.max(finalSize, MIN_FONT_SIZE); mid--) {
       mCtx.font = fontSpec(mid, fontFamily, text, customCjk, isBold);

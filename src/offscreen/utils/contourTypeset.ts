@@ -729,11 +729,8 @@ export function wrapTextContour(
 
   const fits = (res: LineBreakResult | null): boolean => res !== null && !res.overflowed;
 
-  // Koharu LastResort Hyphenation Policy:
-  // Evaluates both clean (unhyphenated) and discretionary-hyphenated layouts across candidate font sizes.
-  // At any given font size, unhyphenated text is preferred (cost penalty for hyphens in DP).
-  // However, across font sizes, a larger readable font size with hyphens takes precedence
-  // over severely downscaled/squeezed unhyphenated text that leaves speech balloons half-empty.
+  // Koharu LastResort Hyphenation Policy (layout.rs:1614-1619):
+  // 1. Evaluate clean unhyphenated text first.
   const cleanFit = largestFittingFontSize(
     minFont,
     maxFont,
@@ -741,6 +738,24 @@ export function wrapTextContour(
     fits
   );
 
+  const cleanSize = cleanFit?.profiles[0]?.height
+    ? Math.round(cleanFit.profiles[0].height / linePitch)
+    : 0;
+
+  // If clean unhyphenated text fits comfortably at or above readable body font size (>= 14px),
+  // strictly keep clean whole words without hyphenation. Never break ordinary words just to inflate font size.
+  if (cleanFit && cleanSize >= 14) {
+    return {
+      lines: cleanFit.lines,
+      fontSize: cleanSize,
+      width: cleanFit.width,
+      height: cleanFit.height,
+      overflowed: cleanFit.overflowed
+    };
+  }
+
+  // 2. If clean text overflows at minFont or long words choke font size below 14px,
+  // evaluate with discretionary hyphenation to recover readable typography (e.g. Hasumi's burst balloon).
   const hyphenatedFit = largestFittingFontSize(
     minFont,
     maxFont,
@@ -748,9 +763,6 @@ export function wrapTextContour(
     fits
   );
 
-  const cleanSize = cleanFit?.profiles[0]?.height
-    ? Math.round(cleanFit.profiles[0].height / linePitch)
-    : 0;
   const hyphenatedSize = hyphenatedFit?.profiles[0]?.height
     ? Math.round(hyphenatedFit.profiles[0].height / linePitch)
     : 0;

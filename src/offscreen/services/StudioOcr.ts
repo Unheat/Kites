@@ -9,7 +9,7 @@ import type { BubbleManager } from './BubbleManager';
 import { SUPPORTED_INPAINT_IDS } from '../../shared/inpaintTiers';
 import { getRenderedBlockGeometry } from '../utils/canvasTypesetting';
 import { detectBlockTextColors, type DetectedTextColor } from '../utils/textColorDetection';
-import { acquireBubbleGeometry, resolveBubbleLayouts } from './BubbleLayoutService';
+import { acquireBubbleGeometry, resolveBubbleLayouts, type BubbleGeometry } from './BubbleLayoutService';
 import { wrapTextContour } from '../utils/contourTypeset';
 import type { BoxRect } from '../utils/bubbleExpansion';
 
@@ -62,6 +62,8 @@ export interface StudioOcrResponse {
     lines?: string[];
     lineSpacing?: number;
     typesetMode?: string;
+    borderRadius?: number;
+    isRounded?: boolean;
     contourPoints?: Point2D[];
     isVertical?: boolean;
     /** OCR block rotation in degrees; Studio rotates the unrotated box around its center. */
@@ -203,6 +205,7 @@ export async function runStudioOcr(
   // Speech bubble carrier detection & layout expansion for Studio Retranslate
   let resolvedLayouts: (BoxRect | undefined)[] = [];
   let bubbleContours: (Point2D[] | undefined)[] = [];
+  let bubbleGeometry: BubbleGeometry | undefined = undefined;
 
   const bubbleMode = popupState.bubbleMode;
   if (bubbleMode && bubbleMode !== 'off' && dependencies.getBubbleManager && typeof createImageBitmap !== 'undefined') {
@@ -228,7 +231,7 @@ export async function runStudioOcr(
             release();
           }
 
-          const bubbleGeometry = acquireBubbleGeometry(
+          bubbleGeometry = acquireBubbleGeometry(
             safeCanvas.ctx as any,
             result.boxes,
             neuralResult?.bubbles,
@@ -246,7 +249,7 @@ export async function runStudioOcr(
           });
 
           bubbleContours = result.boxes.map((_, bIdx) => {
-            const carrier = bubbleGeometry.carriers[bIdx];
+            const carrier = bubbleGeometry?.carriers[bIdx];
             if (!carrier) return undefined;
             return [
               { x: carrier.x, y: carrier.y },
@@ -318,6 +321,13 @@ export async function runStudioOcr(
       ? detectedAngle
       : (calculateRotationAngle(polygon) * 180) / Math.PI;
 
+    const curvature = bubbleGeometry?.curvatures?.[resolvedIndex];
+    const isRounded = Boolean(curvature?.isRounded);
+    const borderRadius = curvature?.borderRadius ?? 0;
+    const typesetMode = expandedBox
+      ? (isRounded ? 'contour' : 'simple')
+      : 'balloon';
+
     return {
       id: `ocr-${timestamp}-${index}`,
       x: payload.offsetX + geometry.x,
@@ -330,7 +340,9 @@ export async function runStudioOcr(
         ? Math.round(detectedFontSize)
         : undefined),
       lines: precomputedLines,
-      typesetMode: expandedBox ? 'contour' : 'simple',
+      typesetMode,
+      borderRadius,
+      isRounded,
       contourPoints,
       isVertical,
       rotation,

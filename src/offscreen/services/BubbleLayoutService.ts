@@ -1,10 +1,11 @@
 import { HeuristicBubbleExtractor, type BubbleShapeEvidence, type ImagePatchData } from '../engines/bubble/HeuristicBubbleExtractor';
 import { NeuralBubbleDetector } from '../engines/bubble/NeuralBubbleDetector';
 import {
+  applySiblingBoundaryConstraints,
   boxIoU,
   computeTypesetBox,
   pairwiseClampBox,
-  partitionContainerByFlowCells,
+  partitionSharedContainer,
   SHARED_CONTAINER_IOU,
   type BoxRect
 } from '../utils/bubbleExpansion';
@@ -231,10 +232,10 @@ export function resolveBubbleLayouts(input: BubbleLayoutInput): (BoxRect | undef
       h: Math.max(...group.map((i) => carriers[i]!.y + carriers[i]!.h)) - top,
     };
 
-    // Multi-utterance container partitioning (Koharu Voronoi perpendicular bisector flow cells):
-    // Partitions shared container into non-overlapping sub-chambers along the natural Voronoi
-    // half-planes between text anchors, expanding each sibling inside its dedicated territory.
-    const subChambers = partitionContainerByFlowCells(container, siblings);
+    // Multi-utterance container partitioning:
+    // Partitions shared container into strictly non-overlapping, disjoint sub-chambers
+    // with guaranteed sibling clearance gap along the dominant axis.
+    const subChambers = partitionSharedContainer(container, siblings);
     const candidates = group.map((i, position) => {
       const isAlreadySevered = Boolean(!proposals[i] || shapes[i]?.isSeveredCarrier);
       const rawBox = computeTypesetBox(
@@ -245,7 +246,7 @@ export function resolveBubbleLayouts(input: BubbleLayoutInput): (BoxRect | undef
         isAlreadySevered,
         true
       );
-      return pairwiseClampBox(rawBox, boxes[i], boxes, i);
+      return pairwiseClampBox(rawBox, boxes[i], boxes, i, subChambers[position]);
     });
 
     if (candidates.every((box, position) => validBox(box) && accept(group[position], box, MIN_SHARED_FONT_RATIO))) {
@@ -273,6 +274,10 @@ export function resolveBubbleLayouts(input: BubbleLayoutInput): (BoxRect | undef
       group.forEach((i) => { result[i] = undefined; });
     }
   }
+
+  // Deterministic final sibling clearance barrier (XianScan expansion.rs:230-269 parity)
+  applySiblingBoundaryConstraints(boxes, result);
+
   input.onDiagnostics?.({
     single: groups.filter((group) => group.length === 1 && result[group[0]]).length,
     xy: groups.filter((group) => group.length > 1).reduce((sum, group) => sum + group.filter((i) => result[i]).length, 0),
