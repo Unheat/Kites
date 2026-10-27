@@ -12,7 +12,7 @@ import { comicBreakPenalty, tokenizeDialogue } from './typography/tokenizer';
 import { findHyphenationPoints } from './typesetLayout';
 
 /** Safety margin in pixels kept between glyph bounds and bubble wall. */
-export const DEFAULT_INLINE_AIR = 4.0;
+export const DEFAULT_INLINE_AIR = 5.0;
 
 /** Default line pitch ratio relative to font size. */
 export const DEFAULT_LINE_PITCH = 1.25;
@@ -278,25 +278,21 @@ export function computeContourProfiles(
 
   for (let i = 0; i < lineCount; i++) {
     const lineTop = startY + i * lineHeight;
-    const lineCenter = lineTop + inkHeight * 0.5;
-    const lineBottom = lineTop + inkHeight;
 
-    // Sample at top, center, and bottom of the glyph ink band
-    const spansTop = polygonInlineSpans(contour, lineTop);
-    const spansCenter = polygonInlineSpans(contour, lineCenter);
-    const spansBottom = polygonInlineSpans(contour, lineBottom);
-
-    if (spansTop.length === 0 || spansCenter.length === 0 || spansBottom.length === 0) {
-      return null;
+    // Koharu 5-point ink band chord sampling (0%, 25%, 50%, 75%, 100% of line ink height):
+    // Intersects contour across the glyph ink band so tapered bubble ends do not artificially choke line widths.
+    let maxLeft = -Infinity;
+    let minRight = Infinity;
+    for (let sample = 0; sample <= 4; sample++) {
+      const sampleY = lineTop + (inkHeight * sample) / 4.0;
+      const spans = polygonInlineSpans(contour, sampleY);
+      if (spans.length === 0) return null;
+      maxLeft = Math.max(maxLeft, spans[0][0]);
+      minRight = Math.min(minRight, spans[0][1]);
     }
 
-    // Use the primary (widest) span
-    const [lTop, rTop] = spansTop[0];
-    const [lMid, rMid] = spansCenter[0];
-    const [lBot, rBot] = spansBottom[0];
-
-    const left = Math.max(lTop, lMid, lBot) + inlineAir;
-    const right = Math.min(rTop, rMid, rBot) - inlineAir;
+    const left = maxLeft + inlineAir;
+    const right = minRight - inlineAir;
     const width = right - left;
 
     if (width <= 0) {
@@ -742,9 +738,10 @@ export function wrapTextContour(
     ? Math.round(cleanFit.profiles[0].height / linePitch)
     : 0;
 
-  // If clean unhyphenated text fits comfortably at or above readable body font size (>= 14px),
-  // strictly keep clean whole words without hyphenation. Never break ordinary words just to inflate font size.
-  if (cleanFit && cleanSize >= 14) {
+  // Koharu LastResort Hyphenation Policy (layout.rs:400-408):
+  // Avoiding a word break is strictly preferred as long as clean text fits above the minimum readability floor.
+  // Never break words across lines just to artificially inflate font size.
+  if (cleanFit && cleanSize > minFont) {
     return {
       lines: cleanFit.lines,
       fontSize: cleanSize,

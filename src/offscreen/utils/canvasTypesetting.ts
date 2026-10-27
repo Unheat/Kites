@@ -788,10 +788,11 @@ function renderTextBlocksDefault(
 
   for (const plan of planned) {
     try {
-      // XianScan clamp: only short non-shout bubbles follow the page baseline; dense
-      // paragraphs and exclamations keep their fitted size.
-      const isShortNonShout = plan.wordCount <= 2 && !/[!！]/.test(plan.region.translation);
-      const baselineCap = !plan.fixed && pageDialogueBaseline > 0 && isShortNonShout
+      // Dialogue font balance: short non-scream utterances follow the page baseline; dense
+      // paragraphs and genuine screams/SFX keep their fitted size.
+      const isScream = plan.wordCount === 1 && /^[A-Z0-9\s!！?？]+$/.test(plan.region.translation);
+      const isShortNonScream = plan.wordCount <= 3 && !isScream;
+      const baselineCap = pageDialogueBaseline > 0 && isShortNonScream
         ? Math.max(18, Math.round(pageDialogueBaseline * 1.25))
         : undefined;
       const info = renderRegionDefault(ctx, plan.region, plan.dstPoints, plan.targetFontSize, baselineCap, fontFamily, isBold, pageMeasureCache, targetLang);

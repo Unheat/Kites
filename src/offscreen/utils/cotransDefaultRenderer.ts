@@ -809,6 +809,10 @@ export function renderRegionDefault(
           { x: 0, y: normV }
         ];
 
+    const maxFont = maxFontSizeCap
+      ? Math.min(maxFontSizeCap, Math.max(16, Math.round(normV * 0.5)))
+      : Math.max(16, Math.round(normV * 0.5));
+
     const contourRes = wrapTextContour(
       unhyphenated,
       contour,
@@ -816,7 +820,7 @@ export function renderRegionDefault(
       fontFamily || DEFAULT_RENDER_FONT_FAMILY,
       {
         minFontSize: 6,
-        maxFontSize: Math.max(16, Math.round(normV * 0.5)),
+        maxFontSize: maxFont,
         targetLang,
         isBold
       }
@@ -830,6 +834,10 @@ export function renderRegionDefault(
       { x: normH, y: normV },
       { x: 0, y: normV }
     ];
+    const maxFont = maxFontSizeCap
+      ? Math.min(maxFontSizeCap, Math.max(16, Math.round(normV * 0.5)))
+      : Math.max(16, Math.round(normV * 0.5));
+
     const simpleRes = wrapTextContour(
       unhyphenated,
       rectContour,
@@ -837,7 +845,7 @@ export function renderRegionDefault(
       fontFamily || DEFAULT_RENDER_FONT_FAMILY,
       {
         minFontSize: 6,
-        maxFontSize: Math.max(16, Math.round(normV * 0.5)),
+        maxFontSize: maxFont,
         targetLang,
         isBold
       }

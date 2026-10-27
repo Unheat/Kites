@@ -5,6 +5,7 @@ import {
   boxIoU,
   computeTypesetBox,
   pairwiseClampBox,
+  partitionBalloonFlowCells,
   partitionSharedContainer,
   SHARED_CONTAINER_IOU,
   type BoxRect
@@ -135,18 +136,29 @@ export function acquireBubbleGeometry(
   const proposals: (BoxRect | null)[] = [];
   const shapes: (BubbleShapeEvidence | undefined)[] = [];
   const curvatures: { isRounded: boolean; borderRadius: number }[] = [];
+  const isNeuralMode = neuralProposals !== undefined && neuralProposals !== null;
   boxes.forEach((box, index) => {
-    const proposal = NeuralBubbleDetector.matchBubble(box, neuralProposals ?? [], BUBBLE_MATCH_COVERAGE);
+    const proposal = isNeuralMode
+      ? NeuralBubbleDetector.matchBubble(box, neuralProposals, BUBBLE_MATCH_COVERAGE)
+      : null;
     proposals[index] = proposal;
-    if (neuralShapes && neuralShapes[index]) {
-      shapes[index] = neuralShapes[index];
-      carriers[index] = neuralShapes[index].carrierBox ?? proposal;
+
+    if (isNeuralMode) {
+      if (proposal) {
+        shapes[index] = neuralShapes?.[index];
+        carriers[index] = neuralShapes?.[index]?.carrierBox ?? proposal;
+      } else {
+        // Free Text: Not inside any neural bubble proposal. Lock to original OCR bounding box.
+        shapes[index] = undefined;
+        carriers[index] = null;
+      }
     } else {
+      // Heuristic Mode (Tier 1): extract carrier via morphological opening on pixel buffer
       const heuristic = HeuristicBubbleExtractor.extractCarrierBox(image, box, {
         allTextBoxes: boxes,
         onShapeEvidence: (shape) => { shapes[index] = shape; }
       });
-      carriers[index] = proposal ?? heuristic;
+      carriers[index] = heuristic;
     }
     curvatures[index] = computeMaskCurvature(shapes[index], carriers[index]);
   });
@@ -186,7 +198,7 @@ export function significantOverlap(a: BoxRect, b: BoxRect, thresholdRatio: numbe
  * @returns Optional fixed boxes; undefined entries retain the untouched Disabled renderer path.
  */
 export function resolveBubbleLayouts(input: BubbleLayoutInput): (BoxRect | undefined)[] {
-  const { boxes, carriers, proposals, shapes, directions, angles, pageWidth, pageHeight, accept } = input;
+  const { boxes, carriers, proposals, shapes, curvatures, directions, angles, pageWidth, pageHeight, accept } = input;
   /** @param box - Candidate/source rectangle. @returns Finite positive geometry inside the page. */
   const validBox = (box: BoxRect): boolean => [box.x, box.y, box.w, box.h].every(Number.isFinite)
     && box.w > 0 && box.h > 0 && box.x >= 0 && box.y >= 0
@@ -223,6 +235,7 @@ export function resolveBubbleLayouts(input: BubbleLayoutInput): (BoxRect | undef
       continue;
     }
     const siblings = group.map((i) => boxes[i]);
+    const isRectangular = group.every((i) => Boolean(curvatures?.[i] && !curvatures[i].isRounded));
     const left = Math.min(...group.map((i) => carriers[i]!.x));
     const top = Math.min(...group.map((i) => carriers[i]!.y));
     const container = {
@@ -233,9 +246,11 @@ export function resolveBubbleLayouts(input: BubbleLayoutInput): (BoxRect | undef
     };
 
     // Multi-utterance container partitioning:
-    // Partitions shared container into strictly non-overlapping, disjoint sub-chambers
-    // with guaranteed sibling clearance gap along the dominant axis.
-    const subChambers = partitionSharedContainer(container, siblings);
+    // For rectangular caption/narration panels: use XianScan axis-dominant midpoint partitioning.
+    // For curved speech bubbles: use Koharu 2-stage reflex-neck and flow cell partitioning.
+    const subChambers = isRectangular
+      ? partitionSharedContainer(container, siblings)
+      : partitionBalloonFlowCells(container, siblings).subChambers;
     const candidates = group.map((i, position) => {
       const isAlreadySevered = Boolean(!proposals[i] || shapes[i]?.isSeveredCarrier);
       const rawBox = computeTypesetBox(
