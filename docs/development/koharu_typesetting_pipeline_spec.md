@@ -129,7 +129,12 @@ This document adheres strictly to **`AGENTS.md` Sections 1–4**:
    - *Abstraction*: Dialogue text entities are associated 1:1 with containing bubbles.
    - *Koharu*: High-level VLM outputs clean semantic paragraphs, eliminating single-character noise.
    - *Kites*: `src/offscreen/services/BubbleLayoutService.ts`.
-   - *Why*: PaddleOCR v6 line detection can produce fragmented lines or misdetect exclamation marks as noise characters (`"电"`, `"士"`). When `topologicalFlowCells` finds no reflex constriction neck on a curved balloon, secondary 1-character noise or same-column stacked lines do NOT slice the single round balloon in half with a Voronoi bisector.
+   - *Why*: PaddleOCR v6 line detection can produce fragmented lines or misdetect exclamation marks as noise characters (`"电"`, `"士"`). When secondary boxes are small noise fragments (area $\le 35\%$) or vertically stacked lines in the same speech column (horizontal overlap $\ge 50\%$), the balloon represents a single coherent speech chamber, preventing false cuts.
+5. **On-Demand Multi-Language Liang Hyphenation (`HyphenationService` vs. `hypher`)**:
+   - *Abstraction*: `findHyphenationPoints(word, targetLang): number[]` returning syllable break character offsets.
+   - *Koharu*: Uses the Rust `hypher` crate, which compiles Franklin Mark Liang's TeX hyphenation algorithm and dictionary tables directly into the native desktop binary.
+   - *Kites*: Uses `src/offscreen/utils/hyphenation/HyphenationService.ts` and `LiangHyphenator.ts` querying 21 on-demand Liang pattern dictionaries in `public/assets/hyphenation/*.txt` (PR #32).
+   - *Why & Scope*: Bundling the full `hypher` npm package or embedding multi-megabyte binary dictionaries into Chrome extension service worker scripts inflates bundle size and exhausts worker memory. Kites fetches dictionary patterns on-demand only when that target language is translated. **Crucially, this hyphenation engine is NOT restricted to XianScan — it is shared across both Route 1 (Auto Balloon) and Route 2 (Koharu Contour DP in `contourTypeset.ts`)**, ensuring identical Liang syllable cuts (`YOUR-SELF`, `DANGER-OUS`, `RE-TREAT`, `SOL-DIERS`).
 
 ---
 
