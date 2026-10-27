@@ -25,6 +25,8 @@
     "test:visual:bubble:heuristic": "tsx src/test/bubbleHeuristicVisualTest.ts",
     "test:visual:bubble:yolo": "tsx src/test/bubbleYoloVisualTest.ts",
     "test:visual:bubble": "npm run test:visual:bubble:heuristic && npm run test:visual:bubble:yolo",
+    "test:visual:pipeline": "tsx src/test/pipelineVisualTest.ts",
+    "test:visual:koharu": "tsx src/test/pipelineVisualKoharuExactTest.ts",
     "test:pipeline:smoke": "tsx src/test/pipelineSmokeMatrix.ts",
     "worker:test": "npm run test:providers --prefix worker",
     "worker:deploy": "npm run deploy --prefix worker",
