@@ -72,11 +72,11 @@ This document adheres strictly to **`AGENTS.md` Sections 1–4**:
 
 1. **Topological Reflex-Neck Decomposition (`topologicalFlowCells` & `decomposeLobes`)**:
    - *Source*: Koharu `crates/koharu-renderer/src/bubble.rs:84–230`.
-   - *Kites*: `src/offscreen/utils/bubbleExpansion.ts`.
+   - *Kites*: `src/offscreen/utils/geometry/polygonMath.ts`.
    - *Math*: Douglas-Peucker contour simplification $\rightarrow$ convex hull recession reflex vertex identification $\rightarrow$ corner strength calculation $\rightarrow$ non-adjacent reflex diagonals cleanly cutting anchors between balloon lobes. Matches Koharu byte-for-byte.
 2. **Voronoi Half-Plane Bisector Partitioning (`anchorFlowCells` & `clipHalfPlane`)**:
    - *Source*: Koharu `crates/koharu-renderer/src/bubble.rs:373–456, 563–592`.
-   - *Kites*: `src/offscreen/utils/bubbleExpansion.ts`.
+   - *Kites*: `src/offscreen/utils/geometry/voronoiPartition.ts`.
    - *Math*: Perpendicular bisector half-plane clipping with sibling clearance gap (`SIBLING_GAP = 2.0`). Coincident cluster strip decomposition.
 3. **Dialogue Role Linking & Containment**:
    - *Source*: Koharu `crates/koharu-pipeline/src/stages/detection.rs:435–464`.
@@ -202,12 +202,15 @@ export interface ITypesetStrategy {
 ### 5.2 Decouple UI State from Engines (`AGENTS.md` Rule 3.1.3)
 - Ensure all references to `PopupState` are eliminated from `src/offscreen/engines/bubble/NeuralBubbleDetector.ts` and other core engines. Completed and verified.
 
-### 5.3 God File Decomposition Plan (`AGENTS.md` Rule 3.1.4)
-- **`src/offscreen/utils/cotransDefaultRenderer.ts` (938 lines) $\rightarrow$ under 250 lines**:
-  - Extract affine warp and canvas draw calls into `src/offscreen/utils/renderer/affineCanvasDrawer.ts`.
-  - Extract quad geometry and distance calculations into `src/offscreen/utils/renderer/quadGeometry.ts`.
-  - Keep `renderRegionDefault` as a clean coordinator dispatching to `ITypesetStrategy` and `affineCanvasDrawer`.
-- **`src/offscreen/utils/bubbleExpansion.ts` (1,272 lines) $\rightarrow$ under 300 lines**:
-  - Extract polygon clipping and Sutherland-Hodgman math into `src/offscreen/utils/geometry/polygonClipping.ts`.
-  - Extract pairwise clearance and AABB clamp algorithms into `src/offscreen/utils/geometry/siblingClearance.ts`.
-  - Retain `flowCells` and `topologicalFlowCells` as clean public entry points.
+### 5.3 God File Decomposition Layout (`AGENTS.md` Rule 3.1.4)
+- **`src/offscreen/utils/cotransDefaultRenderer.ts` (reduced from 938 to 261 lines)**:
+  - `src/offscreen/utils/renderer/cotransLineBreaker.ts` (284 lines): Syllable-based line breaking, word measurement, and whitespace offsetting.
+  - `src/offscreen/utils/renderer/cotransTextRasterizer.ts` (207 lines): Canvas rasterization, outline stroke application, and non-transparent pixel cropping.
+  - `src/offscreen/utils/renderer/regionGeometry.ts` (139 lines): Rigid affine quad geometry, point rotation, and destination scaling.
+  - `cotransDefaultRenderer.ts`: High-level coordinator dispatching to `ITypesetStrategy` and vector affine canvas transform.
+- **`src/offscreen/utils/bubbleExpansion.ts` (reduced from 1,272 to 80 lines)**:
+  - `src/offscreen/utils/geometry/polygonMath.ts` (282 lines): Douglas-Peucker simplification, reflex vertices, and topological lobe cuts.
+  - `src/offscreen/utils/geometry/voronoiPartition.ts` (254 lines): Sutherland-Hodgman half-plane clipping and Voronoi perpendicular bisector flow cells.
+  - `src/offscreen/utils/geometry/siblingClearance.ts` (204 lines): Pairwise clearance clamping and sibling boundary non-overlap constraints.
+  - `src/offscreen/utils/geometry/sharedContainerPartition.ts` (358 lines): Bubble core insetting, tail trimming, and sub-chamber territory partitioning.
+  - `bubbleExpansion.ts`: Clean public facade re-exporting all geometric primitives and types.
