@@ -50,7 +50,7 @@ export class BubbleManager {
    * @returns IBubbleEngine implementation.
    */
   private createEngine(mode: BubbleDetectionMode): IBubbleEngine | null {
-    if (mode === 'neural' || mode === 'neural-mask') {
+    if (mode === 'neural') {
       return new NeuralBubbleEngine();
     }
     if (mode === 'heuristic') {
@@ -66,10 +66,9 @@ export class BubbleManager {
    * @param popupState - Extension settings state.
    * @returns Decoupled options for the bubble engine.
    */
-  private resolveEngineOptions(mode: BubbleDetectionMode, popupState?: PopupState): BubbleEngineOptions {
+  private resolveEngineOptions(popupState?: PopupState): BubbleEngineOptions {
     return {
       preferGpu: popupState ? isBubbleGpuAvailable(popupState) : false,
-      mode: mode === 'neural-mask' ? 'mask' : 'box',
     };
   }
 
@@ -87,11 +86,7 @@ export class BubbleManager {
     onInitialization?: InitializationLifecycleCallback
   ): Promise<{ engine: IBubbleEngine | null; release: () => void }> {
     return this.serializeLifecycle(async () => {
-      const isBothNeural =
-        (this.activeMode === 'neural' && mode === 'neural-mask') ||
-        (this.activeMode === 'neural-mask' && mode === 'neural');
-
-      const options = this.resolveEngineOptions(mode, popupState);
+      const options = this.resolveEngineOptions(popupState);
       const isProviderCurrent =
         !this.activeEngine ||
         typeof this.activeEngine.isProviderCurrent !== 'function' ||
@@ -100,7 +95,7 @@ export class BubbleManager {
       const shouldRecreate = this.activeMode !== mode || !isProviderCurrent;
 
       if (shouldRecreate) {
-        if (this.activeEngine && (!isBothNeural || !isProviderCurrent)) {
+        if (this.activeEngine) {
           console.log(`[BubbleManager] Recreating bubble engine (mode: '${this.activeMode}' -> '${mode}', isProviderCurrent: ${isProviderCurrent}). Destroying old engine...`);
           await this.waitForUsersToDrain();
           await this.activeEngine.destroy();
@@ -111,7 +106,7 @@ export class BubbleManager {
         if (!this.activeEngine) {
           const newEngine = this.createEngine(mode);
           if (newEngine) {
-            const isNeural = mode === 'neural' || mode === 'neural-mask';
+            const isNeural = mode === 'neural';
             if (isNeural) {
               onInitialization?.('started', 'bubble', mode);
             }
@@ -165,7 +160,7 @@ export class BubbleManager {
       return null;
     }
     try {
-      const options = this.resolveEngineOptions(mode, popupState);
+      const options = this.resolveEngineOptions(popupState);
       return await engine.detect(canvas, textBoxes, options);
     } finally {
       release();

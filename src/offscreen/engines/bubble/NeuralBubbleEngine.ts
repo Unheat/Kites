@@ -19,11 +19,11 @@ export class NeuralBubbleEngine implements IBubbleEngine {
 
   /**
    * Detects speech bubbles on the source canvas using the neural vision model.
-   * In neural-mask mode, decodes prototype masks and severs narrow pointing tails on AI contours.
+   * Decodes prototype masks and severs narrow pointing tails on AI contours.
    *
    * @param canvas - Source image canvas.
    * @param textBoxes - Optional array of detected OCR text boxes.
-   * @param options - Runtime detection options (mode, preferGpu).
+   * @param options - Runtime detection options (preferGpu).
    * @returns Detection result with bubble proposals and optional severed chamber shapes.
    */
   async detect(

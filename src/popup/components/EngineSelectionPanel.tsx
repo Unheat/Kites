@@ -351,7 +351,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
         const colorUnavailable = Boolean(selectedColor && !selectedColor.isDownloaded);
         const selectedOcr = hydratedOcr.find((engine) => engine.id === (currentState.activeOcrId || 'v6-small'));
         const ocrUnavailable = Boolean(selectedOcr && !selectedOcr.isDownloaded);
-        const isNeuralActive = currentState.bubbleMode === 'neural' || currentState.bubbleMode === 'neural-mask';
+        const isNeuralActive = currentState.bubbleMode === 'neural';
         const bubbleUnavailable = isNeuralActive && !isBubbleYoloReady;
         const repairs: Partial<PopupState> = {};
         if (translationUnavailable && currentState.activeEngineId !== 'gg-translate') repairs.activeEngineId = 'gg-translate';
@@ -935,7 +935,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                 className="w-full flex items-center justify-between p-3 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md hover:border-[var(--color-ink)] transition-colors cursor-pointer"
               >
                 <span className="font-medium truncate pr-2">
-                  {(activeBubbleMode === 'neural-mask' || activeBubbleMode === 'neural') && isNeuralDownloaded
+                  {activeBubbleMode === 'neural' && isNeuralDownloaded
                     ? 'YOLO (AI)'
                     : activeBubbleMode === 'heuristic'
                       ? 'Heuristic'

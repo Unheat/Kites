@@ -135,7 +135,7 @@ export function computeMaskCurvature(
  * @param image - Original image pixels.
  * @param boxes - Original utterance boxes.
  * @param neuralProposals - Optional class-0 proposals; missing matches use heuristic carriers.
- * @param neuralShapes - Optional morphology shape evidence from neural segmentation (neural-mask).
+ * @param neuralShapes - Optional morphology shape evidence from neural segmentation (neural).
  * @returns Aligned carriers, exact proposal references, and existing morphology evidence.
  */
 export function acquireBubbleGeometry(

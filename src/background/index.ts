@@ -108,11 +108,13 @@ export function normalizePopupState(popupState: Partial<PopupState> | undefined)
   const activeOcrId = resolveOcrTier(completedState.activeOcrId);
   const renderFontPresetId = normalizeRenderFontPresetId(completedState.renderFontPresetId);
   const bubbleMode: BubbleDetectionMode =
-    completedState.bubbleMode === 'heuristic' ||
-    completedState.bubbleMode === 'neural' ||
-    completedState.bubbleMode === 'neural-mask'
+    completedState.bubbleMode === 'heuristic' || completedState.bubbleMode === 'neural'
       ? completedState.bubbleMode
-      : 'off';
+      : // Legacy 'neural-mask' selections behave identically to 'neural' since the YOLO
+        // tier unification; normalize at the storage boundary like other legacy values.
+        (completedState.bubbleMode as string) === 'neural-mask'
+        ? 'neural'
+        : 'off';
   const historyRetention: HistoryRetentionPeriod =
     completedState.historyRetention === '1day' ||
     completedState.historyRetention === '1month' ||

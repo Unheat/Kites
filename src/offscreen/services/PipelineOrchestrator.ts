@@ -297,10 +297,9 @@ export class PipelineOrchestrator {
           // Acquire engine through BubbleManager (OOP lifecycle & clean eviction)
           const { engine, release } = await this.services.bubbleManager.acquireEngine(bubbleMode, popupState, makeLifecycle('bubble', bubbleMode));
           try {
-            const isNeuralMode = bubbleMode === 'neural' || bubbleMode === 'neural-mask';
+            const isNeuralMode = bubbleMode === 'neural';
             const bubbleOptions: BubbleEngineOptions = {
               preferGpu: popupState ? isBubbleGpuAvailable(popupState) : false,
-              mode: 'mask',
             };
             const neuralResult = isNeuralMode && engine
               ? await engine.detect(rawCanvas, ocrResult.boxes, bubbleOptions)
@@ -535,7 +534,7 @@ export class PipelineOrchestrator {
           // render standalone (they would double-paint over the expanded dominant).
           // Only flagged when true so ordinary blocks keep their exact object shape.
           if (detailed.skipped?.[index]) textBlockItems[position].isSkipped = true;
-          // All active bubble tiers (heuristic, neural, neural-mask) route curved speech bubbles through Koharu contour typesetting
+          // All active bubble tiers (heuristic, neural) route curved speech bubbles through Koharu contour typesetting
           // and rectangular caption boxes through simple wrap
           if (typesetBox) {
             const curv = bubbleGeometry?.curvatures?.[index];
@@ -603,7 +602,7 @@ export class PipelineOrchestrator {
         const renderColors = renderInfo;
         const curvature = bubbleGeometry?.curvatures?.[i];
         const hasBubbleBox = Boolean(bubbleGeometry && ocrResult.typesetBoxes?.[i]);
-        // All active bubble tiers (heuristic, neural, neural-mask) use the canonical 'contour'
+        // All active bubble tiers (heuristic, neural) use the canonical 'contour'
         // for rounded speech bubbles (legacy 'ellipse' rows stay loadable via restore
         // normalization) and 'simple' for rectangular caption boxes. Disabled tier ('off')
         // uses 'balloon' (Auto Balloon) on OCR bounds.

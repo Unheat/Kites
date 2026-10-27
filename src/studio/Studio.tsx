@@ -189,6 +189,14 @@ export const Studio: React.FC<StudioProps> = ({
     };
   }, [jobId]);
 
+  // Latest page identity, readable inside async handlers after await points.
+  // Multi-second AI operations must re-check this before touching the canvas,
+  // the store, or the database so a page switch discards the stale result.
+  const jobIdRef = useRef<number | undefined>(jobId);
+  useEffect(() => {
+    jobIdRef.current = jobId;
+  }, [jobId]);
+
   // Hydrate initial colorized status from database record
   useEffect(() => {
     if (!jobId) {
@@ -485,6 +493,12 @@ export const Studio: React.FC<StudioProps> = ({
       }
 
       const colorizedImage = await requestStudioColorize(patchCanvas, selectedColorId);
+      // Staleness guard: the user may have switched pages while inference ran.
+      // Painting would draw the previous page's result onto the new page's canvas.
+      if (jobIdRef.current !== jobId) {
+        console.log('[Studio] Page switched during colorization; discarding stale result.');
+        return;
+      }
       ctx.drawImage(colorizedImage, 0, 0, imageWidth, imageHeight);
       const nextImageData = ctx.getImageData(0, 0, imageWidth, imageHeight);
 
@@ -567,6 +581,13 @@ export const Studio: React.FC<StudioProps> = ({
         { x: 0, y: 0, width: imageWidth, height: imageHeight },
         { translate: true, inpaint: true }
       );
+
+      // Staleness guard: never apply another page's retranslation to this page's
+      // canvas, undo stack, store, or database records.
+      if (jobIdRef.current !== jobId) {
+        console.log('[Studio] Page switched during retranslation; discarding stale result.');
+        return;
+      }
 
       if (ctx && result.inpaintedImage) {
         ctx.drawImage(result.inpaintedImage, 0, 0, imageWidth, imageHeight);

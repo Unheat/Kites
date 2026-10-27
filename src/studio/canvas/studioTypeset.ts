@@ -403,7 +403,9 @@ export function recalculateBlockTypeset(
         fontFamily || 'sans-serif',
         {
           minFontSize: 6,
-          maxFontSize: Math.max(16, Math.round(height * 0.5)),
+          // Match the ContourDpTypesetter bake ceiling (container height * 0.6) so the
+          // live preview picks the same font size the rendered page will.
+          maxFontSize: Math.max(16, Math.round(height * 0.6)),
           targetLang,
           isBold: style.bold,
           isItalic: style.italic

@@ -218,16 +218,12 @@ export async function runStudioOcr(
         const patchBitmap = await createImageBitmap(new Blob([imageBuffer], { type: 'image/png' }));
         try {
           safeCanvas.ctx.drawImage(patchBitmap, 0, 0);
-          const isNeural = bubbleMode === 'neural' || bubbleMode === 'neural-mask';
+          const isNeural = bubbleMode === 'neural';
           const { engine, release } = await bubbleManager.acquireEngine(bubbleMode, popupState);
           let neuralResult: any;
           try {
             neuralResult = isNeural && engine
-              ? await engine.detect(
-                  safeCanvas.canvas as any,
-                  result.boxes,
-                  { mode: bubbleMode === 'neural-mask' ? 'mask' : 'box' }
-                )
+              ? await engine.detect(safeCanvas.canvas as any, result.boxes)
               : undefined;
           } finally {
             release();

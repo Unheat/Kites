@@ -202,7 +202,7 @@ import type { RenderFontPresetId } from './renderFontPresets';
 import type { GlossaryEntry } from './glossary';
 import type { ColorTierId } from './colorTiers';
 
-export type BubbleDetectionMode = 'off' | 'heuristic' | 'neural' | 'neural-mask';
+export type BubbleDetectionMode = 'off' | 'heuristic' | 'neural';
 export type HistoryRetentionPeriod = '1day' | '1week' | '1month' | 'never';
 
 /** Custom CSS image selector rule for tricky or non-standard manga reader sites. */
