@@ -500,7 +500,7 @@ export class PipelineOrchestrator {
             if (!block) return false;
             const curv = bubbleGeometry?.curvatures?.[index];
             const blockWithCurvature = curv?.isRounded
-              ? { ...block, isRounded: true, borderRadius: curv.borderRadius, typesetMode: 'ellipse' as const }
+              ? { ...block, isRounded: true, borderRadius: curv.borderRadius, typesetMode: 'contour' as const }
               : { ...block, isRounded: false, borderRadius: 0, typesetMode: 'simple' as const };
             const fitted = popupState?.renderFontMinSize !== undefined
               ? measureBubbleLayoutFontSize(
@@ -603,10 +603,12 @@ export class PipelineOrchestrator {
         const renderColors = renderInfo;
         const curvature = bubbleGeometry?.curvatures?.[i];
         const hasBubbleBox = Boolean(bubbleGeometry && ocrResult.typesetBoxes?.[i]);
-        // All active bubble tiers (heuristic, neural, neural-mask) use 'ellipse' for rounded speech bubbles,
-        // and 'simple' for rectangular caption boxes. Disabled tier ('off') uses 'balloon' (Auto Balloon) on OCR bounds.
+        // All active bubble tiers (heuristic, neural, neural-mask) use the canonical 'contour'
+        // for rounded speech bubbles (legacy 'ellipse' rows stay loadable via restore
+        // normalization) and 'simple' for rectangular caption boxes. Disabled tier ('off')
+        // uses 'balloon' (Auto Balloon) on OCR bounds.
         const typesetMode: TypesetMode = hasBubbleBox
-          ? (curvature?.isRounded ? 'ellipse' : 'simple')
+          ? (curvature?.isRounded ? 'contour' : 'simple')
           : 'balloon';
         const borderRadius = hasBubbleBox ? (curvature?.borderRadius ?? 0) : 0;
         const isRounded = hasBubbleBox ? Boolean(curvature?.isRounded) : false;

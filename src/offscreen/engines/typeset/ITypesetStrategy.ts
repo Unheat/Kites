@@ -12,7 +12,11 @@ import type { BoxRect } from '../../utils/bubbleExpansion';
 import type { PositionedLine } from '../../utils/contourTypeset';
 import type { MeasureCache } from '../../utils/typesetLayout';
 
-export type TypesetMode = 'contour' | 'simple' | 'auto-balloon';
+/**
+ * Strategy-level typesetting modes. 'balloon' is the persisted/shared-catalog alias of
+ * 'auto-balloon' (src/shared/constants.ts TYPESET_MODES); 'contour' and 'simple' map 1:1.
+ */
+export type TypesetMode = 'contour' | 'simple' | 'auto-balloon' | 'balloon';
 
 export interface TypesetOptions {
   fontFamily: string;

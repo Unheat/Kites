@@ -7,6 +7,7 @@
 import type { Point2D } from '../../../shared/utils/geometry';
 import type { BoxRect } from '../../utils/bubbleExpansion';
 import { fitFontSizeWithLines, type MeasureCache } from '../../utils/typesetLayout';
+import { defaultLayoutFits } from '../../utils/renderer/regionGeometry';
 import { sanitizeTypesetText, compactSpecialSymbols } from '../../../shared/utils/textCleaning';
 import type { ITypesetStrategy, TypesetMode, TypesetOptions, TypesetResult } from './ITypesetStrategy';
 
@@ -70,12 +71,23 @@ export class AutoBalloonTypesetter implements ITypesetStrategy {
 
     if (!fitted || !fitted.lines || fitted.lines.length === 0) return null;
 
+    // Report real fit instead of an unconditional false so callers can react to
+    // text that only renders by overflowing the container.
+    const fits = defaultLayoutFits(
+      ctx as any,
+      fitted,
+      container.w,
+      container.h,
+      options.fontFamily,
+      options.isBold ?? false
+    );
+
     return {
       lines: fitted.lines,
       fontSize: fitted.size,
       width: container.w,
       height: container.h,
-      overflowed: false
+      overflowed: !fits
     };
   }
 }

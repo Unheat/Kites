@@ -3,6 +3,10 @@
  */
 export type MessageType = 
   | 'TRANSLATE_IMAGE'    // Content -> Background
+  | 'PROCESS_JOB'        // Background -> Offscreen (job queue dispatch)
+  | 'JOB_COMPLETED'      // Offscreen -> Background/App (job queue completion)
+  | 'JOB_ERROR'          // Offscreen -> Background/App (job queue failure)
+  | 'IMAGE_TRANSLATED'   // Background -> Content (finished page bitmap)
   | 'PROCESS_PROJECT'    // Background -> Offscreen
   | 'PROCESS_COMPLETE'   // Offscreen -> Background
   | 'PROCESS_ERROR'      // Offscreen -> Background

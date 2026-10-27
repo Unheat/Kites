@@ -300,7 +300,7 @@ describe('PipelineOrchestrator', () => {
     bitmapSpy.mockRestore(); blobSpy.mockRestore(); measureSpy.mockRestore(); renderSpy.mockRestore();
   });
 
-  it('persists typesetMode: ellipse for Heuristic tier when speech bubble is rounded', async () => {
+  it('persists canonical typesetMode contour for Heuristic tier when speech bubble is rounded', async () => {
     ((db.images as any).first as any).mockResolvedValue({ id: 15, jobId: 1500,
       rawImageBlob: new Blob(['fake image data'], { type: 'image/png' }) });
     vi.spyOn(chrome.runtime, 'sendMessage').mockImplementation((_message: any, callback: any) => {
@@ -318,7 +318,7 @@ describe('PipelineOrchestrator', () => {
     const blobSpy = vi.spyOn(pipelineOrchestrator as any, 'blobToArrayBuffer').mockResolvedValue(new ArrayBuffer(8));
     await pipelineOrchestrator.runPipeline(1500);
     expect(db.textBlocks.bulkAdd).toHaveBeenCalledWith(expect.arrayContaining([expect.objectContaining({
-      typesetMode: 'ellipse', isRounded: true,
+      typesetMode: 'contour', isRounded: true,
     })]));
     bitmapSpy.mockRestore(); blobSpy.mockRestore();
   });

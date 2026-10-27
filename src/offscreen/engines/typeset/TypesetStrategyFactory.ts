@@ -55,6 +55,7 @@ export class TypesetStrategyFactory {
       case 'simple':
         return this.simpleStrategy;
       case 'auto-balloon':
+      case 'balloon':
         return this.autoBalloonStrategy;
       default: {
         const _exhaustive: never = mode;
