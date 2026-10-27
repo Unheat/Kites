@@ -51,7 +51,8 @@ export class ContourDpTypesetter implements ITypesetStrategy {
         targetLang: options.targetLang ?? 'en',
         isBold: options.isBold,
         isItalic: options.isItalic,
-        targetCenterY: options.targetCenterY
+        targetCenterY: options.targetCenterY,
+        measureCache: options.measureCache
       }
     );
 

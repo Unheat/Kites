@@ -9,7 +9,7 @@ import type { Point2D } from '../engines/inpaint/BaseInpaintEngine';
 import { inpaintRegistry } from '../engines/inpaint/inpaintRegistry';
 import { InpaintCacheManager } from './InpaintCacheManager';
 import { renderTextBlocksBatch, measureBubbleLayoutFontSize, getRenderedBlockGeometry, LANGUAGE_ORIENTATION_PRESETS, type TextBlockItem, type RenderedBlockInfo } from '../utils/canvasTypesetting';
-import { detectBlockTextColors, type DetectedTextColor } from '../utils/textColorDetection';
+import { detectBlockTextColorsFromContext, type DetectedTextColor } from '../utils/textColorDetection';
 import { resolveRenderFontFamily } from '../../shared/renderFontPresets';
 import { isBubbleGpuAvailable, isColorGpuAvailable } from '../../shared/utils/hardwareUtils';
 import type { BubbleEngineOptions } from '../engines/bubble/BaseBubbleEngine';
@@ -240,13 +240,42 @@ export class PipelineOrchestrator {
         });
       }
 
-      // 3.0 Per-bubble text color detection from the ORIGINAL image (before any
+      // 3.0 Shared original-pixel raster. One full-page canvas feeds BOTH per-bubble
+      // text color detection and bubble carrier extraction (both must sample the
+      // ORIGINAL pre-inpaint ink), halving the previous two full-page allocations.
+      let rawCanvas: OffscreenCanvas | null = null;
+      let rawCtx: OffscreenCanvasRenderingContext2D | null = null;
+      const rawWidth = sourceBitmap?.width ?? (pageWidth || 0);
+      const rawHeight = sourceBitmap?.height ?? (pageHeight || 0);
+      if (rawWidth > 0 && rawHeight > 0 && ocrResult.boxes && ocrResult.boxes.length > 0) {
+        try {
+          rawCanvas = new OffscreenCanvas(rawWidth, rawHeight);
+          rawCtx = rawCanvas.getContext('2d', { willReadFrequently: true });
+          if (rawCtx) {
+            if (sourceBitmap) {
+              rawCtx.drawImage(sourceBitmap, 0, 0);
+            } else {
+              const tempBitmap = await createImageBitmap(imageRecord.rawImageBlob);
+              rawCtx.drawImage(tempBitmap, 0, 0);
+              tempBitmap.close();
+            }
+          }
+        } catch (err) {
+          // Environments without OffscreenCanvas (or failed raster) degrade both
+          // consumers to their null-color / raw-box fallbacks instead of failing the page.
+          rawCanvas = null;
+          rawCtx = null;
+          console.warn('[PipelineOrchestrator] Original-pixel raster unavailable; using fallback colors and boxes:', err);
+        }
+      }
+
+      // Per-bubble text color detection from the ORIGINAL image (before any
       // inpainting erases the glyphs). Best-effort: nulls and failures fall back
       // to the render-time background-adaptive black/white picker.
       let detectedTextColors: (DetectedTextColor | null)[] = [];
-      if (sourceBitmap && ocrResult.boxes && ocrResult.boxes.length > 0) {
+      if (rawCtx && ocrResult.boxes && ocrResult.boxes.length > 0) {
         try {
-          detectedTextColors = await detectBlockTextColors(sourceBitmap, ocrResult.boxes);
+          detectedTextColors = detectBlockTextColorsFromContext(rawCtx, ocrResult.boxes, rawWidth, rawHeight);
         } catch (err) {
           console.warn('[PipelineOrchestrator] Text color detection failed; using background-adaptive colors:', err);
         }
@@ -263,42 +292,27 @@ export class PipelineOrchestrator {
       }
       // Legacy CJK/RTL rendering does not honor fixed bubble rectangles.
       const supportsBubbleLayout = (LANGUAGE_ORIENTATION_PRESETS[targetLang.toLowerCase().trim()] ?? 'h') === 'h';
-      if (bubbleMode !== 'off' && supportsBubbleLayout && ocrResult.boxes && ocrResult.boxes.length > 0 && !ocrResult.typesetBoxes) {
+      if (bubbleMode !== 'off' && supportsBubbleLayout && rawCanvas && rawCtx && ocrResult.boxes && ocrResult.boxes.length > 0 && !ocrResult.typesetBoxes) {
         try {
-          const rawWidth = sourceBitmap?.width ?? (pageWidth || 0);
-          const rawHeight = sourceBitmap?.height ?? (pageHeight || 0);
-          if (rawWidth > 0 && rawHeight > 0) {
-            const rawCanvas = new OffscreenCanvas(rawWidth, rawHeight);
-            const rawCtx = rawCanvas.getContext('2d', { willReadFrequently: true });
-            if (rawCtx) {
-              if (sourceBitmap) {
-                rawCtx.drawImage(sourceBitmap, 0, 0);
-              } else {
-                const tempBitmap = await createImageBitmap(imageRecord.rawImageBlob);
-                rawCtx.drawImage(tempBitmap, 0, 0);
-                tempBitmap.close();
-              }
-              // Acquire engine through BubbleManager (OOP lifecycle & clean eviction)
-              const { engine, release } = await this.services.bubbleManager.acquireEngine(bubbleMode, popupState, makeLifecycle('bubble', bubbleMode));
-              try {
-                const isNeuralMode = bubbleMode === 'neural' || bubbleMode === 'neural-mask';
-                const bubbleOptions: BubbleEngineOptions = {
-                  preferGpu: popupState ? isBubbleGpuAvailable(popupState) : false,
-                  mode: 'mask',
-                };
-                const neuralResult = isNeuralMode && engine
-                  ? await engine.detect(rawCanvas, ocrResult.boxes, bubbleOptions)
-                  : undefined;
-                bubbleGeometry = acquireBubbleGeometry(
-                  rawCtx.getImageData(0, 0, rawWidth, rawHeight),
-                  ocrResult.boxes,
-                  neuralResult?.bubbles,
-                  neuralResult?.shapes
-                );
-              } finally {
-                release();
-              }
-            }
+          // Acquire engine through BubbleManager (OOP lifecycle & clean eviction)
+          const { engine, release } = await this.services.bubbleManager.acquireEngine(bubbleMode, popupState, makeLifecycle('bubble', bubbleMode));
+          try {
+            const isNeuralMode = bubbleMode === 'neural' || bubbleMode === 'neural-mask';
+            const bubbleOptions: BubbleEngineOptions = {
+              preferGpu: popupState ? isBubbleGpuAvailable(popupState) : false,
+              mode: 'mask',
+            };
+            const neuralResult = isNeuralMode && engine
+              ? await engine.detect(rawCanvas, ocrResult.boxes, bubbleOptions)
+              : undefined;
+            bubbleGeometry = acquireBubbleGeometry(
+              rawCtx.getImageData(0, 0, rawWidth, rawHeight),
+              ocrResult.boxes,
+              neuralResult?.bubbles,
+              neuralResult?.shapes
+            );
+          } finally {
+            release();
           }
         } catch (err) {
           console.warn('[PipelineOrchestrator] Bubble carrier extraction failed, falling back to default text boxes:', err);

@@ -366,13 +366,13 @@ describe('PipelineOrchestrator', () => {
         [{ x: 60, y: 20 }, { x: 90, y: 20 }, { x: 90, y: 60 }, { x: 60, y: 60 }],
       ],
     });
-    const detectSpy = vi.spyOn(textColorDetection, 'detectBlockTextColors').mockResolvedValue([
+    const detectSpy = vi.spyOn(textColorDetection, 'detectBlockTextColorsFromContext').mockReturnValue([
       { textColor: '#1473eb', strokeColor: '#ffffff' }, null,
     ]);
     const renderSpy = vi.spyOn(canvasTypesetting, 'renderTextBlocksBatch').mockReturnValue([]);
     const blobSpy = vi.spyOn(pipelineOrchestrator as any, 'blobToArrayBuffer').mockResolvedValue(new ArrayBuffer(8));
     await pipelineOrchestrator.runPipeline(2100);
-    // Detection ran once against the pre-inpaint bitmap with the OCR boxes.
+    // Detection ran once against the shared pre-inpaint original raster with the OCR boxes.
     expect(detectSpy).toHaveBeenCalledTimes(1);
     expect(detectSpy.mock.calls[0][1]).toEqual([
       { x: 10, y: 20, w: 30, h: 40 }, { x: 60, y: 20, w: 30, h: 40 },

@@ -9,7 +9,7 @@
 import type { Point2D } from '../../shared/utils/geometry';
 import { INSERTED_HYPHEN } from './typography/textUnwrap';
 import { comicBreakPenalty, tokenizeDialogue } from './typography/tokenizer';
-import { findHyphenationPoints } from './typesetLayout';
+import { findHyphenationPoints, type MeasureCache } from './typesetLayout';
 
 /** Safety margin in pixels kept between glyph bounds and bubble wall. */
 export const DEFAULT_INLINE_AIR = 4.0;
@@ -126,6 +126,8 @@ export interface WrapContourOptions {
   isBold?: boolean;
   isItalic?: boolean;
   targetCenterY?: number;
+  /** Optional memoized measurement cache; widths must stay identical to raw ctx.measureText. */
+  measureCache?: MeasureCache;
 }
 
 /**
@@ -257,7 +259,25 @@ export function polygonInlineSpans(contour: Point2D[], block: number): [number, 
  * @param lineCount - Number of lines to evaluate.
  * @param fontSize - Candidate font size in pixels.
  * @param linePitch - Line height multiplier (e.g. 1.25).
+/**
+ * Vertical contour bounds reusable across font probes so callers that already
+ * computed the polygon bbox skip the per-line-count recomputation.
+ */
+export interface ContourBounds {
+  minY: number;
+  maxY: number;
+}
+
+/**
+ * Builds scanline chord profiles for a candidate line count inside the contour.
+ *
+ * @param contour - Polygon boundary coordinates.
+ * @param lineCount - Candidate number of text lines.
+ * @param fontSize - Probed font size in pixels.
+ * @param linePitch - Line advance as a multiple of font size.
  * @param inlineAir - Margin clearance between text and bubble perimeter.
+ * @param targetCenterY - Optional vertical ink anchor for centered placement.
+ * @param bounds - Optional precomputed vertical bounds of the contour.
  * @returns Array of LineProfile chords or null if contour cannot contain line count.
  */
 export function computeContourProfiles(
@@ -266,15 +286,20 @@ export function computeContourProfiles(
   fontSize: number,
   linePitch: number = DEFAULT_LINE_PITCH,
   inlineAir: number = DEFAULT_INLINE_AIR,
-  targetCenterY?: number
+  targetCenterY?: number,
+  bounds?: ContourBounds
 ): LineProfile[] | null {
   if (lineCount <= 0 || contour.length < 3) return null;
 
-  let minY = Infinity;
-  let maxY = -Infinity;
-  for (const pt of contour) {
-    if (pt.y < minY) minY = pt.y;
-    if (pt.y > maxY) maxY = pt.y;
+  let minY = bounds?.minY;
+  let maxY = bounds?.maxY;
+  if (minY === undefined || maxY === undefined) {
+    minY = Infinity;
+    maxY = -Infinity;
+    for (const pt of contour) {
+      if (pt.y < minY) minY = pt.y;
+      if (pt.y > maxY) maxY = pt.y;
+    }
   }
 
   const contourHeight = maxY - minY;
@@ -382,25 +407,38 @@ export function computeContourProfiles(
 }
 
 /**
- * Builds candidate breakable segments from dialogue text, optionally expanding
- * syllables for discretionary hyphenation.
+ * Size-invariant blueprint of one breakable segment. Tokenization, hyphenation
+ * syllable analysis, and break penalties never depend on the probed font size,
+ * so templates are computed once per hyphenation pass and only measured per probe.
+ */
+export interface SegmentTemplate {
+  text: string;
+  /** Whether a space advance follows this segment when it is not line-final. */
+  trailingSpace: boolean;
+  /** Whether a hyphen suffix advance applies when this segment ends a non-final line. */
+  hyphenSuffix: boolean;
+  /** Whether this cut is a discretionary syllable hyphenation point. */
+  isHyphenBreak: boolean;
+  /** Punctuation-aware break penalty applied when a line ends after this segment. */
+  breakPenalty: number;
+}
+
+/**
+ * Builds size-invariant segment templates from dialogue text, optionally expanding
+ * syllables for discretionary hyphenation. Pure string analysis: no measurement.
  *
  * @param text - Clean unwrapped dialogue string.
- * @param measure - Measurement callback returning advance width for a substring.
  * @param allowHyphenation - Whether to admit hyphenated syllable cuts.
  * @param targetLang - Target language code for hyphenation patterns.
- * @returns Array of SegmentMeasure units.
+ * @returns Ordered segment templates matching the measured segment stream exactly.
  */
-export function buildSegmentMeasures(
+export function buildSegmentTemplates(
   text: string,
-  measure: (s: string) => number,
   allowHyphenation: boolean,
   targetLang: string = 'en'
-): SegmentMeasure[] {
+): SegmentTemplate[] {
   const rawTokens = tokenizeDialogue(text);
-  const segments: SegmentMeasure[] = [];
-  const hyphenAdvance = measure('-');
-  const spaceAdvance = measure(' ');
+  const templates: SegmentTemplate[] = [];
 
   let charOffset = 0;
 
@@ -416,22 +454,18 @@ export function buildSegmentMeasures(
         const subText = subWords[sIdx];
         if (!subText) continue;
         if (isLastSub) {
-          segments.push({
+          templates.push({
             text: subText,
-            advance: measure(subText) + (isLastToken ? 0 : spaceAdvance),
-            trailingAdvance: isLastToken ? 0 : spaceAdvance,
-            breakSuffixAdvance: 0,
-            isMandatory: false,
+            trailingSpace: !isLastToken,
+            hyphenSuffix: false,
             isHyphenBreak: false,
             breakPenalty: comicBreakPenalty(text, charOffset + token.length)
           });
         } else {
-          segments.push({
+          templates.push({
             text: subText,
-            advance: measure(subText),
-            trailingAdvance: 0,
-            breakSuffixAdvance: hyphenAdvance,
-            isMandatory: false,
+            trailingSpace: false,
+            hyphenSuffix: true,
             isHyphenBreak: false, // Hard hyphen explicitly present in text (always breakable)
             breakPenalty: 10.0
           });
@@ -453,12 +487,10 @@ export function buildSegmentMeasures(
             continue;
           }
           const syllable = stem.slice(prevCut, cut);
-          segments.push({
+          templates.push({
             text: syllable,
-            advance: measure(syllable),
-            trailingAdvance: 0,
-            breakSuffixAdvance: hyphenAdvance,
-            isMandatory: false,
+            trailingSpace: false,
+            hyphenSuffix: true,
             isHyphenBreak: true,
             breakPenalty: DISCRETIONARY_HYPHEN_PENALTY
           });
@@ -466,12 +498,10 @@ export function buildSegmentMeasures(
         }
 
         const finalPiece = stem.slice(prevCut) + trailingPunct;
-        segments.push({
+        templates.push({
           text: finalPiece,
-          advance: measure(finalPiece) + (isLastToken ? 0 : spaceAdvance),
-          trailingAdvance: isLastToken ? 0 : spaceAdvance,
-          breakSuffixAdvance: 0,
-          isMandatory: false,
+          trailingSpace: !isLastToken,
+          hyphenSuffix: false,
           isHyphenBreak: false,
           breakPenalty: comicBreakPenalty(text, charOffset + token.length)
         });
@@ -480,19 +510,63 @@ export function buildSegmentMeasures(
       }
     }
 
-    segments.push({
+    templates.push({
       text: token,
-      advance: measure(token) + (isLastToken ? 0 : spaceAdvance),
-      trailingAdvance: isLastToken ? 0 : spaceAdvance,
-      breakSuffixAdvance: 0,
-      isMandatory: false,
+      trailingSpace: !isLastToken,
+      hyphenSuffix: false,
       isHyphenBreak: false,
       breakPenalty: comicBreakPenalty(text, charOffset + token.length)
     });
     charOffset += token.length + 1;
   }
 
-  return segments;
+  return templates;
+}
+
+/**
+ * Instantiates segment templates with real advances at a probed font size.
+ * Performs exactly one measure call per segment in construction order, mirroring
+ * the original single-pass builder so results are numerically identical.
+ *
+ * @param templates - Size-invariant segment templates.
+ * @param measure - Measurement callback returning advance width for a substring.
+ * @returns Array of SegmentMeasure units.
+ */
+export function measureSegments(
+  templates: SegmentTemplate[],
+  measure: (s: string) => number
+): SegmentMeasure[] {
+  const hyphenAdvance = measure('-');
+  const spaceAdvance = measure(' ');
+
+  return templates.map((template) => ({
+    text: template.text,
+    advance: measure(template.text) + (template.trailingSpace ? spaceAdvance : 0),
+    trailingAdvance: template.trailingSpace ? spaceAdvance : 0,
+    breakSuffixAdvance: template.hyphenSuffix ? hyphenAdvance : 0,
+    isMandatory: false,
+    isHyphenBreak: template.isHyphenBreak,
+    breakPenalty: template.breakPenalty
+  }));
+}
+
+/**
+ * Builds candidate breakable segments from dialogue text, optionally expanding
+ * syllables for discretionary hyphenation.
+ *
+ * @param text - Clean unwrapped dialogue string.
+ * @param measure - Measurement callback returning advance width for a substring.
+ * @param allowHyphenation - Whether to admit hyphenated syllable cuts.
+ * @param targetLang - Target language code for hyphenation patterns.
+ * @returns Array of SegmentMeasure units.
+ */
+export function buildSegmentMeasures(
+  text: string,
+  measure: (s: string) => number,
+  allowHyphenation: boolean,
+  targetLang: string = 'en'
+): SegmentMeasure[] {
+  return measureSegments(buildSegmentTemplates(text, allowHyphenation, targetLang), measure);
 }
 
 /**
@@ -767,12 +841,29 @@ export function wrapTextContour(
 
   const measureAt = (size: number) => {
     ctx.font = `${stylePrefix}${Math.round(size)}px "${fontFamily}"`;
-    return (s: string) => ctx.measureText(s).width;
+    const rawMeasure = (s: string) => ctx.measureText(s).width;
+    // The cache keys by the live ctx.font spec, so memoized widths stay identical
+    // to raw ctx.measureText across probe sizes.
+    const cache = options.measureCache;
+    return cache ? (s: string) => cache.measure(s) : rawMeasure;
+  };
+
+  // Segment templates are size-invariant: tokenize/hyphenate once per hyphenation
+  // pass instead of on every font probe (up to ~28 evaluations per bubble).
+  let cleanTemplates: SegmentTemplate[] | null = null;
+  let hyphenTemplates: SegmentTemplate[] | null = null;
+  const templatesFor = (allowHyphenation: boolean): SegmentTemplate[] => {
+    if (allowHyphenation) {
+      hyphenTemplates ??= buildSegmentTemplates(cleanText, true, targetLang);
+      return hyphenTemplates;
+    }
+    cleanTemplates ??= buildSegmentTemplates(cleanText, false, targetLang);
+    return cleanTemplates;
   };
 
   const evaluateLayout = (size: number, allowHyphenation: boolean, allowOverflow: boolean = false): LineBreakResult | null => {
     const measure = measureAt(size);
-    const segments = buildSegmentMeasures(cleanText, measure, allowHyphenation, targetLang);
+    const segments = measureSegments(templatesFor(allowHyphenation), measure);
     const lineHeight = size * linePitch;
     const maxLineCount = Math.max(1, Math.min(segments.length, Math.floor(containerH / lineHeight)));
 
@@ -796,7 +887,7 @@ export function wrapTextContour(
 
     // Test line counts from minimum required lines to max fitting lines
     for (let lines = 1; lines <= maxLineCount; lines++) {
-      const profiles = computeContourProfiles(contour, lines, size, linePitch, inlineAir, options.targetCenterY);
+      const profiles = computeContourProfiles(contour, lines, size, linePitch, inlineAir, options.targetCenterY, { minY, maxY });
       if (!profiles) continue;
 
       const res = exactProfiledLineBreaks(segments, profiles, allowHyphenation);
