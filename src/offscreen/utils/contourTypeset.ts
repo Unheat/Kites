@@ -432,7 +432,7 @@ export function buildSegmentMeasures(
             trailingAdvance: 0,
             breakSuffixAdvance: hyphenAdvance,
             isMandatory: false,
-            isHyphenBreak: true,
+            isHyphenBreak: false, // Hard hyphen explicitly present in text (always breakable)
             breakPenalty: 10.0
           });
         }
@@ -540,7 +540,7 @@ export function exactProfiledLineBreaks(
         advance += seg.advance;
 
         const suffix = end < len ? seg.breakSuffixAdvance : 0.0;
-        const isHyphen = end < len && suffix > 0.0;
+        const isHyphen = end < len && suffix > 0.0 && seg.isHyphenBreak;
 
         if (isHyphen && !allowHyphenation) {
           continue;
@@ -788,7 +788,7 @@ export function wrapTextContour(
       if (cand.overflowed !== current.overflowed) {
         return !cand.overflowed;
       }
-      if (cand.lines.length !== current.lines.length) {
+      if (!cand.overflowed && cand.lines.length !== current.lines.length) {
         return cand.lines.length < current.lines.length;
       }
       return cand.cost < current.cost;
@@ -887,19 +887,26 @@ export function wrapTextContour(
     : 0;
 
   // Koharu LastResort Hyphenation Policy (layout.rs:416-424 & 2779-2809):
-  // Discretionary hyphenation is only used if it unlocks a STRICTLY LARGER font size (> cleanSize).
-  // If font size remains at or below the minimum readable floor (minFont), clean unhyphenated
-  // text is strictly preferred to avoid breaking words into single-word line towers.
-  const selected = (hyphenatedFit && hyphenatedSize > Math.max(cleanSize, minFont))
-    ? hyphenatedFit
-    : (cleanFit || evaluateLayout(minFont, false, true) || evaluateLayout(minFont, true, true));
+  // 1. If clean text fits without overflow, clean unhyphenated text is preferred.
+  // 2. Discretionary hyphenation is used if it unlocks a strictly larger font size, or fits when clean text overflows.
+  const selected = (cleanFit && (!hyphenatedFit || cleanSize >= hyphenatedSize))
+    ? cleanFit
+    : (hyphenatedFit && (!cleanFit || hyphenatedSize > cleanSize) ? hyphenatedFit : (cleanFit || null));
 
   if (selected) {
     const finalSize = Math.round(selected.profiles[0].height / linePitch);
     return toResult(selected, finalSize);
   }
 
-  // Fallback: evaluate at minFont with allowOverflow=true
-  const fallback = evaluateLayout(minFont, false, true) || evaluateLayout(minFont, true, true);
+  // Fallback: evaluate at minFont with allowOverflow=true.
+  // Port of Koharu layout.rs:1614-1621:
+  // If clean unhyphenated text overflows, evaluate with hyphenation to eliminate/minimize overflow!
+  const cleanFallback = evaluateLayout(minFont, false, true);
+  const hyphenFallback = evaluateLayout(minFont, true, true);
+
+  const fallback = (cleanFallback && !cleanFallback.overflowed)
+    ? cleanFallback
+    : (hyphenFallback || cleanFallback);
+
   return toResult(fallback, minFont, true);
 }
