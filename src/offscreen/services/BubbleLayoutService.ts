@@ -172,16 +172,18 @@ export function acquireBubbleGeometry(
     const shape = shapes[index];
     if (shape && shape.interior && shape.width > 0 && shape.height > 0) {
       const mask = shape.reconstructed ?? shape.interior;
-      const textCenterX = (box.x + box.w / 2 - shape.x) * shape.scale;
-      const textCenterY = (box.y + box.h / 2 - shape.y) * shape.scale;
+      const scaleX = shape.scaleX ?? shape.scale;
+      const scaleY = shape.scaleY ?? shape.scale;
+      const textCenterX = (box.x + box.w / 2 - shape.x) * scaleX;
+      const textCenterY = (box.y + box.h / 2 - shape.y) * scaleY;
       const poly = extractMaskContour(
         mask,
         shape.width,
         shape.height,
         shape.x,
         shape.y,
-        shape.scale,
-        shape.scale,
+        scaleX,
+        scaleY,
         textCenterX,
         textCenterY
       );

@@ -138,6 +138,8 @@ async function runKoharuExactTest() {
       x: minX,
       y: minY,
       scale: avgScale,
+      scaleX,
+      scaleY,
       width: pw,
       height: ph,
       interior: mask,

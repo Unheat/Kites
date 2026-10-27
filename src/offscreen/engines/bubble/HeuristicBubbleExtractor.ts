@@ -35,6 +35,8 @@ export interface BubbleShapeEvidence {
   x: number;
   y: number;
   scale: number;
+  scaleX?: number;
+  scaleY?: number;
   width: number;
   height: number;
   interior: Uint8Array;
@@ -207,6 +209,8 @@ export class HeuristicBubbleExtractor {
       x: minX,
       y: minY,
       scale,
+      scaleX: patchW / origPatchW,
+      scaleY: patchH / origPatchH,
       width: patchW,
       height: patchH,
       interior: mask,
