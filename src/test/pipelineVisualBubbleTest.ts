@@ -11,6 +11,7 @@ import { NeuralBubbleDetector } from '../offscreen/engines/bubble/NeuralBubbleDe
 import { HeuristicBubbleExtractor } from '../offscreen/engines/bubble/HeuristicBubbleExtractor';
 import { acquireBubbleGeometry, resolveBubbleLayoutsDetailed, type BubbleGeometry } from '../offscreen/services/BubbleLayoutService';
 import { DEFAULT_RENDER_FONT_FAMILY } from '../offscreen/utils/canvasTypesetting';
+import { HyphenationService } from '../offscreen/utils/hyphenation/HyphenationService';
 import * as ort from 'onnxruntime-node';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -36,6 +37,16 @@ async function runPipelineVisualBubbleTest() {
   const inpaintManager = new InpaintManager();
   const translator = new GoogleTranslateEngine();
   await translator.init();
+
+  // Register local filesystem pattern loader for Node test environment and preload English patterns
+  HyphenationService.setCustomLoader(async (dictName: string) => {
+    const filePath = path.resolve(process.cwd(), 'public/assets/hyphenation', `${dictName}.txt`);
+    if (fs.existsSync(filePath)) {
+      return fs.readFileSync(filePath, 'utf-8');
+    }
+    return null;
+  });
+  await HyphenationService.getInstance().loadLanguage('en');
 
   // Load Neural Bubble Detector model if available in test/models or models/
   const candidateBubblePaths = [

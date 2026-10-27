@@ -44,8 +44,8 @@ export const DISCRETIONARY_HYPHEN_PENALTY = 350.0;
 /** Minimum word length considered for discretionary syllable hyphenation. */
 export const MIN_HYPHEN_WORD_LENGTH = 6;
 
-/** Minimum syllable side length required before or after a hyphen. */
-export const MIN_HYPHEN_SIDE_LENGTH = 3;
+/** Minimum syllable side length required before or after a hyphen (matches Koharu COMPACT_HYPHENATION_FRAGMENT_LEN = 2). */
+export const MIN_HYPHEN_SIDE_LENGTH = 2;
 
 /** Number of discrete vertices used to approximate a continuous ellipse contour. */
 export const CONTOUR_ELLIPSE_POINTS = 32;
@@ -669,18 +669,12 @@ export function wrapTextContour(
   const containerH = Math.max(20, maxY - minY);
 
   const minFont = options.minFontSize ?? MINIMUM_READABLE_FONT_SIZE;
-  const isTall = containerH / containerW >= 1.4;
   const targetLang = options.targetLang ?? 'en';
   const linePitch = options.linePitch ?? DEFAULT_LINE_PITCH;
   const inlineAir = options.inlineAir ?? DEFAULT_INLINE_AIR;
 
-  const words = cleanText.split(/\s+/).filter(Boolean);
-  const wordCount = Math.max(1, words.length);
-
-  // Height-aware font ceiling for tall burst balloons
-  const heightCeil = isTall
-    ? Math.min(MAXIMUM_EVALUATED_FONT_SIZE, Math.round(containerH / Math.max(2, Math.ceil(wordCount / 2.5))))
-    : Math.min(MAXIMUM_EVALUATED_FONT_SIZE, Math.round(containerH / 2));
+  // Automatic maximum font size ceiling bounded by container height and evaluated font ceiling
+  const heightCeil = Math.min(MAXIMUM_EVALUATED_FONT_SIZE, Math.round(containerH * 0.85));
 
   const maxFont = options.maxFontSize ? Math.max(minFont, options.maxFontSize) : Math.max(minFont, heightCeil);
 
@@ -739,12 +733,10 @@ export function wrapTextContour(
     : 0;
 
   // Koharu LastResort Hyphenation Policy (layout.rs:400-408 & 2892-2924):
-  // 1. If clean unhyphenated text fits comfortably at or above readable body font size (>= 12px),
-  // strictly keep clean whole words without hyphenation.
-  // 2. If clean text is squeezed below the 12px readability floor (e.g. 9px or 10px),
-  // evaluate with discretionary hyphenation to recover readable body typography (12px - 15px).
-  const readabilityFloor = Math.max(12.0, minFont);
-  if (cleanFit && cleanSize >= readabilityFloor) {
+  // If clean unhyphenated text fits above the minimum font floor, strictly keep clean
+  // whole words without hyphenation. Discretionary hyphenation is only evaluated as a last resort
+  // when clean text cannot fit or is pinned to the minimum readable font floor.
+  if (cleanFit && cleanSize > Math.floor(minFont)) {
     return {
       lines: cleanFit.lines,
       fontSize: cleanSize,

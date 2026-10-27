@@ -810,9 +810,9 @@ export function renderRegionDefault(
           { x: 0, y: normV }
         ];
 
-    const maxFont = maxFontSizeCap
-      ? Math.min(maxFontSizeCap, Math.max(16, Math.round(normV * 0.5)))
-      : Math.max(16, Math.round(normV * 0.5));
+    const maxFont = (maxFontSizeCap && !hasContour)
+      ? Math.min(maxFontSizeCap, Math.max(16, Math.round(normV * 0.6)))
+      : Math.max(16, Math.round(normV * 0.6));
 
     const contourRes = wrapTextContour(
       unhyphenated,
@@ -836,8 +836,8 @@ export function renderRegionDefault(
       { x: 0, y: normV }
     ];
     const maxFont = maxFontSizeCap
-      ? Math.min(maxFontSizeCap, Math.max(16, Math.round(normV * 0.5)))
-      : Math.max(16, Math.round(normV * 0.5));
+      ? Math.min(maxFontSizeCap, Math.max(16, Math.round(normV * 0.6)))
+      : Math.max(16, Math.round(normV * 0.6));
 
     const simpleRes = wrapTextContour(
       unhyphenated,

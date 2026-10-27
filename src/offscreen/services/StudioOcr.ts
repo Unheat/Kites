@@ -251,13 +251,13 @@ export async function runStudioOcr(
 
           bubbleContours = result.boxes.map((_, bIdx) => {
             if (detailed.contourPoints?.[bIdx]) return detailed.contourPoints[bIdx];
-            const carrier = bubbleGeometry?.carriers[bIdx];
-            if (!carrier) return undefined;
+            const box = resolvedLayouts[bIdx];
+            if (!box) return undefined;
             return [
-              { x: carrier.x, y: carrier.y },
-              { x: carrier.x + carrier.w, y: carrier.y },
-              { x: carrier.x + carrier.w, y: carrier.y + carrier.h },
-              { x: carrier.x, y: carrier.y + carrier.h }
+              { x: 0, y: 0 },
+              { x: box.w, y: 0 },
+              { x: box.w, y: box.h },
+              { x: 0, y: box.h }
             ];
           });
         } finally {
@@ -292,10 +292,10 @@ export async function runStudioOcr(
       : rawGeometry;
 
     const contourPoints = bubbleContours[resolvedIndex] || [
-      { x: geometry.x, y: geometry.y },
-      { x: geometry.x + geometry.w, y: geometry.y },
-      { x: geometry.x + geometry.w, y: geometry.y + geometry.h },
-      { x: geometry.x, y: geometry.y + geometry.h }
+      { x: 0, y: 0 },
+      { x: geometry.w, y: 0 },
+      { x: geometry.w, y: geometry.h },
+      { x: 0, y: geometry.h }
     ];
 
     let precomputedLines: string[] | undefined = undefined;

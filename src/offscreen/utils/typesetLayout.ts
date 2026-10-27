@@ -96,7 +96,7 @@ export function findHyphenationPoints(rawWord: string, targetLang: string = 'en'
   const servicePoints = service.findHyphenationPoints(rawWord, targetLang);
   if (servicePoints.length > 0) {
     return servicePoints
-      .filter((p) => p >= 3 && len - p >= 3 && word[p - 1] !== "'" && word[p] !== "'" && word[p - 1] !== '’' && word[p] !== '’')
+      .filter((p) => p >= 2 && len - p >= 2 && word[p - 1] !== "'" && word[p] !== "'" && word[p - 1] !== '’' && word[p] !== '’')
       .sort((a, b) => a - b);
   }
 
@@ -165,7 +165,7 @@ export function findHyphenationPoints(rawWord: string, targetLang: string = 'en'
   }
 
   return Array.from(points)
-    .filter((p) => p >= 3 && len - p >= 3 && word[p - 1] !== "'" && word[p] !== "'" && word[p - 1] !== '’' && word[p] !== '’')
+    .filter((p) => p >= 2 && len - p >= 2 && word[p - 1] !== "'" && word[p] !== "'" && word[p - 1] !== '’' && word[p] !== '’')
     .sort((a, b) => a - b);
 }
 
