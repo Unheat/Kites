@@ -87,6 +87,8 @@ export interface DefaultRenderResult {
   lines: string[];
   /** Actual baseline step divided by font size, for lossless layout persistence. */
   lineSpacing: number;
+  /** Koharu scanline placements actually used for drawing, when the contour solver produced them. */
+  positionedLines?: PositionedLine[];
 }
 
 /**
@@ -245,5 +247,5 @@ export function renderRegionDefault(
 
   ctx.restore();
 
-  return { fontSize: fitted.size, lineCount: drawableLines.length, lines: drawableLines, lineSpacing: lineStep / fitted.size };
+  return { fontSize: fitted.size, lineCount: drawableLines.length, lines: drawableLines, lineSpacing: lineStep / fitted.size, positionedLines: hasPositionedLines ? fitted.positionedLines : undefined };
 }

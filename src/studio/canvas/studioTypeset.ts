@@ -100,6 +100,8 @@ export interface BlockTypesetResult {
   fontSize: number;
   lines: string[];
   height?: number;
+  /** Koharu scanline placements (box-local) from contour routes; undefined keeps even spacing. */
+  positionedLines?: TextObject['positionedLines'];
 }
 
 /**
@@ -135,7 +137,7 @@ function reflowTextObject(object: TextObject, mode: StudioTypesetMode): TextObje
     object
   );
 
-  const updated: TextObject = { ...object, width, fontSize: layout.fontSize, lines: layout.lines };
+  const updated: TextObject = { ...object, width, fontSize: layout.fontSize, lines: layout.lines, positionedLines: layout.positionedLines };
   if (isContourMode) {
     updated.roundFit = {
       width: refitting && fit ? fit.width : startWidth,
@@ -415,6 +417,7 @@ export function recalculateBlockTypeset(
         fontSize: result.fontSize,
         lines: result.lines && result.lines.length > 0 ? result.lines : [unhyphenated],
         height: result.height,
+        positionedLines: result.positionedLines,
       };
     }
 

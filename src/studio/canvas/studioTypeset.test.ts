@@ -214,6 +214,22 @@ describe('Studio Algorithmic Typeset & Line Reflow', () => {
     expect(result.fontSize).toBeGreaterThanOrEqual(8);
   });
 
+  it('returns Koharu scanline placements from contour routes and drops them elsewhere', () => {
+    const text = 'Wait... Teacher, please stop right now before it is too late!';
+    const contour = recalculateBlockTypeset(text, 'sans-serif', 220, 160, 16, 'contour', {
+      borderRadius: 40,
+    });
+    expect(contour.positionedLines).toBeDefined();
+    expect(contour.positionedLines!.length).toBe(contour.lines.length);
+    for (const pl of contour.positionedLines!) {
+      expect(pl.text).toBeTypeOf('string');
+      expect([pl.x, pl.y, pl.width, pl.height].every((v) => Number.isFinite(v))).toBe(true);
+    }
+    // Simple/balloon routes keep even spacing (Koharu's non-balloon fallback).
+    const simple = recalculateBlockTypeset(text, 'sans-serif', 220, 160, 16, 'simple');
+    expect(simple.positionedLines).toBeUndefined();
+  });
+
   describe('CJK Vertical Layout & Column Wrapping', () => {
     const japaneseDialogue = 'こんにちは、元気ですか？今日もいい天気ですね。';
 

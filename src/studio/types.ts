@@ -75,6 +75,8 @@ export interface TextObject {
   height: number;
   text: string;
   lines?: string[];
+  /** Koharu scanline placements (box-local). Present after contour typesetting or pipeline restore; absent falls back to even spacing. */
+  positionedLines?: Array<{ text: string; x: number; y: number; width: number; height: number }>;
   originalText?: string;
   charStyles?: (CharStyleOverride | null)[];
   fontSize: number;

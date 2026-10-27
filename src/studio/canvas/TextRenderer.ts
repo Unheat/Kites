@@ -91,11 +91,56 @@ export class TextRenderer {
 
     if (isVerticalMode) {
       this.renderVertical(ctx, lines, obj);
+    } else if (this.canUsePositionedLines(obj, lines)) {
+      this.renderPositioned(ctx, lines, obj);
     } else {
       this.renderHorizontal(ctx, lines, obj);
     }
 
     ctx.restore();
+  }
+
+  /**
+   * Decides whether the Koharu scanline placements can drive painting directly.
+   * Requires one placement per line, finite geometry, and no per-character style
+   * overrides (the positioned bake path measures uniform object-level typography).
+   *
+   * @param obj - Text object carrying optional pipeline/reflow placements.
+   * @param lines - Display-cased lines about to be painted.
+   * @returns True when {@link renderPositioned} reproduces the baked layout.
+   */
+  private static canUsePositionedLines(obj: TextObject, lines: string[]): boolean {
+    const pls = obj.positionedLines;
+    if (!pls || pls.length !== lines.length) return false;
+    if (Array.isArray(obj.charStyles) && obj.charStyles.some(Boolean)) return false;
+    return pls.every((pl) =>
+      [pl.x, pl.y, pl.width, pl.height].every((v) => Number.isFinite(v))
+    );
+  }
+
+  /**
+   * Paints lines at their Koharu scanline placements, replicating the bake's
+   * per-line math (top baseline, line centered within its contour chord) so the
+   * editor shows the exact baked layout until the user re-typesets.
+   *
+   * @param ctx - Target context with base typography configured.
+   * @param lines - Canonical layout lines already transformed to display casing.
+   * @param obj - Object geometry and paint settings.
+   */
+  private static renderPositioned(
+    ctx: CanvasRenderingContext2D,
+    lines: string[],
+    obj: TextObject
+  ): void {
+    const pls = obj.positionedLines!;
+    ctx.textBaseline = 'top';
+    ctx.textAlign = 'left';
+    for (let i = 0; i < lines.length; i++) {
+      const pl = pls[i];
+      const lineWidth = ctx.measureText(lines[i]).width;
+      const x = pl.x + (pl.width - lineWidth) / 2;
+      this.strokeAndFillText(ctx, lines[i], x, pl.y, obj);
+    }
   }
 
   private static drawBackgroundBox(ctx: CanvasRenderingContext2D, obj: TextObject): void {

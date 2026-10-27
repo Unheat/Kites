@@ -93,6 +93,7 @@ export async function requestStudioOcr(
       rotation?: number;
       lines?: string[];
       lineSpacing?: number;
+      positionedLines?: Array<{ text: string; x: number; y: number; width: number; height: number }>;
       fontFamily?: string;
       typesetMode?: TextObject['typesetMode'];
       borderRadius?: number;
@@ -160,6 +161,7 @@ export async function requestStudioOcr(
     fontFamily: t.fontFamily || 'WildWords, CCWildWords, sans-serif',
     lines: t.lines,
     lineSpacing: t.lineSpacing,
+    positionedLines: t.positionedLines,
     typesetMode: t.typesetMode,
     borderRadius: t.borderRadius,
     isRounded: t.isRounded,

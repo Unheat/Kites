@@ -633,6 +633,7 @@ export class PipelineOrchestrator {
           direction: renderInfo?.direction ?? dir,
           lines: renderInfo?.lines,
           lineSpacing: renderInfo?.lineSpacing,
+          positionedLines: renderInfo?.positionedLines,
           typesetMode,
           borderRadius,
           isRounded,

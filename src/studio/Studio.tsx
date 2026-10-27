@@ -666,6 +666,7 @@ export const Studio: React.FC<StudioProps> = ({
               direction: (obj.isVertical ? 'v' : 'h') as 'v' | 'h',
               lines: obj.lines,
               lineSpacing: obj.lineSpacing,
+              positionedLines: obj.positionedLines,
               typesetMode: obj.typesetMode,
               borderRadius: obj.borderRadius,
               isRounded: obj.isRounded,
@@ -886,13 +887,13 @@ export const Studio: React.FC<StudioProps> = ({
       <main className="flex-1 flex flex-col h-full bg-[#12141c] border border-[#262a3b] rounded-xl shadow-2xl overflow-hidden">
         {/* Canvas Top Bar */}
         <div className="w-full h-9 bg-[#141724] border-b border-[#262a3b] px-3 flex items-center justify-between text-xs text-slate-300 shrink-0 select-none z-30">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 min-w-0">
             {/* Breadcrumb back to Projects Dashboard */}
             {onBackToProjects && (
               <button
                 type="button"
                 onClick={onBackToProjects}
-                className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#090a0f] border border-[#262a3b] text-slate-300 hover:text-white hover:bg-[#1c1f2e] text-xs font-semibold transition cursor-pointer"
+                className="shrink-0 flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#090a0f] border border-[#262a3b] text-slate-300 hover:text-white hover:bg-[#1c1f2e] text-xs font-semibold transition cursor-pointer"
                 title="Back to Projects Dashboard"
               >
                 <ChevronLeft className="w-3.5 h-3.5" />
@@ -906,7 +907,7 @@ export const Studio: React.FC<StudioProps> = ({
             )}
 
             {/* 3-Way Presentation View Mode Segmented Control */}
-            <div className="flex items-center p-0.5 rounded-lg bg-[#090a0f] border border-[#262a3b]">
+            <div className="flex items-center p-0.5 rounded-lg bg-[#090a0f] border border-[#262a3b] shrink-0 [&_span]:whitespace-nowrap">
               <button
                 type="button"
                 onClick={() => studioStore.setViewMode('original')}
@@ -949,7 +950,7 @@ export const Studio: React.FC<StudioProps> = ({
               onClick={() => studioStore.setState({ hideBoxes: !hideBoxes })}
               title="Hide Boxes (Preview clean page without dashed outlines)"
               disabled={viewMode !== 'translated'}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-medium transition ${
+              className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-medium transition whitespace-nowrap ${
                 viewMode !== 'translated'
                   ? 'opacity-40 cursor-not-allowed border-[#262a3b] bg-[#090a0f] text-slate-500'
                   : hideBoxes
@@ -958,14 +959,14 @@ export const Studio: React.FC<StudioProps> = ({
               }`}
             >
               {hideBoxes ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-              <span>{hideBoxes ? 'Show Boxes' : 'Hide Boxes'}</span>
+              <span className="hidden md:inline">{hideBoxes ? 'Show Boxes' : 'Hide Boxes'}</span>
             </button>
           </div>
 
-          <span className="font-medium text-slate-400 truncate max-w-sm text-center">{jobTitle}</span>
+          <span className="flex-1 min-w-0 px-2 font-medium text-slate-400 truncate text-center">{jobTitle}</span>
 
-          <div className="flex items-center gap-2">
-            <span className="font-mono text-slate-500 text-[11px] hidden sm:inline">
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="font-mono text-slate-500 text-[11px] hidden lg:inline">
               Canvas: {imageWidth} × {imageHeight}
             </span>
 

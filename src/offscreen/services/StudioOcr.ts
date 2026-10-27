@@ -302,6 +302,7 @@ export async function runStudioOcr(
 
     let precomputedLines: string[] | undefined = undefined;
     let precomputedFontSize: number | undefined = undefined;
+    let precomputedPositionedLines: Array<{ text: string; x: number; y: number; width: number; height: number }> | undefined = undefined;
 
     if (!isVertical && texts[index]) {
       const safeMeasure = createSafeCanvas(geometry.w, geometry.h);
@@ -314,6 +315,7 @@ export async function runStudioOcr(
         if (contourRes.lines.length > 0) {
           precomputedLines = contourRes.lines;
           precomputedFontSize = contourRes.fontSize;
+          precomputedPositionedLines = contourRes.positionedLines;
         }
       }
     }
@@ -344,6 +346,7 @@ export async function runStudioOcr(
         ? Math.round(detectedFontSize)
         : undefined),
       lines: precomputedLines,
+      positionedLines: precomputedPositionedLines,
       typesetMode,
       borderRadius,
       isRounded,

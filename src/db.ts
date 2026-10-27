@@ -82,6 +82,8 @@ export interface TextBlock {
   isRounded?: boolean;
   /** Organic bubble contour relative to (posX, posY) for scanline contour typesetting in Studio. */
   contourPoints?: Array<{ x: number; y: number }>;
+  /** Koharu scanline placements (box-local) so Studio paints the exact baked layout before any edit. */
+  positionedLines?: Array<{ text: string; x: number; y: number; width: number; height: number }>;
   bold?: boolean;
   italic?: boolean;
   align?: 'left' | 'center' | 'right';

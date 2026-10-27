@@ -78,6 +78,20 @@ describe('persisted renderer layout restoration', () => {
     expect(restored.text).not.toContain('Every-');
   });
 
+  it('restores Koharu scanline placements so first open paints the exact baked layout', () => {
+    const positionedBlock: TextBlock = {
+      ...block,
+      lines: ['OTHER PEOPLE', 'ARE ALSO HERE'],
+      positionedLines: [
+        { text: 'OTHER PEOPLE', x: 4, y: 6, width: 92, height: 18 },
+        { text: 'ARE ALSO HERE', x: 8, y: 30, width: 84, height: 18 },
+      ],
+    };
+    const restored = restoreTextObject(positionedBlock);
+    expect(restored.positionedLines).toEqual(positionedBlock.positionedLines);
+    expect(restored.lines).toEqual(positionedBlock.lines);
+  });
+
   it('heals uppercase plain-hyphen splits from legacy pre-marker rows', () => {
     const upperBlock: TextBlock = {
       ...block, translatedText: 'EVERYONE ELSE IS HERE', lines: ['EVERY-', 'ONE ELSE IS HERE'],

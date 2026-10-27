@@ -9,6 +9,9 @@ export const ROTATION_HANDLE_OFFSET = 24;
 /** Offset in image pixels for secondary auxiliary handles (font size & wrap). */
 export const AUX_HANDLE_OFFSET = 16;
 
+/** Dashed organic-contour outline color (Koharu-style balloon silhouette). */
+export const CONTOUR_OUTLINE_COLOR = '#38bdf8';
+
 export class CanvasFurniture {
   /**
    * Draws selection border, 8-point handles, rotation nub, font-size nub, and wrap handle.
@@ -42,6 +45,25 @@ export class CanvasFurniture {
     ctx.setLineDash(isSkipped ? [2, 3] : [4, 4]);
     ctx.strokeRect(0, 0, obj.width, obj.height);
     ctx.setLineDash([]);
+
+    // 1b. Koharu-style organic contour: when the object typesets on a real 2D
+    // bubble contour, show that silhouette so the editing surface matches the
+    // scanline space the text is placed in (and the baked page).
+    const contour = obj.contourPoints;
+    if (!isSkipped && contour && contour.length >= 3
+      && (obj.typesetMode === 'contour' || obj.typesetMode === 'ellipse')) {
+      ctx.beginPath();
+      ctx.moveTo(contour[0].x, contour[0].y);
+      for (let i = 1; i < contour.length; i++) {
+        ctx.lineTo(contour[i].x, contour[i].y);
+      }
+      ctx.closePath();
+      ctx.strokeStyle = CONTOUR_OUTLINE_COLOR;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([5, 4]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
 
     // 2. Draw stem line to rotation handle
     ctx.beginPath();

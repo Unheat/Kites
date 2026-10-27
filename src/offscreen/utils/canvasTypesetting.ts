@@ -7,6 +7,7 @@ import {
   defaultLayoutFits,
   type DefaultRenderRegion
 } from './cotransDefaultRenderer';
+import type { PositionedLine } from './contourTypeset';
 import { fitFontSizeWithLines, decollideBoxes, fontSpec, createMeasureCache } from './typesetLayout';
 import { pickTextColor } from '../../shared/utils/textColor';
 import { getFontSizeMinimumBase } from '../engines/ocr/tallStripTiling';
@@ -452,6 +453,8 @@ export interface RenderedBlockInfo {
   angle: number;
   /** Actual baseline step divided by font size. */
   lineSpacing: number;
+  /** Koharu scanline placements drawn for contour typeset blocks (box-local space). */
+  positionedLines?: PositionedLine[];
 }
 
 /**
@@ -796,6 +799,7 @@ function renderTextBlocksDefault(
           direction: 'h',
           angle: (calculateRotationAngle(plan.dstPoints) * 180) / Math.PI,
           lineSpacing: info.lineSpacing,
+          positionedLines: info.positionedLines,
         };
       }
     } catch (e) {
