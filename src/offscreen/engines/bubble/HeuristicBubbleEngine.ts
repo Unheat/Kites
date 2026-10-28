@@ -81,16 +81,32 @@ export class HeuristicBubbleEngine implements IBubbleEngine {
 
   /**
    * Assigns XianScan shared-chamber proposal identities (expansion.rs:186-194 parity).
-   * When two carriers overlap with IoU >= {@link XIANSCAN_SHARED_BUBBLE_IOU}, the heuristic
-   * extracted the same physical chamber for two utterances: both receive the same proposal
-   * object so the tier-blind resolver groups and partitions them as one balloon.
+   *
+   * Base rule (1:1 donor parity): the donor tests `box_iou(bubble_i, bubble_j) >= 0.5`
+   * on detector bubble boxes to decide two regions share one balloon. The heuristic
+   * carrier is Kites' bubble-box analog, so carrier IoU >= {@link XIANSCAN_SHARED_BUBBLE_IOU}
+   * merges the pair: both boxes receive the SAME proposal object — the mainline grouping
+   * signal — and the tier-blind resolver partitions them as one balloon.
+   *
+   * Ported branch improvement (adapted from the 0f390e6 dominant-shape rule): when a pair
+   * merges, both members adopt the fuller chamber extraction (larger reconstructed/interior
+   * mask area), so one physical balloon yields ONE curvature and contour for every
+   * utterance inside it. Merge condition itself stays pure XianScan — mask evidence is
+   * never a blocker.
    *
    * @param boxes - Original OCR utterance boxes.
    * @param carriers - Per-box extracted carrier chambers.
-   * @returns Proposal identity per box (null for independent single-chamber bubbles).
+   * @param shapes - Per-box morphology shape evidence.
+   * @returns Proposal identity per box (null for independent single-chamber bubbles) and
+   *          shape evidence normalized so merged pairs share their dominant chamber mask.
    */
-  static associateSharedChambers(boxes: BoxRect[], carriers: (BoxRect | null)[]): (BoxRect | null)[] {
+  static associateSharedChambers(
+    boxes: BoxRect[],
+    carriers: (BoxRect | null)[],
+    shapes: (BubbleShapeEvidence | undefined)[] = []
+  ): { proposals: (BoxRect | null)[]; shapes: (BubbleShapeEvidence | undefined)[] } {
     const proposals: (BoxRect | null)[] = boxes.map(() => null);
+    const resolvedShapes = [...shapes];
 
     for (let i = 0; i < boxes.length; i++) {
       const a = carriers[i];
@@ -103,10 +119,42 @@ export class HeuristicBubbleEngine implements IBubbleEngine {
         const shared: BoxRect = proposals[i] ?? proposals[j] ?? { ...a };
         proposals[i] = shared;
         proposals[j] = shared;
+
+        const dominant = HeuristicBubbleEngine.fullerShape(resolvedShapes[i], resolvedShapes[j]);
+        if (dominant) {
+          resolvedShapes[i] = dominant;
+          resolvedShapes[j] = dominant;
+        }
       }
     }
 
-    return proposals;
+    return { proposals, shapes: resolvedShapes };
+  }
+
+  /**
+   * Picks the fuller of two shape evidences by active mask pixel count
+   * (reconstructed chamber preferred over raw interior).
+   *
+   * @param a - First shape evidence.
+   * @param b - Second shape evidence.
+   * @returns The evidence with the larger chamber mask, or the defined one when the other is missing.
+   */
+  private static fullerShape(
+    a: BubbleShapeEvidence | undefined,
+    b: BubbleShapeEvidence | undefined
+  ): BubbleShapeEvidence | undefined {
+    if (!a) return b;
+    if (!b) return a;
+    const maskArea = (shape: BubbleShapeEvidence): number => {
+      const mask = shape.reconstructed ?? shape.interior;
+      if (!mask) return 0;
+      let count = 0;
+      for (let i = 0; i < mask.length; i++) {
+        if (mask[i] > 0) count++;
+      }
+      return count;
+    };
+    return maskArea(a) >= maskArea(b) ? a : b;
   }
 
   /**
@@ -133,15 +181,15 @@ export class HeuristicBubbleEngine implements IBubbleEngine {
       shapes.push(shape);
     }
 
-    const proposals = HeuristicBubbleEngine.associateSharedChambers(textBoxes, carriers);
-    const { curvatures, contours } = finalizeBubbleGeometry(textBoxes, carriers, shapes);
+    const { proposals, shapes: associatedShapes } = HeuristicBubbleEngine.associateSharedChambers(textBoxes, carriers, shapes);
+    const { curvatures, contours } = finalizeBubbleGeometry(textBoxes, carriers, associatedShapes);
 
     return {
       tier: 'heuristic',
       pageWidth: image.width,
       carriers,
       proposals,
-      shapes,
+      shapes: associatedShapes,
       curvatures,
       contours,
     };

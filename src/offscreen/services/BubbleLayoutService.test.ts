@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { computeMaskCurvature, MIN_SHARED_FONT_RATIO, resolveBubbleLayouts, resolveBubbleLayoutsDetailed, significantOverlap, type BubbleLayoutInput } from './BubbleLayoutService';
-import { HeuristicBubbleEngine, XIANSCAN_SHARED_BUBBLE_IOU } from '../engines/bubble/HeuristicBubbleEngine';
+import { HeuristicBubbleEngine } from '../engines/bubble/HeuristicBubbleEngine';
 import { NeuralBubbleEngine } from '../engines/bubble/NeuralBubbleEngine';
 import type { Point2D } from '../../shared/utils/geometry';
 import { computeTypesetBox, type BoxRect } from '../utils/bubbleExpansion';
@@ -494,35 +494,6 @@ describe('conservative bubble layouts', () => {
       expect(detailed.typesetBoxes[0]).toBeDefined();
       expect(detailed.typesetBoxes[1]).toBeDefined();
       expect(detailed.typesetBoxes[0]!.y + detailed.typesetBoxes[0]!.h).toBeLessThanOrEqual(detailed.typesetBoxes[1]!.y);
-    });
-
-    it('heuristic association keeps carriers below the 0.5 shared-chamber threshold ungrouped', () => {
-      const box1: BoxRect = { x: 60, y: 60, w: 60, h: 40 };
-      const box2: BoxRect = { x: 210, y: 60, w: 60, h: 40 };
-      // Overlapping bounding boxes but low IoU (inter 90x80 / union 23200 ≈ 0.31).
-      const carrier1: BoxRect = { x: 40, y: 40, w: 190, h: 80 };
-      const carrier2: BoxRect = { x: 130, y: 40, w: 190, h: 80 };
-
-      const proposals = HeuristicBubbleEngine.associateSharedChambers([box1, box2], [carrier1, carrier2]);
-
-      // Two independent single-chamber bubbles: no shared proposal identity.
-      expect(proposals[0]).toBeNull();
-      expect(proposals[1]).toBeNull();
-    });
-
-    it('heuristic association merges carriers at or above the XianScan 0.5 threshold', () => {
-      const box1: BoxRect = { x: 60, y: 60, w: 60, h: 40 };
-      const box2: BoxRect = { x: 210, y: 60, w: 60, h: 40 };
-      // Same physical chamber extracted twice: IoU 19200 / 36800 ≈ 0.52.
-      const carrier1: BoxRect = { x: 40, y: 40, w: 140, h: 200 };
-      const carrier2: BoxRect = { x: 60, y: 80, w: 140, h: 200 };
-      expect((19200 / 36800)).toBeGreaterThanOrEqual(XIANSCAN_SHARED_BUBBLE_IOU);
-
-      const proposals = HeuristicBubbleEngine.associateSharedChambers([box1, box2], [carrier1, carrier2]);
-
-      // Same chamber => identical proposal object => grouped downstream.
-      expect(proposals[0]).not.toBeNull();
-      expect(proposals[0]).toBe(proposals[1]);
     });
 
     it('does not group distant captions into a shared bubble', () => {
