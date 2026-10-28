@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { acquireBubbleGeometry, computeMaskCurvature, MIN_SHARED_FONT_RATIO, resolveBubbleLayouts, resolveBubbleLayoutsDetailed, significantOverlap, type BubbleLayoutInput } from './BubbleLayoutService';
 import type { Point2D } from '../../shared/utils/geometry';
 import { computeTypesetBox, type BoxRect } from '../utils/bubbleExpansion';
-import type { BubbleShapeEvidence } from '../engines/bubble/HeuristicBubbleExtractor';
+import type { BubbleShapeEvidence, ImagePatchData } from '../engines/bubble/HeuristicBubbleExtractor';
 
 const carrier = { x: 0, y: 20, w: 200, h: 300 };
 const verticalPair = [{ x: 80, y: 70, w: 40, h: 40 }, { x: 80, y: 220, w: 40, h: 40 }];
@@ -444,6 +444,51 @@ describe('conservative bubble layouts', () => {
       });
       expect(detailed.typesetBoxes.every(Boolean)).toBe(true);
       expect(detailed.skipped).toEqual([false, false]);
+    });
+  });
+
+  describe('heuristic multi-utterance joined bubble acquisition', () => {
+    it('associates connected heuristic bubbles into shared proposals for Voronoi partitioning', () => {
+      const W = 300, H = 400;
+      const data = new Uint8ClampedArray(W * H * 4).fill(40);
+      for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+          const inTop = (x - 150) ** 2 + (y - 120) ** 2 <= 50 ** 2;
+          const inBot = (x - 150) ** 2 + (y - 220) ** 2 <= 60 ** 2;
+          if (inTop || inBot) {
+            const idx = (y * W + x) * 4;
+            data[idx] = 255;
+            data[idx + 1] = 255;
+            data[idx + 2] = 255;
+            data[idx + 3] = 255;
+          }
+        }
+      }
+      const image: ImagePatchData = { width: W, height: H, data };
+      const boxTop: BoxRect = { x: 135, y: 105, w: 30, h: 30 };
+      const boxBottom: BoxRect = { x: 130, y: 200, w: 40, h: 40 };
+      const boxes = [boxTop, boxBottom];
+
+      // Heuristic mode: neuralProposals is undefined
+      const geom = acquireBubbleGeometry(image, boxes);
+
+      expect(geom.proposals[0]).toBeDefined();
+      expect(geom.proposals[1]).toBeDefined();
+      // Must share identical proposal reference
+      expect(geom.proposals[0]).toBe(geom.proposals[1]);
+
+      const detailed = resolveBubbleLayoutsDetailed({
+        ...geom,
+        boxes,
+        pageWidth: W,
+        pageHeight: H,
+        accept: () => true,
+      });
+
+      // Both utterances must receive partitioned sub-chambers
+      expect(detailed.typesetBoxes[0]).toBeDefined();
+      expect(detailed.typesetBoxes[1]).toBeDefined();
+      expect(detailed.typesetBoxes[0]!.y + detailed.typesetBoxes[0]!.h).toBeLessThanOrEqual(detailed.typesetBoxes[1]!.y);
     });
   });
 });

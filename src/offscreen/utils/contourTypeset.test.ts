@@ -167,4 +167,28 @@ describe('Koharu contourTypeset', () => {
       ]);
     });
   });
+
+  describe('wrapTextContour positionedLines fallback guarantee', () => {
+    it('always synthesizes positionedLines within contour bounds even when text severely overflows', () => {
+      const tinyContour = [
+        { x: 10, y: 50 },
+        { x: 30, y: 50 },
+        { x: 30, y: 70 },
+        { x: 10, y: 70 },
+      ];
+      const hugeText = 'VERY LONG SENTENCE THAT CANNOT FIT IN A TINY TWENTY PIXEL BOX AT ALL';
+      const result = wrapTextContour(hugeText, tinyContour, mockCtx, 'sans-serif', {
+        minFontSize: 9,
+      });
+
+      expect(result.positionedLines).toBeDefined();
+      expect(result.positionedLines!.length).toBeGreaterThanOrEqual(1);
+      const line = result.positionedLines![0];
+      expect(Number.isFinite(line.x)).toBe(true);
+      expect(Number.isFinite(line.y)).toBe(true);
+      // y must be within or very close to contour bounds [50, 70]
+      expect(line.y).toBeGreaterThanOrEqual(50);
+      expect(line.y).toBeLessThanOrEqual(80);
+    });
+  });
 });

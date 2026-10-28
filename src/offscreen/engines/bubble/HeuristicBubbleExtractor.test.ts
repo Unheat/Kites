@@ -232,4 +232,45 @@ describe('HeuristicBubbleExtractor', () => {
     }
     expect(evidence?.observedInterior.some((val) => val === 1)).toBe(true);
   });
+
+  it('connects multi-utterance stacked bubbles into shared chamber and marks connectedBoxIndices', () => {
+    const W = 300;
+    const H = 400;
+    // Dark background (gray 40)
+    const data = new Uint8ClampedArray(W * H * 4).fill(40);
+    // Draw figure-8 / joined bubble with two connected circular lobes
+    // Top lobe center (150, 120, radius 50)
+    // Bottom lobe center (150, 220, radius 60)
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const inTopLobe = (x - 150) ** 2 + (y - 120) ** 2 <= 50 ** 2;
+        const inBottomLobe = (x - 150) ** 2 + (y - 220) ** 2 <= 60 ** 2;
+        if (inTopLobe || inBottomLobe) {
+          const idx = (y * W + x) * 4;
+          data[idx] = 255;
+          data[idx + 1] = 255;
+          data[idx + 2] = 255;
+          data[idx + 3] = 255;
+        }
+      }
+    }
+
+    const image: ImagePatchData = { width: W, height: H, data };
+    const boxTop: BoxRect = { x: 135, y: 105, w: 30, h: 30 };
+    const boxBottom: BoxRect = { x: 130, y: 200, w: 40, h: 40 };
+    const allBoxes = [boxTop, boxBottom];
+
+    let evidence: import('./HeuristicBubbleExtractor').BubbleShapeEvidence | undefined;
+    const carrier = HeuristicBubbleExtractor.extractCarrierBox(image, boxTop, {
+      allTextBoxes: allBoxes,
+      onShapeEvidence: (shape) => { evidence = shape; },
+    });
+
+    expect(carrier).not.toBeNull();
+    // Carrier spans across both lobes
+    expect(carrier!.y).toBeLessThanOrEqual(boxTop.y);
+    expect(carrier!.y + carrier!.h).toBeGreaterThanOrEqual(boxBottom.y + boxBottom.h);
+    // Verified connected component includes both text boxes
+    expect(evidence?.connectedBoxIndices).toEqual([0, 1]);
+  });
 });

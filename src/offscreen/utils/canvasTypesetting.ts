@@ -395,19 +395,21 @@ export function measureBubbleLayoutFontSize(
   const isContour = hasContour || block.typesetMode === 'contour' || (block.isRounded && block.typesetMode !== 'balloon' && block.typesetMode !== 'simple');
   const isSimple = !isContour && block.typesetMode === 'simple';
 
-  if (isContour || isSimple) {
-    const strategy = TypesetStrategyFactory.resolve({
-      typesetMode: block.typesetMode,
-      isFixed,
-      hasContour,
-      isRounded: block.isRounded
-    });
+    if (isContour || isSimple) {
+      const strategy = TypesetStrategyFactory.resolve({
+        typesetMode: block.typesetMode,
+        isFixed,
+        hasContour,
+        isRounded: block.isRounded
+      });
 
-    let targetCenterY: number | undefined;
-    if (block.polygon && block.polygon.length >= 3) {
-      const polyCentroidY = block.polygon.reduce((sum, p) => sum + p.y, 0) / block.polygon.length;
-      targetCenterY = polyCentroidY - box.y;
-    }
+      // Contour dialogue centers organically within contour (Koharu layout.rs:1928).
+      // Only unconstrained simple mode without contour anchors to source centroid.
+      let targetCenterY: number | undefined;
+      if (!isContour && block.polygon && block.polygon.length >= 3) {
+        const polyCentroidY = block.polygon.reduce((sum, p) => sum + p.y, 0) / block.polygon.length;
+        targetCenterY = polyCentroidY - box.y;
+      }
 
     const res = strategy.typeset(
       block.text.trim(),

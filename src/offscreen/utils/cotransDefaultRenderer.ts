@@ -138,8 +138,13 @@ export function renderRegionDefault(
     isRounded: region.isRounded
   });
 
+  // Koharu centered_block_origin parity: Speech bubble dialogue in contour or fixed mode
+  // centers organically inside the bubble chamber/contour (crates/koharu-renderer/src/layout.rs:1928),
+  // preventing text from being anchored to the bottom/top where foreign OCR glyphs sat.
+  // targetCenterY is only used for unconstrained 'balloon' mode (Auto Balloon / free text).
+  const isContourMode = strategy.mode === 'contour' || hasContour || Boolean(region.isRounded);
   let targetCenterY: number | undefined;
-  if (region.polygon && region.polygon.length >= 3) {
+  if (!isContourMode && region.polygon && region.polygon.length >= 3) {
     const polyCentroidY = region.polygon.reduce((sum, p) => sum + p.y, 0) / region.polygon.length;
     targetCenterY = polyCentroidY - tl.y;
   }

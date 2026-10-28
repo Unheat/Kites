@@ -945,8 +945,20 @@ export function wrapTextContour(
 
   const toResult = (res: LineBreakResult | null, fallbackSize: number, overflowedFallback: boolean = false): WrapContourResult => {
     if (!res) {
+      const lineHeight = fallbackSize * linePitch;
+      const inkHeight = fallbackSize * GLYPH_INK_HEIGHT_RATIO;
+      const blockAir = Math.max(inlineAir, Math.round(fallbackSize * 0.35));
+      const usableHeight = containerH - 2 * blockAir;
+      const startY = minY + blockAir + Math.max(0, (usableHeight - inkHeight) / 2);
       return {
         lines: [cleanText],
+        positionedLines: [{
+          text: cleanText,
+          x: minX + inlineAir,
+          y: startY,
+          width: Math.max(20, containerW - 2 * inlineAir),
+          height: lineHeight
+        }],
         fontSize: Math.round(fallbackSize),
         width: containerW,
         height: containerH,

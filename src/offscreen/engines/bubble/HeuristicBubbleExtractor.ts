@@ -47,6 +47,8 @@ export interface BubbleShapeEvidence {
   reconstructed?: Uint8Array;
   carrierBox?: BoxRect;
   isSeveredCarrier?: boolean;
+  /** Sibling text box indices verified to be enclosed in this same connected bubble chamber. */
+  connectedBoxIndices?: number[];
 }
 
 export interface SeveredTailResult {
@@ -100,10 +102,29 @@ export class HeuristicBubbleExtractor {
     const padX = Math.round(Math.max(50, textBox.w * 1.0));
     const padY = Math.round(Math.max(50, textBox.h * 1.0));
 
-    const minX = Math.max(0, textBox.x - padX);
-    const minY = Math.max(0, textBox.y - padY);
-    const maxX = Math.min(imgW, textBox.x + textBox.w + padX);
-    const maxY = Math.min(imgH, textBox.y + textBox.h + padY);
+    let minX = Math.max(0, textBox.x - padX);
+    let minY = Math.max(0, textBox.y - padY);
+    let maxX = Math.min(imgW, textBox.x + textBox.w + padX);
+    let maxY = Math.min(imgH, textBox.y + textBox.h + padY);
+
+    // Multi-utterance / joined bubble proximity patch expansion:
+    // If nearby sibling text boxes exist within proximity distance, expand the patch
+    // bounds to encompass the connected cluster. This prevents patch clipping at narrow
+    // bubble necks between joined lobes (e.g. L-shaped or figure-8 double bubbles).
+    if (options.allTextBoxes && options.allTextBoxes.length > 1) {
+      for (const sibling of options.allTextBoxes) {
+        if (sibling === textBox) continue;
+        const dx = Math.max(0, Math.max(textBox.x, sibling.x) - Math.min(textBox.x + textBox.w, sibling.x + sibling.w));
+        const dy = Math.max(0, Math.max(textBox.y, sibling.y) - Math.min(textBox.y + textBox.h, sibling.y + sibling.h));
+        const maxDim = Math.max(textBox.w, textBox.h, sibling.w, sibling.h);
+        if (dx <= maxDim * 2.5 && dy <= maxDim * 2.5) {
+          minX = Math.min(minX, Math.max(0, sibling.x - padX));
+          minY = Math.min(minY, Math.max(0, sibling.y - padY));
+          maxX = Math.max(maxX, Math.min(imgW, sibling.x + sibling.w + padX));
+          maxY = Math.max(maxY, Math.min(imgH, sibling.y + sibling.h + padY));
+        }
+      }
+    }
 
     const origPatchW = maxX - minX;
     const origPatchH = maxY - minY;
@@ -204,6 +225,30 @@ export class HeuristicBubbleExtractor {
       return null;
     }
 
+    // Verify which sibling text boxes from allTextBoxes are connected into this same chamber
+    const connectedBoxIndices: number[] = [];
+    if (options.allTextBoxes && options.allTextBoxes.length > 1 && severed.reconstructed) {
+      const rec = severed.reconstructed;
+      const sX = patchW / origPatchW;
+      const sY = patchH / origPatchH;
+      for (let bi = 0; bi < options.allTextBoxes.length; bi++) {
+        const b = options.allTextBoxes[bi];
+        if (b === textBox) {
+          connectedBoxIndices.push(bi);
+          continue;
+        }
+        const cx = Math.round(b.x + b.w / 2);
+        const cy = Math.round(b.y + b.h / 2);
+        if (cx >= minX && cx < maxX && cy >= minY && cy < maxY) {
+          const px = Math.min(patchW - 1, Math.max(0, Math.round((cx - minX) * sX)));
+          const py = Math.min(patchH - 1, Math.max(0, Math.round((cy - minY) * sY)));
+          if (rec[py * patchW + px] === 1) {
+            connectedBoxIndices.push(bi);
+          }
+        }
+      }
+    }
+
     // Preserve morphology evidence for conservative multi-lobe layout validation.
     options.onShapeEvidence?.({
       x: minX,
@@ -219,6 +264,7 @@ export class HeuristicBubbleExtractor {
       reconstructed: severed.reconstructed,
       carrierBox: severed.carrier,
       isSeveredCarrier: true,
+      connectedBoxIndices: connectedBoxIndices.length > 1 ? connectedBoxIndices : undefined,
     });
 
     const carrier = severed.carrier;

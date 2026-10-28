@@ -146,19 +146,19 @@ export function acquireBubbleGeometry(
   neuralProposals?: BoxRect[] | null,
   neuralShapes?: (BubbleShapeEvidence | undefined)[] | null
 ): BubbleGeometry {
-  const carriers: (BoxRect | null)[] = [];
-  const proposals: (BoxRect | null)[] = [];
-  const shapes: (BubbleShapeEvidence | undefined)[] = [];
+  const carriers: (BoxRect | null)[] = new Array(boxes.length).fill(undefined);
+  const proposals: (BoxRect | null)[] = new Array(boxes.length).fill(undefined);
+  const shapes: (BubbleShapeEvidence | undefined)[] = new Array(boxes.length).fill(undefined);
   const curvatures: { isRounded: boolean; borderRadius: number }[] = [];
   const contours: (Point2D[] | undefined)[] = [];
   const isNeuralMode = neuralProposals !== undefined && neuralProposals !== null;
-  boxes.forEach((box, index) => {
-    const proposal = isNeuralMode
-      ? NeuralBubbleDetector.matchBubble(box, neuralProposals, BUBBLE_MATCH_COVERAGE)
-      : null;
-    proposals[index] = proposal;
+
+  for (let index = 0; index < boxes.length; index++) {
+    const box = boxes[index];
 
     if (isNeuralMode) {
+      const proposal = NeuralBubbleDetector.matchBubble(box, neuralProposals, BUBBLE_MATCH_COVERAGE);
+      proposals[index] = proposal;
       if (proposal) {
         shapes[index] = neuralShapes?.[index];
         carriers[index] = neuralShapes?.[index]?.carrierBox ?? proposal;
@@ -168,13 +168,36 @@ export function acquireBubbleGeometry(
         carriers[index] = null;
       }
     } else {
-      // Heuristic Mode (Tier 1): extract carrier via morphological opening on pixel buffer
-      const heuristic = HeuristicBubbleExtractor.extractCarrierBox(image, box, {
-        allTextBoxes: boxes,
-        onShapeEvidence: (shape) => { shapes[index] = shape; }
-      });
-      carriers[index] = heuristic;
+      // Heuristic Mode (Tier 1): check if already populated by a connected sibling
+      if (carriers[index] === undefined) {
+        let shape: BubbleShapeEvidence | undefined;
+        const heuristic = HeuristicBubbleExtractor.extractCarrierBox(image, box, {
+          allTextBoxes: boxes,
+          onShapeEvidence: (s) => { shape = s; }
+        });
+        carriers[index] = heuristic;
+        shapes[index] = shape;
+
+        // Multi-utterance joined bubble: if morphological chamber connects sibling boxes,
+        // share the proposal identity and carrier so downstream Voronoi flow cells partition them.
+        if (heuristic && shape?.connectedBoxIndices && shape.connectedBoxIndices.length > 1) {
+          const sharedProposal: BoxRect = { ...heuristic };
+          proposals[index] = sharedProposal;
+          for (const siblingIdx of shape.connectedBoxIndices) {
+            if (siblingIdx !== index && siblingIdx >= 0 && siblingIdx < boxes.length) {
+              carriers[siblingIdx] = heuristic;
+              shapes[siblingIdx] = shape;
+              proposals[siblingIdx] = sharedProposal;
+            }
+          }
+        } else {
+          proposals[index] = null;
+        }
+      }
     }
+  }
+
+  boxes.forEach((box, index) => {
     curvatures[index] = computeMaskCurvature(shapes[index], carriers[index]);
 
     // Extract closed 2D polygon contour from shape evidence if available
