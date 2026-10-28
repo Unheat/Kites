@@ -32,6 +32,18 @@ export const MINIMUM_READABLE_FONT_SIZE = 9.0;
 /** Maximum font size evaluated when sizing dialogue against container dimensions (Koharu text_renderer.rs:322-336). */
 export const MAXIMUM_EVALUATED_FONT_SIZE = 24.0;
 
+/** Maximum font size for short dialogue sentences (<= 3 words) in speech balloons (Koharu automatic_maximum). */
+export const DIALOGUE_SENTENCE_MAX_FONT_SIZE = 20.0;
+
+/** Maximum font size for dense multi-line dialogue blocks (> 3 words) to prevent awkward 1-word lines. */
+export const DIALOGUE_DENSE_MAX_FONT_SIZE = 18.0;
+
+/** Usable width fraction of container width when calculating automatic font ceiling. */
+export const CONTAINER_WIDTH_CEILING_RATIO = 0.85;
+
+/** Height fraction of container height when calculating automatic font ceiling. */
+export const CONTAINER_HEIGHT_CEILING_RATIO = 0.40;
+
 /** Penalty weight applied to line length slack in DP optimization. */
 export const LINE_SLACK_WEIGHT = 1000.0;
 
@@ -842,10 +854,15 @@ export function wrapTextContour(
   // from ballooning to huge font sizes and stretching into single-word lines.
   const wordCount = cleanText.split(/\s+/).filter(Boolean).length;
   const isScream = wordCount === 1 && /^[A-Z0-9\s!！?？]+$/.test(cleanText);
-  const dialogueCeil = isScream ? MAXIMUM_EVALUATED_FONT_SIZE : (wordCount <= 3 ? 20 : 18);
+  const dialogueCeil = isScream
+    ? MAXIMUM_EVALUATED_FONT_SIZE
+    : (wordCount <= 3 ? DIALOGUE_SENTENCE_MAX_FONT_SIZE : DIALOGUE_DENSE_MAX_FONT_SIZE);
   const autoCeil = Math.min(
     dialogueCeil,
-    Math.round(Math.min(containerW * 0.85, Math.max(16, containerH * 0.40)))
+    Math.round(Math.min(
+      containerW * CONTAINER_WIDTH_CEILING_RATIO,
+      Math.max(MINIMUM_READABLE_FONT_SIZE, containerH * CONTAINER_HEIGHT_CEILING_RATIO)
+    ))
   );
 
   const maxFont = options.maxFontSize ? Math.max(minFont, Math.min(options.maxFontSize, dialogueCeil)) : Math.max(minFont, autoCeil);
