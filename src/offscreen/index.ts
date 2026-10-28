@@ -38,6 +38,10 @@ void ensureFontsRegistered().catch((err) => {
   console.warn('[Offscreen] Font library registration failed:', err);
 });
 
+if (typeof window !== 'undefined') {
+  (window as any).__pipelineOrchestrator = pipelineOrchestrator;
+}
+
 chrome.runtime.onMessage.addListener((message: ProcessJobMessage | any, _sender: chrome.runtime.MessageSender, sendResponse: (response?: any) => void) => {
   if (message.target !== 'offscreen' || message.source !== 'background' || message.request !== true) {
     return false;

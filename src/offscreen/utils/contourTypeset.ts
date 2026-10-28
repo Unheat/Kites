@@ -29,8 +29,8 @@ export const FONT_BINARY_SEARCH_MAX_ITER = 10;
 /** Minimum allowed raster font size floor in pixels (matches Koharu MINIMUM_FONT_SIZE = 9.0 in renderer.rs:53). */
 export const MINIMUM_READABLE_FONT_SIZE = 9.0;
 
-/** Maximum font size evaluated when sizing against container dimensions. */
-export const MAXIMUM_EVALUATED_FONT_SIZE = 48.0;
+/** Maximum font size evaluated when sizing dialogue against container dimensions (Koharu text_renderer.rs:322-336). */
+export const MAXIMUM_EVALUATED_FONT_SIZE = 24.0;
 
 /** Penalty weight applied to line length slack in DP optimization. */
 export const LINE_SLACK_WEIGHT = 1000.0;
@@ -838,19 +838,27 @@ export function wrapTextContour(
   const inlineAir = options.inlineAir ?? DEFAULT_INLINE_AIR;
 
   // Koharu automatic_maximum (crates/koharu-renderer/src/text_renderer.rs:322-336):
-  // For horizontal bubble text, maximum font size is bounded by container width,
-  // preventing narrow vertical bubbles from inflating short sentences to 48px.
+  // Normal comic dialogue caps at 18-20px (screams up to 24px), preventing sentences
+  // from ballooning to huge font sizes and stretching into single-word lines.
+  const wordCount = cleanText.split(/\s+/).filter(Boolean).length;
+  const isScream = wordCount === 1 && /^[A-Z0-9\s!！?？]+$/.test(cleanText);
+  const dialogueCeil = isScream ? MAXIMUM_EVALUATED_FONT_SIZE : (wordCount <= 3 ? 20 : 18);
   const autoCeil = Math.min(
-    MAXIMUM_EVALUATED_FONT_SIZE,
-    Math.round(Math.min(containerW * 0.85, Math.max(26, containerH * 0.45)))
+    dialogueCeil,
+    Math.round(Math.min(containerW * 0.85, Math.max(16, containerH * 0.40)))
   );
 
-  const maxFont = options.maxFontSize ? Math.max(minFont, options.maxFontSize) : Math.max(minFont, autoCeil);
+  const maxFont = options.maxFontSize ? Math.max(minFont, Math.min(options.maxFontSize, dialogueCeil)) : Math.max(minFont, autoCeil);
 
   const stylePrefix = `${options.isItalic ? 'italic ' : ''}${options.isBold ? 'bold ' : ''}`;
 
+  const cleanFamily = (fontFamily || 'sans-serif').trim();
+  const familyStack = cleanFamily.includes(',')
+    ? cleanFamily
+    : (cleanFamily.startsWith('"') || cleanFamily.startsWith("'") ? cleanFamily : `"${cleanFamily}"`);
+
   const measureAt = (size: number) => {
-    ctx.font = `${stylePrefix}${Math.round(size)}px "${fontFamily}"`;
+    ctx.font = `${stylePrefix}${Math.round(size)}px ${familyStack}`;
     const rawMeasure = (s: string) => ctx.measureText(s).width;
     // The cache keys by the live ctx.font spec, so memoized widths stay identical
     // to raw ctx.measureText across probe sizes.

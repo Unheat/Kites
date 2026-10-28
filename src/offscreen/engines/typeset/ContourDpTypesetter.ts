@@ -32,9 +32,7 @@ export class ContourDpTypesetter implements ITypesetStrategy {
           { x: 0, y: container.h }
         ];
 
-    const maxFont = (options.maxFontSizeCap && !hasContour)
-      ? Math.min(options.maxFontSizeCap, Math.max(16, Math.round(container.h * 0.6)))
-      : (options.maxFontSize ?? Math.max(16, Math.round(container.h * 0.6)));
+    const maxFont = options.maxFontSize ?? options.maxFontSizeCap;
 
     const minFont = options.minFontSize ?? MINIMUM_READABLE_FONT_SIZE;
 

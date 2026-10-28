@@ -381,7 +381,11 @@ export function recalculateBlockTypeset(
     if (mode === 'simple') {
       const unhyphenated = unwrapWrappedText(text);
       const stylePrefix = `${style.italic ? 'italic ' : ''}${style.bold ? 'bold ' : ''}`;
-      ctx.font = `${stylePrefix}${Math.round(fallbackSize)}px "${fontFamily || 'sans-serif'}"`;
+      const cleanFamily = (fontFamily || 'sans-serif').trim();
+      const familyStack = cleanFamily.includes(',')
+        ? cleanFamily
+        : (cleanFamily.startsWith('"') || cleanFamily.startsWith("'") ? cleanFamily : `"${cleanFamily}"`);
+      ctx.font = `${stylePrefix}${Math.round(fallbackSize)}px ${familyStack}`;
       const measure = (s: string) => ctx.measureText(s).width;
       const words = unhyphenated.split(/\s+/).filter(Boolean);
       const lines = wrapRectangular(words, width, measure, targetLang);
@@ -404,10 +408,7 @@ export function recalculateBlockTypeset(
         ctx,
         fontFamily || 'sans-serif',
         {
-          minFontSize: 6,
-          // Match the ContourDpTypesetter bake ceiling (container height * 0.6) so the
-          // live preview picks the same font size the rendered page will.
-          maxFontSize: Math.max(16, Math.round(height * 0.6)),
+          minFontSize: 9,
           targetLang,
           isBold: style.bold,
           isItalic: style.italic

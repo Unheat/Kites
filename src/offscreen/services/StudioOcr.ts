@@ -308,8 +308,7 @@ export async function runStudioOcr(
       const safeMeasure = createSafeCanvas(geometry.w, geometry.h);
       if (safeMeasure?.ctx) {
         const contourRes = wrapTextContour(texts[index], contourPoints, safeMeasure.ctx, 'WildWords, CCWildWords, sans-serif', {
-          minFontSize: 8,
-          maxFontSize: Math.max(16, Math.round(geometry.h * 0.45)),
+          minFontSize: 9,
           targetLang: popupState.targetLang || 'en'
         });
         if (contourRes.lines.length > 0) {
@@ -328,8 +327,10 @@ export async function runStudioOcr(
       : (calculateRotationAngle(polygon) * 180) / Math.PI;
 
     const curvature = bubbleGeometry?.curvatures?.[resolvedIndex];
-    const isRounded = Boolean(curvature?.isRounded);
-    const borderRadius = curvature?.borderRadius ?? 0;
+    const rawContour = bubbleContours[resolvedIndex] ?? bubbleGeometry?.contours?.[resolvedIndex];
+    const hasOrganicContour = Boolean(rawContour && rawContour.length >= 3 && rawContour.length !== 4);
+    const isRounded = hasOrganicContour || Boolean(curvature?.isRounded);
+    const borderRadius = curvature?.borderRadius ?? (isRounded ? Math.round(Math.min(geometry.w, geometry.h) / 2) : 0);
     const typesetMode = expandedBox
       ? (isRounded ? 'contour' : 'simple')
       : 'balloon';

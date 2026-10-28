@@ -108,8 +108,9 @@ export function computeMaskCurvature(
   const endRatio = wCenter > 0 ? (wTop + wBot) / (2 * wCenter) : 0.5;
 
   // 1. Rectangular Narration / Caption Box:
-  // Fills corners evenly or width remains uniform from top to bottom (endRatio >= 0.75)
-  if (fillRatio >= 0.88 || (fillRatio >= 0.75 && endRatio >= 0.75)) {
+  // Only shapes that fill nearly 100% of the bounding quad with sharp square corners are rectangular captions.
+  // Speech bubbles with curved or vertical walls must not be falsely downgraded to rectangles.
+  if (fillRatio >= 0.94) {
     return { isRounded: false, borderRadius: 0 };
   }
 
@@ -440,10 +441,15 @@ export function resolveBubbleLayoutsDetailed(input: BubbleLayoutInput): Resolved
       return boxes.some((original, j) => {
         if (group.includes(j)) return false;
         const obstacle = result[j] ?? original;
-        return significantOverlap(current, obstacle);
+        const coll = significantOverlap(current, obstacle);
+        if (coll) {
+          console.log(`[Collision] Block ${i} (${current.w}x${current.h} at ${current.x},${current.y}) collided with Block ${j} (${obstacle.w}x${obstacle.h} at ${obstacle.x},${obstacle.y})`);
+        }
+        return coll;
       });
     });
     if (hasSignificantCollision) {
+      console.log('[BubbleLayoutService] Rollback group due to collision:', group);
       group.forEach((i) => {
         result[i] = undefined;
         resultContours[i] = undefined;

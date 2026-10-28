@@ -292,8 +292,10 @@ export class PipelineOrchestrator {
       }
       // Legacy CJK/RTL rendering does not honor fixed bubble rectangles.
       const supportsBubbleLayout = (LANGUAGE_ORIENTATION_PRESETS[targetLang.toLowerCase().trim()] ?? 'h') === 'h';
+      console.log(`[PipelineOrchestrator] Bubble check: mode=${bubbleMode}, supports=${supportsBubbleLayout}, boxes=${ocrResult.boxes?.length}, hasTypesetBoxes=${Boolean(ocrResult.typesetBoxes)}`);
       if (bubbleMode !== 'off' && supportsBubbleLayout && rawCanvas && rawCtx && ocrResult.boxes && ocrResult.boxes.length > 0 && !ocrResult.typesetBoxes) {
         try {
+          console.log('[PipelineOrchestrator] Acquiring bubble engine...');
           // Acquire engine through BubbleManager (OOP lifecycle & clean eviction)
           const { engine, release } = await this.services.bubbleManager.acquireEngine(bubbleMode, popupState, makeLifecycle('bubble', bubbleMode));
           try {
@@ -507,8 +509,18 @@ export class PipelineOrchestrator {
             const block = blockByOcrIndex.get(index);
             if (!block) return false;
             const curv = bubbleGeometry?.curvatures?.[index];
-            const blockWithCurvature = curv?.isRounded
-              ? { ...block, isRounded: true, borderRadius: curv.borderRadius, typesetMode: 'contour' as const }
+            const hasContour = Boolean(bubbleGeometry?.contours?.[index] && bubbleGeometry.contours[index]!.length >= 3);
+            const isContour = hasContour || Boolean(curv?.isRounded);
+            const blockWithCurvature = isContour
+              ? {
+                  ...block,
+                  isRounded: true,
+                  borderRadius: curv?.borderRadius || Math.round(Math.min(proposed.w, proposed.h) / 2),
+                  typesetMode: 'contour' as const,
+                  contourPoints: bubbleGeometry?.contours?.[index]
+                    ? bubbleGeometry.contours[index]!.map((p) => ({ x: p.x - proposed.x, y: p.y - proposed.y }))
+                    : undefined,
+                }
               : { ...block, isRounded: false, borderRadius: 0, typesetMode: 'simple' as const };
             const fitted = popupState?.renderFontMinSize !== undefined
               ? measureBubbleLayoutFontSize(
@@ -528,7 +540,9 @@ export class PipelineOrchestrator {
                   renderFontBold,
                   targetLang
                 );
-            return fitted > 0;
+            const ok = fitted > 0;
+            console.log(`[PipelineOrchestrator accept #${index}] ok=${ok} fitted=${fitted} text="${block.text}" proposed=${JSON.stringify(proposed)}`);
+            return ok;
           },
           onDiagnostics: (counts) => console.log('[PipelineOrchestrator] Bubble layouts:', counts)
         });
@@ -537,21 +551,22 @@ export class PipelineOrchestrator {
         bubbleSkipped = detailed.skipped;
         itemOcrIndices.forEach((index, position) => {
           const typesetBox = ocrResult.typesetBoxes?.[index];
+          const contour = detailed.contourPoints?.[index];
+          const hasContour = Boolean(contour && contour.length >= 3);
           textBlockItems[position].typesetBox = typesetBox;
-          textBlockItems[position].contourPoints = detailed.contourPoints?.[index];
+          textBlockItems[position].contourPoints = contour;
           // Fragments absorbed into a dominant chamber by the noise guard must not
           // render standalone (they would double-paint over the expanded dominant).
           // Only flagged when true so ordinary blocks keep their exact object shape.
           if (detailed.skipped?.[index]) textBlockItems[position].isSkipped = true;
-          // All active bubble tiers (heuristic, neural) route curved speech bubbles through Koharu contour typesetting
-          // and rectangular caption boxes through simple wrap
+          // All active bubble tiers (heuristic, neural): if a bubble contour exists or curvature is rounded,
+          // route through Koharu contour typesetting. Only true rectangular boxes without contours use simple wrap.
           if (typesetBox) {
             const curv = bubbleGeometry?.curvatures?.[index];
-            if (curv) {
-              textBlockItems[position].isRounded = curv.isRounded;
-              textBlockItems[position].borderRadius = curv.borderRadius;
-              textBlockItems[position].typesetMode = curv.isRounded ? 'contour' : 'simple';
-            }
+            const isContour = hasContour || Boolean(curv?.isRounded);
+            textBlockItems[position].isRounded = isContour;
+            textBlockItems[position].borderRadius = isContour ? (curv?.borderRadius || Math.round(Math.min(typesetBox.w, typesetBox.h) / 2)) : 0;
+            textBlockItems[position].typesetMode = isContour ? 'contour' : 'simple';
           }
         });
       }
@@ -614,15 +629,17 @@ export class PipelineOrchestrator {
           ?? (bubbleGeometry?.contours?.[i]
             ? bubbleGeometry.contours[i].map((p) => ({ x: p.x - activeBox.x, y: p.y - activeBox.y }))
             : undefined);
+        const hasContour = Boolean(contour && contour.length >= 3);
         const hasBubble = Boolean(bubbleGeometry && (ocrResult.typesetBoxes?.[i] || bubbleGeometry.proposals?.[i] || bubbleGeometry.carriers?.[i]));
-        const isRounded = Boolean(curvature?.isRounded ?? (contour && contour.length >= 3));
+        const isContour = hasContour || Boolean(curvature?.isRounded);
         // Active bubble tiers (heuristic, neural): text inside a bubble is 'contour',
         // captions/narration panels outside bubbles are 'simple'.
         // Disabled tier ('off') uses 'balloon' (Auto Balloon) on OCR bounds.
         const typesetMode: TypesetMode = hasBubble
-          ? (isRounded ? 'contour' : 'simple')
+          ? (isContour ? 'contour' : 'simple')
           : 'balloon';
-        const borderRadius = hasBubble ? (curvature?.borderRadius ?? (isRounded ? Math.min(activeBox.w, activeBox.h) / 2 : 0)) : 0;
+        const borderRadius = hasBubble ? (curvature?.borderRadius ?? (isContour ? Math.min(activeBox.w, activeBox.h) / 2 : 0)) : 0;
+        const isRounded = hasBubble && isContour;
 
         return {
           imageId: imageRecord.id!,
