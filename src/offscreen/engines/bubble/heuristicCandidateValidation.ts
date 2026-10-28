@@ -52,9 +52,10 @@ export function boundarySupport(image: ImagePatchData, patch: PaperPatch, mask: 
 /** @param image Original pixels. @param patch Crop evidence. @param component Observed component. @param filled Cavity with enclosed glyph holes. @param text OCR bounds. @returns Rejection reason or null when supported. */
 export function validatePaperCandidate(image: ImagePatchData, patch: PaperPatch, component: PaperComponent, filled: Uint8Array, text: BoxRect): string | null {
   if (paperCoverage(filled, patch.bounds, text) < MIN_HEURISTIC_TEXT_COVERAGE) return 'insufficient-text-support';
-  // A physical page edge is not an observed enclosing stroke. Cropped balloons remain
-  // ambiguous and use OCR bounds rather than certifying the page margin as a bubble wall.
-  if (Object.values(component.frontier).some(Boolean)) return 'page-edge-ambiguous';
+  // Paper spanning opposite edges proves unbounded territory (no enclosing wall).
+  // Single-edge contact may be a legitimate bubble at a crop or panel boundary.
+  if ((component.frontier.left && component.frontier.right) ||
+      (component.frontier.top && component.frontier.bottom)) return 'page-spanning-paper';
   if (boundarySupport(image, patch, filled) < MIN_SUPPORTED_BOUNDARY_RATIO) return 'unsupported-boundary';
   return null;
 }

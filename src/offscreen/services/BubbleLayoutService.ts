@@ -243,7 +243,8 @@ export function resolveBubbleLayoutsDetailed(input: BubbleLayoutInput): Resolved
         continue;
       }
 
-      const partition = partitionBalloonFlowCells(container, siblings, sharedContour);
+      const siblingDirections = group.map((idx) => directions?.[idx]);
+      const partition = partitionBalloonFlowCells(container, siblings, sharedContour, SIBLING_GAP, siblingDirections);
       const subChambers = partition.subChambers;
       const cellContours = partition.cellContours;
 
