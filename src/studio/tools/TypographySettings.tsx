@@ -303,7 +303,6 @@ export const TypographySettings: React.FC = () => {
     });
     const modeLabels: Record<TypesetMode, string> = {
       contour: 'Bubble Contour',
-      ellipse: 'Bubble Contour',
       balloon: 'Balanced Fit',
       simple: 'Caption Box',
     };
@@ -689,13 +688,13 @@ export const TypographySettings: React.FC = () => {
             type="button"
             onClick={() => handleToggleTypesetMode('contour')}
             className={`flex-1 py-1.5 px-1.5 rounded-md font-semibold transition-all flex items-center justify-center gap-1 cursor-pointer text-[11px] ${
-              effectiveTypesetMode === 'contour' || effectiveTypesetMode === 'ellipse'
+              effectiveTypesetMode === 'contour'
                 ? 'bg-[#1c1f2e] text-[#f4446d] shadow-xs'
                 : 'text-slate-400 hover:text-white'
             }`}
             title="Bubble Contour: 2D scanline engine fitted to speech bubble curves and ovals with dynamic font sizing (Koharu engine)"
           >
-            <CircleDot size={12} className={effectiveTypesetMode === 'contour' || effectiveTypesetMode === 'ellipse' ? 'text-[#f4446d]' : ''} />
+            <CircleDot size={12} className={effectiveTypesetMode === 'contour' ? 'text-[#f4446d]' : ''} />
             <span className="truncate">Bubble Contour</span>
           </button>
           <button

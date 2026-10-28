@@ -349,8 +349,8 @@ export interface TextBlockItem {
   isRounded?: boolean;
   /** Mathematical bubble corner radius in pixels. */
   borderRadius?: number;
-  /** Explicit typesetting engine mode: 'balloon' (XianScan), 'contour' (Koharu DP), 'ellipse' (alias), or 'simple' (Rectangular wrap). */
-  typesetMode?: 'balloon' | 'contour' | 'ellipse' | 'simple';
+  /** Explicit typesetting engine mode: 'balloon' (Auto Balloon), 'contour' (Koharu DP), or 'simple' (Rectangular wrap). */
+  typesetMode?: 'balloon' | 'contour' | 'simple';
   /** Optional bubble contour polygon (in region coordinates). */
   contourPoints?: Point2D[];
 }
@@ -392,7 +392,7 @@ export function measureBubbleLayoutFontSize(
 
   const hasContour = Boolean(block.contourPoints && block.contourPoints.length >= 3);
   const isFixed = true;
-  const isContour = hasContour || block.typesetMode === 'contour' || block.typesetMode === 'ellipse' || (block.isRounded && block.typesetMode !== 'balloon' && block.typesetMode !== 'simple');
+  const isContour = hasContour || block.typesetMode === 'contour' || (block.isRounded && block.typesetMode !== 'balloon' && block.typesetMode !== 'simple');
   const isSimple = !isContour && block.typesetMode === 'simple';
 
   if (isContour || isSimple) {

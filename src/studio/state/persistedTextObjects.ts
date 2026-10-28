@@ -25,7 +25,7 @@ export function restoreTextObject(block: TextBlock): TextObject {
     text: unhyphenatedText,
     lines: block.lines,
     lineSpacing: block.lineSpacing,
-    typesetMode: block.typesetMode === 'ellipse' ? 'contour' : (block.typesetMode || 'balloon'),
+    typesetMode: (block.typesetMode as string) === 'ellipse' ? 'contour' : (block.typesetMode || (block.contourPoints && block.contourPoints.length >= 3 ? 'contour' : 'balloon')),
     borderRadius: block.borderRadius,
     isRounded: block.isRounded,
     contourPoints: block.contourPoints,

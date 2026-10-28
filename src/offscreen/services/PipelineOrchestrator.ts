@@ -610,16 +610,19 @@ export class PipelineOrchestrator {
         // matches the baked image instead of assuming black-on-white.
         const renderColors = renderInfo;
         const curvature = bubbleGeometry?.curvatures?.[i];
-        const hasBubbleBox = Boolean(bubbleGeometry && ocrResult.typesetBoxes?.[i]);
-        // All active bubble tiers (heuristic, neural) use the canonical 'contour'
-        // for rounded speech bubbles (legacy 'ellipse' rows stay loadable via restore
-        // normalization) and 'simple' for rectangular caption boxes. Disabled tier ('off')
-        // uses 'balloon' (Auto Balloon) on OCR bounds.
-        const typesetMode: TypesetMode = hasBubbleBox
-          ? (curvature?.isRounded ? 'contour' : 'simple')
+        const contour = ocrResult.contourPoints?.[i]
+          ?? (bubbleGeometry?.contours?.[i]
+            ? bubbleGeometry.contours[i].map((p) => ({ x: p.x - activeBox.x, y: p.y - activeBox.y }))
+            : undefined);
+        const hasBubble = Boolean(bubbleGeometry && (ocrResult.typesetBoxes?.[i] || bubbleGeometry.proposals?.[i] || bubbleGeometry.carriers?.[i]));
+        const isRounded = Boolean(curvature?.isRounded ?? (contour && contour.length >= 3));
+        // Active bubble tiers (heuristic, neural): text inside a bubble is 'contour',
+        // captions/narration panels outside bubbles are 'simple'.
+        // Disabled tier ('off') uses 'balloon' (Auto Balloon) on OCR bounds.
+        const typesetMode: TypesetMode = hasBubble
+          ? (isRounded ? 'contour' : 'simple')
           : 'balloon';
-        const borderRadius = hasBubbleBox ? (curvature?.borderRadius ?? 0) : 0;
-        const isRounded = hasBubbleBox ? Boolean(curvature?.isRounded) : false;
+        const borderRadius = hasBubble ? (curvature?.borderRadius ?? (isRounded ? Math.min(activeBox.w, activeBox.h) / 2 : 0)) : 0;
 
         return {
           imageId: imageRecord.id!,
@@ -648,7 +651,7 @@ export class PipelineOrchestrator {
           isRounded,
           // Box-relative organic contour for the typeset box, so Studio contour mode
           // restores the real bubble shape instead of a synthetic oval fallback.
-          contourPoints: ocrResult.contourPoints?.[i],
+          contourPoints: contour,
           // Noise-guard absorbed fragments stay in the DB (editable) but flag the
           // suppressed standalone render.
           isSkipped: Boolean(bubbleSkipped?.[i]),

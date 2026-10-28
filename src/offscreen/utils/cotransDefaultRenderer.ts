@@ -71,8 +71,8 @@ export interface DefaultRenderRegion {
   isRounded?: boolean;
   /** Mathematical bubble corner radius in pixels. */
   borderRadius?: number;
-  /** Explicit typesetting engine mode: 'balloon' (XianScan), 'contour' (Koharu DP), 'ellipse' (legacy alias), or 'simple' (Rectangular wrap). */
-  typesetMode?: 'balloon' | 'contour' | 'ellipse' | 'simple';
+  /** Explicit typesetting engine mode: 'balloon' (Auto Balloon), 'contour' (Koharu DP), or 'simple' (Rectangular wrap). */
+  typesetMode?: 'balloon' | 'contour' | 'simple';
   /** Optional bubble contour polygon (in region coordinates). */
   contourPoints?: Point2D[];
   /** When false or undefined, region was not fixed to an accepted bubble and must use Route 1 Auto Balloon. */

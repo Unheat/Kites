@@ -30,7 +30,7 @@ export class TypesetStrategyFactory {
   static resolve(params: StrategyResolutionParams): ITypesetStrategy {
     const isFixed = params.isFixed ?? (params.typesetMode !== 'balloon' && params.typesetMode !== undefined);
     const hasContour = Boolean(params.hasContour);
-    const isContour = isFixed && (hasContour || params.typesetMode === 'contour' || params.typesetMode === 'ellipse' || (params.isRounded && params.typesetMode !== 'simple'));
+    const isContour = isFixed && (hasContour || params.typesetMode === 'contour' || (params.isRounded && params.typesetMode !== 'simple'));
     const isSimple = isFixed && !isContour && params.typesetMode === 'simple';
 
     if (isContour) {

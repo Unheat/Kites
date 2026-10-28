@@ -119,7 +119,7 @@ function reflowTextObject(object: TextObject, mode: StudioTypesetMode): TextObje
   const startWidth = width;
   const startFontSize = fontSize;
 
-  const isContourMode = mode === 'contour' || mode === 'ellipse';
+  const isContourMode = mode === 'contour';
   const fit = object.roundFit;
   const refitting = isContourMode && !!fit && fit.fittedWidth === width && fit.fittedFontSize === fontSize;
   if (refitting) {
@@ -391,8 +391,8 @@ export function recalculateBlockTypeset(
       };
     }
 
-    // Contour / Ellipse Mode: Koharu 2D scanline ray-casting on bubble polygon or curved contour (Route 2)
-    if (mode === 'contour' || mode === 'ellipse') {
+    // Contour Mode: Koharu 2D scanline ray-casting on bubble polygon or curved contour (Route 2)
+    if (mode === 'contour') {
       const unhyphenated = unwrapWrappedText(text);
       const contour = (style.contourPoints && style.contourPoints.length >= 3)
         ? style.contourPoints

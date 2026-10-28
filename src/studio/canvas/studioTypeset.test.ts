@@ -154,9 +154,9 @@ describe('Studio Algorithmic Typeset & Line Reflow', () => {
     expect(simpleJoined).not.toContain('com-munity');
     expect(simpleJoined).not.toContain('com- munity');
 
-    const ellipseWide = recalculateBlockTypeset(textWithHyphen, 'sans-serif', 300, 200, 18, 'ellipse');
-    const ellipseJoined = ellipseWide.lines.join(' ');
-    expect(ellipseJoined).toContain('community');
+    const contourWide = recalculateBlockTypeset(textWithHyphen, 'sans-serif', 300, 200, 18, 'contour');
+    const contourJoined = contourWide.lines.join(' ');
+    expect(contourJoined).toContain('community');
   });
 
   it('un-hyphenates INSERTED_HYPHEN marker splits when box is widened in Auto Balloon mode', () => {
@@ -177,13 +177,13 @@ describe('Studio Algorithmic Typeset & Line Reflow', () => {
       width: 100,
       height: 200,
       text: 'This is a long sentence that occupies multiple lines inside a narrow speech bubble container.',
-      typesetMode: 'ellipse',
+      typesetMode: 'contour',
     };
     // Widening from 100 to 400 reduces line count while preserving height
     const widened = applyTextObjectUpdates(multiLineObject, { width: 400 });
     expect(widened.width).toBe(400);
     expect(widened.height).toBe(200);
-    expect(widened.lines?.length).toBeLessThan(recalculateBlockTypeset(multiLineObject.text, multiLineObject.fontFamily, 100, 200, 16, 'ellipse').lines.length);
+    expect(widened.lines?.length).toBeLessThan(recalculateBlockTypeset(multiLineObject.text, multiLineObject.fontFamily, 100, 200, 16, 'contour').lines.length);
 
     // Height can be resized independently in any direction
     const resizedHeight = applyTextObjectUpdates(multiLineObject, { height: 350 });
