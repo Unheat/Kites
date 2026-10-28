@@ -31,6 +31,7 @@ import {
   Check,
 } from 'lucide-react';
 import { db } from '../db';
+import { ensureFontsRegistered } from '../shared/fontLibrary';
 import { studioStore, useStudioStore } from './state/studioStore';
 import { studioUndoStack } from './state/undoStack';
 import { requestStudioOcr, requestStudioColorize } from './bridge/offscreenStudioBridge';
@@ -178,6 +179,14 @@ export const Studio: React.FC<StudioProps> = ({
     return studioUndoStack.subscribe((u: boolean, r: boolean) => {
       setCanUndo(u);
       setCanRedo(r);
+    });
+  }, []);
+
+  // Register persisted font-library faces so the live overlay paints with the
+  // same bytes the bake uses (imports and catalog downloads).
+  useEffect(() => {
+    void ensureFontsRegistered().catch((err) => {
+      console.warn('[Studio] Font library registration failed:', err);
     });
   }, []);
 

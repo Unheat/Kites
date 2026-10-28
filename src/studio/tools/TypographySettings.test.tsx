@@ -153,7 +153,13 @@ describe('TypographySettings editing intent and reflow', () => {
 
   it('reflows font family and line spacing edits', async () => {
     await render();
-    await change('select', 'Figtree, sans-serif');
+    // Font family changes route through the shared picker's preset rows.
+    const trigger = container.querySelector('button[aria-label="Font Family"]') as HTMLButtonElement;
+    await act(async () => { trigger.click(); });
+    const wildWordsRow = Array.from(container.querySelectorAll('button'))
+      .find((button) => button.textContent?.trim().startsWith('Wild Words'));
+    await act(async () => { wildWordsRow?.click(); });
+    expect(measureDefaultLayout).toHaveBeenCalledTimes(1);
     await change('input[type="range"][step="0.1"]', '1.8');
     expect(measureDefaultLayout).toHaveBeenCalledTimes(2);
     expect(studioStore.getState().textObjects[0].lineSpacing).toBe(1.8);

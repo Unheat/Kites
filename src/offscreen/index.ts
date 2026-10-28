@@ -15,6 +15,7 @@ import { pipelineOrchestrator } from './services/PipelineOrchestrator';
 import { translationManager } from './services/TranslationManager';
 import { bubbleManager } from './services/BubbleManager';
 import { STORAGE_KEYS } from '../shared/constants';
+import { ensureFontsRegistered } from '../shared/fontLibrary';
 import { runStudioOcr, type StudioOcrResponse } from './services/StudioOcr';
 import { CustomApiEngine } from './engines/translation/CustomApiEngine';
 import { inpaintRegistry } from './engines/inpaint/inpaintRegistry';
@@ -30,6 +31,12 @@ import { OcrCacheManager } from './services/OcrCacheManager';
 import { BubbleCacheManager } from './services/BubbleCacheManager';
 import { hasModelInCache } from '@mlc-ai/web-llm';
 import { checkWebGPUAvailability } from './utils/hardware';
+
+// Register persisted font-library faces at boot so the bake measures with the
+// exact bytes the user's selection refers to (font metrics drive every line break).
+void ensureFontsRegistered().catch((err) => {
+  console.warn('[Offscreen] Font library registration failed:', err);
+});
 
 chrome.runtime.onMessage.addListener((message: ProcessJobMessage | any, _sender: chrome.runtime.MessageSender, sendResponse: (response?: any) => void) => {
   if (message.target !== 'offscreen' || message.source !== 'background' || message.request !== true) {

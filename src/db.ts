@@ -92,11 +92,27 @@ export interface TextBlock {
   angle?: number;
 }
 
+/** A font face persisted in the on-demand library (catalog download or user import). */
+export interface FontRecord {
+  /** Stable key: catalog id, or `import-<sanitized>-<timestamp>` for user imports. */
+  id: string;
+  /** CSS family name the face registers under. */
+  family: string;
+  /** Display label for pickers. */
+  label: string;
+  /** Where this face came from; imports render on the storing machine's terms. */
+  source: 'catalog' | 'import';
+  /** Raw font bytes (woff2/ttf/otf). */
+  data: ArrayBuffer;
+  addedAt: number;
+}
+
 const db = new Dexie('KitesDatabase') as Dexie & {
   translationJobs: EntityTable<TranslationJob, 'id'>;
   projectFolders: EntityTable<ProjectFolder, 'id'>;
   images: EntityTable<ImageRecord, 'id'>;
   textBlocks: EntityTable<TextBlock, 'id'>;
+  fonts: EntityTable<FontRecord, 'id'>;
 };
 
 db.version(4).stores({
@@ -111,6 +127,14 @@ db.version(5).stores({
   projectFolders: '++id, title, timestamp, updatedAt, isFavorite',
   images: '++id, jobId',
   textBlocks: '++id, imageId'
+});
+
+db.version(6).stores({
+  translationJobs: '++id, timestamp, status, folderId, srcUrl, projectOrder',
+  projectFolders: '++id, title, timestamp, updatedAt, isFavorite',
+  images: '++id, jobId',
+  textBlocks: '++id, imageId',
+  fonts: 'id, family'
 });
 
 /**

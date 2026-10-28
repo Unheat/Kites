@@ -5,7 +5,8 @@ import AddApiForm from './AddApiForm';
 import MiniSearch from 'minisearch';
 import { ModelRegistry } from '../services/ModelRegistry';
 import { isLlmGpuAvailable } from '../../shared/utils/hardwareUtils';
-import { RENDER_FONT_PRESETS, normalizeRenderFontPresetId } from '../../shared/renderFontPresets';
+import { normalizeRenderFontPresetId, CUSTOM_FONT_PREFIX } from '../../shared/renderFontPresets';
+import { FontPickerDropdown, type FontSelection } from '../../shared/ui/FontPickerDropdown';
 import { INPAINT_TIER_CATALOG } from '../../shared/inpaintTiers';
 import { COLOR_TIER_CATALOG } from '../../shared/colorTiers';
 import HelpTooltip from './HelpTooltip';
@@ -121,7 +122,6 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
   const [isOpenInpaint, setIsOpenInpaint] = useState(false);
   const [isOpenColor, setIsOpenColor] = useState(false);
   const [isOpenOcr, setIsOpenOcr] = useState(false);
-  const [isOpenRenderFont, setIsOpenRenderFont] = useState(false);
   const [isOpenFontOptions, setIsOpenFontOptions] = useState(false);
   const [isOpenBubbleMode, setIsOpenBubbleMode] = useState(false);
   const [isNeuralDownloaded, setIsNeuralDownloaded] = useState(false);
@@ -421,8 +421,6 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
     || allEngines[0]
     || { name: 'Loading...', id: '' };
   const activeRenderFontPresetId = normalizeRenderFontPresetId(state.renderFontPresetId);
-  const activeRenderFontPreset = RENDER_FONT_PRESETS.find((preset) => preset.id === activeRenderFontPresetId)
-    ?? RENDER_FONT_PRESETS[0];
 
   return (
     <div className="flex flex-col gap-3">
@@ -1044,51 +1042,20 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
           />
         </div>
 
-        <div className="relative flex flex-col">
-          <button
-            aria-label="Render Font"
-            aria-expanded={isOpenRenderFont}
-            onClick={() => setIsOpenRenderFont(!isOpenRenderFont)}
-            className="w-full flex items-center justify-between p-3 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md hover:border-[var(--color-ink)] transition-colors cursor-pointer"
-          >
-            <span className="font-medium truncate pr-2" style={{ fontFamily: activeRenderFontPreset.fontFamily }}>{activeRenderFontPreset.label}</span>
-            <ChevronDown size={16} className={`text-[var(--color-dust)] transition-transform ${isOpenRenderFont ? 'rotate-180' : ''}`} />
-          </button>
-
-          {isOpenRenderFont && (
-            <div className="mt-1 bg-[var(--color-paper)] border border-[var(--color-dust)] rounded-md shadow-sm overflow-hidden flex flex-col max-h-[350px] z-50">
-              <div className="overflow-y-auto flex-1 p-1 custom-scrollbar">
-                {RENDER_FONT_PRESETS.map((preset) => {
-                  const isActive = activeRenderFontPresetId === preset.id;
-                  return (
-                    <button
-                      key={preset.id}
-                      onClick={() => {
-                        updateState({ renderFontPresetId: normalizeRenderFontPresetId(preset.id) });
-                        setIsOpenRenderFont(false);
-                      }}
-                      className={`w-full flex items-center justify-between p-2 text-left rounded-sm transition-colors ${
-                        isActive
-                          ? 'bg-[var(--color-vellum)] text-[var(--color-editorial)] font-semibold cursor-pointer'
-                          : 'hover:bg-[var(--color-vellum)] cursor-pointer'
-                      }`}
-                    >
-                      <div className="flex flex-col overflow-hidden">
-                        <span className="truncate pr-2 text-sm" style={{ fontFamily: preset.fontFamily }}>{preset.label}</span>
-                        {preset.description && (
-                          <span className="text-[11px] text-[var(--color-dust)] truncate">{preset.description}</span>
-                        )}
-                      </div>
-                      <div className="flex-shrink-0 ml-2">
-                        {isActive ? <Check size={14} className="text-[var(--color-editorial)]" /> : null}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-        </div>
+        <FontPickerDropdown
+          ariaLabel="Render Font"
+          variant="popup"
+          selection={state.renderFontPresetId.startsWith(CUSTOM_FONT_PREFIX)
+            ? { type: 'family', family: state.renderFontPresetId.slice(CUSTOM_FONT_PREFIX.length) }
+            : { type: 'preset', presetId: activeRenderFontPresetId }}
+          onSelect={(sel: FontSelection) => {
+            if (sel.type === 'preset') {
+              updateState({ renderFontPresetId: normalizeRenderFontPresetId(sel.presetId) });
+            } else {
+              updateState({ renderFontPresetId: `${CUSTOM_FONT_PREFIX}${sel.family}` });
+            }
+          }}
+        />
 
         {/* Advanced Text Rendering Options */}
         <div className="flex flex-col mt-0.5">

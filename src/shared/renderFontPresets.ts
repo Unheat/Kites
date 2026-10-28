@@ -62,6 +62,21 @@ export const fontRegistry: Record<string, RenderFontPreset> = {
  */
 export const RENDER_FONT_PRESETS: readonly RenderFontPreset[] = Object.values(fontRegistry);
 
+/** Prefix marking a library font selection (downloaded catalog face or user import). */
+export const CUSTOM_FONT_PREFIX = 'font:';
+/** Characters that would break the canvas font shorthand; library family names strip them. */
+const UNSAFE_FAMILY_CHARS = /["';{}]/g;
+
+/**
+ * Sanitizes a library family name for safe interpolation into canvas font shorthands.
+ *
+ * @param family - Raw family name from the library.
+ * @returns Sanitized single-line family, or empty string when nothing usable remains.
+ */
+export function sanitizeLibraryFamily(family: string): string {
+  return family.replace(UNSAFE_FAMILY_CHARS, '').trim();
+}
+
 /** Known aliases mapped to their canonical registered ID. */
 const FONT_PRESET_ALIASES: Record<string, string> = {
   'wild-words': 'comic',
@@ -78,6 +93,10 @@ const FONT_PRESET_ALIASES: Record<string, string> = {
  * @returns Matching registered ID, or the Standard preset ID when invalid.
  */
 export function normalizeRenderFontPresetId(value: unknown): string {
+  if (typeof value === 'string' && value.startsWith(CUSTOM_FONT_PREFIX)) {
+    const family = sanitizeLibraryFamily(value.slice(CUSTOM_FONT_PREFIX.length));
+    return family ? `${CUSTOM_FONT_PREFIX}${family}` : DEFAULT_RENDER_FONT_PRESET_ID;
+  }
   if (typeof value !== 'string') return DEFAULT_RENDER_FONT_PRESET_ID;
   const canonical = FONT_PRESET_ALIASES[value] ?? value;
   return fontRegistry[canonical] ? canonical : DEFAULT_RENDER_FONT_PRESET_ID;
@@ -90,6 +109,12 @@ export function normalizeRenderFontPresetId(value: unknown): string {
  * @returns Registered font-family stack, defaulting to sans-serif.
  */
 export function resolveRenderFontFamily(value: unknown): string {
+  if (typeof value === 'string' && value.startsWith(CUSTOM_FONT_PREFIX)) {
+    const family = sanitizeLibraryFamily(value.slice(CUSTOM_FONT_PREFIX.length));
+    // Library faces register under this exact family in both the dashboard and the
+    // offscreen bake document; an unregistered name degrades to canvas fallback.
+    return family || 'sans-serif';
+  }
   const presetId = normalizeRenderFontPresetId(value);
   return fontRegistry[presetId]?.fontFamily ?? 'sans-serif';
 }

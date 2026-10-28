@@ -52,8 +52,14 @@ describe('SettingsView', () => {
     });
 
     const fontButtons = Array.from(trigger?.parentElement?.querySelectorAll('button') ?? []);
-    const optionLabels = fontButtons.slice(1).map((button) => button.querySelector('span')?.textContent?.trim());
-    expect(optionLabels).toEqual(['Standard', 'Wild Words', 'Anime Ace', 'Comic Hand', 'Serif', 'Monospace']);
+    const optionLabels = fontButtons.slice(1).map((button) => button.querySelector('span')?.textContent?.trim()).filter(Boolean);
+    // Presets are offered in one searchable list.
+    for (const expected of ['Standard', 'Wild Words', 'Anime Ace', 'Comic Hand', 'Serif', 'Monospace']) {
+      expect(optionLabels).toContain(expected);
+    }
+    // Catalog fonts are offered for on-demand download alongside them.
+    const downloadButtons = trigger?.parentElement?.querySelectorAll('button[aria-label^="Download"]') ?? [];
+    expect(downloadButtons.length).toBeGreaterThanOrEqual(10);
 
     const wildWordsOption = fontButtons.find((button) => button.querySelector('span')?.textContent?.trim() === 'Wild Words');
     await act(async () => {

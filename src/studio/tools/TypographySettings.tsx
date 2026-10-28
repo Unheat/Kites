@@ -20,6 +20,14 @@ import {
   CircleDot,
 } from 'lucide-react';
 import type { TypesetMode } from '../../shared/constants';
+import { RENDER_FONT_PRESETS } from '../../shared/renderFontPresets';
+import { FontPickerDropdown } from '../../shared/ui/FontPickerDropdown';
+
+/** @param stack - CSS font-family stack. @returns First family token, de-quoted, for display/selection. */
+function displayFontFamily(stack: string): string {
+  const first = stack.split(',')[0]?.trim() ?? stack;
+  return first.replace(/^['"]|['"]$/g, '') || stack;
+}
 import { studioStore, useStudioStore, extractTypographyStyle } from '../state/studioStore';
 import { studioUndoStack } from '../state/undoStack';
 import { applyTextObjectUpdates, prepareInitialTextObject } from '../canvas/studioTypeset';
@@ -722,21 +730,23 @@ export const TypographySettings: React.FC = () => {
         </p>
       </div>
 
-      {/* Font Family */}
+      {/* Font Family — shared picker: presets, on-demand catalog, and user imports */}
       <div>
         <label className="block text-slate-400 font-medium mb-1">Font Family</label>
-        <select
-          value={effectiveFontFamily}
-          onChange={(e) => updateSelected({ fontFamily: e.target.value })}
-          className="w-full rounded-lg border border-[#282d3f] bg-[#090a0f] px-2.5 py-1.5 text-xs text-slate-200 focus:outline-hidden"
-        >
-          <option value="WildWords, CCWildWords, sans-serif">CC Wild Words (Comic)</option>
-          <option value="Kalam, cursive">Kalam (Manga Dialogue)</option>
-          <option value="Figtree, sans-serif">Figtree (Modern Clean)</option>
-          <option value="Comic Sans MS, cursive">Comic Sans (Classic)</option>
-          <option value="Impact, sans-serif">Impact (Action SFX)</option>
-          <option value="sans-serif">System Sans-Serif</option>
-        </select>
+        <FontPickerDropdown
+          ariaLabel="Font Family"
+          variant="studio"
+          selection={RENDER_FONT_PRESETS.some((preset) => preset.fontFamily === effectiveFontFamily)
+            ? { type: 'preset', presetId: RENDER_FONT_PRESETS.find((preset) => preset.fontFamily === effectiveFontFamily)!.id }
+            : { type: 'family', family: displayFontFamily(effectiveFontFamily) }}
+          onSelect={(sel) => {
+            updateSelected({
+              fontFamily: sel.type === 'preset'
+                ? (RENDER_FONT_PRESETS.find((preset) => preset.id === sel.presetId)?.fontFamily ?? effectiveFontFamily)
+                : sel.family,
+            });
+          }}
+        />
       </div>
 
       {/* Font Size & Spacing */}

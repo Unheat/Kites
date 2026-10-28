@@ -8,7 +8,7 @@ import {
 } from './thumbnailRenderer';
 
 async function clearDatabase(): Promise<void> {
-  await db.transaction('rw', db.translationJobs, db.projectFolders, db.images, db.textBlocks, async () => {
+  await db.transaction('rw', db.translationJobs, db.projectFolders, db.images, db.textBlocks, db.fonts, async () => {
     await Promise.all(db.tables.map((table) => table.clear()));
   });
 }
