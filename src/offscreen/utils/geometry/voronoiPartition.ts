@@ -173,7 +173,8 @@ export function partitionBalloonFlowCells(
   container: BoxRect,
   boxes: BoxRect[],
   contour?: Point2D[],
-  siblingGap: number = SIBLING_GAP
+  siblingGap: number = SIBLING_GAP,
+  directions?: (string | undefined)[]
 ): BalloonFlowPartitionResult {
   if (boxes.length <= 1) {
     return {
@@ -189,10 +190,45 @@ export function partitionBalloonFlowCells(
     };
   }
 
-  const anchors: Point2D[] = boxes.map(b => ({
-    x: Math.max(0, Math.min(container.w, b.x + b.w / 2 - container.x)),
-    y: Math.max(0, Math.min(container.h, b.y + b.h / 2 - container.y)),
-  }));
+  // Reading-order vertical stacking for side-by-side vertical columns:
+  // When multiple vertical source columns (e.g. Japanese right-to-left columns) share a bubble,
+  // slicing the bubble into narrow vertical strips breaks horizontal English typesetting.
+  // Instead, stack them in vertical reading order (Right column -> Top chamber, Left column -> Bottom chamber)
+  // so each horizontal English utterance receives the full width of the bubble.
+  const isAllVertical = boxes.length >= 2 && boxes.every((b, idx) => {
+    const isVertDir = directions ? directions[idx] === 'v' : false;
+    return isVertDir || b.h > b.w * 1.3;
+  });
+  const isSideBySide = isAllVertical && boxes.every((b1, i) =>
+    boxes.every((b2, j) => {
+      if (i === j) return true;
+      const dx = Math.abs((b1.x + b1.w / 2) - (b2.x + b2.w / 2));
+      const dy = Math.abs((b1.y + b1.h / 2) - (b2.y + b2.h / 2));
+      const yOverlap = (b1.y + b1.h > b2.y) && (b2.y + b2.h > b1.y);
+      return dx > dy * 0.8 && yOverlap;
+    })
+  );
+
+  let anchors: Point2D[];
+  if (isSideBySide) {
+    // Japanese CJK vertical reading order: rightmost column is read first.
+    // Map in descending X order to ascending Y order in container space.
+    const indicesByReadingOrder = boxes.map((_, i) => i).sort((a, b) => boxes[b].x - boxes[a].x);
+    const stepY = container.h / boxes.length;
+    anchors = new Array(boxes.length);
+    for (let order = 0; order < indicesByReadingOrder.length; order++) {
+      const originalIdx = indicesByReadingOrder[order];
+      anchors[originalIdx] = {
+        x: container.w / 2,
+        y: Math.round(stepY * (order + 0.5)),
+      };
+    }
+  } else {
+    anchors = boxes.map(b => ({
+      x: Math.max(0, Math.min(container.w, b.x + b.w / 2 - container.x)),
+      y: Math.max(0, Math.min(container.h, b.y + b.h / 2 - container.y)),
+    }));
+  }
 
   const localContour = contour
     ? contour.map(p => ({ x: p.x - container.x, y: p.y - container.y }))

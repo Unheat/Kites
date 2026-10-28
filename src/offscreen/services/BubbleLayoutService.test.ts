@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { acquireBubbleGeometry, computeMaskCurvature, MIN_SHARED_FONT_RATIO, resolveBubbleLayouts, resolveBubbleLayoutsDetailed, significantOverlap, type BubbleLayoutInput } from './BubbleLayoutService';
 import type { Point2D } from '../../shared/utils/geometry';
-import { computeTypesetBox, type BoxRect } from '../utils/bubbleExpansion';
+import { computeTypesetBox, SIBLING_GAP, type BoxRect } from '../utils/bubbleExpansion';
 import type { BubbleShapeEvidence, ImagePatchData } from '../engines/bubble/HeuristicBubbleExtractor';
 
 const carrier = { x: 0, y: 20, w: 200, h: 300 };
@@ -551,6 +551,48 @@ describe('conservative bubble layouts', () => {
       expect(detailed.typesetBoxes[0]).toBeDefined();
       expect(detailed.typesetBoxes[1]).toBeDefined();
       expect(detailed.skipped).toEqual([false, false]);
+    });
+
+    it('stacks side-by-side vertical source columns vertically in Japanese reading order (right column top, left column bottom)', () => {
+      // Speech bubble: 120x140
+      // Right column (read first in Japanese): x=60..80, y=30..110
+      // Left column (read second in Japanese): x=20..40, y=30..110
+      const colRight: BoxRect = { x: 60, y: 30, w: 20, h: 80 };
+      const colLeft: BoxRect = { x: 20, y: 30, w: 20, h: 80 };
+      const container: BoxRect = { x: 10, y: 10, w: 100, h: 120 };
+
+      const points: Point2D[] = [];
+      for (let step = 0; step < 24; step++) {
+        const angle = (step / 24) * Math.PI * 2;
+        points.push({ x: Math.round(60 + 50 * Math.cos(angle)), y: Math.round(70 + 60 * Math.sin(angle)) });
+      }
+
+      const detailed = resolveBubbleLayoutsDetailed({
+        pageWidth: 200,
+        pageHeight: 200,
+        boxes: [colRight, colLeft],
+        carriers: [container, container],
+        proposals: [container, container],
+        shapes: [],
+        curvatures: [{ isRounded: true, borderRadius: 30 }, { isRounded: true, borderRadius: 30 }],
+        contours: [points, points],
+        directions: ['v', 'v'],
+        accept: () => true,
+      });
+
+      expect(detailed.typesetBoxes[0]).toBeDefined();
+      expect(detailed.typesetBoxes[1]).toBeDefined();
+
+      const topBox = detailed.typesetBoxes[0]!;
+      const bottomBox = detailed.typesetBoxes[1]!;
+
+      // Right column (0) gets top chamber, Left column (1) gets bottom chamber
+      expect(topBox.y).toBeLessThan(bottomBox.y);
+      // Both subchambers get wide horizontal width for translated English text
+      expect(topBox.w).toBeGreaterThanOrEqual(60);
+      expect(bottomBox.w).toBeGreaterThanOrEqual(60);
+      // Clearance between top and bottom
+      expect(topBox.y + topBox.h).toBeLessThanOrEqual(bottomBox.y + SIBLING_GAP);
     });
   });
 });

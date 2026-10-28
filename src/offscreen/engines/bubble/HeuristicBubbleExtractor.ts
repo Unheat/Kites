@@ -99,15 +99,36 @@ export class HeuristicBubbleExtractor {
     }
 
     // 1. Expand patch around text box (slack for bubble borders).
-    // Bounded local patch: prevents open artwork or uniform textures (e.g. clothing)
-    // from evading the >= 96% leakGuard ceiling.
     const padX = Math.round(Math.max(50, textBox.w * 0.9));
     const padY = Math.round(Math.max(50, textBox.h * 0.9));
 
-    const minX = Math.max(0, textBox.x - padX);
-    const minY = Math.max(0, textBox.y - padY);
-    const maxX = Math.min(imgW, textBox.x + textBox.w + padX);
-    const maxY = Math.min(imgH, textBox.y + textBox.h + padY);
+    let minX = Math.max(0, textBox.x - padX);
+    let minY = Math.max(0, textBox.y - padY);
+    let maxX = Math.min(imgW, textBox.x + textBox.w + padX);
+    let maxY = Math.min(imgH, textBox.y + textBox.h + padY);
+
+    // Tight sibling proximity bridge:
+    // When an immediate sibling text box exists within close conversational distance (gap <= 45px),
+    // expand patch bounds to enclose it and treat its glyphs as interior whitespace.
+    // Denser artwork thresholds (gap > 45px like captions across panels or clothing textures)
+    // are strictly excluded, preserving leakGuard protection.
+    const MAX_SIBLING_BRIDGE_GAP = 45;
+    const bridgeSiblings: BoxRect[] = [];
+
+    if (options.allTextBoxes && options.allTextBoxes.length > 1) {
+      for (const sibling of options.allTextBoxes) {
+        if (sibling === textBox) continue;
+        const gapX = Math.max(0, Math.max(textBox.x, sibling.x) - Math.min(textBox.x + textBox.w, sibling.x + sibling.w));
+        const gapY = Math.max(0, Math.max(textBox.y, sibling.y) - Math.min(textBox.y + textBox.h, sibling.y + sibling.h));
+        if (gapX <= MAX_SIBLING_BRIDGE_GAP && gapY <= MAX_SIBLING_BRIDGE_GAP) {
+          bridgeSiblings.push(sibling);
+          minX = Math.min(minX, Math.max(0, sibling.x - padX));
+          minY = Math.min(minY, Math.max(0, sibling.y - padY));
+          maxX = Math.max(maxX, Math.min(imgW, sibling.x + sibling.w + padX));
+          maxY = Math.max(maxY, Math.min(imgH, sibling.y + sibling.h + padY));
+        }
+      }
+    }
 
     const origPatchW = maxX - minX;
     const origPatchH = maxY - minY;
@@ -161,7 +182,16 @@ export class HeuristicBubbleExtractor {
       for (let px = 0; px < patchW; px++) {
         const origX = Math.min(imgW - 1, minX + Math.floor(px / scale));
 
-        const inText = origX >= textBox.x && origX < textBox.x + textBox.w && origY >= textBox.y && origY < textBox.y + textBox.h;
+        let inText = origX >= textBox.x && origX < textBox.x + textBox.w && origY >= textBox.y && origY < textBox.y + textBox.h;
+        if (!inText && bridgeSiblings.length > 0) {
+          for (let bi = 0; bi < bridgeSiblings.length; bi++) {
+            const b = bridgeSiblings[bi];
+            if (origX >= b.x && origX < b.x + b.w && origY >= b.y && origY < b.y + b.h) {
+              inText = true;
+              break;
+            }
+          }
+        }
 
         const pIdx = (origY * imgW + origX) * channels;
         const r = data[pIdx];

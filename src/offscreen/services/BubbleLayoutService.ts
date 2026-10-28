@@ -196,10 +196,14 @@ export function acquireBubbleGeometry(
         const cxJ = boxes[j].x + boxes[j].w / 2;
         const cyJ = boxes[j].y + boxes[j].h / 2;
 
-        const iContainsJ = cxJ >= cI.x && cxJ <= cI.x + cI.w && cyJ >= cI.y && cyJ <= cI.y + cI.h;
-        const jContainsI = cxI >= cJ.x && cxI <= cJ.x + cJ.w && cyI >= cJ.y && cyI <= cJ.y + cJ.h;
+        const iEnclosesJ = cxJ >= cI.x && cxJ <= cI.x + cI.w && cyJ >= cI.y && cyJ <= cI.y + cI.h;
+        const jEnclosesI = cxI >= cJ.x && cxI <= cJ.x + cJ.w && cyI >= cJ.y && cyI <= cJ.y + cJ.h;
 
-        if (iContainsJ && jContainsI) {
+        const isConnected = (iEnclosesJ && shapes[i]?.connectedBoxIndices?.includes(j))
+          || (jEnclosesI && shapes[j]?.connectedBoxIndices?.includes(i))
+          || (iEnclosesJ && jEnclosesI);
+
+        if (isConnected) {
           const unionLeft = Math.min(cI.x, cJ.x);
           const unionTop = Math.min(cI.y, cJ.y);
           const unionRight = Math.max(cI.x + cI.w, cJ.x + cJ.w);
@@ -215,8 +219,11 @@ export function acquireBubbleGeometry(
           proposals[j] = sharedProposal;
           carriers[i] = unionCarrier;
           carriers[j] = unionCarrier;
-          if (!shapes[i]?.interior && shapes[j]?.interior) shapes[i] = shapes[j];
-          else if (shapes[i]?.interior && !shapes[j]?.interior) shapes[j] = shapes[i];
+          const dominantShape = (shapes[i]?.connectedBoxIndices?.includes(j))
+            ? shapes[i]
+            : (shapes[j]?.connectedBoxIndices?.includes(i) ? shapes[j] : (shapes[i] ?? shapes[j]));
+          shapes[i] = dominantShape;
+          shapes[j] = dominantShape;
         }
       }
     }
@@ -453,7 +460,8 @@ export function resolveBubbleLayoutsDetailed(input: BubbleLayoutInput): Resolved
         continue;
       }
 
-      const partition = partitionBalloonFlowCells(container, siblings, sharedContour);
+      const siblingDirections = group.map((idx) => directions?.[idx]);
+      const partition = partitionBalloonFlowCells(container, siblings, sharedContour, SIBLING_GAP, siblingDirections);
       const subChambers = partition.subChambers;
       const cellContours = partition.cellContours;
 
