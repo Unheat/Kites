@@ -112,7 +112,7 @@ describe('Studio OCR independent optional steps', () => {
       expect(object).toMatchObject({
         id: expect.stringMatching(/^ocr-\d+-0$/),
         text: 'Xin chào', originalText: 'こんにちは',
-        fontSize: 14, isVertical: false,
+        fontSize: 13, isVertical: false,
       });
       // Centered unrotated rectangle (edge-midpoint dimensions), not the rotated AABB.
       expect(object.x).toBeCloseTo(212.3753, 4);

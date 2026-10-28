@@ -42,7 +42,7 @@ export const LINE_OVERFLOW_WEIGHT = 1000000.0;
 export const DISCRETIONARY_HYPHEN_PENALTY = 2000.0;
 
 /** Minimum word length considered for discretionary syllable hyphenation. */
-export const MIN_HYPHEN_WORD_LENGTH = 6;
+export const MIN_HYPHEN_WORD_LENGTH = 7;
 
 /** Minimum syllable side length required before or after a hyphen (matches Koharu COMPACT_HYPHENATION_FRAGMENT_LEN = 2). */
 export const MIN_HYPHEN_SIDE_LENGTH = 2;
@@ -307,19 +307,24 @@ export function computeContourProfiles(
   const inkHeight = fontSize * GLYPH_INK_HEIGHT_RATIO;
   const totalTextHeight = (lineCount - 1) * lineHeight + inkHeight;
 
-  if (totalTextHeight > contourHeight) {
+  // Koharu centered_block_origin (crates/koharu-renderer/src/layout.rs:1897-1919):
+  // Enforces vertical block clearance (blockAir) so line chords never enter the
+  // extreme needle tips of an oval or curved contour where widths drop to near zero.
+  const blockAir = Math.max(inlineAir, Math.round(fontSize * 0.35));
+  const usableHeight = contourHeight - 2 * blockAir;
+  if (totalTextHeight > usableHeight) {
     return null;
   }
 
-  const minStart = minY + inlineAir;
-  const maxStart = maxY - inlineAir - totalTextHeight;
+  const minStart = minY + blockAir;
+  const maxStart = maxY - blockAir - totalTextHeight;
   let startY: number;
 
   if (typeof targetCenterY === 'number' && Number.isFinite(targetCenterY) && maxStart >= minStart) {
     const desiredStart = targetCenterY - totalTextHeight / 2;
     startY = Math.max(minStart, Math.min(maxStart, desiredStart));
   } else {
-    startY = minY + (contourHeight - totalTextHeight) / 2;
+    startY = minY + blockAir + (usableHeight - totalTextHeight) / 2;
   }
 
   const rawProfiles: LineProfile[] = [];
@@ -832,10 +837,15 @@ export function wrapTextContour(
   const linePitch = options.linePitch ?? DEFAULT_LINE_PITCH;
   const inlineAir = options.inlineAir ?? DEFAULT_INLINE_AIR;
 
-  // Automatic maximum font size ceiling bounded by container height and evaluated font ceiling
-  const heightCeil = Math.min(MAXIMUM_EVALUATED_FONT_SIZE, Math.round(containerH * 0.85));
+  // Koharu automatic_maximum (crates/koharu-renderer/src/text_renderer.rs:322-336):
+  // For horizontal bubble text, maximum font size is bounded by container width,
+  // preventing narrow vertical bubbles from inflating short sentences to 48px.
+  const autoCeil = Math.min(
+    MAXIMUM_EVALUATED_FONT_SIZE,
+    Math.round(Math.min(containerW * 0.85, Math.max(26, containerH * 0.45)))
+  );
 
-  const maxFont = options.maxFontSize ? Math.max(minFont, options.maxFontSize) : Math.max(minFont, heightCeil);
+  const maxFont = options.maxFontSize ? Math.max(minFont, options.maxFontSize) : Math.max(minFont, autoCeil);
 
   const stylePrefix = `${options.isItalic ? 'italic ' : ''}${options.isBold ? 'bold ' : ''}`;
 

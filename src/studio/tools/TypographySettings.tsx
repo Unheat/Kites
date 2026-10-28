@@ -725,6 +725,25 @@ export const TypographySettings: React.FC = () => {
             <span className="truncate">Caption Box</span>
           </button>
         </div>
+        {selectedObj?.originalContourPoints && selectedObj?.detectedWidth && selectedObj?.detectedHeight &&
+          (Math.round(selectedObj.width) !== Math.round(selectedObj.detectedWidth) || Math.round(selectedObj.height) !== Math.round(selectedObj.detectedHeight)) && (
+          <button
+            type="button"
+            onClick={() => {
+              if (!selectedObj.originalContourPoints || !selectedObj.detectedWidth || !selectedObj.detectedHeight) return;
+              updateSelected({
+                width: selectedObj.detectedWidth,
+                height: selectedObj.detectedHeight,
+                contourPoints: [...selectedObj.originalContourPoints],
+              });
+            }}
+            className="mt-2 w-full py-1 px-2 rounded-md border border-[#282d3f] bg-[#12151f] hover:bg-[#1a1e2d] text-slate-300 hover:text-white transition-all flex items-center justify-center gap-1.5 text-[11px] cursor-pointer"
+            title="Reset frame dimensions and contour back to the detected bubble (Koharu Reset)"
+          >
+            <RotateCcw size={12} className="text-[#38bdf8]" />
+            <span>Reset to Bubble Frame</span>
+          </button>
+        )}
         <p className="mt-1 text-[10px] text-slate-500">
           Applies when you edit text or typography. Existing layout stays unchanged until then.
         </p>

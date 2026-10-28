@@ -122,6 +122,11 @@ export interface TextObject {
   isRounded?: boolean;
   /** Organic bubble contour polygon coordinates (in image pixels), if detected. */
   contourPoints?: Point[];
+  /** Original unscaled contour polygon coordinates from detection, preserved across user transforms for reset. */
+  originalContourPoints?: Point[];
+  /** Original detected box width and height for proportional contour scaling on transform. */
+  detectedWidth?: number;
+  detectedHeight?: number;
   /** Target language code for syllable hyphenation (e.g. 'en', 'es', 'de'). */
   targetLang?: string;
   /** Cached dimensions and font for smooth non-destructive radius slider scrubbing. */

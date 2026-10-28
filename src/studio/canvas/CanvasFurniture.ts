@@ -46,21 +46,29 @@ export class CanvasFurniture {
     ctx.strokeRect(0, 0, obj.width, obj.height);
     ctx.setLineDash([]);
 
-    // 1b. Koharu-style organic contour: when the object typesets on a real 2D
-    // bubble contour, show that silhouette so the editing surface matches the
-    // scanline space the text is placed in (and the baked page).
+    // 1b. Koharu-style organic contour: when the object has a real 2D
+    // bubble contour, show that silhouette with high-contrast dual-stroke
+    // (Koharu CanvasOverlay.tsx) so it is clearly visible across both dark and light artwork.
     const contour = obj.contourPoints;
-    if (!isSkipped && contour && contour.length >= 3
-      && (obj.typesetMode === 'contour' || obj.typesetMode === 'ellipse')) {
+    if (!isSkipped && contour && contour.length >= 3) {
       ctx.beginPath();
       ctx.moveTo(contour[0].x, contour[0].y);
       for (let i = 1; i < contour.length; i++) {
         ctx.lineTo(contour[i].x, contour[i].y);
       }
       ctx.closePath();
+
+      // Outer contrast halo (Koharu CanvasOverlay.tsx dual-stroke: 6px white halo)
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.92)';
+      ctx.lineWidth = 6;
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.setLineDash([10, 6]);
+      ctx.stroke();
+
+      // Inner accent dashed stroke
       ctx.strokeStyle = CONTOUR_OUTLINE_COLOR;
       ctx.lineWidth = 2.5;
-      ctx.setLineDash([9, 6]);
       ctx.stroke();
       ctx.setLineDash([]);
     }

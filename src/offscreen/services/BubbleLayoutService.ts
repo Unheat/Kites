@@ -2,6 +2,7 @@ import type { Point2D } from '../../shared/utils/geometry';
 import { HeuristicBubbleExtractor, type BubbleShapeEvidence, type ImagePatchData } from '../engines/bubble/HeuristicBubbleExtractor';
 import { NeuralBubbleDetector } from '../engines/bubble/NeuralBubbleDetector';
 import { extractMaskContour } from '../utils/maskContourExtractor';
+import { generateBubbleContour } from '../utils/contourTypeset';
 import {
   applySiblingBoundaryConstraints,
   boxIoU,
@@ -343,8 +344,10 @@ export function resolveBubbleLayoutsDetailed(input: BubbleLayoutInput): Resolved
 
       if (candidates.every((box, position) => validBox(box) && accept(group[position], box, MIN_SHARED_FONT_RATIO))) {
         group.forEach((i, position) => {
-          result[i] = candidates[position];
-          resultContours[i] = undefined;
+          const candidateBox = candidates[position];
+          result[i] = candidateBox;
+          const radius = curvatures?.[i]?.borderRadius ?? 0;
+          resultContours[i] = generateBubbleContour(candidateBox.w, candidateBox.h, radius);
         });
       }
     } else {

@@ -168,6 +168,9 @@ export async function requestStudioOcr(
     // Organic contours ride in box-relative so contour mode typesets on the real
     // bubble shape instead of a synthetic oval fallback.
     contourPoints: t.contourPoints,
+    originalContourPoints: t.contourPoints,
+    detectedWidth: t.width,
+    detectedHeight: t.height,
     // Absorbed noise fragments stay editable in Studio but do not double-paint.
     isSkipped: t.isSkipped ?? false,
     // Detected per-bubble colors ride in from Studio OCR; the hardcoded pair

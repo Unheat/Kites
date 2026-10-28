@@ -684,6 +684,25 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       updated.y = newBounds.y;
       updated.width = newBounds.width;
       updated.height = newBounds.height;
+
+      // Koharu 2D contour affine transform (crates/koharu-desktop/src/lib.rs:283-297):
+      // When the user resizes a speech bubble in Studio, scale its polygon contour
+      // proportionally with the bounding box so text reflows live into the wider space
+      // and the dashed outline stays locked to the editing handles.
+      const baseContour = initialTransform.originalContourPoints ?? initialTransform.contourPoints;
+      const baseW = initialTransform.detectedWidth ?? initialTransform.width;
+      const baseH = initialTransform.detectedHeight ?? initialTransform.height;
+      if (baseContour && baseContour.length >= 3 && baseW > 0 && baseH > 0) {
+        const scaleX = newBounds.width / baseW;
+        const scaleY = newBounds.height / baseH;
+        updated.contourPoints = baseContour.map((p) => ({
+          x: Math.round(p.x * scaleX),
+          y: Math.round(p.y * scaleY),
+        }));
+        updated.originalContourPoints = baseContour;
+        updated.detectedWidth = baseW;
+        updated.detectedHeight = baseH;
+      }
     }
 
     return applyTextObjectUpdates(initialTransform, updated, studioStore.getState().globalTypesetMode);
