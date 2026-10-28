@@ -29,14 +29,14 @@ export const FONT_BINARY_SEARCH_MAX_ITER = 10;
 /** Minimum allowed raster font size floor in pixels (matches Koharu MINIMUM_FONT_SIZE = 9.0 in renderer.rs:53). */
 export const MINIMUM_READABLE_FONT_SIZE = 9.0;
 
-/** Maximum font size evaluated when sizing dialogue against container dimensions (Koharu text_renderer.rs:322-336). */
-export const MAXIMUM_EVALUATED_FONT_SIZE = 24.0;
+/** Maximum font size evaluated when sizing dialogue against container dimensions (matches Koharu automatic_maximum / Studio ceiling). */
+export const MAXIMUM_EVALUATED_FONT_SIZE = 48.0;
 
-/** Maximum font size for short dialogue sentences (<= 3 words) in speech balloons (Koharu automatic_maximum). */
-export const DIALOGUE_SENTENCE_MAX_FONT_SIZE = 20.0;
+/** @deprecated Kept for backwards compatibility; Koharu automatic_maximum scales up to container width. */
+export const DIALOGUE_SENTENCE_MAX_FONT_SIZE = MAXIMUM_EVALUATED_FONT_SIZE;
 
-/** Maximum font size for dense multi-line dialogue blocks (> 3 words) to prevent awkward 1-word lines. */
-export const DIALOGUE_DENSE_MAX_FONT_SIZE = 18.0;
+/** @deprecated Kept for backwards compatibility; Koharu automatic_maximum scales up to container width. */
+export const DIALOGUE_DENSE_MAX_FONT_SIZE = MAXIMUM_EVALUATED_FONT_SIZE;
 
 /** Usable width fraction of container width when calculating automatic font ceiling. */
 export const CONTAINER_WIDTH_CEILING_RATIO = 0.85;
@@ -850,22 +850,18 @@ export function wrapTextContour(
   const inlineAir = options.inlineAir ?? DEFAULT_INLINE_AIR;
 
   // Koharu automatic_maximum (crates/koharu-renderer/src/text_renderer.rs:322-336):
-  // Normal comic dialogue caps at 18-20px (screams up to 24px), preventing sentences
-  // from ballooning to huge font sizes and stretching into single-word lines.
-  const wordCount = cleanText.split(/\s+/).filter(Boolean).length;
-  const isScream = wordCount === 1 && /^[A-Z0-9\s!！?？]+$/.test(cleanText);
-  const dialogueCeil = isScream
-    ? MAXIMUM_EVALUATED_FONT_SIZE
-    : (wordCount <= 3 ? DIALOGUE_SENTENCE_MAX_FONT_SIZE : DIALOGUE_DENSE_MAX_FONT_SIZE);
-  const autoCeil = Math.min(
-    dialogueCeil,
-    Math.round(Math.min(
+  // For comic speech balloons, candidate font size evaluates up to container bounds.width
+  // (capped at MAXIMUM_EVALUATED_FONT_SIZE = 48.0), without artificial 18-20px clamps.
+  const autoCeil = Math.round(
+    Math.min(
       containerW * CONTAINER_WIDTH_CEILING_RATIO,
-      Math.max(MINIMUM_READABLE_FONT_SIZE, containerH * CONTAINER_HEIGHT_CEILING_RATIO)
-    ))
+      MAXIMUM_EVALUATED_FONT_SIZE
+    )
   );
 
-  const maxFont = options.maxFontSize ? Math.max(minFont, Math.min(options.maxFontSize, dialogueCeil)) : Math.max(minFont, autoCeil);
+  const maxFont = options.maxFontSize
+    ? Math.max(minFont, options.maxFontSize)
+    : Math.max(minFont, autoCeil);
 
   const stylePrefix = `${options.isItalic ? 'italic ' : ''}${options.isBold ? 'bold ' : ''}`;
 

@@ -190,5 +190,26 @@ describe('Koharu contourTypeset', () => {
       expect(line.y).toBeGreaterThanOrEqual(50);
       expect(line.y).toBeLessThanOrEqual(80);
     });
+
+    it('allows font size to expand above 18px in large speech bubbles without artificial clamps', () => {
+      // 300px wide x 200px tall rectangular bubble contour
+      const largeContour: Point2D[] = [
+        { x: 0, y: 0 },
+        { x: 300, y: 0 },
+        { x: 300, y: 200 },
+        { x: 0, y: 200 },
+      ];
+      const dialogueText = 'I will stand up to the teacher here! Retreat and get reinforcements!';
+
+      const result = wrapTextContour(dialogueText, largeContour, mockCtx, 'sans-serif', {
+        minFontSize: 9,
+        maxFontSize: 48,
+      });
+
+      expect(result.overflowed).toBe(false);
+      // Previously, dialogueCeil clamped dense dialogue to 18.0px.
+      // Now it should scale up into the 20s or 30s to fit the large container.
+      expect(result.fontSize).toBeGreaterThan(18.0);
+    });
   });
 });
