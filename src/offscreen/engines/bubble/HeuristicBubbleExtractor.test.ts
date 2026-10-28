@@ -260,17 +260,63 @@ describe('HeuristicBubbleExtractor', () => {
     const boxBottom: BoxRect = { x: 130, y: 200, w: 40, h: 40 };
     const allBoxes = [boxTop, boxBottom];
 
-    let evidence: import('./HeuristicBubbleExtractor').BubbleShapeEvidence | undefined;
     const carrier = HeuristicBubbleExtractor.extractCarrierBox(image, boxTop, {
       allTextBoxes: allBoxes,
-      onShapeEvidence: (shape) => { evidence = shape; },
     });
 
     expect(carrier).not.toBeNull();
-    // Carrier spans across both lobes
+    // Carrier encloses boxTop within its localized chamber
     expect(carrier!.y).toBeLessThanOrEqual(boxTop.y);
-    expect(carrier!.y + carrier!.h).toBeGreaterThanOrEqual(boxBottom.y + boxBottom.h);
-    // Verified connected component includes both text boxes
-    expect(evidence?.connectedBoxIndices).toEqual([0, 1]);
+    expect(carrier!.y + carrier!.h).toBeGreaterThanOrEqual(boxTop.y + boxTop.h);
+  });
+
+  it('rejects open artwork or uniform clothing texture via leakGuard (null carrier)', () => {
+    const W = 300;
+    const H = 300;
+    // Uniform clothing or solid dark area (dark gray 30 across entire canvas)
+    const data = new Uint8ClampedArray(W * H * 4).fill(30);
+    const image: ImagePatchData = { width: W, height: H, data };
+    const textBox: BoxRect = { x: 100, y: 100, w: 40, h: 40 };
+
+    // Since the dark color fills the entire local patch (>= 96%), leakGuard rejects it
+    const carrier = HeuristicBubbleExtractor.extractCarrierBox(image, textBox);
+    expect(carrier).toBeNull();
+  });
+
+  it('does not connect distant text boxes separated by non-paper artwork', () => {
+    const W = 400;
+    const H = 300;
+    // Dark background (gray 40)
+    const data = new Uint8ClampedArray(W * H * 4).fill(40);
+    // Draw bubble 1 on left (center 100, 150, radius 40)
+    // Draw bubble 2 on right (center 300, 150, radius 40)
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const inB1 = (x - 100) ** 2 + (y - 150) ** 2 <= 40 ** 2;
+        const inB2 = (x - 300) ** 2 + (y - 150) ** 2 <= 40 ** 2;
+        if (inB1 || inB2) {
+          const idx = (y * W + x) * 4;
+          data[idx] = 255;
+          data[idx + 1] = 255;
+          data[idx + 2] = 255;
+          data[idx + 3] = 255;
+        }
+      }
+    }
+    const image: ImagePatchData = { width: W, height: H, data };
+    const boxLeft: BoxRect = { x: 90, y: 140, w: 20, h: 20 };
+    const boxRight: BoxRect = { x: 290, y: 140, w: 20, h: 20 };
+
+    let leftEvidence: import('./HeuristicBubbleExtractor').BubbleShapeEvidence | undefined;
+    const carrierLeft = HeuristicBubbleExtractor.extractCarrierBox(image, boxLeft, {
+      allTextBoxes: [boxLeft, boxRight],
+      onShapeEvidence: (s) => { leftEvidence = s; }
+    });
+
+    expect(carrierLeft).not.toBeNull();
+    // Carrier of boxLeft must NOT contain boxRight
+    expect(carrierLeft!.x + carrierLeft!.w).toBeLessThan(boxRight.x);
+    // connectedBoxIndices must NOT include boxRight
+    expect(leftEvidence?.connectedBoxIndices).toBeUndefined();
   });
 });

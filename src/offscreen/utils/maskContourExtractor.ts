@@ -60,45 +60,50 @@ function simplifyDouglasPeucker(points: Point2D[], tolerance: number): Point2D[]
 }
 
 /**
- * Simplifies a closed polygon contour with Douglas-Peucker.
+ * Simplifies a closed polygon contour with Douglas-Peucker using 4-cardinal anchor points.
+ * Splitting along cardinal extremes (Top, Right, Bottom, Left) ensures simplification chords
+ * follow the outer perimeter without cutting across the bubble interior or collapsing curved walls.
  */
 function simplifyClosedContour(contour: Point2D[], tolerance: number): Point2D[] {
   if (contour.length <= 4) return contour.slice();
 
-  // Find two points that are farthest apart to anchor the DP simplification
-  let maxD2 = 0;
-  let idxA = 0;
-  let idxB = Math.floor(contour.length / 2);
+  // Locate the 4 cardinal extreme points (top, right, bottom, left)
+  let minY = Infinity, maxY = -Infinity;
+  let minX = Infinity, maxX = -Infinity;
+  let idxTop = 0, idxRight = 0, idxBottom = 0, idxLeft = 0;
 
   for (let i = 0; i < contour.length; i++) {
-    for (let j = i + 1; j < contour.length; j++) {
-      const dx = contour[i].x - contour[j].x;
-      const dy = contour[i].y - contour[j].y;
-      const d2 = dx * dx + dy * dy;
-      if (d2 > maxD2) {
-        maxD2 = d2;
-        idxA = i;
-        idxB = j;
-      }
-    }
+    const pt = contour[i];
+    if (pt.y < minY) { minY = pt.y; idxTop = i; }
+    if (pt.x > maxX) { maxX = pt.x; idxRight = i; }
+    if (pt.y > maxY) { maxY = pt.y; idxBottom = i; }
+    if (pt.x < minX) { minX = pt.x; idxLeft = i; }
   }
 
-  if (idxA > idxB) {
-    const tmp = idxA;
-    idxA = idxB;
-    idxB = tmp;
+  // Deduplicate and sort cardinal indices in boundary traversal order
+  const uniqueIndices = Array.from(new Set([idxTop, idxRight, idxBottom, idxLeft])).sort((a, b) => a - b);
+  if (uniqueIndices.length < 3) {
+    return contour.slice();
   }
 
-  // Segment 1: idxA -> idxB
-  const chain1 = contour.slice(idxA, idxB + 1);
-  // Segment 2: idxB -> end + 0 -> idxA
-  const chain2 = contour.slice(idxB).concat(contour.slice(0, idxA + 1));
+  // Simplify each quadrant chain separately so anchor chords follow the perimeter
+  const result: Point2D[] = [];
+  const n = uniqueIndices.length;
 
-  const simp1 = simplifyDouglasPeucker(chain1, tolerance);
-  const simp2 = simplifyDouglasPeucker(chain2, tolerance);
+  for (let k = 0; k < n; k++) {
+    const startIdx = uniqueIndices[k];
+    const endIdx = uniqueIndices[(k + 1) % n];
 
-  const merged = simp1.slice(0, simp1.length - 1).concat(simp2.slice(0, simp2.length - 1));
-  return merged.length >= 3 ? merged : contour.slice();
+    const chain = endIdx > startIdx
+      ? contour.slice(startIdx, endIdx + 1)
+      : contour.slice(startIdx).concat(contour.slice(0, endIdx + 1));
+
+    const simplifiedChain = simplifyDouglasPeucker(chain, tolerance);
+    // Exclude the end vertex to avoid duplication with the start of the next chain
+    result.push(...simplifiedChain.slice(0, simplifiedChain.length - 1));
+  }
+
+  return result.length >= 3 ? result : contour.slice();
 }
 
 /**
@@ -242,9 +247,10 @@ export function extractMaskContour(
   const boundary = traceMaskBoundary(mask, width, height, seedX, seedY);
   if (!boundary || boundary.length < 3) return null;
 
-  // Koharu tolerance: scale * 0.0075 or ~1.5 - 2.0 mask pixels
+  // Koharu tolerance: arc_length * 0.001 (crates/koharu-pipeline/src/stages/detection.rs:1341)
+  // Tight epsilon removes collinear step artifacts while preserving smooth organic contour arcs.
   const maskDimension = Math.max(width, height);
-  const tolerance = Math.max(1.2, maskDimension * 0.0075);
+  const tolerance = Math.max(0.6, Math.min(1.5, maskDimension * 0.002));
   const simplified = simplifyClosedContour(boundary, tolerance);
 
   if (simplified.length < 3) return null;

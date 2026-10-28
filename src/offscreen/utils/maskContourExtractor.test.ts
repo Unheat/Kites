@@ -90,4 +90,34 @@ describe('maskContourExtractor', () => {
     expect(minWaistX).toBeGreaterThanOrEqual(16);
     expect(maxWaistX).toBeLessThanOrEqual(24);
   });
+
+  it('preserves curved oval contour without collapsing into a triangle', () => {
+    const w = 100;
+    const h = 200;
+    const mask = new Uint8Array(w * h);
+    // Draw vertical oval centered at (50, 100) with rx = 35, ry = 80
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        if (((x - 50) / 35) ** 2 + ((y - 100) / 80) ** 2 <= 1.0) {
+          mask[y * w + x] = 1;
+        }
+      }
+    }
+
+    const contour = extractMaskContour(mask, w, h, 0, 0, 1.0, 1.0);
+    expect(contour).not.toBeNull();
+    // A smooth oval must retain at least 12 vertices (not collapsed to 3-5 triangular chords)
+    expect(contour!.length).toBeGreaterThanOrEqual(12);
+
+    // Verify vertices exist across all 4 quadrants (top, right, bottom, left)
+    const rightPoints = contour!.filter(p => p.x >= 75);
+    const leftPoints = contour!.filter(p => p.x <= 25);
+    const topPoints = contour!.filter(p => p.y <= 35);
+    const bottomPoints = contour!.filter(p => p.y >= 165);
+
+    expect(rightPoints.length).toBeGreaterThanOrEqual(2);
+    expect(leftPoints.length).toBeGreaterThanOrEqual(2);
+    expect(topPoints.length).toBeGreaterThanOrEqual(2);
+    expect(bottomPoints.length).toBeGreaterThanOrEqual(2);
+  });
 });

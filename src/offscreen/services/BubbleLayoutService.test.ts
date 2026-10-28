@@ -391,7 +391,7 @@ describe('conservative bubble layouts', () => {
     }
 
     const dominant: BoxRect = { x: 150, y: 160, w: 120, h: 80 };
-    const fragment: BoxRect = { x: 160, y: 170, w: 40, h: 30 };
+    const fragment: BoxRect = { x: 160, y: 170, w: 20, h: 15 };
     const sharedProposal: BoxRect = { x: 120, y: 130, w: 220, h: 140 };
 
     function noiseInput(accept: BubbleLayoutInput['accept']): BubbleLayoutInput {
@@ -489,6 +489,68 @@ describe('conservative bubble layouts', () => {
       expect(detailed.typesetBoxes[0]).toBeDefined();
       expect(detailed.typesetBoxes[1]).toBeDefined();
       expect(detailed.typesetBoxes[0]!.y + detailed.typesetBoxes[0]!.h).toBeLessThanOrEqual(detailed.typesetBoxes[1]!.y);
+    });
+
+    it('does not group distant captions into a shared bubble', () => {
+      const W = 500, H = 400;
+      const data = new Uint8ClampedArray(W * H * 4).fill(40);
+      // Bubble 1 on left (center 100, 150, radius 40)
+      // Bubble 2 on right (center 350, 150, radius 40)
+      for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+          const inLeft = (x - 100) ** 2 + (y - 150) ** 2 <= 40 ** 2;
+          const inRight = (x - 350) ** 2 + (y - 150) ** 2 <= 40 ** 2;
+          if (inLeft || inRight) {
+            const idx = (y * W + x) * 4;
+            data[idx] = 255;
+            data[idx + 1] = 255;
+            data[idx + 2] = 255;
+            data[idx + 3] = 255;
+          }
+        }
+      }
+      const image: ImagePatchData = { width: W, height: H, data };
+      const boxLeft: BoxRect = { x: 90, y: 140, w: 20, h: 20 };
+      const boxRight: BoxRect = { x: 340, y: 140, w: 20, h: 20 };
+      const boxes = [boxLeft, boxRight];
+
+      const geom = acquireBubbleGeometry(image, boxes);
+      // Independent bubbles keep null proposal identities (not grouped into multi-utterance)
+      expect(geom.proposals[0]).toBeNull();
+      expect(geom.proposals[1]).toBeNull();
+    });
+
+    it('does not absorb short dialogue lines (e.g. "HASUMI!") as noise, partitioning both subchambers', () => {
+      // Dominant box: 120x80 (area 9600)
+      // Short dialogue box: 40x25 (area 1000, > 400px absolute ceiling)
+      const dominant: BoxRect = { x: 150, y: 140, w: 120, h: 80 };
+      const shortDialogue: BoxRect = { x: 160, y: 230, w: 40, h: 25 };
+      const sharedProposal: BoxRect = { x: 120, y: 120, w: 220, h: 160 };
+
+      // Synthetic 24-point oval contour enclosing both
+      const points: Point2D[] = [];
+      for (let step = 0; step < 24; step++) {
+        const angle = (step / 24) * Math.PI * 2;
+        points.push({ x: Math.round(230 + 110 * Math.cos(angle)), y: Math.round(200 + 90 * Math.sin(angle)) });
+      }
+
+      const detailed = resolveBubbleLayoutsDetailed({
+        pageWidth: 500,
+        pageHeight: 500,
+        boxes: [dominant, shortDialogue],
+        carriers: [{ ...dominant }, { ...shortDialogue }],
+        proposals: [sharedProposal, sharedProposal],
+        shapes: [],
+        curvatures: [{ isRounded: true, borderRadius: 40 }, { isRounded: true, borderRadius: 40 }],
+        contours: [points, points],
+        directions: ['h', 'h'],
+        accept: () => true,
+      });
+
+      // Both must receive their own subchamber; shortDialogue is NOT skipped
+      expect(detailed.typesetBoxes[0]).toBeDefined();
+      expect(detailed.typesetBoxes[1]).toBeDefined();
+      expect(detailed.skipped).toEqual([false, false]);
     });
   });
 });

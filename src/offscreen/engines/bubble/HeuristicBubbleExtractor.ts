@@ -98,33 +98,16 @@ export class HeuristicBubbleExtractor {
       return null;
     }
 
-    // 1. Expand patch around text box (slack for bubble borders)
-    const padX = Math.round(Math.max(50, textBox.w * 1.0));
-    const padY = Math.round(Math.max(50, textBox.h * 1.0));
+    // 1. Expand patch around text box (slack for bubble borders).
+    // Bounded local patch: prevents open artwork or uniform textures (e.g. clothing)
+    // from evading the >= 96% leakGuard ceiling.
+    const padX = Math.round(Math.max(50, textBox.w * 0.9));
+    const padY = Math.round(Math.max(50, textBox.h * 0.9));
 
-    let minX = Math.max(0, textBox.x - padX);
-    let minY = Math.max(0, textBox.y - padY);
-    let maxX = Math.min(imgW, textBox.x + textBox.w + padX);
-    let maxY = Math.min(imgH, textBox.y + textBox.h + padY);
-
-    // Multi-utterance / joined bubble proximity patch expansion:
-    // If nearby sibling text boxes exist within proximity distance, expand the patch
-    // bounds to encompass the connected cluster. This prevents patch clipping at narrow
-    // bubble necks between joined lobes (e.g. L-shaped or figure-8 double bubbles).
-    if (options.allTextBoxes && options.allTextBoxes.length > 1) {
-      for (const sibling of options.allTextBoxes) {
-        if (sibling === textBox) continue;
-        const dx = Math.max(0, Math.max(textBox.x, sibling.x) - Math.min(textBox.x + textBox.w, sibling.x + sibling.w));
-        const dy = Math.max(0, Math.max(textBox.y, sibling.y) - Math.min(textBox.y + textBox.h, sibling.y + sibling.h));
-        const maxDim = Math.max(textBox.w, textBox.h, sibling.w, sibling.h);
-        if (dx <= maxDim * 2.5 && dy <= maxDim * 2.5) {
-          minX = Math.min(minX, Math.max(0, sibling.x - padX));
-          minY = Math.min(minY, Math.max(0, sibling.y - padY));
-          maxX = Math.max(maxX, Math.min(imgW, sibling.x + sibling.w + padX));
-          maxY = Math.max(maxY, Math.min(imgH, sibling.y + sibling.h + padY));
-        }
-      }
-    }
+    const minX = Math.max(0, textBox.x - padX);
+    const minY = Math.max(0, textBox.y - padY);
+    const maxX = Math.min(imgW, textBox.x + textBox.w + padX);
+    const maxY = Math.min(imgH, textBox.y + textBox.h + padY);
 
     const origPatchW = maxX - minX;
     const origPatchH = maxY - minY;
@@ -166,19 +149,11 @@ export class HeuristicBubbleExtractor {
       darkThresh = DEFAULT_DARK_LUMINANCE_THRESHOLD;
     }
 
-    // Filter nearby text boxes that intersect the patch so their dark glyph pixels
-    // are treated as interior whitespace rather than artificial obstacle walls.
-    const nearbyBoxes = options.allTextBoxes && options.allTextBoxes.length > 0
-      ? options.allTextBoxes.filter((b) =>
-          b.x + b.w > minX && b.x < maxX && b.y + b.h > minY && b.y < maxY
-        )
-      : [textBox];
-
-    // 3. Build binary mask of bubble interior
-    // Pixel is interior if inside any known text box or matches dominant paper polarity
+    // 3. Build binary mask of bubble interior.
+    // Only the target text box's interior is marked inText to prevent its own glyph strokes
+    // from acting as obstacle walls. Connectivity across multiple lobes must be carried
+    // by real observed paper pixels (isPaper), never manufactured across artwork borders.
     const mask = new Uint8Array(patchW * patchH);
-    // Validation keeps only observed paper pixels: force-filled OCR rectangles must never
-    // manufacture connectivity across artwork or a border between unrelated bubbles.
     const observedInterior = options.onShapeEvidence ? new Uint8Array(patchW * patchH) : undefined;
 
     for (let py = 0; py < patchH; py++) {
@@ -186,14 +161,7 @@ export class HeuristicBubbleExtractor {
       for (let px = 0; px < patchW; px++) {
         const origX = Math.min(imgW - 1, minX + Math.floor(px / scale));
 
-        let inText = false;
-        for (let bi = 0; bi < nearbyBoxes.length; bi++) {
-          const b = nearbyBoxes[bi];
-          if (origX >= b.x && origX < b.x + b.w && origY >= b.y && origY < b.y + b.h) {
-            inText = true;
-            break;
-          }
-        }
+        const inText = origX >= textBox.x && origX < textBox.x + textBox.w && origY >= textBox.y && origY < textBox.y + textBox.h;
 
         const pIdx = (origY * imgW + origX) * channels;
         const r = data[pIdx];
@@ -225,7 +193,25 @@ export class HeuristicBubbleExtractor {
       return null;
     }
 
-    // Verify which sibling text boxes from allTextBoxes are connected into this same chamber
+    const carrier = severed.carrier;
+
+    // Sanity clamp: carrier must at least contain the original text box
+    const finalX = Math.min(carrier.x, textBox.x);
+    const finalY = Math.min(carrier.y, textBox.y);
+    const finalW = Math.max(carrier.w, textBox.w, (carrier.x + carrier.w) - finalX);
+    const finalH = Math.max(carrier.h, textBox.h, (carrier.y + carrier.h) - finalY);
+
+    const finalCarrier: BoxRect = {
+      x: Math.max(0, finalX),
+      y: Math.max(0, finalY),
+      w: Math.min(imgW - Math.max(0, finalX), finalW),
+      h: Math.min(imgH - Math.max(0, finalY), finalH),
+    };
+
+    // Verify which sibling text boxes from allTextBoxes are connected into this same chamber.
+    // A sibling is only part of this chamber if:
+    // 1. Its center falls inside the reconstructed morphology chamber (rec[cy][cx] === 1).
+    // 2. The chamber bounding box strictly encloses the sibling box.
     const connectedBoxIndices: number[] = [];
     if (options.allTextBoxes && options.allTextBoxes.length > 1 && severed.reconstructed) {
       const rec = severed.reconstructed;
@@ -237,6 +223,10 @@ export class HeuristicBubbleExtractor {
           connectedBoxIndices.push(bi);
           continue;
         }
+        const isInsideCarrier = b.x >= finalCarrier.x && b.y >= finalCarrier.y
+          && b.x + b.w <= finalCarrier.x + finalCarrier.w && b.y + b.h <= finalCarrier.y + finalCarrier.h;
+        if (!isInsideCarrier) continue;
+
         const cx = Math.round(b.x + b.w / 2);
         const cy = Math.round(b.y + b.h / 2);
         if (cx >= minX && cx < maxX && cy >= minY && cy < maxY) {
@@ -262,25 +252,12 @@ export class HeuristicBubbleExtractor {
       observedInterior: observedInterior!,
       eroded: severed.eroded,
       reconstructed: severed.reconstructed,
-      carrierBox: severed.carrier,
+      carrierBox: finalCarrier,
       isSeveredCarrier: true,
       connectedBoxIndices: connectedBoxIndices.length > 1 ? connectedBoxIndices : undefined,
     });
 
-    const carrier = severed.carrier;
-
-    // Sanity clamp: carrier must at least contain the original text box
-    const finalX = Math.min(carrier.x, textBox.x);
-    const finalY = Math.min(carrier.y, textBox.y);
-    const finalW = Math.max(carrier.w, textBox.w, (carrier.x + carrier.w) - finalX);
-    const finalH = Math.max(carrier.h, textBox.h, (carrier.y + carrier.h) - finalY);
-
-    return {
-      x: Math.max(0, finalX),
-      y: Math.max(0, finalY),
-      w: Math.min(imgW - Math.max(0, finalX), finalW),
-      h: Math.min(imgH - Math.max(0, finalY), finalH),
-    };
+    return finalCarrier;
   }
 
   /**

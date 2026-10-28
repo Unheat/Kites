@@ -20,12 +20,13 @@ export const MIN_SHARED_FONT_RATIO = 0.85;
 /** Production and visual harness intentionally share the same association threshold. */
 export const BUBBLE_MATCH_COVERAGE = 0.50;
 /**
- * Fragments up to this fraction of the dominant box's area are OCR noise
- * (stray punctuation strokes, unmerged column slivers) rather than real utterances.
- * Larger stacked siblings are genuine utterances sharing the balloon and keep
- * their own sub-chamber through normal flow-cell partitioning.
+ * Fragments up to this fraction of the dominant box's area (AND below the absolute area ceiling)
+ * are OCR noise (stray punctuation strokes, unmerged column slivers) rather than real utterances.
+ * Substantial stacked siblings (e.g. short dialogue like "HASUMI!" or "DAMN...") are genuine
+ * utterances sharing the balloon and keep their own sub-chamber through normal flow-cell partitioning.
  */
-export const NOISE_AREA_RATIO = 0.35;
+export const NOISE_AREA_RATIO = 0.10;
+export const NOISE_MAX_ABSOLUTE_AREA = 400;
 
 export interface BubbleGeometry {
   pageWidth: number;
@@ -168,30 +169,54 @@ export function acquireBubbleGeometry(
         carriers[index] = null;
       }
     } else {
-      // Heuristic Mode (Tier 1): check if already populated by a connected sibling
-      if (carriers[index] === undefined) {
-        let shape: BubbleShapeEvidence | undefined;
-        const heuristic = HeuristicBubbleExtractor.extractCarrierBox(image, box, {
-          allTextBoxes: boxes,
-          onShapeEvidence: (s) => { shape = s; }
-        });
-        carriers[index] = heuristic;
-        shapes[index] = shape;
+      // Heuristic Mode (Tier 1): extract local carrier and shape for each box
+      let shape: BubbleShapeEvidence | undefined;
+      const heuristic = HeuristicBubbleExtractor.extractCarrierBox(image, box, {
+        allTextBoxes: boxes,
+        onShapeEvidence: (s) => { shape = s; }
+      });
+      carriers[index] = heuristic;
+      shapes[index] = shape;
+      proposals[index] = null;
+    }
+  }
 
-        // Multi-utterance joined bubble: if morphological chamber connects sibling boxes,
-        // share the proposal identity and carrier so downstream Voronoi flow cells partition them.
-        if (heuristic && shape?.connectedBoxIndices && shape.connectedBoxIndices.length > 1) {
-          const sharedProposal: BoxRect = { ...heuristic };
-          proposals[index] = sharedProposal;
-          for (const siblingIdx of shape.connectedBoxIndices) {
-            if (siblingIdx !== index && siblingIdx >= 0 && siblingIdx < boxes.length) {
-              carriers[siblingIdx] = heuristic;
-              shapes[siblingIdx] = shape;
-              proposals[siblingIdx] = sharedProposal;
-            }
-          }
-        } else {
-          proposals[index] = null;
+  // Heuristic multi-utterance joined bubble resolution:
+  // When two distinct text boxes i and j have mutually overlapping carrier chambers that contain
+  // each other's text centers, link them into a shared multi-utterance proposal.
+  if (!isNeuralMode) {
+    for (let i = 0; i < boxes.length; i++) {
+      const cI = carriers[i];
+      if (!cI) continue;
+      for (let j = 0; j < i; j++) {
+        const cJ = carriers[j];
+        if (!cJ) continue;
+        const cxI = boxes[i].x + boxes[i].w / 2;
+        const cyI = boxes[i].y + boxes[i].h / 2;
+        const cxJ = boxes[j].x + boxes[j].w / 2;
+        const cyJ = boxes[j].y + boxes[j].h / 2;
+
+        const iContainsJ = cxJ >= cI.x && cxJ <= cI.x + cI.w && cyJ >= cI.y && cyJ <= cI.y + cI.h;
+        const jContainsI = cxI >= cJ.x && cxI <= cJ.x + cJ.w && cyI >= cJ.y && cyI <= cJ.y + cJ.h;
+
+        if (iContainsJ && jContainsI) {
+          const unionLeft = Math.min(cI.x, cJ.x);
+          const unionTop = Math.min(cI.y, cJ.y);
+          const unionRight = Math.max(cI.x + cI.w, cJ.x + cJ.w);
+          const unionBottom = Math.max(cI.y + cI.h, cJ.y + cJ.h);
+          const unionCarrier: BoxRect = {
+            x: unionLeft,
+            y: unionTop,
+            w: unionRight - unionLeft,
+            h: unionBottom - unionTop,
+          };
+          const sharedProposal: BoxRect = proposals[j] ?? proposals[i] ?? unionCarrier;
+          proposals[i] = sharedProposal;
+          proposals[j] = sharedProposal;
+          carriers[i] = unionCarrier;
+          carriers[j] = unionCarrier;
+          if (!shapes[i]?.interior && shapes[j]?.interior) shapes[i] = shapes[j];
+          else if (shapes[i]?.interior && !shapes[j]?.interior) shapes[j] = shapes[i];
         }
       }
     }
@@ -392,12 +417,13 @@ export function resolveBubbleLayoutsDetailed(input: BubbleLayoutInput): Resolved
           dominantPos = p;
         }
       }
-      // Noise Splitting Guard (split clause): only TINY fragments (area ratio) count as
-      // noise. Stacked siblings with substantial area are real utterances sharing the
+      // Noise Splitting Guard (split clause): only TINY fragments (area ratio AND small absolute area) count as
+      // noise. Stacked siblings with substantial area or dialogue words are real utterances sharing the
       // balloon and fall through to flow-cell partitioning so their text keeps rendering.
       const isSingleChamberWithNoise = siblings.every((b, p) => {
         if (p === dominantPos) return true;
-        return (b.w * b.h) / Math.max(1, maxArea) <= NOISE_AREA_RATIO;
+        const area = b.w * b.h;
+        return area <= NOISE_MAX_ABSOLUTE_AREA && (area / Math.max(1, maxArea)) <= NOISE_AREA_RATIO;
       });
 
       if (isSingleChamberWithNoise) {
