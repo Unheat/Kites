@@ -1,0 +1,256 @@
+{
+  "metadata": {
+    "image": "image6.jpg",
+    "sourceDictionary": "pipelineVisualKoharuExactTest.ts:mapOcrTextToKoharuExact",
+    "totalBlocks": 19
+  },
+  "transcriptions": [
+    {
+      "index": 0,
+      "originalText": "我",
+      "box": {
+        "x": 648,
+        "y": 15,
+        "w": 37.33630940518894,
+        "h": 37.21558813185679
+      },
+      "direction": "h",
+      "mappedText": "我",
+      "uncertainty": "Watermark debris: raw OCR \"我==\" stripped to \"我\" by battery; missing dictionary rule for \"我==\" vs Japanese SFX."
+    },
+    {
+      "index": 1,
+      "originalText": "可恶…",
+      "box": {
+        "x": 575,
+        "y": 18,
+        "w": 33,
+        "h": 62
+      },
+      "direction": "v",
+      "mappedText": "UGH...",
+      "uncertainty": null
+    },
+    {
+      "index": 2,
+      "originalText": "敌人太强了…！",
+      "box": {
+        "x": 524,
+        "y": 61,
+        "w": 39,
+        "h": 134
+      },
+      "direction": "v",
+      "mappedText": "THE ENEMY IS TOO STRONG",
+      "uncertainty": null
+    },
+    {
+      "index": 3,
+      "originalText": "其他人也都是无法战斗的状态",
+      "box": {
+        "x": 108,
+        "y": 20,
+        "w": 53,
+        "h": 138
+      },
+      "direction": "v",
+      "mappedText": "OTHER PEOPLE ARE ALSO STUCK IN THIS STATE WHERE THEY CAN'T FIGHT.",
+      "uncertainty": null
+    },
+    {
+      "index": 4,
+      "originalText": "这样下去的话…",
+      "box": {
+        "x": 36,
+        "y": 57,
+        "w": 30,
+        "h": 126
+      },
+      "direction": "v",
+      "mappedText": "THIS KEEPS HAPPENING: IT'S JUST LIKE THAT.",
+      "uncertainty": null
+    },
+    {
+      "index": 5,
+      "originalText": "电",
+      "box": {
+        "x": 316,
+        "y": 219,
+        "w": 36.22154055254967,
+        "h": 54.45181356024793
+      },
+      "direction": "v",
+      "mappedText": "电",
+      "uncertainty": "Isolated SFX character \"电\" inside lightning glyph panel; no dictionary mapping."
+    },
+    {
+      "index": 6,
+      "originalText": "还样太危险了",
+      "box": {
+        "x": 266,
+        "y": 227,
+        "w": 71,
+        "h": 134
+      },
+      "direction": "v",
+      "mappedText": "NO WAY! THIS IS REALLY DANGEROUS!",
+      "uncertainty": null
+    },
+    {
+      "index": 7,
+      "originalText": "老师ー！",
+      "box": {
+        "x": 814,
+        "y": 321,
+        "w": 44,
+        "h": 102
+      },
+      "direction": "v",
+      "mappedText": "TEACHER!!",
+      "uncertainty": null
+    },
+    {
+      "index": 8,
+      "originalText": "ボロ",
+      "box": {
+        "x": 797,
+        "y": 461,
+        "w": 85,
+        "h": 171
+      },
+      "direction": "v",
+      "mappedText": "POOR...!",
+      "uncertainty": "Raw OCR \"ボロ\" recognized; dictionary maps to \"POOR...!\""
+    },
+    {
+      "index": 9,
+      "originalText": "老师你们赶快撤退去搬救兵！！",
+      "box": {
+        "x": 440,
+        "y": 376,
+        "w": 61,
+        "h": 185
+      },
+      "direction": "v",
+      "mappedText": "I'M GOING TO TAKE THIS BURDEN MYSELF. PLEASE RETREAT QUICKLY AND SAVE THE SOLDIERS!!",
+      "uncertainty": null
+    },
+    {
+      "index": 10,
+      "originalText": "要想取胜的话没有别的办法了！",
+      "box": {
+        "x": 321,
+        "y": 394,
+        "w": 53,
+        "h": 156
+      },
+      "direction": "v",
+      "mappedText": "IF YOU REALLY WANT TO WIN, THERE'S NO OTHER CHOICE.",
+      "uncertainty": null
+    },
+    {
+      "index": 11,
+      "originalText": "老师！请相信我！",
+      "box": {
+        "x": 20,
+        "y": 394,
+        "w": 52,
+        "h": 104
+      },
+      "direction": "v",
+      "mappedText": "TEACHER, PLEASE BELIEVE ME!",
+      "uncertainty": null
+    },
+    {
+      "index": 12,
+      "originalText": "我知道了！",
+      "box": {
+        "x": 253,
+        "y": 614,
+        "w": 33,
+        "h": 103
+      },
+      "direction": "v",
+      "mappedText": "I GET IT NOW..",
+      "uncertainty": null
+    },
+    {
+      "index": 13,
+      "originalText": "但是千万不要勉強自己！",
+      "box": {
+        "x": 220,
+        "y": 622,
+        "w": 33,
+        "h": 203
+      },
+      "direction": "v",
+      "mappedText": "BUT PLEASE DON'T FORCE YOURSELF TOO MUCH!",
+      "uncertainty": null
+    },
+    {
+      "index": 14,
+      "originalText": "要是情况危险的话莲实你也要马上撤退！",
+      "box": {
+        "x": 30,
+        "y": 595,
+        "w": 48,
+        "h": 186
+      },
+      "direction": "v",
+      "mappedText": "IN CASE THINGS GET DANGEROUS, YOU SHOULD ALL RETREAT IMMEDIATELY!",
+      "uncertainty": null
+    },
+    {
+      "index": 15,
+      "originalText": "明白！",
+      "box": {
+        "x": 14,
+        "y": 792,
+        "w": 30,
+        "h": 62
+      },
+      "direction": "v",
+      "mappedText": "UN-DER-STOOD!",
+      "uncertainty": "Raw OCR \"明白！\" recognized; dictionary maps to \"UN-DER-STOOD!\"."
+    },
+    {
+      "index": 16,
+      "originalText": "现在证是拼尽全力的时候",
+      "box": {
+        "x": 93,
+        "y": 874,
+        "w": 46,
+        "h": 127
+      },
+      "direction": "v",
+      "mappedText": "THIS IS WHEN WE REALLY PUSH OURSELVES!",
+      "uncertainty": "Homophone \"证\" for \"正\" in \"现在证是拼尽全力的时候\"; dictionary matches on \"全力\"."
+    },
+    {
+      "index": 17,
+      "originalText": "打起精神来",
+      "box": {
+        "x": 43,
+        "y": 923,
+        "w": 29,
+        "h": 92
+      },
+      "direction": "v",
+      "mappedText": "LET'S GET OUR SPIRITS BACK UP!",
+      "uncertainty": null
+    },
+    {
+      "index": 18,
+      "originalText": "莲实！",
+      "box": {
+        "x": 14,
+        "y": 983,
+        "w": 30,
+        "h": 62
+      },
+      "direction": "v",
+      "mappedText": "LION! YOU HAVE TO GO!",
+      "uncertainty": null
+    }
+  ]
+}

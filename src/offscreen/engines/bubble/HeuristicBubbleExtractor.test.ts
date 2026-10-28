@@ -111,12 +111,13 @@ describe('HeuristicBubbleExtractor', () => {
   it('detects a translucent grey bubble via adaptive luminance (legacy 200 threshold fails)', () => {
     const W = 120;
     const H = 120;
-    // Translucent bubble interior over dark artwork renders as grey (~170), not white
+    // Translucent bubble interior over dark artwork renders as grey (~170), not white.
+    // Keep the circle fully on-page; a cropped circle is not evidence of enclosure.
     const data = new Uint8ClampedArray(W * H * 4).fill(170);
     // Dark bubble border disc (radius 45) so the chamber is enclosed
     for (let y = 0; y < H; y++) {
       for (let x = 0; x < W; x++) {
-        const dist = (x - 100) ** 2 + (y - 100) ** 2;
+        const dist = (x - 60) ** 2 + (y - 60) ** 2;
         if (dist > 45 ** 2) {
           const idx = (y * W + x) * 4;
           data[idx] = 40;
@@ -126,7 +127,7 @@ describe('HeuristicBubbleExtractor', () => {
       }
     }
     const image: ImagePatchData = { width: W, height: H, data };
-    const textBox: BoxRect = { x: 90, y: 90, w: 20, h: 20 };
+    const textBox: BoxRect = { x: 50, y: 50, w: 20, h: 20 };
 
     // Adaptive: background 170 -> threshold max(130, 170-35) = 135 -> grey interior detected
     const adaptive = HeuristicBubbleExtractor.extractCarrierBox(image, textBox);

@@ -37,15 +37,17 @@ conditions and tests protected the boundary, but nothing structural did.
 Grouping signal: engines express "these two texts share one balloon" by assigning the
 **same proposal object** to both boxes. The service groups on proposal identity or
 high-IoU/containment exactly as before — it never needs to know which tier produced the
-geometry. Editing heuristic association code can no longer affect YOLO because the code
-paths are separate classes; TypeScript fails the build if either engine stops honoring
-the `IBubbleEngine.acquireGeometry` contract.
+geometry. Separate engine classes keep heuristic association off the neural acquisition
+path; TypeScript checks the interface contract, not visual behavior or shared-helper safety.
+Shared utilities still require neural differential regression tests (added in Phase 82).
 
 ## 3. Donor Mapping (unchanged behavior, relocated)
 
-- **XianScan `expansion.rs:186-194`**: shared-bubble test = bubble IoU ≥ 0.5 → now
-  `HeuristicBubbleEngine.associateSharedChambers` (1.2.3's carrier-overlap merge,
-  restored in `aa907e1` as an IoU-guarded version, moved here).
+- **XianScan `expansion.rs:186-204`** tests IoU ≥ 0.5 between **neural detector bubble boxes**
+  to decide sole/shared occupancy before carrier refinement. Applying this threshold to
+  independently extracted heuristic carriers is a Kites adaptation, not an exact detector
+  port. It cannot establish that a candidate is a bubble. Phase 82 validates observed
+  components first, then uses component identity or evidence-supported IoU association.
 - **Koharu `bubble.rs` flow cells**: multi-utterance balloons partition by topological
   neck decomposition then Voronoi bisectors → unchanged in `partitionBalloonFlowCells`.
 - **Cotrans `generic.py:666`**: text-line merge (distance ≤ 2×fontSize) remains owned by

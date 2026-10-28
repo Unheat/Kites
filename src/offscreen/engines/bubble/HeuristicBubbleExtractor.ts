@@ -1,4 +1,7 @@
 import type { BoxRect } from '../../utils/bubbleExpansion';
+import { discoverHeuristicRegion, initialSearchBounds } from './heuristicRegionSearch';
+import { paperCoverage } from './heuristicPaperComponents';
+import { MIN_HEURISTIC_TEXT_COVERAGE } from './heuristicCandidateValidation';
 
 // Adaptive luminance tuning: the binarization threshold is anchored to the background sampled on a
 // ring just outside the text box (see sampleBackgroundLuminance). FLOOR guards against dark artwork
@@ -47,6 +50,8 @@ export interface BubbleShapeEvidence {
   reconstructed?: Uint8Array;
   carrierBox?: BoxRect;
   isSeveredCarrier?: boolean;
+  /** Heuristic-only proof that the full observed component passed enclosure validation. */
+  validatedComponent?: boolean;
 }
 
 export interface SeveredTailResult {
@@ -56,24 +61,28 @@ export interface SeveredTailResult {
 }
 
 export interface HeuristicExtractionOptions {
-  /** Maximum downscale dimension for the local patch to guarantee sub-millisecond execution. Default 200. */
+  /** Maximum geometry-raster dimension after native-resolution validation. Default 200. */
   maxPatchDimension?: number;
   /** Disk erosion radius at standard resolution. Default 14. */
   baseErodeRadius?: number;
   /** Manual binarization threshold (0..255) override. Default: adaptive — sampled background ring minus ADAPTIVE_LUM_MARGIN, floored at ADAPTIVE_LUM_FLOOR (fallback DEFAULT_LUMINANCE_THRESHOLD). */
   luminanceThreshold?: number;
-  /** Optional array of all detected text boxes to treat as interior whitespace (prevents un-erased sibling text from acting as fake walls). */
+  /** OCR boxes used as supported chamber seeds, never force-painted over outlines. */
   allTextBoxes?: BoxRect[];
   /** Receives existing masks, including when tail severing leaves only one lobe. No extra segmentation. */
   onShapeEvidence?: (evidence: BubbleShapeEvidence) => void;
+  /** Native-pixel search allocation ceiling; exhaustion rejects rather than inventing closure. */
+  maxSearchPixels?: number;
+  /** Receives accepted/rejected search diagnostics without per-pixel logging. */
+  onDiagnostics?: (diagnostics: { status: string; reason?: string; passes: number }) => void;
 }
 
 /**
  * Tier 1 Adaptive Heuristic Carrier Extractor.
  *
- * Implements morphological opening (disk erosion + flood fill + dilation) to extract
- * the speech bubble chamber and sever narrow pointing tails, with resolution-invariant
- * patch downscaling (< 1.5ms per bubble).
+   * Validates observed paper topology with bounded adaptive search before morphological
+   * opening (disk erosion + flood fill + dilation) severs narrow pointing tails.
+   * Search uses native pixels; the final geometry raster is downscaled independently.
  */
 export class HeuristicBubbleExtractor {
   /**
@@ -96,26 +105,9 @@ export class HeuristicBubbleExtractor {
       return null;
     }
 
-    // 1. Expand patch around text box (slack for bubble borders)
-    const padX = Math.round(Math.max(50, textBox.w * 1.0));
-    const padY = Math.round(Math.max(50, textBox.h * 1.0));
-
-    const minX = Math.max(0, textBox.x - padX);
-    const minY = Math.max(0, textBox.y - padY);
-    const maxX = Math.min(imgW, textBox.x + textBox.w + padX);
-    const maxY = Math.min(imgH, textBox.y + textBox.h + padY);
-
-    const origPatchW = maxX - minX;
-    const origPatchH = maxY - minY;
-    if (origPatchW < 20 || origPatchH < 20) {
-      return null;
-    }
-
-    // 2. Compute downscale factor to bound computational complexity
-    const maxDim = options.maxPatchDimension ?? 200;
-    const scale = Math.min(1.0, maxDim / Math.max(origPatchW, origPatchH));
-    const patchW = Math.max(10, Math.round(origPatchW * scale));
-    const patchH = Math.max(10, Math.round(origPatchH * scale));
+    const bounds = initialSearchBounds(image, textBox);
+    const minX = bounds.x, minY = bounds.y;
+    const maxX = bounds.x + bounds.w, maxY = bounds.y + bounds.h;
 
     // Adaptive dual-polarity luminance:
     // Pass 1: analyze dominant background paper polarity inside the text box.
@@ -145,96 +137,56 @@ export class HeuristicBubbleExtractor {
       darkThresh = DEFAULT_DARK_LUMINANCE_THRESHOLD;
     }
 
-    // Filter nearby text boxes that intersect the patch so their dark glyph pixels
-    // are treated as interior whitespace rather than artificial obstacle walls.
-    const nearbyBoxes = options.allTextBoxes && options.allTextBoxes.length > 0
-      ? options.allTextBoxes.filter((b) =>
-          b.x + b.w > minX && b.x < maxX && b.y + b.h > minY && b.y < maxY
-        )
-      : [textBox];
-
-    // 3. Build binary mask of bubble interior
-    // Pixel is interior if inside any known text box or matches dominant paper polarity
-    const mask = new Uint8Array(patchW * patchH);
-    // Validation keeps only observed paper pixels: force-filled OCR rectangles must never
-    // manufacture connectivity across artwork or a border between unrelated bubbles.
-    const observedInterior = options.onShapeEvidence ? new Uint8Array(patchW * patchH) : undefined;
-
-    for (let py = 0; py < patchH; py++) {
-      const origY = Math.min(imgH - 1, minY + Math.floor(py / scale));
-      for (let px = 0; px < patchW; px++) {
-        const origX = Math.min(imgW - 1, minX + Math.floor(px / scale));
-
-        let inText = false;
-        for (let bi = 0; bi < nearbyBoxes.length; bi++) {
-          const b = nearbyBoxes[bi];
-          if (origX >= b.x && origX < b.x + b.w && origY >= b.y && origY < b.y + b.h) {
-            inText = true;
-            break;
-          }
-        }
-
-        const pIdx = (origY * imgW + origX) * channels;
-        const r = data[pIdx];
-        const g = data[pIdx + 1];
-        const b = data[pIdx + 2];
-        const isPaper = isDarkBubble
-          ? (r <= darkThresh && g <= darkThresh && b <= darkThresh)
-          : (r >= lumThresh && g >= lumThresh && b >= lumThresh);
-
-        if (isPaper && observedInterior) observedInterior[py * patchW + px] = 1;
-        if (inText || isPaper) {
-          mask[py * patchW + px] = 1;
-        }
-      }
-    }
-
-    // 4. Sever narrow pointing tails via morphological opening on binary mask
-    const baseR = options.baseErodeRadius ?? 14;
-    const rErode = Math.max(4, Math.round(baseR * scale));
-    const textCenterX = Math.max(0, Math.min(patchW - 1, Math.round((textBox.x + textBox.w / 2 - minX) * scale)));
-    const textCenterY = Math.max(0, Math.min(patchH - 1, Math.round((textBox.y + textBox.h / 2 - minY) * scale)));
-
-    const severed = HeuristicBubbleExtractor.severTailOnBinaryMask(
-      mask, patchW, patchH, textCenterX, textCenterY, rErode,
-      origPatchW, origPatchH, minX, minY, scale, scale, true
-    );
-
-    if (!severed) {
-      return null;
-    }
-
-    // Preserve morphology evidence for conservative multi-lobe layout validation.
-    options.onShapeEvidence?.({
-      x: minX,
-      y: minY,
-      scale,
-      scaleX: patchW / origPatchW,
-      scaleY: patchH / origPatchH,
-      width: patchW,
-      height: patchH,
-      interior: mask,
-      observedInterior: observedInterior!,
-      eroded: severed.eroded,
-      reconstructed: severed.reconstructed,
-      carrierBox: severed.carrier,
-      isSeveredCarrier: true,
+    const discovered = discoverHeuristicRegion(image, textBox, {
+      dark: isDarkBubble,
+      threshold: isDarkBubble ? darkThresh : lumThresh,
+      maxPixels: options.maxSearchPixels,
     });
+    options.onDiagnostics?.({ status: discovered.status,
+      reason: discovered.status === 'rejected' ? discovered.reason : undefined, passes: discovered.passes });
+    if (discovered.status === 'rejected') return null;
 
-    const carrier = severed.carrier;
-
-    // Sanity clamp: carrier must at least contain the original text box
-    const finalX = Math.min(carrier.x, textBox.x);
-    const finalY = Math.min(carrier.y, textBox.y);
-    const finalW = Math.max(carrier.w, textBox.w, (carrier.x + carrier.w) - finalX);
-    const finalH = Math.max(carrier.h, textBox.h, (carrier.y + carrier.h) - finalY);
-
-    return {
-      x: Math.max(0, finalX),
-      y: Math.max(0, finalY),
-      w: Math.min(imgW - Math.max(0, finalX), finalW),
-      h: Math.min(imgH - Math.max(0, finalY), finalH),
-    };
+    const region = discovered.patch.bounds;
+    const scale = Math.min(1, (options.maxPatchDimension ?? 200) / Math.max(region.w, region.h));
+    const width = Math.max(1, Math.round(region.w * scale));
+    const height = Math.max(1, Math.round(region.h * scale));
+    const scaleX = width / region.w, scaleY = height / region.h;
+    const mask = new Uint8Array(width * height);
+    const observed = new Uint8Array(mask.length);
+    for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+      const source = Math.min(region.h - 1, Math.floor(y / scaleY)) * region.w
+        + Math.min(region.w - 1, Math.floor(x / scaleX));
+      mask[y * width + x] = discovered.filled[source];
+      observed[y * width + x] = discovered.component.mask[source];
+    }
+    const reconstructed = new Uint8Array(mask.length);
+    let eroded: Uint8Array = new Uint8Array(mask.length);
+    const seeds = (options.allTextBoxes ?? [textBox]).filter((box) =>
+      paperCoverage(discovered.filled, region, box) >= MIN_HEURISTIC_TEXT_COVERAGE);
+    for (const seed of seeds) {
+      const cx = Math.max(0, Math.min(width - 1, Math.round((seed.x + seed.w / 2 - region.x) * scaleX)));
+      const cy = Math.max(0, Math.min(height - 1, Math.round((seed.y + seed.h / 2 - region.y) * scaleY)));
+      const severed = HeuristicBubbleExtractor.severTailOnBinaryMask(mask, width, height, cx, cy,
+        Math.max(1, Math.round((options.baseErodeRadius ?? 14) * scale)),
+        region.w, region.h, region.x, region.y, scaleX, scaleY, false);
+      if (!severed) continue;
+      eroded = severed.eroded;
+      for (let i = 0; i < mask.length; i++) reconstructed[i] |= severed.reconstructed[i];
+    }
+    // Small valid cavities can disappear under erosion. Keep the verified cavity, not an OCR rectangle.
+    const chamber = reconstructed.some(Boolean) ? reconstructed : mask;
+    let left = width, top = height, right = -1, bottom = -1;
+    for (let i = 0; i < chamber.length; i++) if (chamber[i]) {
+      left = Math.min(left, i % width); right = Math.max(right, i % width);
+      top = Math.min(top, Math.floor(i / width)); bottom = Math.max(bottom, Math.floor(i / width));
+    }
+    if (right < left) return null;
+    const carrier = { x: region.x + left / scaleX, y: region.y + top / scaleY,
+      w: (right - left + 1) / scaleX, h: (bottom - top + 1) / scaleY };
+    options.onShapeEvidence?.({ x: region.x, y: region.y, scale, scaleX, scaleY, width, height,
+      interior: mask, observedInterior: observed, eroded, reconstructed: chamber,
+      carrierBox: carrier, isSeveredCarrier: true, validatedComponent: true });
+    return carrier;
   }
 
   /**
