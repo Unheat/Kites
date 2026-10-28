@@ -59,8 +59,8 @@ export class CanvasFurniture {
       }
       ctx.closePath();
       ctx.strokeStyle = CONTOUR_OUTLINE_COLOR;
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([5, 4]);
+      ctx.lineWidth = 2.5;
+      ctx.setLineDash([9, 6]);
       ctx.stroke();
       ctx.setLineDash([]);
     }
