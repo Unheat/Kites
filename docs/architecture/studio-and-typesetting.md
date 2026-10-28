@@ -1,8 +1,16 @@
 # Studio Editor & Typesetting Architecture 🎨
 
-The **Kites Studio** (`src/App.tsx`) and **Typesetting Engine** (`src/offscreen/utils/canvasTypesetting.ts`, `typesetLayout.ts`, `cotransDefaultRenderer.ts`) provide an interactive desktop environment for reviewing comic translations, editing dialogue, adjusting typography, and exporting publication-ready comic pages.
+The **Kites Studio** (`src/studio/Studio.tsx`, hosted by `src/App.tsx`) and **Typesetting Engine** (`src/offscreen/utils/canvasTypesetting.ts`, `typesetLayout.ts`, `cotransDefaultRenderer.ts`) provide an interactive desktop environment for reviewing comic translations, editing dialogue, adjusting typography, and exporting publication-ready comic pages.
 
 ---
+
+## Current implementation status (2026-10-28)
+
+Audited cumulative `origin/main..main` through `656d720` against current code. The earlier dual-mode, font-ready-only, and universal four-pass descriptions are superseded by the route-specific notes below. Historical phase plans remain history, not proof of current behavior or end-to-end pixel parity.
+
+- `src/studio/Studio.tsx` owns the editor; `src/App.tsx` hosts application/history navigation.
+- `src/studio/canvas/TextRenderer.ts` paints **Canvas 2D**, not SVG. Furniture is also Canvas; the inline textarea is a DOM editing surface, not the final renderer.
+- Backend strategy dispatch and Studio edit dispatch are related but not identical. Stored contour visibility is not evidence that the baked solver used that contour.
 
 ## 🏗️ Architectural Topology
 
@@ -13,7 +21,7 @@ flowchart TD
         TextBlockStore["Structured TextBlock Records<br/>(pos, size, font, color, lines)"]
     end
 
-    subgraph StudioUI["Kites Studio Editor (src/App.tsx)"]
+    subgraph StudioUI["Kites Studio Editor (src/studio/Studio.tsx)"]
         CanvasViewport["Zoom & Pan Viewport<br/>(Preserves Natural Aspect Ratio)"]
         InteractiveBoxes["Interactive 8-Handle Overlay<br/>(Drag, Resize, Selection)"]
         InspectorPanel["Dialogue & Typography Inspector<br/>(Font, Size, Color, Text Edit)"]
@@ -21,8 +29,8 @@ flowchart TD
 
     subgraph TypesetEngine["Typesetting Engine (Offscreen / Studio)"]
         FontLoader["Font Preset Loader (@font-face)<br/>(Wild Words, Anime Ace, etc.)"]
-        ColorSampler["Background Color Sampler<br/>(Luminance Contrast Detection)"]
-        BinaryLayout["4-Pass Binary Search Layout<br/>(Balanced Stanza Wrapping)"]
+        ColorSampler["Text Color Detection<br/>(Clustered colors / contrast fallback)"]
+        BinaryLayout["Route-Specific Layout<br/>(Contour DP / Auto Balloon / Caption)"]
         AffineRenderer["Affine Canvas Matrix Renderer<br/>(Rotated Speech Bubbles)"]
     end
 
@@ -74,8 +82,8 @@ Kites adopts a **Clean Plate Architecture**:
      ```
 2. **Infinite Re-Typesetting:**
    Because text is rendered dynamically over the clean background, users can change fonts, resize speech bubbles, adjust colors, or retranslate text without degrading the underlying artwork.
-3. **Zero-Migration `typesetBox` Studio Parity:**
-   When speech bubble expansion is enabled, `posX, posY, width, height` in `db.textBlocks` are set directly to the validated expanded `typesetBox` coordinates rather than the narrow raw OCR bounding box. This guarantees 100% WYSIWYG parity between the baked in-page translation and the Studio desktop editor without requiring any Dexie schema migration.
+3. **Stored Current Layout (Not Complete Detection History):**
+   `PipelineOrchestrator` prefers actual rendered destination geometry, then an accepted `typesetBox`, then the OCR box when saving `posX, posY, width, height`. Lines, font size and optional positioned placements are saved separately. This improves initial layout continuity but does not guarantee pixel parity or preserve complete original detection history; see the lifecycle limitations below.
 
 ---
 
@@ -105,29 +113,25 @@ $$Y_{\text{natural}} = \frac{Y_{\text{pointer}} - Y_{\text{pan}}}{\text{Scale}}$
 
 ---
 
-## 🎛️ Dual Typesetting Engine Toggle (Auto Balloon vs Simple Wrap)
+## Typesetting Modes: Backend vs Studio Edits
 
-Studio V2 provides a dedicated **Typesetting Engine** switcher in `TypographySettings.tsx` (see ADR-008):
+The shared `TypesetMode` union is `contour | simple | auto-balloon | balloon`; `balloon` is the retained Auto Balloon alias. Legacy persisted `ellipse` restores as `contour`. Studio labels are **Contour**, **Auto Balloon**, and **Caption Box**. Selection changes affect selected objects; without selection, the setting is a default for future edits/objects, not an automatic rewrite of every existing layout.
 
 ```mermaid
 flowchart TD
-    ModeSelect{"Typesetting Engine Mode"}
-    ModeSelect -->|Auto Balloon| Auto["Auto Balloon Engine<br/>(4-Pass Binary Search + Diamond Stanza)"]
-    ModeSelect -->|Simple Wrap| Simple["Simple Wrap Engine<br/>(Greedy Rectangular Wrap at Fixed Size)"]
-    Auto --> Reflow["Dynamic Font Reflow on Box Resize"]
-    Simple --> Fixed["Predictable Caption Wrapping"]
+    Bake["Offscreen fixed region?"] -->|No| Auto["AutoBalloonTypesetter: shared 4-pass fitting"]
+    Bake -->|Yes| ContourCheck{"Contour present, contour mode, or rounded non-simple?"}
+    ContourCheck -->|Yes| Contour["ContourDpTypesetter: polygon DP"]
+    ContourCheck -->|No, simple| Rect["SimpleRectTypesetter: rectangle through contour DP"]
+    Edit["Studio recalculateBlockTypeset"] --> Vertical{"Vertical CJK?"}
+    Vertical -->|Yes| CJK["Vertical column fitting"]
+    Vertical -->|No| Mode{"Mode"}
+    Mode -->|contour| StudioContour["Stored contour or generated fallback; wrapTextContour"]
+    Mode -->|simple| Greedy["Fixed current font; wrapRectangular"]
+    Mode -->|balloon / auto-balloon| StudioAuto["measureDefaultLayout"]
 ```
 
-1. **`Auto Balloon` Mode (Default for Detected Dialogue):**
-   - Implements 4-pass binary search fitting and balanced diamond line-envelope wrapping (`typesetLayout.ts`).
-   - Automatically reflows line wraps and scales font size as the user drags resize handles.
-   - Employs strict 7-letter hyphenation and Kinsoku Shori punctuation rules.
-2. **`Simple Wrap` Mode (For Narration & Rectangular Boxes):**
-   - Implements greedy rectangular word-wrapping at a fixed user-defined font size (`studioTypeset.ts`).
-   - Preserves exact user font choices without automatic downscaling or diamond curvature.
-3. **Dual Editing Scope Integration:**
-   - When text boxes are selected, toggling updates the active boxes locally.
-   - When no text boxes are selected, toggling updates the global studio default for newly created boxes.
+A fixed contour takes priority in `TypesetStrategyFactory.resolve()`, even with a `simple` label. Studio simple edits instead use their explicit branch and fixed-font wrapping. Contour DP uses a 9px default floor and current custom 18/20/24px ceilings (dense dialogue / short dialogue / single uppercase scream); the shared free fitter can search down to 6px. **These caps are not Koharu parity:** donor bubble maximum is horizontal width or vertical height; 24 is only the donor nonbubble maximum.
 
 ---
 
@@ -138,48 +142,53 @@ Kites includes an extensible font registry tailored for manga and comics letteri
 | Preset ID | Family Label | Typographic Role | Primary Font Stack |
 | :--- | :--- | :--- | :--- |
 | `standard` | Standard | Clean modern sans-serif | `sans-serif` |
-| `comic` | Wild Words | Classic manga dialogue | `"Kites Comic", "Wild Words", cursive, sans-serif` |
-| `anime-ace`| Anime Ace | Shonen action lettering | `"Anime Ace 2.0 BB", "Anime Ace", cursive` |
+| `comic` | Wild Words | Classic manga dialogue | `"CC Wild Words", "WildWords", "CCWildWords", "Kites Comic", sans-serif` |
+| `anime-ace`| Anime Ace | Shonen action lettering | `"Anime Ace", "MTO Comic 2", cursive, sans-serif` |
 | `comic-hand`| Comic Hand | Informal handwriting / small caps | `"Patrick Hand SC", "Comic Sans MS", cursive` |
 | `serif` | Serif | Literary prose & narration boxes | `Georgia, "Times New Roman", serif` |
 | `monospace` | Monospace | Digital screens & system messages | `"Courier New", Courier, monospace` |
 
-### Font Loading Invariant
-Before executing text measurement on canvas, the engine awaits font readiness:
-```ts
-if (typeof document !== 'undefined' && document.fonts) {
-  await document.fonts.ready;
-}
+### Font Registration, Measurement & Drawing
+
+Preset families come from `src/shared/renderFontPresets.ts`; downloadable choices come from `src/shared/fontCatalog.ts`, not duplicated UI literals. Comic presets now lead with `"CC Wild Words"` and `"Anime Ace"`; bundled `@font-face` rules also include Patrick Hand SC. The on-demand library supports catalog downloads with pinned SHA-256 verification and user imports; Dexie schema v6 adds a `fonts` table containing raw bytes and family metadata.
+
+`font:<family>` selections resolve to a sanitized library family. Each document must register persisted bytes through `ensureFontsRegistered()` / `FontFace.load()` / `document.fonts.add()`. The live bake explicitly loads named selected families before `document.fonts.ready`, because readiness alone does not request every declared face. Studio starts library registration asynchronously; failures can still use browser fallback. Its Canvas renderer is not a font-readiness or pixel-parity guarantee. See the detailed [font resolution/measurement/draw flow](../development/cotrans_renderer_spec.md#2-font-resolution-measurement--draw-lifecycle).
+
+### Color & Outline Routes
+
+The current pipeline supports per-block ink/background clustering (`textColor.ts`, `textColorDetection.ts`) with anti-alias fringe rejection and black/white snapping, plus fallback contrast sampling. The older single luminance-threshold description was incomplete. Final offscreen outlines use `2 * max(trunc(fontSize * 0.07), 1)` when enabled, then a separate fill pass. Studio `TextRenderer` uses object `strokeWidth * 2` and supports styled runs/gradients; restored objects currently default to stroke width 2. These separate paint policies can differ visually.
+
+### Bubble Geometry, Database & Studio Lifecycle
+
+```mermaid
+flowchart TD
+    Source["Original pixels + OCR boxes"] --> Geometry["acquireBubbleGeometry: heuristic or neural class-0 proposal + shape"]
+    Geometry --> Raw["Page-space raw contour; independent scaleX / scaleY"]
+    Raw --> Resolve["resolveBubbleLayoutsDetailed: chambers, noise fragments, collision rollback, sibling clearance"]
+    Resolve --> Accepted["Accepted axis-aligned typesetBox + local contour + skipped flags"]
+    Resolve --> Rejected["Rejected layout: no accepted box/contour"]
+    Accepted --> Bake["Measure with actual fonts; draw final Canvas layout"]
+    Rejected --> Free["Live bake free-region fallback"]
+    Bake --> Save["Dexie: clean plate + final geometry/font/lines/placements/mode/contour"]
+    Free --> Save
+    Raw -.->|"Current persistence fallback may retain rejected raw contour"| Save
+    Save --> Restore["restoreTextObject; keep lines/positionedLines; heal soft hyphens"]
+    Restore --> Baseline["Seed transient originalContourPoints and detected dimensions from saved values"]
+    Restore --> Paint["TextRenderer Canvas: eligible placements or regular layout"]
+    Restore --> Outline["CanvasFurniture: draw stored contour regardless of mode"]
+    Baseline --> Resize["Resize scales baseline contour by new width/height ratios"]
+    Resize --> Reflow["Layout fields changed: invalidate placements and reflow"]
+    Reflow --> Save
+    Baseline --> Reset["Reset dimensions + contour only; position/rotation unchanged"]
 ```
-This guarantees that `ctx.measureText` reflects real glyph metrics rather than system fallback widths.
 
----
+**Persisted layout is not the full detection history.** `TextBlock` stores `contourPoints`, `positionedLines`, current geometry, lines, font, mode, curvature and skipped status. `originalContourPoints`, `detectedWidth` and `detectedHeight` are transient Studio fields, not persisted columns/payload fields. On reload they are reseeded from the current saved contour and dimensions, so reset is relative to that restored frame, not necessarily the original detector frame. `Reset to Bubble Frame` does not restore position or rotation.
 
-## 🎨 Background Color Sampling & Contrast Preservation
+**Known integration limitation:** `PipelineOrchestrator` prefers detailed accepted contours but falls back to raw acquisition contours while saving. It can also classify the saved mode from proposal/carrier evidence after the live layout was rejected. A later Studio contour reflow can therefore differ from the free-region bake. `CanvasFurniture` draws any stored non-skipped contour with at least three points regardless of `typesetMode`; its dashed white halo/accent outline proves storage only, not acceptance or solver use.
 
-Comic text appears on diverse backgrounds: bright white speech balloons, dark nighttime panels, or screaming black spiky balloons. Hardcoding black-on-white text destroys dark panels.
+`TextRenderer` uses stored positioned lines when their count matches, coordinates are finite, and per-character styling does not require regular rendering. Edits invalidate/recompute placements. Backend and Studio share useful data, but there is no verified end-to-end pixel parity claim.
 
-Kites ports XianScan's **color sampling algorithm** (`textColor.ts`):
-1. **Sampling Ring:** Samples pixels in a narrow band outside the text polygon but inside the speech bubble perimeter.
-2. **Perceived Luminance Formula:**
-   $$Y = 0.299R + 0.587G + 0.114B$$
-3. **Contrast Decision:**
-   - **Light Background ($Y \ge 128$):** Primary text `#000000` (black) with `#FFFFFF` (white) outline stroke.
-   - **Dark Background ($Y < 128$):** Primary text `#FFFFFF` (white) with `#000000` (black) outline stroke.
-4. **Stroke Padding:** Text outlines are rendered with `lineWidth = \max(2, \text{fontSize} \times 0.15)$ using `lineJoin = 'round'` to prevent text collisions with screentones.
-
----
-
-## 📐 4-Pass Binary Search Typesetting Layout
-
-To fill irregularly shaped comic speech balloons without overflowing, Kites runs an iterative layout engine:
-
-1. **Pass 1 (Binary Fit):** Binary searches font size between $6\text{ px}$ and the balloon height until all lines wrap within safety margins.
-2. **Pass 2 (Tall-Box Aspect Cap):** When balloon aspect ratio $H / W \ge 2.0$, clamps font size to prevent narrow speech bubbles from blowing up font sizes unnaturally.
-3. **Pass 3 (Hyphenation Scan):** Uses `hypher` with language hyphenation patterns to break words $\ge 7$ characters across lines in narrow balloons, preventing single-word line overflows.
-4. **Pass 4 (Readability Floor):** Enforces a minimum $6\text{ px}$ floor to guarantee legible text.
-5. **Balanced Stanza Wrapping:** Evaluates multiple wrapping options to balance line lengths into an inverted pyramid or centered diamond stanza.
-6. **2D Affine Transformation:** For balloons tilted by $|\theta| \ge 3^\circ$, text is drawn through affine rotation matrices (`ctx.translate`, `ctx.rotate`).
+`runStudioOcr()` shares acquisition/resolution helpers but currently uses an unconditional geometry acceptance callback and precomputes horizontal layout through `wrapTextContour()` with a hardcoded comic font, including rectangle fallbacks. It is not the live bake's selected-font acceptance path. The offscreen response adds patch offsets; the bridge seeds initial contour/dimension baselines for resizing. Studio guards long-running retranslation/colorization results against page switches and clears undo history on page identity changes; this does not imply every asynchronous UI read is guarded.
 
 ---
 
@@ -222,9 +231,9 @@ Studio V2 provides direct on-canvas dialogue editing and interactive inpainting:
 
 Kites Studio renders directly onto a hidden full-resolution `OffscreenCanvas`:
 1. **Canvas Untaint Guard:** Ensures all source images (clean plate blobs and background layers) are loaded as same-origin Blobs or authenticated Data URLs. Prevents browser security exceptions (`SecurityError: The operation is insecure`) when invoking `toDataURL()` or `toBlob()`.
-2. **Lossless Vector Composition:**
+2. **Native-Resolution Canvas Composition:**
    - Renders the clean inpainted background bitmap at 100% native resolution.
-   - Renders each `TextBlock` using vector canvas primitives (`fillText`, `strokeText`, `setTransform`).
+   - Rasterizes each text object using Canvas text primitives (`fillText`, `strokeText`, transforms). PNG losslessness does not mean vector output or donor pixel parity.
 3. **Multi-Format Export:**
    - **PNG:** Lossless compression preserving all crisp text edges and transparency.
    - **JPEG:** High-quality lossy compression (quality 0.92) for smaller file sizes.

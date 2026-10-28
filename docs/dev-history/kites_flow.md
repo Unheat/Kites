@@ -2,11 +2,49 @@
 
 **Pipeline Orchestrator**: `src/offscreen/services/PipelineOrchestrator.ts` -> `PipelineOrchestrator.runPipeline(jobId)`
 
-Below is the complete step-by-step technical execution flow for image translation in the **Kites** browser extension codebase.
+## Current execution map — 2026-10-28
+
+The original ASCII diagram and function index below are retained as **historical snapshots**, not a current API inventory. In particular, their `action` messaging examples, old OCR labels, `ballonExtractor`, raw-mask forwarding, `layoutLines`, old hyphenation path and intermediate renderer assumptions must not be used as implementation instructions. Current cumulative `origin/main..main` through `656d720` follows this map.
+
+```mermaid
+flowchart TD
+    Request["Content/popup request"] --> Background["Background creates/enqueues job; explicit routed runtime messages"]
+    Background --> Offscreen["PROCESS_JOB: PipelineOrchestrator.runPipeline; read job and raw blob"]
+    Offscreen --> OCR["OcrManager: selected OCR, filter/group, reading order, original polygons"]
+    OCR --> Geometry["off / heuristic / neural; acquireBubbleGeometry from source raster"]
+    OCR --> Translation["TranslationManager: configured provider waterfall"]
+    OCR --> Erase["Color/inpaint work: original text polygons only"]
+    Geometry --> Ready["Selected font family registered and explicitly loaded for live bake; hyphenation ready"]
+    Translation --> Ready
+    Erase --> Ready
+    Ready --> Layout["resolveBubbleLayoutsDetailed; live font gate, partition, rollback, sibling clearance"]
+    Layout --> Render["renderTextBlocksBatch; default strategies or legacy language route; Canvas draw"]
+    Render --> Live["Baked PNG returned for host image"]
+    Render --> DB["Clean plate + actual text geometry/font/lines/placements/mode/contours"]
+    DB --> Restore["restoreTextObject: transient contour/dimension baseline seeded from saved state"]
+    Restore --> Studio["Canvas TextRenderer + CanvasFurniture; editor modes and resize reflow"]
+    Studio --> DB
+```
+
+### Verified current source map
+
+- **Job and media persistence:** `src/offscreen/services/PipelineOrchestrator.ts`, `src/db.ts`. Project-owned jobs are exempt from retention cleanup. Webpage receives baked PNG; DB receives clean plate plus text blocks, not that baked bitmap as its background.
+- **Bubble geometry:** `src/offscreen/services/BubbleLayoutService.ts`, `src/offscreen/utils/maskContourExtractor.ts`, `src/offscreen/utils/geometry/`. Runtime modes are `off`, `heuristic`, `neural`; separate `neural-mask` is retired. Mask projection uses independent X/Y scales. Curved shared balloons use flow-cell partitioning, not only axis-aligned chain splits; tiny absorbed fragments persist as skipped.
+- **Inpaint boundary:** `src/offscreen/services/InpaintManager.ts` receives original text polygons. `maskRawCanvas` is diagnostic; expanded boxes/contours are not eraser masks. Historical Stage 3's mask-forwarding wording is superseded.
+- **Strategy resolution:** `src/offscreen/engines/typeset/TypesetStrategyFactory.ts`; fixed contour evidence wins before simple, otherwise Auto Balloon. Backend `SimpleRectTypesetter` calls Contour DP with a rectangle. `balloon` and `auto-balloon` both mean Auto Balloon; legacy `ellipse` restores as contour.
+- **Font and draw:** `src/shared/renderFontPresets.ts`, `src/shared/fontCatalog.ts`, `src/shared/fontLibrary.ts`, `src/offscreen/utils/canvasTypesetting.ts`, `src/offscreen/utils/cotransDefaultRenderer.ts`. Library bytes live in Dexie v6 `fonts`; faces register per document. Live bake preloads named selected families before measurement. Final renderer uses affine Canvas stroke/fill, not SVG or a required rasterize-then-warp stage. Full [font flow](../development/cotrans_renderer_spec.md#2-font-resolution-measurement--draw-lifecycle).
+- **Current custom font ceiling:** shared Contour DP's 18/20/24 dialogue caps are not donor parity. Koharu bubble automatic maximum is width horizontally or height vertically; 24 is only nonbubble. Nonempty/overflow fallback output does not prove containment.
+- **Studio lifecycle:** `src/studio/state/persistedTextObjects.ts`, `src/studio/canvas/studioTypeset.ts`, `src/studio/canvas/TextRenderer.ts`, `src/studio/canvas/CanvasFurniture.ts`. Retain eligible positioned lines initially; edits invalidate/reflow. Studio simple edits are fixed-font rectangular wrapping, unlike backend fitting. Stored contours draw regardless of mode and do not prove solver use.
+- **Known persistence/reset gaps:** pipeline save can reuse a rejected raw acquisition contour and classify mode using carrier/proposal evidence. `originalContourPoints` / `detectedWidth` / `detectedHeight` are not persisted, only reseeded from saved values. Reset restores dimensions/contour, not position/rotation. [Lifecycle flow and details](../architecture/studio-and-typesetting.md#bubble-geometry-database--studio-lifecycle).
+- **Studio OCR is a separate seam:** `src/offscreen/services/StudioOcr.ts` shares geometry but uses unconditional acceptance and hardcoded comic-family horizontal contour precomputation; the offscreen response adds patch offsets and the bridge prepares transient baselines. This differs from live selected-font bake. Long-running Studio retranslation/colorization rejects stale page results; undo history clears on page switches.
+
+Visual tests, fixtures and Chrome probe scripts cover selected behavior; no end-to-end donor pixel-parity claim follows from their names or presence.
 
 ---
 
-### Full Technical Flow Diagram
+### Historical technical flow diagram (superseded where noted above)
+
+
 
 ```
 [ Extension / Content Script Request ] (`chrome.runtime.sendMessage({ action: 'TRANSLATE_IMAGE' })`)
@@ -26,7 +64,6 @@ Below is the complete step-by-step technical execution flow for image translatio
        │  Stage 2: OCR & Text Detection (`OcrManager`)
        │  File: src/offscreen/services/OcrManager.ts -> OcrManager.processImage()
        │  File: src/offscreen/services/OcrManager.ts -> OcrManager.getOrLoadEngine(tier)
-       │  File: src/offscreen/engines/ocr/CtdOcrEngine.ts -> CtdOcrEngine.detect()
        │  File: src/offscreen/engines/ocr/PaddleOcrEngine.ts -> PaddleOcrEngine.detect() & recognizeCrops()
        │  File: src/shared/utils/geometry.ts -> assignTextDirections() & splitTextRegion()
 ┌──────┴──────────────────────────────────────────────────────────────────────────────────────┐
@@ -45,7 +82,7 @@ Below is the complete step-by-step technical execution flow for image translatio
                                                ▼
        │  Stage 3: OCR Mask Output (used by inpainting and optional bubble-fit rendering)
        │  File: src/offscreen/engines/ocr/extractPolygons.ts -> extractRawMaskCanvas()
-       │  File: src/offscreen/utils/ballonExtractor.ts -> extractBallonRegion() [optional]
+       │  File: src/offscreen/engines/bubble/HeuristicBubbleExtractor.ts -> extractCarrierBox() [optional]
 ┌──────┴──────────────────────────────────────────────────────────────────────────────────────┐
 │ 1. `extractRawMaskCanvas()` emits the detector's raw probability mask canvas                 │
 │ 2. The default renderer does not use bubble extraction; `manga2eng` may use it separately    │
@@ -100,7 +137,7 @@ Below is the complete step-by-step technical execution flow for image translatio
 
 ---
 
-### Detailed Kites Code Reference & Function Index
+### Historical code reference & function index (not current API inventory)
 
 #### Stage 1: Pipeline Message Entry & DB Fetch
 * **Message Listener**: `src/offscreen/index.ts` -> `chrome.runtime.onMessage.addListener()`
@@ -140,7 +177,7 @@ Below is the complete step-by-step technical execution flow for image translatio
 * **Batch Render Entry**: `src/offscreen/services/PipelineOrchestrator.ts` -> calls `renderTextBlocksBatch()`
 * **Cotrans Default Renderer**: `src/offscreen/utils/cotransDefaultRenderer.ts` -> `resizeRegionToFontSize()` & `renderRegionDefault()`
 * **Canvas Renderer**: `src/offscreen/utils/canvasTypesetting.ts` -> `renderTextBlocksBatch()`, `layoutLines()`, `renderTextBlock()`
-* **Hyphenation Helper**: `src/offscreen/utils/hyphenation.ts` -> `syllables()`
+* **Hyphenation Helper**: `src/offscreen/utils/hyphenation/HyphenationService.ts` (current replacement for the historical single-file module) -> `syllables()`
 
 #### Stage 7: Persistence & Return
 * **Image Update**: `src/offscreen/services/PipelineOrchestrator.ts` -> `db.images.update()`

@@ -1,67 +1,45 @@
 # Route 1: Auto Balloon Typesetting Specification
 
-## 1. Overview & Purpose
+## 1. Overview & Current Scope
 
-**Route 1 (Auto Balloon)** is the default typesetting engine used when dialogue text does not have an active speech bubble segmentation contour (such as uncontained free text, background dialogue, or when bubble detection is in `Disabled` mode).
+**Current-code audit: 2026-10-28, cumulative `origin/main..main` through `656d720`.** Earlier versions of this specification described an exact ellipse-chord solver and a 9px floor. Those descriptions are superseded by the implementation below. Reference-derived algorithms do not establish end-to-end pixel parity.
 
-It is a 1:1 port of XianScan's diamond/elliptical reflow engine (`typeset.ts` / `builder.rs`) combined with Cotrans 2023 `measureDefaultLayout`.
+Auto Balloon is the free-region route used by the Western default renderer when no accepted `typesetBox` is available. `TypesetMode` includes `balloon` and `auto-balloon` as aliases, plus `contour` and `simple`; `ellipse` is retired and normalized to `contour` when restoring old Studio records.
 
-* **Implementation File**: [`src/offscreen/engines/typeset/AutoBalloonTypesetter.ts`](file:///Users/dangtruongan/study/Kites/src/offscreen/engines/typeset/AutoBalloonTypesetter.ts)
-* **Underlying Layout Math**: [`src/offscreen/utils/typesetLayout.ts`](file:///Users/dangtruongan/study/Kites/src/offscreen/utils/typesetLayout.ts)
-* **Dispatcher**: [`src/offscreen/engines/typeset/TypesetStrategyFactory.ts`](file:///Users/dangtruongan/study/Kites/src/offscreen/engines/typeset/TypesetStrategyFactory.ts) (`mode: 'auto-balloon'`)
+- Strategy: `src/offscreen/engines/typeset/AutoBalloonTypesetter.ts`.
+- Shared fitting, wrapping and measurement cache: `src/offscreen/utils/typesetLayout.ts`.
+- Strategy selection: `src/offscreen/engines/typeset/TypesetStrategyFactory.ts`.
+- Fit verification and region resizing: `src/offscreen/utils/renderer/regionGeometry.ts`.
 
----
+`TypesetStrategyFactory.resolve()` chooses Contour DP first for a fixed region with a contour, explicit contour mode, or rounded geometry unless explicitly simple. A fixed simple region without contour selects Simple Rect. Everything else selects Auto Balloon. This is not selection solely by the mode label.
 
-## 2. Mathematical Foundation & Geometry
+## 2. Measurement & Geometry
 
-### 2.1 Diamond / Elliptical Reflow Model
-When text sits inside an unconstrained comic bubble, a rectangular wrap leaves large empty corners while overflowing the center. The Auto Balloon model calculates line capacities by modeling an inscribed ellipse inside the bounding box $(W, H)$:
+`measureDefaultLayout()` sanitizes and compacts text, then calls `fitFontSizeWithLines()` with a 5% inset and an upper bound of:
 
-For line index $k \in [0, N-1]$ out of $N$ total lines, the available width $W_k$ follows the chord equation:
+$$S_{max}=\min(\max(\text{requestedSize},48),\text{maxFontSizeCap or }\infty)$$
 
-$$W_k = W_{\text{max}} \cdot \sqrt{1 - \left(\frac{2k + 1 - N}{N}\right)^2}$$
+The shared fitter uses rectangular usable dimensions `max(10, dimension * 0.90)`, `fontSpec()` and a per-font measurement cache. Its lower probe bound is `MIN_FONT_SIZE = 6`, not a guaranteed 9px or 14px floor. The strategy passes `options.minFontSize ?? 14` as the requested/start size; that argument does not replace the shared fitter's 6px lower bound.
 
-Where:
-* $W_{\text{max}} = W \cdot (1 - 2 \cdot \text{DEFAULT\_FIT\_INSET})$
-* $\text{DEFAULT\_FIT\_INSET} = 0.05$ (reserving a 5% margin buffer from container boundaries)
+Balanced wrapping can form a diamond-like stanza, but the current strategy does **not** implement the previously documented per-line ellipse chord equation or golden-aspect cost formula. Those formulas were design descriptions, not this route's current acceptance predicate.
 
-### 2.2 Aspect Ratio Penalty
-To prevent dialogue from forming unnaturally tall vertical columns or flat horizontal ribbons, each candidate line count $N$ is penalized by its deviation from the golden comic aspect ratio ($\approx 1.25$ to $1.40$):
+## 3. Four Fitting Passes
 
-$$\text{Penalty}_{\text{aspect}} = \left|\frac{W_{\text{eff}}}{H_{\text{eff}}} - 1.30\right| \times 200.0$$
+1. **Clean binary search:** Prefer whole-word layouts. Require each measured line to fit usable width (0.5px tolerance), total height to fit using `LINE_HEIGHT = 1.2`, and no newly inserted hyphen breaks.
+2. **Tall-narrow floor search:** For usable `H/W >= 2`, probe a geometric size derived from width and area, bounded by the caller's ceiling. This is a candidate improvement search, not a blanket height-based ceiling.
+3. **Vertical-fill hyphenation:** If clean fitting fails or remains below 14px and the tall-box threshold is met, scan downward from a bounded candidate ceiling with discretionary hyphenation.
+4. **Fallback binary search:** Retry reflow under the width/height predicate. If no larger fit exists, retain the initialized 6px wrapped layout.
 
----
+`AutoBalloonTypesetter.typeset()` returns the measured lines and reports `overflowed` using `defaultLayoutFits()`. A nonempty result is not proof of containment; the final renderer does not universally reject every result marked overflowed.
 
-## 3. Font Fitting Algorithm (Binary Search)
+## 4. Hyphenation & Script Routing
 
-The engine fits the largest readable font size using a bounded binary search:
+`findHyphenationPoints()` consults the shared on-demand Liang dictionary service and retains its local fallback rules. Pattern assets live under `public/assets/hyphenation/`. Long-word logic uses the seven-character stem gate and measured discretionary-hyphen suffixes. Shared typography helpers heal typesetter-inserted hyphens before Studio reflow so resizing does not turn temporary syllable breaks into canonical dialogue.
 
-1. **Lower Bound ($S_{\text{min}}$)**:
-   * Sourced from detected OCR font size or `options.minFontSize` (default `14.0px` for unconstrained dialogue, minimum `9.0px`).
-2. **Upper Bound ($S_{\text{max}}$)**:
-   * Bounded by `Math.min(Math.max(fontSize, 48.0), maxFontSizeCap)`.
-3. **Height Budget**:
-   $$H_{\text{required}} = N \cdot S \cdot \text{DEFAULT\_FIT\_LINE\_HEIGHT}$$
-   Where $\text{DEFAULT\_FIT\_LINE\_HEIGHT} = 1.20$.
-4. **Verification Predicate (`defaultLayoutFits`)**:
-   At each probe, every line's measured advance must satisfy:
-   $$\text{ctx.measureText}(\text{line}_k).\text{width} \le W_k$$
-   $$H_{\text{required}} \le H \cdot (1 - 2 \cdot \text{DEFAULT\_FIT\_INSET})$$
+Non-Western output routing belongs to `renderTextBlocksBatch()` in `canvasTypesetting.ts`, not to a failed Auto Balloon strategy. The batch dispatcher selects the legacy orientation-aware path by target language; it does not wait for this strategy to fail.
 
----
+## 5. Live Bake vs Studio Edits
 
-## 4. On-Demand Multi-Language Syllable Hyphenation
+The live free-region renderer can resize/decollide OCR quads and cap short non-scream text relative to the page dialogue median before invoking this strategy. Fixed bubble layouts bypass those movement operations. Studio Auto Balloon reuses `measureDefaultLayout()` but supplies its own ceiling and style adapter. Studio contour and simple editing are separate branches; their behavior must not be inferred from Auto Balloon's four passes.
 
-Route 1 directly invokes [`src/offscreen/utils/hyphenation/HyphenationService.ts`](file:///Users/dangtruongan/study/Kites/src/offscreen/utils/hyphenation/HyphenationService.ts) during line breaking:
-* Uses the **Franklin Mark Liang** TeX hyphenation trie.
-* Queries on-demand pattern dictionaries stored in `public/assets/hyphenation/*.txt`.
-* Words with length $\ge 7$ characters are broken at valid syllable points when an unbroken word would exceed $W_k$.
-* Discretionary hyphens (`-`) are appended with measured hyphen offset width.
-
----
-
-## 5. Failure Recovery & Fallback
-
-If binary search fails to find a zero-overflow configuration at $S_{\text{min}}$:
-1. Falls back to $S_{\text{min}}$ with greedy character wrapping.
-2. If text contains non-Western scripts (CJK / Arabic / Thai), delegates to [`renderTextBlocksLegacy`](file:///Users/dangtruongan/study/Kites/src/offscreen/utils/canvasTypesetting.ts) for orientation-aware vertical line layout.
+For font readiness, final Canvas drawing and persistence caveats, see [Cotrans renderer](cotrans_renderer_spec.md) and [Studio architecture](../architecture/studio-and-typesetting.md).

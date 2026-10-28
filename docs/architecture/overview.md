@@ -4,13 +4,15 @@ Kites is built as a **Chrome Manifest V3 (MV3)** extension designed to process a
 
 This document outlines the multi-tier extension architecture, runtime boundaries, communication contracts, storage schema, and supporting backend services.
 
+**Current-code audit (2026-10-28):** cumulative `origin/main..main` through `656d720`; current typesetting/storage notes supersede the former dual-mode summary. Shared algorithms and visual test runners are not evidence of end-to-end pixel parity.
+
 ---
 
 ## 🏗️ Architectural Topology
 
 Chrome Manifest V3 enforces strict security boundaries: service workers are ephemeral, background contexts cannot access DOM or WebGPU adapters reliably, and page scripts cannot execute untrusted code.
 
-Kites overcomes these constraints using a coordinated five-tier architecture:
+Kites overcomes these constraints using a coordinated six-part architecture:
 
 ```mermaid
 graph TB
@@ -32,11 +34,11 @@ graph TB
         OcrSvc["OcrManager<br/>(PaddleOCR & 1D Tiler)"]
         InpaintSvc["InpaintManager & Binarizer<br/>(LaMa / AOT-GAN / Telea / Precise / Simple)"]
         TransSvc["TranslationManager<br/>(Keyed JSON Protocol)"]
-        RenderSvc["Canvas Renderer<br/>(Dual Engine: Auto Balloon / Simple Wrap)"]
+        RenderSvc["Canvas Renderer<br/>(Contour DP / Auto Balloon / Simple Rect)"]
     end
 
     subgraph LocalStorage["4. Browser Local Storage"]
-        DexieDB[("IndexedDB (Dexie.js)<br/>Jobs · Blobs · TextBlocks")]
+        DexieDB[("IndexedDB (Dexie.js)<br/>Jobs · Blobs · TextBlocks · Fonts")]
         LocalStore[("chrome.storage.local<br/>User Settings, Keys & Blacklist")]
     end
 
@@ -48,7 +50,7 @@ graph TB
 
     subgraph DesktopUI["6. Extension UI & Dashboard"]
         PopupView["Quick Menu & Batch Scanner<br/>Language, Domain Rules & Queue Hub"]
-        StudioApp["Kites Studio V2<br/>Canvas Tools, Inpaint & Dual Typeset"]
+        StudioApp["Kites Studio V2<br/>Canvas Tools, Inpaint & Three Typeset Modes"]
         ReaderModal["Chapter Reader Modal<br/>Fullscreen, Webtoon Scroll & ZIP Export"]
     end
 
@@ -118,8 +120,8 @@ graph TB
 - **Pipeline Orchestrator (`PipelineOrchestrator.ts`):** Controls the end-to-end pipeline:
   1. OCR via `OcrManager` (with 1D tiling for $h \ge 2500\text{ px}$ images).
   2. 14-stage geometric and noise filtering + Kruskal MST bubble clustering.
-  3. Parallel execution of Inpainting (Simple, Precise Stroke Fill, Telea FMM, LaMa Manga, AOT-GAN) and Translation via `Promise.all`.
-  4. Dual-mode Typesetting (Auto Balloon with Kinsoku Shori and MeasureCache memoization vs Simple Wrap).
+  3. Network translation overlaps vision work. Local WebLLM translation, colorization, and inpainting run sequentially to avoid competing WebGPU workloads.
+  4. Bubble geometry acquisition/resolution (`off`, `heuristic`, `neural`), followed by strategy dispatch (Contour DP, Simple Rect, Auto Balloon); non-Western targets retain a legacy orientation-aware drawing route.
   5. Affine matrix canvas baking.
 
 👉 *Detailed guide: [`docs/architecture/pipeline.md`](pipeline.md)*
@@ -129,7 +131,8 @@ graph TB
 ### 4. Local Database & Clean Plate Storage (`src/db.ts`)
 - **Dexie.js on IndexedDB:** Persists full translation records locally on the user's device.
 - **Clean Plate Storage Invariant:** Rather than destructively baking translated text into the stored database image, Kites saves the **raw inpainted background plate** alongside structured `TextBlock[]` arrays (coordinates, original text, translated text, font size, color, stroke).
-- **Automatic 7-Day TTL Cleanup:** On startup, an orphan-recovery and garbage collection routine purges records older than 7 days to keep disk usage lean.
+- **Retention Cleanup:** Startup recovery/cleanup applies retention to eligible unprojected terminal jobs. Jobs with `folderId` are protected from age-based retention cleanup; project deletion remains explicit.
+- **Schema v6 Fonts:** `fonts` stores catalog/import bytes and family metadata; contour/positioned-line fields are persisted on text blocks. Original detection baselines are not persisted. See [Studio lifecycle](studio-and-typesetting.md#bubble-geometry-database--studio-lifecycle).
 
 ---
 
@@ -144,10 +147,12 @@ graph TB
 
 ---
 
-### 6. Kites Studio & Typesetting Editor (`src/App.tsx`)
+### 6. Kites Studio & Typesetting Editor (`src/studio/Studio.tsx`, hosted by `src/App.tsx`)
 - A full-screen desktop dashboard built with React 19 and Tailwind CSS 4.
 - **Interactive 8-Point Bounding Boxes & Gesture State Machine:** 3px drag deadzone, RAF-throttled reflow, decoupled double-click editing, and clamped handle hit radii.
-- **Dual Typesetting Mode (Auto Balloon vs Simple Wrap):** Switch between dynamic binary-search diamond stanzas and predictable rectangular caption wrapping per dialogue box or globally.
+- **Three Typesetting Choices:** Contour, Auto Balloon and Caption Box. Backend contour-priority routing differs from Studio explicit edit branches; Caption Box edits retain current size. Canvas `TextRenderer` paints text, not SVG.
+- **Font Library:** Bundled comic faces plus an on-demand catalog/import library, searchable pickers, per-document FontFace registration and explicit selected-family loading for the live bake.
+- **Current Caveats:** Stored raw contours may outlive rejected bubble layouts; furniture visibility does not prove solver use. Reset restores transient frame dimensions/contour, not position/rotation. Current 18/20/24 contour caps are customization, not donor parity.
 - **Advanced Lettering Tools:** Rotation angle slider with curved handle & snapping, partial word selection styling, and stroke-then-fill canvas layering.
 - **3-Way View Switcher & Universal Brushes:** Quick toggles between Original, Inpainted, and Typeset canvases with direct AI brush inpainting.
 - **Lossless PNG/JPEG & Clipboard Export:** Exports high-resolution 1:1 comic pages with canvas untaint guards.

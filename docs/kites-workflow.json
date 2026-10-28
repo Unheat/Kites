@@ -18,7 +18,7 @@
           "typeset_bake",
           "dom_swap"
         ],
-        "note": "Trace a DOM image through Blob queueing, PP-OCRv6, noise filtering, MST grouping, parallel compute, typesetting, and swap."
+        "note": "Trace capture through OCR, grouping, scheduled compute, three typesetting strategies, and swap. Source reviewed 2026-10-28."
       },
       {
         "id": "ocr-detail",
@@ -40,7 +40,7 @@
           "typeset_bake",
           "dom_swap"
         ],
-        "note": "Follow speech bubble safe-core expansion, four-pass font fitting, balanced-wrap width search, and locked affine text placement."
+        "note": "Bubble geometry selects Contour DP, Simple Rect, or Auto Balloon. Fonts load before measurement; geometry rejection and edits can reroute."
       },
       {
         "id": "dual-compute",
@@ -51,7 +51,7 @@
           "typeset_bake",
           "dexie_db"
         ],
-        "note": "Promise.all waits for index-safe translation and polygon-only inpainting before canvas composition."
+        "note": "Network translation overlaps vision work; local GPU translation is serialized. Composition waits for text and clean plate."
       },
       {
         "id": "local-storage",
@@ -62,7 +62,7 @@
           "typeset_bake",
           "dashboard_editor"
         ],
-        "note": "Raw Blob enters Dexie; clean plate and editable TextBlock lines persist separately from the baked PNG returned to the page."
+        "note": "Dexie stores raw/clean Blobs and layout apart from baked PNG. Studio restores layout, reflows edits, and registers fonts per document."
       }
     ],
     "output": "docs/workflow.html"
@@ -117,7 +117,7 @@
     },
     {
       "id": "parallel_ai_group",
-      "label": "Promise.all Branches",
+      "label": "Scheduled AI Branches",
       "lane": "offscreen",
       "fromCol": 2,
       "toCol": 3,
@@ -203,8 +203,8 @@
       "lane": "offscreen",
       "col": 4,
       "type": "backend",
-      "label": "Bubble Fit & Typeset",
-      "sublabel": "Heuristic/YOLO · 4-pass fit",
+      "label": "Three-Strategy Typeset",
+      "sublabel": "Contour · Simple · Auto Balloon",
       "width": 164
     },
     {
@@ -222,7 +222,7 @@
       "col": 4,
       "type": "database",
       "label": "Dexie IndexedDB",
-      "sublabel": "clean Blob + editable lines",
+      "sublabel": "clean Blob · layout · font bytes",
       "width": 164
     },
     {
@@ -231,7 +231,7 @@
       "col": 5,
       "type": "frontend",
       "label": "Studio Editor",
-      "sublabel": "rerender saved TextBlocks",
+      "sublabel": "restore · reflow on edit",
       "width": 144
     }
   ],
@@ -296,14 +296,14 @@
       "id": "typeset-to-db",
       "from": "typeset_bake",
       "to": "dexie_db",
-      "label": "clean plate + fitted TextBlocks",
+      "label": "clean plate + final layout metadata",
       "variant": "dashed"
     },
     {
       "id": "db-to-dashboard",
       "from": "dexie_db",
       "to": "dashboard_editor",
-      "label": "load editable project",
+      "label": "restore contours + positionedLines",
       "variant": "default"
     }
   ],
@@ -331,13 +331,13 @@
     },
     {
       "dot": "violet",
-      "title": "Bubble Expansion & Typesetting Layout",
+      "title": "Bubble Geometry & Three Typesetting Strategies",
       "items": [
-        "Bubble expansion: Tier 1 Heuristic (adaptive luminance, erosion R=14, 12% safe core) + Tier 2 Neural YOLO (detector-v4-s_int8 WebGPU, class 0 only).",
-        "BubbleLayoutService: single-bubble expansion with font fit gate; clean single-axis X/Y partition for connected lobes (gap ≥6px); diagonal/complex lobes fall back to Disabled.",
-        "Font fitter: 5% inset, line height 1.2, search 6 px…max; Pass 1 clean binary fit; Pass 2 tall-box geometric cap when H/W ≥2.0.",
-        "Pass 3 scans down with six-stage hyphenation for words ≥7 chars when H/W ≥1.5; Pass 4 runs fallback binary search to the 6 px floor.",
-        "Balanced wrap: greedy line count N → binary-search minimum width preserving ≤N lines; locked axis-aligned typesetBox (0°) bypasses decollision shifts."
+        "Geometry: heuristic pixel carriers or YOLO11n segmentation; associate OCR boxes, resolve shared chambers, suppress small fragments, and measure candidates with the selected font. Curved shared chambers use reflex-neck decomposition then contour-clipped anchor partitioning; rejected groups can roll back.",
+        "Contour DP (contour): fixed layouts with supplied contours take priority; rounded geometry can also select this route. Polygon scanline profiles, DP line selection, common horizontal center, and coarse-to-refined font probes produce positionedLines. Local font bounds are Kites policy, not proof of donor equivalence.",
+        "Simple Rect (simple): backend runs the contour solver on a rectangle. Studio simple edits instead use greedy rectangular wrapping at the current font size; do not assume identical reflow behavior.",
+        "Auto Balloon (balloon): free-box route without accepted fixed bubble geometry, using source-aware expansion and line fitting. Legacy ellipse values normalize to contour on restore; a generated ellipse is geometry fallback, not a fourth strategy.",
+        "Mode labels alone do not prove the solver used: fixed contours can override simple, and rejected geometry can leave saved carrier metadata differing from the baked route. Canvas measurement, painting, and Studio lifecycle have no established end-to-end visual parity guarantee."
       ]
     },
     {
@@ -346,7 +346,7 @@
       "items": [
         "Translation: Google GTX chunks ≤1800 chars with ⟦index⟧ delimiters; LLM batches 15 tagged segments and writes results back by tag index.",
         "Inpaint: raw surviving line polygons only; Simple uses luminance ≥180 RGB median, Telea-like FMM radius 3, neural tiers (LaMa/AOT-GAN) use 64px dynamic patch bucketing with UNCLIP 1.8 stroke expansion.",
-        "Promise.all waits for translated text and clean plate; raw DBNet mask forwarding remains rejected to avoid erasing non-text bubble art.",
+        "Scheduling: network translation overlaps vision work; local GPU translation is serialized with vision inference. Composition waits for translated text and clean plate; raw DBNet masks remain rejected to protect non-text bubble art.",
         "Persist clean image plus editable fitted lines in Dexie; return a separate baked PNG data URL for immediate DOM replacement."
       ]
     }

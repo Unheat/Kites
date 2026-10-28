@@ -1,6 +1,6 @@
 # Translation Pipeline & Algorithm Guide 📐
 
-This document provides a comprehensive technical walkthrough of Kites' 5-stage spatial comic translation pipeline.
+This document describes Kites' spatial comic translation pipeline. **Current-code audit: 2026-10-28, cumulative `origin/main..main` through `656d720`.** The numbered overview groups work into five stages; the detailed sections separate bubble resolution from drawing. Current route-specific behavior below supersedes older universal ellipse/four-pass descriptions; no end-to-end pixel parity is implied.
 
 > 💡 **Want to explore interactively?** Open [`docs/workflow.html`](../workflow.html) for an explorable architecture diagram with inspectable parameters and formula cards.
 
@@ -33,8 +33,8 @@ flowchart LR
     end
 
     subgraph S5["Stage 5: Typesetting & Render"]
-        ColorSample["Background Color Sampling<br/>(Luminance Black/White Contrast)"]:::out
-        BinaryFit["4-Pass Binary Search<br/>Font Sizing & Balanced Wrap"]:::out
+        ColorSample["Per-Block Color Detection<br/>(Clustering / Contrast Fallback)"]:::out
+        BinaryFit["Bubble Layout + Strategy Resolution<br/>Contour DP / Simple Rect / Auto Balloon"]:::out
         MatrixBake["Affine Canvas Matrix<br/>& Final Plate Export"]:::out
     end
 
@@ -187,7 +187,7 @@ graph TD
 
 ### Stage 4: Keyed JSON Translation Waterfall (`BaseLlmTranslationEngine.ts`)
 
-Translation runs concurrently with inpainting via `Promise.all`:
+Scheduling depends on provider: network translation overlaps local colorization/inpainting, while local WebLLM translation, colorization, and inpainting run sequentially. The waterfall below describes provider selection, not universal parallel execution:
 
 ```mermaid
 flowchart TD
@@ -226,103 +226,53 @@ $$\text{WebLLM} \longrightarrow \text{Cloudflare Shared Pool} \longrightarrow \t
 
 ---
 
-### Stage 5: Bubble Container Extraction & Layout Resolution (`BubbleLayoutService.ts`)
+### Stage 5: Bubble Container Extraction & Layout Resolution
 
-To prevent narrow vertical CJK text lines ($20-30\text{ px}$) from forcing horizontal English translations to collapse into tiny unreadable $5-7\text{ px}$ fonts, Kites incorporates the **Speech Bubble Detection & Layout Subsystem**:
+Current runtime modes are `off`, `heuristic` and `neural`. The separate `neural-mask` mode has been removed; neural processing with text boxes can consume mask evidence when provided. Both active tiers converge on `acquireBubbleGeometry()` and `resolveBubbleLayoutsDetailed()` in `src/offscreen/services/BubbleLayoutService.ts`.
 
 ```mermaid
 flowchart TD
-    ModeCheck{"bubbleMode != 'off'?"} -->|No| DisabledPath["Disabled (Cotrans MST Blocks)"]
-    ModeCheck -->|Yes| Acquire["Pass 1: Geometry Acquisition<br/>(Neural Class 0 / Heuristic BFS)"]
-    Acquire --> TranslateWait["Wait for Translation + Canvas Font Ready"]
-    TranslateWait --> Resolve["Pass 2: Layout Resolution (BubbleLayoutService)"]
-    Resolve --> GroupCheck{"Multi-Utterance<br/>Connected Group?"}
-    GroupCheck -->|Single Bubble| ExpandSingle["computeTypesetBox (12% Safe Core)"]
-    ExpandSingle --> FontCheck{"measureBubbleLayoutFontSize<br/>fitted > 0?"}
-    FontCheck -->|Fits| EmitBox["Emit Fixed typesetBox"]
-    FontCheck -->|Fails| DisabledFallback["Fallback to Disabled (typesetBox = undefined)"]
-    GroupCheck -->|Multi-Utterance| AxisCheck{"Clean Single-Axis X/Y Chain<br/>with Gap ≥ 6px?"}
-    AxisCheck -->|Yes| PartitionXY["Partition Axis Territories + Check Fit"]
-    PartitionXY --> AllFit{"All Members Fit?"}
-    AllFit -->|Yes| EmitGroup["Emit Sub-Chamber typesetBoxes"]
-    AllFit -->|No| DisabledFallback
-    AxisCheck -->|"No (Diagonal / Overlapping / Slits)"| DisabledFallback
+    Mode{"Bubble mode"} -->|off| Free["Keep free OCR-region route"]
+    Mode -->|heuristic| Heuristic["Morphological carrier + shape evidence from source pixels"]
+    Mode -->|neural| Neural["Class-0 proposals; optional mask evidence; match OCR boxes"]
+    Heuristic --> Acquire["acquireBubbleGeometry: carriers, curvatures, page-space contours"]
+    Neural --> Acquire
+    Acquire --> Groups{"Single or shared container?"}
+    Groups -->|single| Single["Contour bounds when available or computed safe box; pairwise clamp"]
+    Groups -->|rectangular / no shared contour| Rect["partitionSharedContainer; compute safe sub-boxes"]
+    Groups -->|curved shared contour| Cells["Dominant/tiny-fragment guard or partitionBalloonFlowCells"]
+    Single --> Gate["Live accept callback: proposed-box-relative contour + font measurement"]
+    Rect --> Gate
+    Cells --> Gate
+    Gate --> Checks["Page geometry, group collision rollback, sibling boundary constraints"]
+    Checks --> Accepted["typesetBoxes + local contours + skipped flags"]
+    Checks --> Fallback["Rejected entries unset; free-region bake fallback"]
 ```
 
-#### 1. Dual-Route Separation
-- **Dialogue in Speech Balloons:** Top-down container extraction pipeline detects the balloon chamber (Tier 1 Heuristic or Tier 2 Neural YOLO), insets a 12% safe core, and expands text horizontally to utilize available chamber space.
-- **Free-Floating Text & Sound Effects:** Bottom-up Cotrans MST merge preserves tight bounding hulls with zero expansion.
-- **Inpainting Isolation Invariant:** Inpainting models strictly receive original character contour polygons (`rawPolygons`), never expanded bubble boxes.
+- Neural matching admits class `0: bubble` rather than tight text/free-text classes. Heuristic masks and neural masks produce source-coordinate contours using independent `scaleX` / `scaleY`, avoiding anisotropic drift.
+- A 12% safe core remains in computed-box paths; it is **not** universal. A single neural proposal with a contour can use contour bounds instead. Shared curved balloons can use flow-cell/topological partitioning, not only clean one-axis X/Y splits.
+- Tiny secondary fragments can be suppressed by the dominant-chamber noise guard. Their text remains persisted/editable with `isSkipped`; collision rollback clears those suppressions for the rejected group.
+- Validation checks page bounds and tilt, uses the caller's acceptance callback, rolls back significant external collisions group-wise, then applies sibling boundary constraints. Do not interpret every surviving contour as an independently font-validated final cell: the live acceptance closure measures acquisition contour evidence relative to the proposed box, whereas final cell contours are returned afterward.
+- **Inpainting isolation:** erasers receive original text polygons, never expanded typeset boxes or balloon contours. The OCR raw probability mask remains diagnostic, not the inpaint engine contract.
+- **Fixed geometry lock:** accepted `typesetBox` regions bake at angle zero and bypass free-region resizing/decollision. Free regions may resize and translate; their final rendered destination is what persistence prefers.
 
-#### 2. Neural Bubble Detector Hardening
-- `NeuralBubbleDetector` exclusively admits class `0: bubble` proposals. Classes `1: text_bubble` and `2: text_free` are strictly filtered out to prevent tight OCR text boxes from being misclassified as bubble containers.
-
-#### 3. Unified Layout Resolution (`BubbleLayoutService`)
-Production and test pipelines invoke the identical `BubbleLayoutService`:
-- **Single-Occupant Balloons:** Expand into the 12% safe core (`computeTypesetBox`), verified by canvas font measurement (`measureBubbleLayoutFontSize`).
-- **Connected Multi-Lobe Balloons:** Sliced into independent territories along clean single-axis X or Y boundaries **only** when unambiguous neck/lobe morphology is proven and positive clearance ($\ge 6\text{ px}$) exists.
-- **Conservative Fallback to Disabled:** When multi-utterance geometry is diagonal, rotated, overlapping across both axes, or lacks clean separation, the entire group rolls back atomically to `typesetBox = undefined` (the exact Disabled tier: Cotrans MST + utterance splitting). This guarantees zero text clipping or slit distortion.
-
-#### 4. Renderer Geometry Lock
-- Accepted `typesetBox` rectangles are rendered axis-aligned (angle 0°) and strictly bypass font-floor quad ballooning and global decollision translation shifts, preserving exact layout geometry and Dexie persistence parity.
+Studio OCR shares geometry helpers but supplies `accept: () => true` and precomputes horizontal contour layout with a hardcoded comic family. It is not the live selected-font gate. See [Studio lifecycle and limitations](studio-and-typesetting.md#bubble-geometry-database--studio-lifecycle).
 
 ---
 
-### Stage 6: Typesetting & Affine Rendering (`canvasTypesetting.ts` & `cotransDefaultRenderer.ts`)
+### Stage 6: Typesetting, Canvas Drawing & Persistence
 
-```mermaid
-flowchart TD
-    Inputs["Clean Plate + Translated Texts + Polygons"] --> ColorSample["Background Color Sampling (XianScan color.ts)"]
-    ColorSample --> ContrastDecision{"Luminance Check<br/>lum < 128 ?"}
-    ContrastDecision -->|Dark BG| WhiteText["White Text (#FFFFFF) + Black Stroke (#000000)"]
-    ContrastDecision -->|Light BG| BlackText["Black Text (#000000) + White Stroke (#FFFFFF)"]
-    WhiteText --> BinarySearch["4-Pass Binary Search Font Sizing"]
-    BlackText --> BinarySearch
-    BinarySearch --> BalancedWrap["Balanced Line Wrapping (Stanza Balance)"]
-    BalancedWrap --> AngleCheck{"Angle Check<br/>|angle| ≥ 3°?"}
-    AngleCheck -->|Rotated| AffineMatrix["ctx.setTransform(Affine Matrix)"]
-    AngleCheck -->|Axis-Aligned| StandardDraw["ctx.fillText()"]
-    AffineMatrix --> FinalBake["Final Canvas Plate Export"]
-    StandardDraw --> FinalBake
-```
+`renderTextBlocksBatch()` dispatches by target language: Western default rendering or the retained orientation-aware legacy path. Default rendering builds fixed/free plans, measures candidate layouts, computes a page dialogue median and applies a short-non-scream baseline cap before `renderRegionDefault()`.
 
-#### 1. Background Color Sampling (XianScan `color.ts` Port)
-Before drawing text, Kites inspects the local pixel neighborhood around the bubble polygon:
-- Samples RGB values outside the text polygon but inside the speech bubble boundary.
-- Calculates perceived luminance:
-  $$Y = 0.299R + 0.587G + 0.114B$$
-- **Automatic Contrast Selection:**
-  - $Y < 128$ (Dark panel or black speech bubble): Renders **White text** (`#FFFFFF`) with **Black stroke** (`#000000`).
-  - $Y \ge 128$ (Standard white paper / light balloon): Renders **Black text** (`#000000`) with **White stroke** (`#FFFFFF`).
+The factory routes fixed contours/contour mode/rounded non-simple regions to `ContourDpTypesetter`, fixed simple regions without contours to `SimpleRectTypesetter`, and other regions to `AutoBalloonTypesetter`. Both contour and backend simple strategies use shared Contour DP; backend simple constructs a rectangle. Studio simple edits instead preserve current font size and wrap rectangularly.
 
-#### 2. 4-Pass Binary Search Typography Layout & MeasureCache Memoization
-1. **Pass 1 (Binary Search Fitting):** Binary searches font size between $6\text{ px}$ and the maximum bubble height until text wraps within an inner safety padding.
-2. **Pass 2 (Tall-Box Aspect Cap):** When bubble aspect ratio $H / W \ge 2.0$, caps font size to prevent narrow speech balloons from producing oversized text.
-3. **Pass 3 (Hyphenation Scan & Strict 7-Letter Invariant):** For Latin text in narrow balloons, invokes syllable hyphenation (`findHyphenationPoints`). Stems shorter than 7 letters are strictly forbidden from hyphenating (`stem.length < 7`), eliminating awkward breaks on short words (`wi-th`, `th-at`). Words $\ge 7$ letters require a minimum 3-letter prefix and 3-letter suffix. Contractions and digit sequences are strictly protected against hyphenation.
-4. **Pass 4 (Readability Floor):** Enforces a minimum $6\text{ px}$ font size floor.
-5. **Token Measurement Memoization (`MeasureCache`):** An in-memory cache mapping `${token}:${fontSize}:${fontFamily}` to measured pixel width eliminates $60-75\%$ of redundant `ctx.measureText()` calls during iterative binary search passes, reducing layout latency from ~140ms to ~35ms per page.
+- **Contour DP:** scanline line-band profiles, block-tip guard, grammatical/slack/overflow penalties, unhyphenated-first then Liang LastResort fallback, positioned line output. Default minimum 9px; current 18/20/24px ceilings are Kites custom dialogue policy, **not Koharu parity**. Donor bubble maximum is width for horizontal writing and height for vertical writing; donor 24 applies only to nonbubble text.
+- **Auto Balloon:** shared `measureDefaultLayout()` / `fitFontSizeWithLines()`, 5% inset, 6px lower search bound, four fitting/recovery passes and balanced wrapping. It is not the removed ellipse DP route or an exact ellipse-chord equation.
+- **Color:** per-block ink/background clustering, anti-alias fringe rejection and snapping with contrast fallback replace a universal black/white luminance-only account.
+- **Font:** resolve preset/library family, register bytes per document, explicitly load named selected families before the live bake's measurement, then await readiness. Missing faces can still fall back. Full [font resolution/measurement/draw Mermaid flow](../development/cotrans_renderer_spec.md#2-font-resolution-measurement--draw-lifecycle).
+- **Draw:** `renderRegionDefault()` applies an affine Canvas transform and draws all outline lines before all fill lines. Positioned lines supply local top offsets/spans when present; otherwise the block centers vertically. Active default composition does not rasterize a text bitmap and perspective-warp it. Studio `TextRenderer` also uses Canvas, not SVG.
+- **Save/return:** return baked PNG data for the webpage; save the clean background and structured text records in Dexie. Persist actual rendered font, lines, line spacing, placements, geometry and angle when available.
 
-#### 3. Kinsoku Shori (禁則処理) & Punctuation Attachment
-To prevent orphaned punctuation marks and preserve authentic East Asian / Western typography:
-- **Line-Start Prohibitions (`KINSOKU_LINE_START_PROHIBITED`):** Closing brackets, quotation marks (`」`, `』`, `）`, `]`, `}`, `”`, `’`), and punctuation marks (`、`, `。`, `,`, `.`, `!`, `?`, `…`, `〜`) cannot start a new line. They are pulled back onto the preceding line.
-- **Line-End Prohibitions (`KINSOKU_LINE_END_PROHIBITED`):** Opening brackets and quotes (`「`, `『`, `（`, `[`, `{`, `“`, `‘`, Spanish `¿`, `¡`) cannot end a line; they bind forward to the subsequent word token.
-- **Symbol Compaction (`compactSpecialSymbols`):** Spaced single-dot ellipses (`. . .`) and multi-dot runs are normalized to `…`; spaced exclamation/question marks (`! ! !`) are compacted to `!!!`, while preserving single ASCII spaces for Western word wrap.
-- **Korean Script Protection:** `CJK_SCRIPT_REGEX` includes Hangul syllables (`\uac00-\ud7af`) and Jamo blocks, preventing Korean quotation brackets (`「`, `」`) from being converted to ASCII quotes.
+**Known persistence gap:** saving can fall back from rejected detailed contours to raw acquisition contours and infer contour/simple mode from proposal/carrier evidence. Studio can later reflow a stored contour that the live bake did not use. Current original-contour/detected-dimension baselines are transient, reseeded from saved geometry; reset restores dimensions/contour only, not position/rotation. A visible `CanvasFurniture` contour is not solver evidence. See [renderer specification](../development/cotrans_renderer_spec.md), [Auto Balloon](../development/auto_balloon_typesetting_spec.md), and [Simple Rect](../development/simple_rect_typesetting_spec.md).
 
-#### 4. Balanced Stanza Wrapping & Dual Typesetting Modes
-- **`Auto Balloon` Mode (Default):** Shapes dialogue lines into an aesthetically balanced inverted pyramid or diamond stanza (`balancedWrapText`), matching the curved geometry of speech balloons.
-- **`Simple Wrap` Mode:** Uses greedy rectangular word wrapping at a fixed user-defined font size, tailored for rectangular captions, square signs, and SFX without diamond curvature or font shrinkage (see ADR-008).
-
-#### 5. Comic Lettering & Stroke-Then-Fill Canvas Layering
-- **Crossbar "I" Convention:** For comic fonts (`Wild Words`, `Anime Ace`, `Comic Neue`), all-caps text converts non-pronoun "I" letters to stick-I (`i`), reserving crossbar "I" strictly for personal pronouns (`I`, `I'M`, `I'LL`, `I'D`, `I'VE`) and acronyms (`FBI`, `CIA`, `AI`).
-- **Stroke-Then-Fill Layering:** Canvas rendering executes `ctx.strokeText()` prior to `ctx.fillText()`. This prevents outline strokes from bleeding into interior letter loops (`e`, `o`, `a`), ensuring clean vector boundaries.
-
-#### 6. Affine Matrix Placement
-For angled speech bubbles ($|\theta| \ge 3^\circ$), text is rendered through a 2D affine transformation matrix:
-```ts
-ctx.translate(centerX, centerY);
-ctx.rotate(angleRad);
-// Draw centered text lines
-ctx.setTransform(1, 0, 0, 1, 0, 0); // Restore identity matrix
-```
-The resulting canvas is baked into a lossless PNG Data URL and returned to the webpage content script.
+Visual fixtures and Chrome probes exercise selected routes. Their existence and parity-oriented names do not establish end-to-end pixel parity across donor fonts, browser rasterization, DB restore and Studio editing.

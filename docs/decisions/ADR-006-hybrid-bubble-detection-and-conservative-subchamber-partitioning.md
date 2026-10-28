@@ -1,7 +1,7 @@
 # ADR-006: Hybrid Bubble Detection & Conservative Sub-Chamber Partitioning
 
 ## Status
-Accepted
+Accepted historically. Partitioning/routing details are updated by [ADR-010](ADR-010-contour-layout-and-browser-validation.md) and the [current pipeline specification](../development/koharu_typesetting_pipeline_spec.md). The polygon-only inpainting separation remains in force; historical detector taxonomy and geometric fallback descriptions below are not the complete current implementation.
 
 ## Context
 In manga and comic translation, original CJK (Japanese, Chinese, Korean) dialogue lines are frequently oriented vertically in narrow columns measuring only 20–30px wide.

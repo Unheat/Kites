@@ -35,7 +35,7 @@ graph TD
 
 ## ⚡ Tier 1: Automated Unit Tests (`npm test`)
 
-Unit tests run via **Vitest** under `src/` and complete in under 5 seconds:
+Unit tests run via **Vitest** under `src/`. The local-main merge check on 2026-10-28 reported 104 files / 1,122 passing tests; duration depends on hardware and parallel workers. These checks do not establish visual parity:
 
 ```bash
 npm test
@@ -79,7 +79,7 @@ npm run test:e2e
 
 ## 🎨 Tier 3: Real-Model Visual Verification (Manual Visual Gate)
 
-> ⚠️ **Rule:** Real-model visual tests are **deliberately separated from `npm test`**. They download live model weights and require hardware WebGPU or valid API credentials. They must never be run in automated headless CI without GPU runners.
+> **Rule:** Real-model visual tests remain separate from `npm test`. Requirements vary: native Node ONNX runners can run on CPU; browser neural tests may need WebGPU/model caches; cloud/custom API runners require appropriate credentials. The pipeline smoke workflow runs selected checks, but does not supply an automatic visual-acceptance gate. Do not infer image quality from a successful exit.
 
 To run end-to-end visual tests with real models:
 
@@ -103,6 +103,32 @@ npm run test:visual:custom-api
 - Tests user-supplied OpenAI, Gemini, or Anthropic API endpoints.
 
 ---
+
+## Contour and font regression evidence
+
+```bash
+# Native reference runner; hardcoded transcription, not the production orchestrator
+npm run test:visual:koharu
+
+# Real-browser diagnostic scripts; build first
+npm run build
+node scripts/chromeBubbleProbe.mjs --bubbles-only
+node scripts/e2eChromeBakeVisualTest.mjs
+```
+
+The Node runner uses native inference/canvas, manually builds neural evidence, directly registers a reference font, and hardcodes translated text. It can reveal layout regressions but does not cover Chrome CSS parsing, popup hydration, Studio edits, or addressed extension messaging.
+
+The bubble probe drives Studio OCR. Its saved patch is an inpaint/background response, not proof of rendered translated text. The bake harness seeds local YOLO model bytes and directly calls an exposed orchestrator in an extension page. It prints blocks and writes `src/test/result/e2e_chrome_baked_wildwords.png`; it currently has no image-diff assertions and does not exercise the complete content-script or Studio interaction path. Temporary browser profiles do not share IndexedDB across separate launches.
+
+Before claiming equivalence:
+
+1. Hold input pixels, transcription, OCR boxes, contour geometry, source/target language, face bytes, weight/style, and layout options constant.
+2. Verify the resulting `ctx.font`, not only the requested string, at different probe sizes. Invalid CSS assignments keep the previous font. Test a fresh context and a context reused after another block.
+3. Confirm fonts are loaded in the actual measuring/painting document before fitting. A hash check or `font-display: block` alone is insufficient.
+4. Compare font size, lines, positioned coordinates, route, accepted/rejected geometry, and skip flags. Then open and inspect the rendered output; preserve comparable artifacts with settings/revision metadata.
+5. Separately exercise Studio initial-open preservation, font changes, resize/move/rotation, local/global mode switches, reset, undo/redo, save/reload, and export.
+
+The 2026-10-28 investigation reproduced and repaired font syntax, but did not complete this controlled matrix. See [Devlog 078](../dev-history/devlog/078_phase78_koharu_typesetting_visual_parity_browser_canvas_discrepancy.md). Neither 1,122 passing unit tests nor a screenshot with different words proves exact parity.
 
 ## 🔍 Code Linting & Static Checks
 

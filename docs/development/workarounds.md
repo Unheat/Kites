@@ -159,7 +159,7 @@ This document preserves the complete technical background, rationale, and implem
 
 ## 11. Alexandru Telea FMM Gradient Stabilization & Taylor Series Boundary Capping
 
-**Affected Files:** [`src/offscreen/engines/inpaint/TeleaInpaintEngine.ts`](file:///Users/dangtruongan/study/Kites/src/offscreen/engines/inpaint/TeleaInpaintEngine.ts), `src/offscreen/engines/inpaint/telea.ts`  
+**Affected Files:** [`src/offscreen/engines/inpaint/TeleaInpaintEngine.ts`](file:///Users/dangtruongan/study/Kites/src/offscreen/engines/inpaint/TeleaInpaintEngine.ts) (the FMM helpers are defined in this engine file; there is no separate `telea.ts` module)
 **Related Devlog:** [`043_phase43_real_telea_fmm_precise_fill_and_centralized_inpaint_catalog.md`](file:///Users/dangtruongan/study/Kites/docs/dev-history/devlog/043_phase43_real_telea_fmm_precise_fill_and_centralized_inpaint_catalog.md)  
 **Related ADR:** [`ADR-007-alexandru-telea-fmm-inpainting-and-centralized-catalog.md`](file:///Users/dangtruongan/study/Kites/docs/decisions/ADR-007-alexandru-telea-fmm-inpainting-and-centralized-catalog.md)
 
@@ -204,7 +204,7 @@ This document preserves the complete technical background, rationale, and implem
 
 ## 14. Canvas Untaint & Same-Origin Data URL / Blob Normalization for Studio Export
 
-**Affected Files:** [`src/studio/canvas/StudioCanvas.tsx`](file:///Users/dangtruongan/study/Kites/src/studio/canvas/StudioCanvas.tsx), [`src/studio/tools/StudioExportMenu.tsx`](file:///Users/dangtruongan/study/Kites/src/studio/tools/StudioExportMenu.tsx)  
+**Affected Files:** [`src/studio/canvas/StudioCanvas.tsx`](file:///Users/dangtruongan/study/Kites/src/studio/canvas/StudioCanvas.tsx), [`src/studio/Studio.tsx`](file:///Users/dangtruongan/study/Kites/src/studio/Studio.tsx)
 **Related Devlog:** [`046_phase46_advanced_lettering_rotation_untaint_peek_shortcuts.md`](file:///Users/dangtruongan/study/Kites/docs/dev-history/devlog/046_phase46_advanced_lettering_rotation_untaint_peek_shortcuts.md)
 
 * **Why direct canvas export throws `SecurityError: The operation is insecure`:**
@@ -212,6 +212,30 @@ This document preserves the complete technical background, rationale, and implem
 * **The Invariant Fix (Origin Isolation via Blobs):**
   Never draw raw remote web image URLs directly onto the export canvas. Always resolve source images through IndexedDB (`GET_JOB_IMAGE`) or background fetchers, converting image bytes into same-origin Blob URLs (`URL.createObjectURL(blob)`) or base64 Data URLs prior to canvas rendering.
 
+---
 
+## 15. Canvas Font Syntax and Contour Coordinate Contracts
 
+**Classification:** application integration defects, not evidence of a Chromium arithmetic bug or an upstream library workaround. Corrections below supersede earlier explanations from this investigation.
 
+**Affected Files:** [`src/offscreen/utils/contourTypeset.ts`](file:///Users/dangtruongan/study/Kites/src/offscreen/utils/contourTypeset.ts), [`src/studio/canvas/studioTypeset.ts`](file:///Users/dangtruongan/study/Kites/src/studio/canvas/studioTypeset.ts), [`src/offscreen/services/PipelineOrchestrator.ts`](file:///Users/dangtruongan/study/Kites/src/offscreen/services/PipelineOrchestrator.ts), [`src/offscreen/services/BubbleLayoutService.ts`](file:///Users/dangtruongan/study/Kites/src/offscreen/services/BubbleLayoutService.ts)
+**Related Devlog:** [`078_phase78_koharu_typesetting_visual_parity_browser_canvas_discrepancy.md`](file:///Users/dangtruongan/study/Kites/docs/dev-history/devlog/078_phase78_koharu_typesetting_visual_parity_browser_canvas_discrepancy.md)
+**Related ADR:** [`ADR-009-on-demand-font-catalog-and-koharu-2d-contour-invariants.md`](file:///Users/dangtruongan/study/Kites/docs/decisions/ADR-009-on-demand-font-catalog-and-koharu-2d-contour-invariants.md)
+
+* **Invalid font assignment retains the previous font:**
+  Wrapping the already quoted family stack in another pair of quotes produces invalid syntax such as `16px ""CC Wild Words", "WildWords", sans-serif"`. A real-Chrome probe reproduced the setter ignoring that assignment without throwing. The context retains its previous font: `10px sans-serif` on a fresh canvas, but possibly a preceding block's draw font on a reused canvas. That state dependence explains both oversized and undersized results. Measurement used one font while painting used a valid stack and another size. Node's visual runner passed `CCWildWords, sans-serif`, a different string; wrapping that whole string instead requests one family whose name contains commas. Its output therefore was not proof that it measured the registered reference font. Do not describe this as demonstrated Node tolerance of identical invalid nested quotes.
+* **The Invariant Fix (Safe Font-Stack Assignment):**
+  Never wrap `fontFamily` in literal quotes when assigning `ctx.font`. Sanitize and check whether the string already contains comma-separated font stacks or inner quotes before formatting:
+  ```typescript
+  const cleanFamily = (fontFamily || 'sans-serif').trim();
+  const familyStack = cleanFamily.includes(',')
+    ? cleanFamily
+    : (cleanFamily.startsWith('"') || cleanFamily.startsWith("'") ? cleanFamily : `"${cleanFamily}"`);
+  ctx.font = `${stylePrefix}${Math.round(size)}px ${familyStack}`;
+  ```
+* **Coordinate space alignment:**
+  `acquireBubbleGeometry()` returns page-absolute contours. `resolveBubbleLayoutsDetailed()` returns accepted contours relative to their typeset boxes. The pipeline's acceptance probe now subtracts the candidate origin before passing raw geometry onward. This aligns contour spans with the local text anchor. `wrapTextContour()` itself derives its scanline bounds from the supplied contour, so the earlier blanket claim that absolute coordinates always yield zero intersections was incorrect. The acceptance callback still sees a full raw contour, not necessarily the eventual partition cell; a positive fitted size alone does not prove a non-overflowing final render.
+* **Custom dialogue ceilings, not donor rules:**
+  Current Kites constants cap dense dialogue at 18px, short dialogue at 20px, and matching single-word screams at 24px, with width/height ratios 0.85/0.40. These are local tuning choices introduced during debugging. Naming them does not establish their validity or make them a faithful port. Koharu's `automatic_maximum` uses bubble width for horizontal text, bubble height for vertical text, and 24px for **nonbubble** text. Do not cite these local caps as Koharu parity or use them to explain away invalid measurement syntax.
+* **Curvature classification is heuristic:**
+  `computeMaskCurvature()` now uses `fillRatio >= 0.94` for its rectangular classification. This is a local threshold, not proof that a shape is a caption. The pipeline also treats contour presence as routing evidence. `CanvasFurniture` displays available contours regardless of mode; seeing blue dashes does not establish which strategy produced the current saved lines. See the current pipeline and Studio specs for rejected-layout and persistence limitations.

@@ -1,7 +1,7 @@
 # ADR-008: Dual Typesetting Engine Architecture & Advanced Typography Post-Processing Invariants
 
 ## Status
-Accepted
+Accepted historically. The two-engine taxonomy is superseded by [ADR-010](ADR-010-contour-layout-and-browser-validation.md); current algorithm and policy differences are specified in [the current typesetting contract](../development/koharu_typesetting_pipeline_spec.md). Historical performance and visual-quality statements below are not fresh acceptance results.
 
 ## Date
 2026-10-16

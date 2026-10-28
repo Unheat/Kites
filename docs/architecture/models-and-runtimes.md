@@ -159,44 +159,40 @@ graph TD
 
 ---
 
-## 🗨️ Speech Bubble Detection & Layout Subsystem
+## Speech Bubble Detection & Layout Subsystem (current 2026-10-28)
 
-Kites incorporates a dual-route bubble extraction subsystem to expand narrow vertical CJK text bounding boxes into comfortable, readable horizontal chambers:
+Current runtime modes are `off`, `heuristic`, and `neural`. The former separate `neural-mask` choice was removed in cumulative `origin/main..main` through `656d720`. Neural detection with OCR boxes consumes prototype mask evidence when available; it is not a box-only tier followed by a separate active smart-mask tier.
 
 ```mermaid
-graph TD
-    InputImage["Source Canvas Image"] --> RouteChoice{"Bubble Mode Selection"}
-    RouteChoice -->|Disabled| ClassicPath["Cotrans MST (Bounding Line Polygons)"]
-    RouteChoice -->|Heuristic| HeuristicExtractor["Tier 1: Heuristic Bubble Extractor<br/>(0 MB, CPU Instant)"]
-    RouteChoice -->|Neural YOLO| NeuralDetector["Tier 2: Neural Bubble Detector<br/>(11 MB ONNX, WebGPU / WASM)"]
-
-    HeuristicExtractor --> AdaptiveLum["Adaptive Background Luminance Sampling<br/>(16-Sample Median Ring)"]
-    AdaptiveLum --> DiskErosion["Morphological Disk Erosion (R = 14) + BFS"]
-    DiskErosion --> CoreInset["12% Safe Core Clamping (8-48px)"]
-
-    NeuralDetector --> ClassFilter["Class Filter (Class 0: bubble only)"]
-    ClassFilter --> CoreInset
-
-    CoreInset --> LayoutService["BubbleLayoutService (Safe Layout & Font Gate)"]
-    LayoutService --> OutputBoxes["Validated typesetBox Coordinates"]
+flowchart TD
+    Source["Source pixels + OCR boxes"] --> Mode{"Bubble mode"}
+    Mode -->|off| Free["Free OCR-region Auto Balloon route"]
+    Mode -->|heuristic| Heuristic["Morphological carrier and mask evidence; no model"]
+    Mode -->|neural| Neural["Class-0 proposals; optional per-box mask evidence"]
+    Heuristic --> Acquire["acquireBubbleGeometry: curvature and closed mask contour"]
+    Neural --> Acquire
+    Acquire --> Coordinates["Source coordinates with separate scaleX / scaleY"]
+    Coordinates --> Resolve["Contour bounds / computed safe boxes; shared flow-cell partitioning"]
+    Resolve --> Validate["Caller gate, collision rollback and sibling clearance"]
+    Validate --> Layout["Accepted box-local contours / fixed typeset boxes, or free fallback"]
 ```
 
-### 1. Tier 1: Heuristic Bubble Extractor (0 MB, Instant CPU)
-- **Zero-Download Footprint:** Operates on offscreen canvas `ImageData` at $< 1.5\text{ ms}$ runtime per bubble.
+A 12% safe core applies to computed-box paths, not every contour route. Closed shape contours and topological/shared flow-cell partitioning are already implemented in CPU TypeScript; they do not require a future segmentation-model tier. Detection availability is not proof of accepted layout, persisted contour use, or pixel parity. See [pipeline](pipeline.md#stage-5-bubble-container-extraction--layout-resolution) and [DB/Studio lifecycle](studio-and-typesetting.md#bubble-geometry-database--studio-lifecycle).
+
+### 1. Tier 1: Heuristic Bubble Extractor (0 MB, CPU)
+- **Zero-Download Footprint:** Operates on offscreen source `ImageData`; runtime depends on patch size and device, not a universal per-bubble guarantee.
 - **Adaptive Luminance Sampling:** 16-sample median ring $4\text{ px}$ outside the text bounding box computes $L_{bg}$ and sets threshold $\text{max}(130, L_{bg} - 35)$, allowing translucent balloons to be extracted without premature cutoff.
 - **Morphological Opening:** Disk erosion ($R \approx 14\text{ px}$) severs pointing tails; 4-connected BFS flood-fill recovers the main balloon chamber; constrained dilation restores true borders.
 - **Leak Guard:** Bounding patch fill ratio $\ge 96\%$ in both dimensions flags unbounded page margins, falling back to tight text bounds.
 
-### 2. Tier 2: Neural Bubble Detector (`bubble-yolo`, ~11.12 MB ONNX)
-- **Model:** `ogkalu/comic-text-and-bubble-detector` (`detector-v4-s_int8.onnx`, 11,120,765 bytes).
-- **Execution Provider:** WebGPU (`powerPreference: 'high-performance'`) with automated fallback to multi-threaded WASM.
-- **Input Dimension:** $640 \times 640\text{ px}$.
-- **Class Filtering:** Exclusively admits class `0: bubble` proposals at score threshold $\ge 0.30$. Classes `1: text_bubble` and `2: text_free` are strictly discarded to prevent OCR-like text bounding boxes from being treated as bubble containers.
+### 2. Tier 2: Neural Bubble Detector (`bubble-yolo`)
+- **Active registry:** `src/offscreen/engines/bubble/bubbleRegistry.ts` selects `mednasserallah/manga109-segmentation-bubble-onnx`, file `manga109_segmentation_bubble_1024.onnx`.
+- **Input:** 1024 × 1024; YOLO11n box predictions and prototype segmentation masks. `NeuralBubbleEngine` converts matched masks into per-text-box shape evidence before contour extraction.
+- **Execution provider:** requested WebGPU uses `powerPreference: 'high-performance'`, with WASM fallback. The registry does not select a separate FP16 model, and browser thread availability must not be assumed.
+- **Caching:** `BubbleCacheManager` checks `kites-bubble-models-v1`; an uncached model can make neural detection unavailable. The UI tier and a successful script exit are not proof that neural inference ran.
 
-### 3. Future Work: Neural Bubble Segmentation Candidate
-- **Model:** `mednasserallah/manga109-segmentation-bubble-onnx` (`manga109_segmentation_bubble_1024.onnx`, 11,845,329 bytes / 11.85 MB).
-- **Architecture:** YOLO11n fine-tuned on Manga109 dataset with segmentation head (1024×1024 input, opset 17).
-- **Role:** Deferred research tier for direct curved mask generation and per-line text layout, bypassing axis-aligned rectangular approximations.
+### 3. Historical detector and tier taxonomy
+The previous 640px detector-v4 model and separate `neural-mask` choice are historical. Current public modes are `off`, `heuristic`, and `neural`; legacy `neural-mask` selections normalize to `neural`. Segmentation is already part of the active neural implementation, not a deferred extra tier.
 
 ---
 

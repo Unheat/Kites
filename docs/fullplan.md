@@ -1,5 +1,20 @@
 # Full Stack Spatial Image & Manga Translator (Personal Project Plan)
 
+## Current implementation overlay — 2026-10-28
+
+This document preserves the original plan, phase record and historical diagrams below. Statements about React-Konva/DOM, FastAPI/PostgreSQL, two YOLO modes, no hyphenation, intermediate text bitmaps, and “perfect” output describe earlier proposals/checkpoints, not current guarantees. This overlay takes precedence for cumulative `origin/main..main` through `656d720`; it does not claim end-to-end pixel parity.
+
+- **Current rendering:** `src/studio/Studio.tsx` and Canvas 2D `TextRenderer`; no SVG final text renderer or React-Konva dependency is implied by the historical plan. Live pages receive a baked PNG; Dexie stores the clean background and editable text data separately.
+- **Current typesetting:** `TypesetStrategyFactory` resolves Contour DP, backend Simple Rect (rectangle through shared DP), and Auto Balloon (`balloon`/`auto-balloon` aliases). `ellipse` is retired/normalized on restore. Studio offers Contour / Auto Balloon / Caption Box; its simple edit branch retains the user font size instead of backend font fitting. Hyphenation is active with on-demand Liang patterns, LastResort contour fallback and marker-aware healing on Studio edits.
+- **Current bubble modes:** `off`, `heuristic`, `neural`; the separate `neural-mask` mode is retired. Active geometry extracts closed contours, separates anisotropic mask scales, partitions connected chambers/flow cells, suppresses tiny absorbed fragments, checks collisions and preserves fixed geometry. Erasers still receive original text polygons, not expanded balloon geometry or OCR raw-mask canvases.
+- **Current font policy:** bundled CC Wild Words, Anime Ace and Patrick Hand SC; searchable on-demand catalog/import library, Dexie v6 `fonts`, per-document registration and explicit selected-family loading for live measurement. Missing fonts can still fall back. Current contour ceilings of 18/20/24px are Kites customization: Koharu bubble maximum is width for horizontal writing or height for vertical writing, while 24 applies only to nonbubble text.
+- **Current persistence limitations:** stored lines/positioned placements preserve initial layout when eligible, but rejected detailed layouts can still fall back to raw acquisition contours/mode evidence during saving. Studio may reflow a contour that the bake did not use. `CanvasFurniture` shows stored contours regardless of mode, not solver proof. `originalContourPoints` and detected dimensions are transient, reseeded from current saved data; Reset to Bubble Frame restores dimensions/contour only, not position or rotation.
+- **Other cumulative changes:** project-owned jobs are protected from retention cleanup; uploads carry project identity; Studio retranslation/colorization discards stale page results and undo resets on page changes. Parser/glossary safeguards and batch/PSD export hardening are implemented checkpoints, not reasons to erase earlier plans.
+
+Current source-oriented explanations and Mermaid flows: [pipeline](architecture/pipeline.md), [Studio and DB lifecycle](architecture/studio-and-typesetting.md), and [font resolution/measurement/draw](development/cotrans_renderer_spec.md). The remaining phase list is historical; in particular Phase 6's dual-YOLO wording and Phase 15's dual-mode wording are superseded, not a request to restore removed routes.
+
+---
+
 ## 1. Project Overview & Flow
 A Chrome Extension-first web application that allows users to translate text within images (like manga panels, blueprints, or diagrams), overlaying translated text in real-time, and letting users edit the result on a dynamic, local-first canvas. The core philosophy is "Local-First Storage, Dual-Compute" where all user data is stored locally, and the user can choose to compute translations locally (free) or via a cloud server (premium).
 
