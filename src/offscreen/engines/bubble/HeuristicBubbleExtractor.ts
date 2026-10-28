@@ -171,9 +171,8 @@ export class HeuristicBubbleExtractor {
     }
 
     // 3. Build binary mask of bubble interior.
-    // Only the target text box's interior is marked inText to prevent its own glyph strokes
-    // from acting as obstacle walls. Connectivity across multiple lobes must be carried
-    // by real observed paper pixels (isPaper), never manufactured across artwork borders.
+    // Inset text box boundary: ensures outer border strokes are never bridged or punctured.
+    const INSET_STROKE_GUARD = 4;
     const mask = new Uint8Array(patchW * patchH);
     const observedInterior = options.onShapeEvidence ? new Uint8Array(patchW * patchH) : undefined;
 
@@ -182,17 +181,6 @@ export class HeuristicBubbleExtractor {
       for (let px = 0; px < patchW; px++) {
         const origX = Math.min(imgW - 1, minX + Math.floor(px / scale));
 
-        let inText = origX >= textBox.x && origX < textBox.x + textBox.w && origY >= textBox.y && origY < textBox.y + textBox.h;
-        if (!inText && bridgeSiblings.length > 0) {
-          for (let bi = 0; bi < bridgeSiblings.length; bi++) {
-            const b = bridgeSiblings[bi];
-            if (origX >= b.x && origX < b.x + b.w && origY >= b.y && origY < b.y + b.h) {
-              inText = true;
-              break;
-            }
-          }
-        }
-
         const pIdx = (origY * imgW + origX) * channels;
         const r = data[pIdx];
         const g = data[pIdx + 1];
@@ -200,6 +188,28 @@ export class HeuristicBubbleExtractor {
         const isPaper = isDarkBubble
           ? (r <= darkThresh && g <= darkThresh && b <= darkThresh)
           : (r >= lumThresh && g >= lumThresh && b >= lumThresh);
+
+        // Stroke leak guard: strong black outline pixels (r, g, b <= 35) must never be treated as text whitespace
+        const isStrongStroke = !isDarkBubble && (r <= 35 && g <= 35 && b <= 35);
+
+        let inText = false;
+        if (!isStrongStroke) {
+          const selfInset = Math.min(INSET_STROKE_GUARD, Math.floor(Math.min(textBox.w, textBox.h) / 3));
+          if (origX >= textBox.x + selfInset && origX < textBox.x + textBox.w - selfInset &&
+              origY >= textBox.y + selfInset && origY < textBox.y + textBox.h - selfInset) {
+            inText = true;
+          } else if (bridgeSiblings.length > 0) {
+            for (let bi = 0; bi < bridgeSiblings.length; bi++) {
+              const sib = bridgeSiblings[bi];
+              const sibInset = Math.min(INSET_STROKE_GUARD, Math.floor(Math.min(sib.w, sib.h) / 3));
+              if (origX >= sib.x + sibInset && origX < sib.x + sib.w - sibInset &&
+                  origY >= sib.y + sibInset && origY < sib.y + sib.h - sibInset) {
+                inText = true;
+                break;
+              }
+            }
+          }
+        }
 
         if (isPaper && observedInterior) observedInterior[py * patchW + px] = 1;
         if (inText || isPaper) {

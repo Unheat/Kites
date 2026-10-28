@@ -3,6 +3,7 @@ import { HeuristicBubbleExtractor, type BubbleShapeEvidence, type ImagePatchData
 import { NeuralBubbleDetector } from '../engines/bubble/NeuralBubbleDetector';
 import { extractMaskContour } from '../utils/maskContourExtractor';
 import { generateBubbleContour } from '../utils/contourTypeset';
+import { clipHalfPlane } from '../utils/geometry/voronoiPartition';
 import {
   applySiblingBoundaryConstraints,
   boxIoU,
@@ -256,7 +257,105 @@ export function acquireBubbleGeometry(
       contours[index] = undefined;
     }
   });
+
+  // Pairwise Voronoi perpendicular bisector partitioning for overlapping carriers:
+  // If independent carriers overlap, partition their overlapping territory closer to their respective text centers.
+  partitionOverlappingCarriers(boxes, carriers, contours, proposals, SIBLING_GAP);
+
   return { pageWidth: image.width, carriers, proposals, shapes, curvatures, contours };
+}
+
+/**
+ * Partitions overlapping carrier chambers and contours between independent bubbles
+ * using pairwise Voronoi perpendicular bisectors.
+ * Guarantees that neither contour nor carrier bounding box invades a neighbor's territory.
+ */
+export function partitionOverlappingCarriers(
+  boxes: BoxRect[],
+  carriers: (BoxRect | null)[],
+  contours: (Point2D[] | undefined)[],
+  proposals: (BoxRect | null)[],
+  siblingGap: number = SIBLING_GAP
+): void {
+  const halfGap = siblingGap * 0.5;
+
+  for (let i = 0; i < boxes.length; i++) {
+    const cI = carriers[i];
+    if (!cI) continue;
+
+    for (let j = 0; j < i; j++) {
+      const cJ = carriers[j];
+      if (!cJ) continue;
+      // If co-members of the same shared proposal, they are handled together downstream
+      if (proposals[i] && proposals[i] === proposals[j]) continue;
+
+      // Check if carrier boxes overlap
+      if (!overlaps(cI, cJ)) continue;
+
+      const cxI = boxes[i].x + boxes[i].w / 2;
+      const cyI = boxes[i].y + boxes[i].h / 2;
+      const cxJ = boxes[j].x + boxes[j].w / 2;
+      const cyJ = boxes[j].y + boxes[j].h / 2;
+
+      const normal = { x: cxJ - cxI, y: cyJ - cyI };
+      const dist = Math.hypot(normal.x, normal.y);
+      if (dist < 1e-4) continue;
+
+      const baseOffset = (cxJ * cxJ + cyJ * cyJ - cxI * cxI - cyI * cyI) * 0.5;
+
+      // Poly I: closer to center I (dot(P, normal) <= baseOffset - halfGap * dist)
+      const polyI: Point2D[] = (contours[i] && contours[i]!.length >= 3)
+        ? contours[i]!
+        : [
+            { x: cI.x, y: cI.y },
+            { x: cI.x + cI.w, y: cI.y },
+            { x: cI.x + cI.w, y: cI.y + cI.h },
+            { x: cI.x, y: cI.y + cI.h }
+          ];
+
+      const clippedI = clipHalfPlane(polyI, normal, baseOffset - halfGap * dist);
+      if (clippedI.length >= 3) {
+        contours[i] = clippedI;
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        for (const p of clippedI) {
+          if (p.x < minX) minX = p.x;
+          if (p.x > maxX) maxX = p.x;
+          if (p.y < minY) minY = p.y;
+          if (p.y > maxY) maxY = p.y;
+        }
+        cI.x = Math.max(0, Math.round(minX));
+        cI.y = Math.max(0, Math.round(minY));
+        cI.w = Math.max(20, Math.round(maxX - minX));
+        cI.h = Math.max(20, Math.round(maxY - minY));
+      }
+
+      // Poly J: closer to center J (dot(P, -normal) <= -baseOffset - halfGap * dist)
+      const polyJ: Point2D[] = (contours[j] && contours[j]!.length >= 3)
+        ? contours[j]!
+        : [
+            { x: cJ.x, y: cJ.y },
+            { x: cJ.x + cJ.w, y: cJ.y },
+            { x: cJ.x + cJ.w, y: cJ.y + cJ.h },
+            { x: cJ.x, y: cJ.y + cJ.h }
+          ];
+
+      const clippedJ = clipHalfPlane(polyJ, { x: -normal.x, y: -normal.y }, -baseOffset - halfGap * dist);
+      if (clippedJ.length >= 3) {
+        contours[j] = clippedJ;
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        for (const p of clippedJ) {
+          if (p.x < minX) minX = p.x;
+          if (p.x > maxX) maxX = p.x;
+          if (p.y < minY) minY = p.y;
+          if (p.y > maxY) maxY = p.y;
+        }
+        cJ.x = Math.max(0, Math.round(minX));
+        cJ.y = Math.max(0, Math.round(minY));
+        cJ.w = Math.max(20, Math.round(maxX - minX));
+        cJ.h = Math.max(20, Math.round(maxY - minY));
+      }
+    }
+  }
 }
 
 /** @param a - Outer rectangle. @param b - Inner rectangle. @returns Whether all inner edges are contained. */

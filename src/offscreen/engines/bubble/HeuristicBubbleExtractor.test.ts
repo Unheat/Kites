@@ -319,4 +319,33 @@ describe('HeuristicBubbleExtractor', () => {
     // connectedBoxIndices must NOT include boxRight
     expect(leftEvidence?.connectedBoxIndices).toBeUndefined();
   });
+
+  it('preserves bubble stroke boundary and does not leak outside when text touches border stroke', () => {
+    const W = 250;
+    const H = 250;
+    // Dark artwork background (gray 40)
+    const data = new Uint8ClampedArray(W * H * 4).fill(40);
+    // White bubble from x=50..150, y=50..150
+    // Black border stroke (0) around x=150 (stroke width 4px: x=148..152)
+    // White background outside border at x > 152
+    for (let y = 50; y <= 150; y++) {
+      for (let x = 50; x < 220; x++) {
+        const isBorder = x >= 148 && x <= 152;
+        const idx = (y * W + x) * 4;
+        if (isBorder) {
+          data[idx] = 0; data[idx + 1] = 0; data[idx + 2] = 0; data[idx + 3] = 255;
+        } else {
+          data[idx] = 255; data[idx + 1] = 255; data[idx + 2] = 255; data[idx + 3] = 255;
+        }
+      }
+    }
+    const image: ImagePatchData = { width: W, height: H, data };
+    // Text box touches the black stroke border at x=148
+    const textBox: BoxRect = { x: 80, y: 80, w: 68, h: 40 };
+
+    const carrier = HeuristicBubbleExtractor.extractCarrierBox(image, textBox);
+    expect(carrier).not.toBeNull();
+    // Carrier must be contained within the bubble and NOT leak across the border to x > 155
+    expect(carrier!.x + carrier!.w).toBeLessThanOrEqual(155);
+  });
 });

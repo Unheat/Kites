@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { acquireBubbleGeometry, computeMaskCurvature, MIN_SHARED_FONT_RATIO, resolveBubbleLayouts, resolveBubbleLayoutsDetailed, significantOverlap, type BubbleLayoutInput } from './BubbleLayoutService';
+import { acquireBubbleGeometry, computeMaskCurvature, MIN_SHARED_FONT_RATIO, partitionOverlappingCarriers, resolveBubbleLayouts, resolveBubbleLayoutsDetailed, significantOverlap, type BubbleLayoutInput } from './BubbleLayoutService';
 import type { Point2D } from '../../shared/utils/geometry';
 import { computeTypesetBox, SIBLING_GAP, type BoxRect } from '../utils/bubbleExpansion';
 import type { BubbleShapeEvidence, ImagePatchData } from '../engines/bubble/HeuristicBubbleExtractor';
@@ -593,6 +593,24 @@ describe('conservative bubble layouts', () => {
       expect(bottomBox.w).toBeGreaterThanOrEqual(60);
       // Clearance between top and bottom
       expect(topBox.y + topBox.h).toBeLessThanOrEqual(bottomBox.y + SIBLING_GAP);
+    });
+
+    it('partitions overlapping carriers and contours using pairwise Voronoi perpendicular bisector', () => {
+      // Two separate text boxes whose carrier boxes overlap in the center (x=70..100)
+      const boxA: BoxRect = { x: 30, y: 50, w: 30, h: 40 };
+      const boxB: BoxRect = { x: 110, y: 50, w: 30, h: 40 };
+      const carrierA: BoxRect = { x: 20, y: 30, w: 80, h: 80 }; // x: 20..100
+      const carrierB: BoxRect = { x: 70, y: 30, w: 80, h: 80 }; // x: 70..150 (overlap from 70 to 100)
+      const contours: (Point2D[] | undefined)[] = [undefined, undefined];
+      const proposals: (BoxRect | null)[] = [null, null];
+
+      partitionOverlappingCarriers([boxA, boxB], [carrierA, carrierB], contours, proposals, 6);
+
+      // Carrier A and Carrier B must now have zero overlap (separated by sibling gap around midpoint x=85)
+      expect(carrierA.x + carrierA.w).toBeLessThanOrEqual(carrierB.x);
+      // Both contours must be materialized as non-overlapping polygons
+      expect(contours[0]).toBeDefined();
+      expect(contours[1]).toBeDefined();
     });
   });
 });
