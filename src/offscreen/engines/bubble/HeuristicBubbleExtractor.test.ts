@@ -314,10 +314,10 @@ describe('HeuristicBubbleExtractor', () => {
     });
 
     expect(carrierLeft).not.toBeNull();
-    // Carrier of boxLeft must NOT contain boxRight
+    // Carrier of boxLeft must NOT contain boxRight: the two chambers stay separate
+    // because no observed paper path connects them across the dark artwork.
     expect(carrierLeft!.x + carrierLeft!.w).toBeLessThan(boxRight.x);
-    // connectedBoxIndices must NOT include boxRight
-    expect(leftEvidence?.connectedBoxIndices).toBeUndefined();
+    expect(leftEvidence).toBeDefined();
   });
 
   it('preserves bubble stroke boundary and does not leak outside when text touches border stroke', () => {

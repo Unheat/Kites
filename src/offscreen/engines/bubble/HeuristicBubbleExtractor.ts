@@ -47,8 +47,6 @@ export interface BubbleShapeEvidence {
   reconstructed?: Uint8Array;
   carrierBox?: BoxRect;
   isSeveredCarrier?: boolean;
-  /** Sibling text box indices verified to be enclosed in this same connected bubble chamber. */
-  connectedBoxIndices?: number[];
 }
 
 export interface SeveredTailResult {
@@ -98,37 +96,14 @@ export class HeuristicBubbleExtractor {
       return null;
     }
 
-    // 1. Expand patch around text box (slack for bubble borders).
-    const padX = Math.round(Math.max(50, textBox.w * 0.9));
-    const padY = Math.round(Math.max(50, textBox.h * 0.9));
+    // 1. Expand patch around text box (slack for bubble borders)
+    const padX = Math.round(Math.max(50, textBox.w * 1.0));
+    const padY = Math.round(Math.max(50, textBox.h * 1.0));
 
-    let minX = Math.max(0, textBox.x - padX);
-    let minY = Math.max(0, textBox.y - padY);
-    let maxX = Math.min(imgW, textBox.x + textBox.w + padX);
-    let maxY = Math.min(imgH, textBox.y + textBox.h + padY);
-
-    // Tight sibling proximity bridge:
-    // When an immediate sibling text box exists within close conversational distance (gap <= 45px),
-    // expand patch bounds to enclose it and treat its glyphs as interior whitespace.
-    // Denser artwork thresholds (gap > 45px like captions across panels or clothing textures)
-    // are strictly excluded, preserving leakGuard protection.
-    const MAX_SIBLING_BRIDGE_GAP = 45;
-    const bridgeSiblings: BoxRect[] = [];
-
-    if (options.allTextBoxes && options.allTextBoxes.length > 1) {
-      for (const sibling of options.allTextBoxes) {
-        if (sibling === textBox) continue;
-        const gapX = Math.max(0, Math.max(textBox.x, sibling.x) - Math.min(textBox.x + textBox.w, sibling.x + sibling.w));
-        const gapY = Math.max(0, Math.max(textBox.y, sibling.y) - Math.min(textBox.y + textBox.h, sibling.y + sibling.h));
-        if (gapX <= MAX_SIBLING_BRIDGE_GAP && gapY <= MAX_SIBLING_BRIDGE_GAP) {
-          bridgeSiblings.push(sibling);
-          minX = Math.min(minX, Math.max(0, sibling.x - padX));
-          minY = Math.min(minY, Math.max(0, sibling.y - padY));
-          maxX = Math.max(maxX, Math.min(imgW, sibling.x + sibling.w + padX));
-          maxY = Math.max(maxY, Math.min(imgH, sibling.y + sibling.h + padY));
-        }
-      }
-    }
+    const minX = Math.max(0, textBox.x - padX);
+    const minY = Math.max(0, textBox.y - padY);
+    const maxX = Math.min(imgW, textBox.x + textBox.w + padX);
+    const maxY = Math.min(imgH, textBox.y + textBox.h + padY);
 
     const origPatchW = maxX - minX;
     const origPatchH = maxY - minY;
@@ -170,16 +145,34 @@ export class HeuristicBubbleExtractor {
       darkThresh = DEFAULT_DARK_LUMINANCE_THRESHOLD;
     }
 
-    // 3. Build binary mask of bubble interior.
-    // Inset text box boundary: ensures outer border strokes are never bridged or punctured.
-    const INSET_STROKE_GUARD = 4;
+    // Filter nearby text boxes that intersect the patch so their dark glyph pixels
+    // are treated as interior whitespace rather than artificial obstacle walls.
+    const nearbyBoxes = options.allTextBoxes && options.allTextBoxes.length > 0
+      ? options.allTextBoxes.filter((b) =>
+          b.x + b.w > minX && b.x < maxX && b.y + b.h > minY && b.y < maxY
+        )
+      : [textBox];
+
+    // 3. Build binary mask of bubble interior
+    // Pixel is interior if inside any known text box or matches dominant paper polarity
     const mask = new Uint8Array(patchW * patchH);
+    // Validation keeps only observed paper pixels: force-filled OCR rectangles must never
+    // manufacture connectivity across artwork or a border between unrelated bubbles.
     const observedInterior = options.onShapeEvidence ? new Uint8Array(patchW * patchH) : undefined;
 
     for (let py = 0; py < patchH; py++) {
       const origY = Math.min(imgH - 1, minY + Math.floor(py / scale));
       for (let px = 0; px < patchW; px++) {
         const origX = Math.min(imgW - 1, minX + Math.floor(px / scale));
+
+        let inText = false;
+        for (let bi = 0; bi < nearbyBoxes.length; bi++) {
+          const b = nearbyBoxes[bi];
+          if (origX >= b.x && origX < b.x + b.w && origY >= b.y && origY < b.y + b.h) {
+            inText = true;
+            break;
+          }
+        }
 
         const pIdx = (origY * imgW + origX) * channels;
         const r = data[pIdx];
@@ -188,28 +181,6 @@ export class HeuristicBubbleExtractor {
         const isPaper = isDarkBubble
           ? (r <= darkThresh && g <= darkThresh && b <= darkThresh)
           : (r >= lumThresh && g >= lumThresh && b >= lumThresh);
-
-        // Stroke leak guard: strong black outline pixels (r, g, b <= 35) must never be treated as text whitespace
-        const isStrongStroke = !isDarkBubble && (r <= 35 && g <= 35 && b <= 35);
-
-        let inText = false;
-        if (!isStrongStroke) {
-          const selfInset = Math.min(INSET_STROKE_GUARD, Math.floor(Math.min(textBox.w, textBox.h) / 3));
-          if (origX >= textBox.x + selfInset && origX < textBox.x + textBox.w - selfInset &&
-              origY >= textBox.y + selfInset && origY < textBox.y + textBox.h - selfInset) {
-            inText = true;
-          } else if (bridgeSiblings.length > 0) {
-            for (let bi = 0; bi < bridgeSiblings.length; bi++) {
-              const sib = bridgeSiblings[bi];
-              const sibInset = Math.min(INSET_STROKE_GUARD, Math.floor(Math.min(sib.w, sib.h) / 3));
-              if (origX >= sib.x + sibInset && origX < sib.x + sib.w - sibInset &&
-                  origY >= sib.y + sibInset && origY < sib.y + sib.h - sibInset) {
-                inText = true;
-                break;
-              }
-            }
-          }
-        }
 
         if (isPaper && observedInterior) observedInterior[py * patchW + px] = 1;
         if (inText || isPaper) {
@@ -233,52 +204,6 @@ export class HeuristicBubbleExtractor {
       return null;
     }
 
-    const carrier = severed.carrier;
-
-    // Sanity clamp: carrier must at least contain the original text box
-    const finalX = Math.min(carrier.x, textBox.x);
-    const finalY = Math.min(carrier.y, textBox.y);
-    const finalW = Math.max(carrier.w, textBox.w, (carrier.x + carrier.w) - finalX);
-    const finalH = Math.max(carrier.h, textBox.h, (carrier.y + carrier.h) - finalY);
-
-    const finalCarrier: BoxRect = {
-      x: Math.max(0, finalX),
-      y: Math.max(0, finalY),
-      w: Math.min(imgW - Math.max(0, finalX), finalW),
-      h: Math.min(imgH - Math.max(0, finalY), finalH),
-    };
-
-    // Verify which sibling text boxes from allTextBoxes are connected into this same chamber.
-    // A sibling is only part of this chamber if:
-    // 1. Its center falls inside the reconstructed morphology chamber (rec[cy][cx] === 1).
-    // 2. The chamber bounding box strictly encloses the sibling box.
-    const connectedBoxIndices: number[] = [];
-    if (options.allTextBoxes && options.allTextBoxes.length > 1 && severed.reconstructed) {
-      const rec = severed.reconstructed;
-      const sX = patchW / origPatchW;
-      const sY = patchH / origPatchH;
-      for (let bi = 0; bi < options.allTextBoxes.length; bi++) {
-        const b = options.allTextBoxes[bi];
-        if (b === textBox) {
-          connectedBoxIndices.push(bi);
-          continue;
-        }
-        const isInsideCarrier = b.x >= finalCarrier.x && b.y >= finalCarrier.y
-          && b.x + b.w <= finalCarrier.x + finalCarrier.w && b.y + b.h <= finalCarrier.y + finalCarrier.h;
-        if (!isInsideCarrier) continue;
-
-        const cx = Math.round(b.x + b.w / 2);
-        const cy = Math.round(b.y + b.h / 2);
-        if (cx >= minX && cx < maxX && cy >= minY && cy < maxY) {
-          const px = Math.min(patchW - 1, Math.max(0, Math.round((cx - minX) * sX)));
-          const py = Math.min(patchH - 1, Math.max(0, Math.round((cy - minY) * sY)));
-          if (rec[py * patchW + px] === 1) {
-            connectedBoxIndices.push(bi);
-          }
-        }
-      }
-    }
-
     // Preserve morphology evidence for conservative multi-lobe layout validation.
     options.onShapeEvidence?.({
       x: minX,
@@ -292,12 +217,24 @@ export class HeuristicBubbleExtractor {
       observedInterior: observedInterior!,
       eroded: severed.eroded,
       reconstructed: severed.reconstructed,
-      carrierBox: finalCarrier,
+      carrierBox: severed.carrier,
       isSeveredCarrier: true,
-      connectedBoxIndices: connectedBoxIndices.length > 1 ? connectedBoxIndices : undefined,
     });
 
-    return finalCarrier;
+    const carrier = severed.carrier;
+
+    // Sanity clamp: carrier must at least contain the original text box
+    const finalX = Math.min(carrier.x, textBox.x);
+    const finalY = Math.min(carrier.y, textBox.y);
+    const finalW = Math.max(carrier.w, textBox.w, (carrier.x + carrier.w) - finalX);
+    const finalH = Math.max(carrier.h, textBox.h, (carrier.y + carrier.h) - finalY);
+
+    return {
+      x: Math.max(0, finalX),
+      y: Math.max(0, finalY),
+      w: Math.min(imgW - Math.max(0, finalX), finalW),
+      h: Math.min(imgH - Math.max(0, finalY), finalH),
+    };
   }
 
   /**

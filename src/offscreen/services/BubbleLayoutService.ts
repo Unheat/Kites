@@ -3,7 +3,6 @@ import { HeuristicBubbleExtractor, type BubbleShapeEvidence, type ImagePatchData
 import { NeuralBubbleDetector } from '../engines/bubble/NeuralBubbleDetector';
 import { extractMaskContour } from '../utils/maskContourExtractor';
 import { generateBubbleContour } from '../utils/contourTypeset';
-import { clipHalfPlane } from '../utils/geometry/voronoiPartition';
 import {
   applySiblingBoundaryConstraints,
   boxIoU,
@@ -28,6 +27,12 @@ export const BUBBLE_MATCH_COVERAGE = 0.50;
  */
 export const NOISE_AREA_RATIO = 0.10;
 export const NOISE_MAX_ABSOLUTE_AREA = 400;
+/**
+ * Heuristic tier only (XianScan expansion.rs:186-194 parity): when the same physical chamber
+ * is extracted for two utterances (carrier IoU >= 0.5), both texts live in one balloon and are
+ * partitioned by the flow-cell / sub-chamber paths instead of colliding as separate bubbles.
+ */
+export const XIANSCAN_SHARED_BUBBLE_IOU = 0.5;
 
 export interface BubbleGeometry {
   pageWidth: number;
@@ -148,19 +153,19 @@ export function acquireBubbleGeometry(
   neuralProposals?: BoxRect[] | null,
   neuralShapes?: (BubbleShapeEvidence | undefined)[] | null
 ): BubbleGeometry {
-  const carriers: (BoxRect | null)[] = new Array(boxes.length).fill(undefined);
-  const proposals: (BoxRect | null)[] = new Array(boxes.length).fill(undefined);
-  const shapes: (BubbleShapeEvidence | undefined)[] = new Array(boxes.length).fill(undefined);
+  const carriers: (BoxRect | null)[] = [];
+  const proposals: (BoxRect | null)[] = [];
+  const shapes: (BubbleShapeEvidence | undefined)[] = [];
   const curvatures: { isRounded: boolean; borderRadius: number }[] = [];
   const contours: (Point2D[] | undefined)[] = [];
   const isNeuralMode = neuralProposals !== undefined && neuralProposals !== null;
-
-  for (let index = 0; index < boxes.length; index++) {
-    const box = boxes[index];
+  boxes.forEach((box, index) => {
+    const proposal = isNeuralMode
+      ? NeuralBubbleDetector.matchBubble(box, neuralProposals, BUBBLE_MATCH_COVERAGE)
+      : null;
+    proposals[index] = proposal;
 
     if (isNeuralMode) {
-      const proposal = NeuralBubbleDetector.matchBubble(box, neuralProposals, BUBBLE_MATCH_COVERAGE);
-      proposals[index] = proposal;
       if (proposal) {
         shapes[index] = neuralShapes?.[index];
         carriers[index] = neuralShapes?.[index]?.carrierBox ?? proposal;
@@ -170,67 +175,13 @@ export function acquireBubbleGeometry(
         carriers[index] = null;
       }
     } else {
-      // Heuristic Mode (Tier 1): extract local carrier and shape for each box
-      let shape: BubbleShapeEvidence | undefined;
+      // Heuristic Mode (Tier 1): extract carrier via morphological opening on pixel buffer
       const heuristic = HeuristicBubbleExtractor.extractCarrierBox(image, box, {
         allTextBoxes: boxes,
-        onShapeEvidence: (s) => { shape = s; }
+        onShapeEvidence: (shape) => { shapes[index] = shape; }
       });
       carriers[index] = heuristic;
-      shapes[index] = shape;
-      proposals[index] = null;
     }
-  }
-
-  // Heuristic multi-utterance joined bubble resolution:
-  // When two distinct text boxes i and j have mutually overlapping carrier chambers that contain
-  // each other's text centers, link them into a shared multi-utterance proposal.
-  if (!isNeuralMode) {
-    for (let i = 0; i < boxes.length; i++) {
-      const cI = carriers[i];
-      if (!cI) continue;
-      for (let j = 0; j < i; j++) {
-        const cJ = carriers[j];
-        if (!cJ) continue;
-        const cxI = boxes[i].x + boxes[i].w / 2;
-        const cyI = boxes[i].y + boxes[i].h / 2;
-        const cxJ = boxes[j].x + boxes[j].w / 2;
-        const cyJ = boxes[j].y + boxes[j].h / 2;
-
-        const iEnclosesJ = cxJ >= cI.x && cxJ <= cI.x + cI.w && cyJ >= cI.y && cyJ <= cI.y + cI.h;
-        const jEnclosesI = cxI >= cJ.x && cxI <= cJ.x + cJ.w && cyI >= cJ.y && cyI <= cJ.y + cJ.h;
-
-        const isConnected = (iEnclosesJ && shapes[i]?.connectedBoxIndices?.includes(j))
-          || (jEnclosesI && shapes[j]?.connectedBoxIndices?.includes(i))
-          || (iEnclosesJ && jEnclosesI);
-
-        if (isConnected) {
-          const unionLeft = Math.min(cI.x, cJ.x);
-          const unionTop = Math.min(cI.y, cJ.y);
-          const unionRight = Math.max(cI.x + cI.w, cJ.x + cJ.w);
-          const unionBottom = Math.max(cI.y + cI.h, cJ.y + cJ.h);
-          const unionCarrier: BoxRect = {
-            x: unionLeft,
-            y: unionTop,
-            w: unionRight - unionLeft,
-            h: unionBottom - unionTop,
-          };
-          const sharedProposal: BoxRect = proposals[j] ?? proposals[i] ?? unionCarrier;
-          proposals[i] = sharedProposal;
-          proposals[j] = sharedProposal;
-          carriers[i] = unionCarrier;
-          carriers[j] = unionCarrier;
-          const dominantShape = (shapes[i]?.connectedBoxIndices?.includes(j))
-            ? shapes[i]
-            : (shapes[j]?.connectedBoxIndices?.includes(i) ? shapes[j] : (shapes[i] ?? shapes[j]));
-          shapes[i] = dominantShape;
-          shapes[j] = dominantShape;
-        }
-      }
-    }
-  }
-
-  boxes.forEach((box, index) => {
     curvatures[index] = computeMaskCurvature(shapes[index], carriers[index]);
 
     // Extract closed 2D polygon contour from shape evidence if available
@@ -257,105 +208,7 @@ export function acquireBubbleGeometry(
       contours[index] = undefined;
     }
   });
-
-  // Pairwise Voronoi perpendicular bisector partitioning for overlapping carriers:
-  // If independent carriers overlap, partition their overlapping territory closer to their respective text centers.
-  partitionOverlappingCarriers(boxes, carriers, contours, proposals, SIBLING_GAP);
-
   return { pageWidth: image.width, carriers, proposals, shapes, curvatures, contours };
-}
-
-/**
- * Partitions overlapping carrier chambers and contours between independent bubbles
- * using pairwise Voronoi perpendicular bisectors.
- * Guarantees that neither contour nor carrier bounding box invades a neighbor's territory.
- */
-export function partitionOverlappingCarriers(
-  boxes: BoxRect[],
-  carriers: (BoxRect | null)[],
-  contours: (Point2D[] | undefined)[],
-  proposals: (BoxRect | null)[],
-  siblingGap: number = SIBLING_GAP
-): void {
-  const halfGap = siblingGap * 0.5;
-
-  for (let i = 0; i < boxes.length; i++) {
-    const cI = carriers[i];
-    if (!cI) continue;
-
-    for (let j = 0; j < i; j++) {
-      const cJ = carriers[j];
-      if (!cJ) continue;
-      // If co-members of the same shared proposal, they are handled together downstream
-      if (proposals[i] && proposals[i] === proposals[j]) continue;
-
-      // Check if carrier boxes overlap
-      if (!overlaps(cI, cJ)) continue;
-
-      const cxI = boxes[i].x + boxes[i].w / 2;
-      const cyI = boxes[i].y + boxes[i].h / 2;
-      const cxJ = boxes[j].x + boxes[j].w / 2;
-      const cyJ = boxes[j].y + boxes[j].h / 2;
-
-      const normal = { x: cxJ - cxI, y: cyJ - cyI };
-      const dist = Math.hypot(normal.x, normal.y);
-      if (dist < 1e-4) continue;
-
-      const baseOffset = (cxJ * cxJ + cyJ * cyJ - cxI * cxI - cyI * cyI) * 0.5;
-
-      // Poly I: closer to center I (dot(P, normal) <= baseOffset - halfGap * dist)
-      const polyI: Point2D[] = (contours[i] && contours[i]!.length >= 3)
-        ? contours[i]!
-        : [
-            { x: cI.x, y: cI.y },
-            { x: cI.x + cI.w, y: cI.y },
-            { x: cI.x + cI.w, y: cI.y + cI.h },
-            { x: cI.x, y: cI.y + cI.h }
-          ];
-
-      const clippedI = clipHalfPlane(polyI, normal, baseOffset - halfGap * dist);
-      if (clippedI.length >= 3) {
-        contours[i] = clippedI;
-        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-        for (const p of clippedI) {
-          if (p.x < minX) minX = p.x;
-          if (p.x > maxX) maxX = p.x;
-          if (p.y < minY) minY = p.y;
-          if (p.y > maxY) maxY = p.y;
-        }
-        cI.x = Math.max(0, Math.round(minX));
-        cI.y = Math.max(0, Math.round(minY));
-        cI.w = Math.max(20, Math.round(maxX - minX));
-        cI.h = Math.max(20, Math.round(maxY - minY));
-      }
-
-      // Poly J: closer to center J (dot(P, -normal) <= -baseOffset - halfGap * dist)
-      const polyJ: Point2D[] = (contours[j] && contours[j]!.length >= 3)
-        ? contours[j]!
-        : [
-            { x: cJ.x, y: cJ.y },
-            { x: cJ.x + cJ.w, y: cJ.y },
-            { x: cJ.x + cJ.w, y: cJ.y + cJ.h },
-            { x: cJ.x, y: cJ.y + cJ.h }
-          ];
-
-      const clippedJ = clipHalfPlane(polyJ, { x: -normal.x, y: -normal.y }, -baseOffset - halfGap * dist);
-      if (clippedJ.length >= 3) {
-        contours[j] = clippedJ;
-        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-        for (const p of clippedJ) {
-          if (p.x < minX) minX = p.x;
-          if (p.x > maxX) maxX = p.x;
-          if (p.y < minY) minY = p.y;
-          if (p.y > maxY) maxY = p.y;
-        }
-        cJ.x = Math.max(0, Math.round(minX));
-        cJ.y = Math.max(0, Math.round(minY));
-        cJ.w = Math.max(20, Math.round(maxX - minX));
-        cJ.h = Math.max(20, Math.round(maxY - minY));
-      }
-    }
-  }
 }
 
 /** @param a - Outer rectangle. @param b - Inner rectangle. @returns Whether all inner edges are contained. */
@@ -419,7 +272,13 @@ export function resolveBubbleLayoutsDetailed(input: BubbleLayoutInput): Resolved
     for (let j = 0; j < i; j++) {
       const a = carriers[i], b = carriers[j];
       const candidate = (proposals[i] && proposals[i] === proposals[j])
-        || (a && b && (boxIoU(a, b) >= SHARED_CONTAINER_IOU || contains(a, b) || contains(b, a)));
+        || (a && b && (boxIoU(a, b) >= SHARED_CONTAINER_IOU || contains(a, b) || contains(b, a)))
+        // Heuristic tier only (XianScan expansion.rs:186-194): when the heuristic extracted
+        // the same physical chamber for two utterances (carrier IoU >= 0.5), both texts share
+        // one balloon and are partitioned by the flow-cell / sub-chamber paths below.
+        // Neural runs are excluded: unmatched neural boxes carry null proposals but null
+        // carriers too, so the `a && b` guard can never fire for them.
+        || (a && b && !proposals[i] && !proposals[j] && boxIoU(a, b) >= XIANSCAN_SHARED_BUBBLE_IOU);
       if (!candidate) continue;
       const first = groups.find((g) => g.includes(i))!;
       const second = groups.find((g) => g.includes(j))!;
@@ -523,13 +382,12 @@ export function resolveBubbleLayoutsDetailed(input: BubbleLayoutInput): Resolved
           dominantPos = p;
         }
       }
-      // Noise Splitting Guard (split clause): only TINY fragments (area ratio AND small absolute area) count as
-      // noise. Stacked siblings with substantial area or dialogue words are real utterances sharing the
+      // Noise Splitting Guard (split clause): only TINY fragments (area ratio) count as
+      // noise. Stacked siblings with substantial area are real utterances sharing the
       // balloon and fall through to flow-cell partitioning so their text keeps rendering.
       const isSingleChamberWithNoise = siblings.every((b, p) => {
         if (p === dominantPos) return true;
-        const area = b.w * b.h;
-        return area <= NOISE_MAX_ABSOLUTE_AREA && (area / Math.max(1, maxArea)) <= NOISE_AREA_RATIO;
+        return (b.w * b.h) / Math.max(1, maxArea) <= NOISE_AREA_RATIO;
       });
 
       if (isSingleChamberWithNoise) {
@@ -559,8 +417,7 @@ export function resolveBubbleLayoutsDetailed(input: BubbleLayoutInput): Resolved
         continue;
       }
 
-      const siblingDirections = group.map((idx) => directions?.[idx]);
-      const partition = partitionBalloonFlowCells(container, siblings, sharedContour, SIBLING_GAP, siblingDirections);
+      const partition = partitionBalloonFlowCells(container, siblings, sharedContour);
       const subChambers = partition.subChambers;
       const cellContours = partition.cellContours;
 

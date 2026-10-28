@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import { acquireBubbleGeometry, computeMaskCurvature, MIN_SHARED_FONT_RATIO, partitionOverlappingCarriers, resolveBubbleLayouts, resolveBubbleLayoutsDetailed, significantOverlap, type BubbleLayoutInput } from './BubbleLayoutService';
+import { acquireBubbleGeometry, computeMaskCurvature, MIN_SHARED_FONT_RATIO, resolveBubbleLayouts, resolveBubbleLayoutsDetailed, significantOverlap, type BubbleLayoutInput } from './BubbleLayoutService';
 import type { Point2D } from '../../shared/utils/geometry';
-import { computeTypesetBox, SIBLING_GAP, type BoxRect } from '../utils/bubbleExpansion';
+import { computeTypesetBox, type BoxRect } from '../utils/bubbleExpansion';
 import type { BubbleShapeEvidence, ImagePatchData } from '../engines/bubble/HeuristicBubbleExtractor';
 
 const carrier = { x: 0, y: 20, w: 200, h: 300 };
@@ -447,48 +447,100 @@ describe('conservative bubble layouts', () => {
     });
   });
 
-  describe('heuristic multi-utterance joined bubble acquisition', () => {
-    it('associates connected heuristic bubbles into shared proposals for Voronoi partitioning', () => {
-      const W = 300, H = 400;
-      const data = new Uint8ClampedArray(W * H * 4).fill(40);
-      for (let y = 0; y < H; y++) {
-        for (let x = 0; x < W; x++) {
-          const inTop = (x - 150) ** 2 + (y - 120) ** 2 <= 50 ** 2;
-          const inBot = (x - 150) ** 2 + (y - 220) ** 2 <= 60 ** 2;
-          if (inTop || inBot) {
-            const idx = (y * W + x) * 4;
-            data[idx] = 255;
-            data[idx + 1] = 255;
-            data[idx + 2] = 255;
-            data[idx + 3] = 255;
-          }
-        }
+  describe('heuristic shared-chamber grouping (XianScan expansion.rs:186-194 parity)', () => {
+    /** @returns Closed 24-point oval polygon around a center. */
+    function ovalContour(cx: number, cy: number, rx: number, ry: number): Point2D[] {
+      const points: Point2D[] = [];
+      for (let step = 0; step < 24; step++) {
+        const angle = (step / 24) * Math.PI * 2;
+        points.push({ x: Math.round(cx + rx * Math.cos(angle)), y: Math.round(cy + ry * Math.sin(angle)) });
       }
-      const image: ImagePatchData = { width: W, height: H, data };
-      const boxTop: BoxRect = { x: 135, y: 105, w: 30, h: 30 };
-      const boxBottom: BoxRect = { x: 130, y: 200, w: 40, h: 40 };
-      const boxes = [boxTop, boxBottom];
+      return points;
+    }
 
-      // Heuristic mode: neuralProposals is undefined
-      const geom = acquireBubbleGeometry(image, boxes);
+    it('merges heuristic utterances whose carriers share one chamber (IoU >= 0.5) and splits them via Koharu flow cells', () => {
+      const top: BoxRect = { x: 80, y: 70, w: 60, h: 40 };
+      const bottom: BoxRect = { x: 75, y: 220, w: 70, h: 50 };
+      // Same physical chamber extracted twice: carrier IoU = 19200 / 36800 ≈ 0.52
+      // (above the 0.5 shared-bubble threshold, below the 0.7 cross-tier container threshold).
+      const carrierTop: BoxRect = { x: 40, y: 40, w: 140, h: 200 };
+      const carrierBottom: BoxRect = { x: 60, y: 80, w: 140, h: 200 };
+      const contour = ovalContour(115, 155, 80, 120);
 
-      expect(geom.proposals[0]).toBeDefined();
-      expect(geom.proposals[1]).toBeDefined();
-      // Must share identical proposal reference
-      expect(geom.proposals[0]).toBe(geom.proposals[1]);
-
+      let diagnostics = { single: -1, xy: -1, fallback: -1 };
       const detailed = resolveBubbleLayoutsDetailed({
-        ...geom,
-        boxes,
-        pageWidth: W,
-        pageHeight: H,
+        pageWidth: 400,
+        pageHeight: 400,
+        boxes: [top, bottom],
+        carriers: [carrierTop, carrierBottom],
+        proposals: [null, null],
+        shapes: [],
+        curvatures: [{ isRounded: true, borderRadius: 40 }, { isRounded: true, borderRadius: 40 }],
+        contours: [contour, contour],
+        directions: ['h', 'h'],
         accept: () => true,
+        onDiagnostics: (counts) => { diagnostics = counts; },
       });
 
-      // Both utterances must receive partitioned sub-chambers
+      // Grouped into one shared balloon (xy = 2), not treated as two independent bubbles.
+      expect(diagnostics.xy).toBe(2);
+      expect(diagnostics.single).toBe(0);
       expect(detailed.typesetBoxes[0]).toBeDefined();
       expect(detailed.typesetBoxes[1]).toBeDefined();
       expect(detailed.typesetBoxes[0]!.y + detailed.typesetBoxes[0]!.h).toBeLessThanOrEqual(detailed.typesetBoxes[1]!.y);
+    });
+
+    it('keeps heuristic carriers below the 0.5 shared-chamber threshold ungrouped', () => {
+      const box1: BoxRect = { x: 60, y: 60, w: 60, h: 40 };
+      const box2: BoxRect = { x: 210, y: 60, w: 60, h: 40 };
+      // Overlapping bounding boxes but low IoU (inter 90x80 / union 23200 ≈ 0.31).
+      const carrier1: BoxRect = { x: 40, y: 40, w: 190, h: 80 };
+      const carrier2: BoxRect = { x: 130, y: 40, w: 190, h: 80 };
+
+      let diagnostics = { single: -1, xy: -1, fallback: -1 };
+      const detailed = resolveBubbleLayoutsDetailed({
+        pageWidth: 400,
+        pageHeight: 400,
+        boxes: [box1, box2],
+        carriers: [carrier1, carrier2],
+        proposals: [null, null],
+        shapes: [],
+        directions: ['h', 'h'],
+        accept: () => true,
+        onDiagnostics: (counts) => { diagnostics = counts; },
+      });
+
+      // Two independent single-bubble expansions, never merged into a shared balloon.
+      expect(diagnostics.single).toBe(2);
+      expect(diagnostics.xy).toBe(0);
+      expect(detailed.typesetBoxes[0]).toBeDefined();
+      expect(detailed.typesetBoxes[1]).toBeDefined();
+    });
+
+    it('never merges neural runs by carrier overlap alone (distinct proposals stay separate)', () => {
+      const top: BoxRect = { x: 80, y: 70, w: 60, h: 40 };
+      const bottom: BoxRect = { x: 75, y: 220, w: 70, h: 50 };
+      // Same heavily-overlapping carriers as the heuristic merge test (IoU ≈ 0.52),
+      // but YOLO assigned distinct proposal identities: the merge clause must stay inert.
+      const carrierTop: BoxRect = { x: 40, y: 40, w: 140, h: 200 };
+      const carrierBottom: BoxRect = { x: 60, y: 80, w: 140, h: 200 };
+
+      let diagnostics = { single: -1, xy: -1, fallback: -1 };
+      resolveBubbleLayoutsDetailed({
+        pageWidth: 400,
+        pageHeight: 400,
+        boxes: [top, bottom],
+        carriers: [carrierTop, carrierBottom],
+        proposals: [{ ...carrierTop }, { ...carrierBottom }],
+        shapes: [],
+        curvatures: [{ isRounded: true, borderRadius: 40 }, { isRounded: true, borderRadius: 40 }],
+        directions: ['h', 'h'],
+        accept: () => true,
+        onDiagnostics: (counts) => { diagnostics = counts; },
+      });
+
+      expect(diagnostics.single).toBe(2);
+      expect(diagnostics.xy).toBe(0);
     });
 
     it('does not group distant captions into a shared bubble', () => {
@@ -551,66 +603,6 @@ describe('conservative bubble layouts', () => {
       expect(detailed.typesetBoxes[0]).toBeDefined();
       expect(detailed.typesetBoxes[1]).toBeDefined();
       expect(detailed.skipped).toEqual([false, false]);
-    });
-
-    it('stacks side-by-side vertical source columns vertically in Japanese reading order (right column top, left column bottom)', () => {
-      // Speech bubble: 120x140
-      // Right column (read first in Japanese): x=60..80, y=30..110
-      // Left column (read second in Japanese): x=20..40, y=30..110
-      const colRight: BoxRect = { x: 60, y: 30, w: 20, h: 80 };
-      const colLeft: BoxRect = { x: 20, y: 30, w: 20, h: 80 };
-      const container: BoxRect = { x: 10, y: 10, w: 100, h: 120 };
-
-      const points: Point2D[] = [];
-      for (let step = 0; step < 24; step++) {
-        const angle = (step / 24) * Math.PI * 2;
-        points.push({ x: Math.round(60 + 50 * Math.cos(angle)), y: Math.round(70 + 60 * Math.sin(angle)) });
-      }
-
-      const detailed = resolveBubbleLayoutsDetailed({
-        pageWidth: 200,
-        pageHeight: 200,
-        boxes: [colRight, colLeft],
-        carriers: [container, container],
-        proposals: [container, container],
-        shapes: [],
-        curvatures: [{ isRounded: true, borderRadius: 30 }, { isRounded: true, borderRadius: 30 }],
-        contours: [points, points],
-        directions: ['v', 'v'],
-        accept: () => true,
-      });
-
-      expect(detailed.typesetBoxes[0]).toBeDefined();
-      expect(detailed.typesetBoxes[1]).toBeDefined();
-
-      const topBox = detailed.typesetBoxes[0]!;
-      const bottomBox = detailed.typesetBoxes[1]!;
-
-      // Right column (0) gets top chamber, Left column (1) gets bottom chamber
-      expect(topBox.y).toBeLessThan(bottomBox.y);
-      // Both subchambers get wide horizontal width for translated English text
-      expect(topBox.w).toBeGreaterThanOrEqual(60);
-      expect(bottomBox.w).toBeGreaterThanOrEqual(60);
-      // Clearance between top and bottom
-      expect(topBox.y + topBox.h).toBeLessThanOrEqual(bottomBox.y + SIBLING_GAP);
-    });
-
-    it('partitions overlapping carriers and contours using pairwise Voronoi perpendicular bisector', () => {
-      // Two separate text boxes whose carrier boxes overlap in the center (x=70..100)
-      const boxA: BoxRect = { x: 30, y: 50, w: 30, h: 40 };
-      const boxB: BoxRect = { x: 110, y: 50, w: 30, h: 40 };
-      const carrierA: BoxRect = { x: 20, y: 30, w: 80, h: 80 }; // x: 20..100
-      const carrierB: BoxRect = { x: 70, y: 30, w: 80, h: 80 }; // x: 70..150 (overlap from 70 to 100)
-      const contours: (Point2D[] | undefined)[] = [undefined, undefined];
-      const proposals: (BoxRect | null)[] = [null, null];
-
-      partitionOverlappingCarriers([boxA, boxB], [carrierA, carrierB], contours, proposals, 6);
-
-      // Carrier A and Carrier B must now have zero overlap (separated by sibling gap around midpoint x=85)
-      expect(carrierA.x + carrierA.w).toBeLessThanOrEqual(carrierB.x);
-      // Both contours must be materialized as non-overlapping polygons
-      expect(contours[0]).toBeDefined();
-      expect(contours[1]).toBeDefined();
     });
   });
 });
