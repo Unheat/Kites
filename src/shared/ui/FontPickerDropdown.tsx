@@ -63,6 +63,32 @@ const SECTION_LABEL_CLASS: Record<FontPickerDropdownProps['variant'], string> = 
   studio: 'px-2 pt-1.5 pb-0.5 text-[10px] uppercase tracking-wide text-slate-500',
 };
 
+/**
+ * Contains picker failures inside the dropdown so a rendering error degrades to a
+ * harmless message instead of unmounting the host popup or editor panel.
+ */
+class FontPickerErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { failed: boolean }
+> {
+  state = { failed: false };
+
+  static getDerivedStateFromError(): { failed: boolean } {
+    return { failed: true };
+  }
+
+  componentDidCatch(error: unknown): void {
+    console.warn('[FontPicker] Picker render failed:', error);
+  }
+
+  render(): React.ReactNode {
+    if (this.state.failed) {
+      return <p className="px-2 py-2 text-xs text-slate-500">Font picker failed to load. Reopen to retry.</p>;
+    }
+    return this.props.children;
+  }
+}
+
 /** @param stack - CSS font-family stack. @returns First family token, de-quoted, for display. */
 function displayFamily(stack: string): string {
   const first = stack.split(',')[0]?.trim() ?? stack;
@@ -114,16 +140,18 @@ export const FontPickerDropdown: React.FC<FontPickerDropdownProps> = ({ selectio
     return list;
   }, [installed]);
 
-  const searchIndex = useMemo(() => new MiniSearch({
-    idField: 'key',
-    fields: ['label', 'family'],
-    storeFields: ['key'],
-    searchOptions: { fuzzy: 0.2, prefix: true },
-  }), []);
-
-  useEffect(() => {
-    searchIndex.addAll(items.map((item) => ({ ...item })));
-  }, [items, searchIndex]);
+  // Rebuilt per items change (same pattern as the model picker): MiniSearch.add
+  // throws on duplicate ids, so the index must never accumulate across refreshes.
+  const searchIndex = useMemo(() => {
+    const index = new MiniSearch({
+      idField: 'key',
+      fields: ['label', 'family'],
+      storeFields: ['key'],
+      searchOptions: { fuzzy: 0.2, prefix: true },
+    });
+    index.addAll(items);
+    return index;
+  }, [items]);
 
   const filtered = useMemo(() => {
     if (!searchQuery.trim()) return items;
@@ -240,6 +268,7 @@ export const FontPickerDropdown: React.FC<FontPickerDropdownProps> = ({ selectio
   };
 
   return (
+    <FontPickerErrorBoundary>
     <div className="relative flex flex-col">
       <button
         aria-label={ariaLabel ?? 'Font'}
@@ -342,5 +371,6 @@ export const FontPickerDropdown: React.FC<FontPickerDropdownProps> = ({ selectio
         </div>
       )}
     </div>
+    </FontPickerErrorBoundary>
   );
 };
