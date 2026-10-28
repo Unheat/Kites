@@ -1,36 +1,57 @@
 @import "tailwindcss";
 
 @font-face {
-  font-family: 'Kites Comic';
-  src: local('SVN-Wild Words'),
-       local('CC Wild Words'),
-       local('HL-Wild Words'),
-       local('VNF-Wild Words'),
-       local('MTO COMIC 1'),
-       local('SVN-Anime Ace 2.0'),
-       local('Patrick Hand SC'),
-       url('/fonts/mto-comic-1.woff') format('woff'),
-       url('/fonts/comic-dialogue.woff') format('woff'),
-       url('/fonts/mto-comic-1.ttf') format('truetype');
+  font-family: 'CC Wild Words';
+  src: url('/fonts/cc-wild-words.ttf') format('truetype');
   font-weight: normal;
   font-style: normal;
-  font-display: swap;
+  font-display: block;
+}
+
+@font-face {
+  font-family: 'CCWildWords';
+  src: url('/fonts/cc-wild-words.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+  font-display: block;
+}
+
+@font-face {
+  font-family: 'WildWords';
+  src: url('/fonts/cc-wild-words.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+  font-display: block;
+}
+
+@font-face {
+  font-family: 'Anime Ace';
+  src: url('/fonts/anime-ace.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+  font-display: block;
 }
 
 @font-face {
   font-family: 'Kites Comic';
-  src: local('SVN-Wild Words Bold'),
+  src: url('/fonts/cc-wild-words.ttf') format('truetype'),
+       local('CC Wild Words'),
+       local('SVN-Wild Words'),
+       url('/fonts/comic-dialogue.woff') format('woff');
+  font-weight: normal;
+  font-style: normal;
+  font-display: block;
+}
+
+@font-face {
+  font-family: 'Kites Comic';
+  src: url('/fonts/cc-wild-words.ttf') format('truetype'),
        local('CC Wild Words Bold'),
-       local('HL-Wild Words Bold'),
-       local('VNF-Wild Words Bold'),
-       local('MTO COMIC 1'),
-       local('SVN-Anime Ace 2.0 Bold'),
-       url('/fonts/mto-comic-1.woff') format('woff'),
-       url('/fonts/comic-dialogue.woff') format('woff'),
-       url('/fonts/mto-comic-1.ttf') format('truetype');
+       local('SVN-Wild Words Bold'),
+       url('/fonts/comic-dialogue.woff') format('woff');
   font-weight: bold;
   font-style: normal;
-  font-display: swap;
+  font-display: block;
 }
 
 @font-face {

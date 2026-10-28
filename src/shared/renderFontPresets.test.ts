@@ -17,8 +17,8 @@ describe('renderFontPresets', () => {
 
     expect(DEFAULT_RENDER_FONT_PRESET_ID).toBe('standard');
     expect(presetMap.get('standard')).toBe('sans-serif');
-    expect(presetMap.get('comic')).toBe('"Kites Comic", "SVN-Wild Words", "CC Wild Words", "HL-Wild Words", "VNF-Wild Words", "MTO COMIC 1", cursive, sans-serif');
-    expect(presetMap.get('anime-ace')).toBe('"MTO Comic 2", "SVN-Anime Ace 2.0", "Anime Ace 2.0 BB", "Anime Ace", cursive, sans-serif');
+    expect(presetMap.get('comic')).toBe('"CC Wild Words", "WildWords", "CCWildWords", "Kites Comic", sans-serif');
+    expect(presetMap.get('anime-ace')).toBe('"Anime Ace", "MTO Comic 2", cursive, sans-serif');
     expect(presetMap.get('comic-hand')).toBe('"Patrick Hand SC", "Comic Sans MS", cursive, sans-serif');
     expect(presetMap.get('serif')).toBe('Georgia, "Times New Roman", serif');
     expect(presetMap.get('monospace')).toBe('"Courier New", Courier, monospace');
@@ -44,9 +44,9 @@ describe('renderFontPresets', () => {
   });
 
   it('resolves font family stacks with safe fallback', () => {
-    expect(resolveRenderFontFamily('comic')).toBe('"Kites Comic", "SVN-Wild Words", "CC Wild Words", "HL-Wild Words", "VNF-Wild Words", "MTO COMIC 1", cursive, sans-serif');
-    expect(resolveRenderFontFamily('wild-words')).toBe('"Kites Comic", "SVN-Wild Words", "CC Wild Words", "HL-Wild Words", "VNF-Wild Words", "MTO COMIC 1", cursive, sans-serif');
-    expect(resolveRenderFontFamily('anime-ace')).toBe('"MTO Comic 2", "SVN-Anime Ace 2.0", "Anime Ace 2.0 BB", "Anime Ace", cursive, sans-serif');
+    expect(resolveRenderFontFamily('comic')).toBe('"CC Wild Words", "WildWords", "CCWildWords", "Kites Comic", sans-serif');
+    expect(resolveRenderFontFamily('wild-words')).toBe('"CC Wild Words", "WildWords", "CCWildWords", "Kites Comic", sans-serif');
+    expect(resolveRenderFontFamily('anime-ace')).toBe('"Anime Ace", "MTO Comic 2", cursive, sans-serif');
     expect(resolveRenderFontFamily('comic-hand')).toBe('"Patrick Hand SC", "Comic Sans MS", cursive, sans-serif');
     expect(resolveRenderFontFamily('serif')).toBe('Georgia, "Times New Roman", serif');
     expect(resolveRenderFontFamily('monospace')).toBe('"Courier New", Courier, monospace');

@@ -429,9 +429,12 @@ export class PipelineOrchestrator {
       // resolve the preset family — otherwise measurement can silently run with a
       // fallback font and collapse the fit (font metrics drive every line break).
       if (typeof document !== 'undefined' && document.fonts) {
-        await document.fonts.load(`16px ${resolvedFontFamily}`).catch((err) => {
-          console.warn('[PipelineOrchestrator] Preset font preload failed; using availability fallback:', err);
-        });
+        const families = resolvedFontFamily.split(',').map((f) => f.trim().replace(/^["']|["']$/g, ''));
+        for (const family of families) {
+          if (family && !['sans-serif', 'serif', 'monospace', 'cursive', 'fantasy'].includes(family.toLowerCase())) {
+            await document.fonts.load(`16px "${family}"`).catch(() => {});
+          }
+        }
         await document.fonts.ready;
       }
       await hyphenationPromise;
