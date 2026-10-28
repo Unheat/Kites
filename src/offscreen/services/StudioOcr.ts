@@ -9,7 +9,7 @@ import type { BubbleManager } from './BubbleManager';
 import { SUPPORTED_INPAINT_IDS } from '../../shared/inpaintTiers';
 import { getRenderedBlockGeometry } from '../utils/canvasTypesetting';
 import { detectBlockTextColors, type DetectedTextColor } from '../utils/textColorDetection';
-import { acquireBubbleGeometry, resolveBubbleLayoutsDetailed, type BubbleGeometry } from './BubbleLayoutService';
+import { resolveBubbleLayoutsDetailed, type BubbleGeometry } from './BubbleLayoutService';
 import { wrapTextContour } from '../utils/contourTypeset';
 import type { BoxRect } from '../utils/bubbleExpansion';
 
@@ -218,50 +218,48 @@ export async function runStudioOcr(
         const patchBitmap = await createImageBitmap(new Blob([imageBuffer], { type: 'image/png' }));
         try {
           safeCanvas.ctx.drawImage(patchBitmap, 0, 0);
-          const isNeural = bubbleMode === 'neural';
+          // The engine owns all tier-specific geometry rules; Studio OCR is tier-blind.
           const { engine, release } = await bubbleManager.acquireEngine(bubbleMode, popupState);
-          let neuralResult: any;
           try {
-            neuralResult = isNeural && engine
-              ? await engine.detect(safeCanvas.canvas as any, result.boxes)
-              : undefined;
+            if (engine) {
+              bubbleGeometry = await engine.acquireGeometry(
+                safeCanvas.canvas as any,
+                // ImagePatchData contract (same as PipelineOrchestrator): a real pixel
+                // buffer, not the 2D context — passing the ctx made heuristic carrier
+                // extraction throw on the missing .data buffer and silently skip layout.
+                safeCanvas.ctx.getImageData(0, 0, payload.width, payload.height),
+                result.boxes
+              ) ?? undefined;
+            }
           } finally {
             release();
           }
 
-          bubbleGeometry = acquireBubbleGeometry(
-            // ImagePatchData contract (same as PipelineOrchestrator): a real pixel
-            // buffer, not the 2D context — passing the ctx made heuristic carrier
-            // extraction throw on the missing .data buffer and silently skip layout.
-            safeCanvas.ctx.getImageData(0, 0, payload.width, payload.height),
-            result.boxes,
-            neuralResult?.bubbles,
-            neuralResult?.shapes
-          );
+          if (bubbleGeometry) {
+            const detailed = resolveBubbleLayoutsDetailed({
+              ...bubbleGeometry,
+              boxes: result.boxes,
+              directions: result.directions,
+              angles: result.angles,
+              pageWidth: payload.width,
+              pageHeight: payload.height,
+              accept: () => true
+            });
+            resolvedLayouts = detailed.typesetBoxes;
+            bubbleSkipped = detailed.skipped ?? [];
 
-          const detailed = resolveBubbleLayoutsDetailed({
-            ...bubbleGeometry,
-            boxes: result.boxes,
-            directions: result.directions,
-            angles: result.angles,
-            pageWidth: payload.width,
-            pageHeight: payload.height,
-            accept: () => true
-          });
-          resolvedLayouts = detailed.typesetBoxes;
-          bubbleSkipped = detailed.skipped ?? [];
-
-          bubbleContours = result.boxes.map((_, bIdx) => {
-            if (detailed.contourPoints?.[bIdx]) return detailed.contourPoints[bIdx];
-            const box = resolvedLayouts[bIdx];
-            if (!box) return undefined;
-            return [
-              { x: 0, y: 0 },
-              { x: box.w, y: 0 },
-              { x: box.w, y: box.h },
-              { x: 0, y: box.h }
-            ];
-          });
+            bubbleContours = result.boxes.map((_, bIdx) => {
+              if (detailed.contourPoints?.[bIdx]) return detailed.contourPoints[bIdx];
+              const box = resolvedLayouts[bIdx];
+              if (!box) return undefined;
+              return [
+                { x: 0, y: 0 },
+                { x: box.w, y: 0 },
+                { x: box.w, y: box.h },
+                { x: 0, y: box.h }
+              ];
+            });
+          }
         } finally {
           patchBitmap.close();
         }

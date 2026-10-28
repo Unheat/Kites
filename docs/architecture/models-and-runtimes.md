@@ -169,8 +169,8 @@ flowchart TD
     Mode -->|off| Free["Free OCR-region Auto Balloon route"]
     Mode -->|heuristic| Heuristic["Morphological carrier and mask evidence; no model"]
     Mode -->|neural| Neural["Class-0 proposals; optional per-box mask evidence"]
-    Heuristic --> Acquire["acquireBubbleGeometry: curvature and closed mask contour"]
-    Neural --> Acquire
+    Heuristic --> Acquire["HeuristicBubbleEngine.buildGeometry: curvature and closed mask contour"]
+    Neural --> Acquire["NeuralBubbleEngine.buildGeometry: matched proposals and mask shapes"]
     Acquire --> Coordinates["Source coordinates with separate scaleX / scaleY"]
     Coordinates --> Resolve["Contour bounds / computed safe boxes; shared flow-cell partitioning"]
     Resolve --> Validate["Caller gate, collision rollback and sibling clearance"]

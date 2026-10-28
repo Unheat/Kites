@@ -9,7 +9,9 @@ import { createCanvas, loadImage } from 'canvas';
 import type { Point2D } from '../shared/utils/geometry';
 import { NeuralBubbleDetector } from '../offscreen/engines/bubble/NeuralBubbleDetector';
 import { HeuristicBubbleExtractor } from '../offscreen/engines/bubble/HeuristicBubbleExtractor';
-import { acquireBubbleGeometry, resolveBubbleLayoutsDetailed, type BubbleGeometry } from '../offscreen/services/BubbleLayoutService';
+import { resolveBubbleLayoutsDetailed, type BubbleGeometry } from '../offscreen/services/BubbleLayoutService';
+import { HeuristicBubbleEngine } from '../offscreen/engines/bubble/HeuristicBubbleEngine';
+import { NeuralBubbleEngine } from '../offscreen/engines/bubble/NeuralBubbleEngine';
 import { DEFAULT_RENDER_FONT_FAMILY } from '../offscreen/utils/canvasTypesetting';
 import { HyphenationService } from '../offscreen/utils/hyphenation/HyphenationService';
 import * as ort from 'onnxruntime-node';
@@ -126,7 +128,7 @@ async function runPipelineVisualBubbleTest() {
     // PASS 1: TIER 1 HEURISTIC BUBBLE EXTRACTOR (0 MB)
     // -------------------------------------------------------------
     console.log("\n--- [Pass 1] Tier 1 Heuristic Bubble Expansion ---");
-    const heuristicGeometry = acquireBubbleGeometry(rawImageData, boxes);
+    const heuristicGeometry = HeuristicBubbleEngine.buildGeometry(rawImageData, boxes);
 
     /**
      * Uses the production acquisition/layout contract after translation and font readiness.
@@ -317,7 +319,11 @@ async function runPipelineVisualBubbleTest() {
         }
       }
 
-      const neuralGeometry = acquireBubbleGeometry(rawImageData, boxes, detectedBubbles, neuralShapes);
+      const neuralGeometry = await NeuralBubbleEngine.buildGeometry(null, rawImageData, boxes, undefined, {
+        bubbles: detectedBubbles,
+        shapes: neuralShapes,
+      });
+      if (!neuralGeometry) throw new Error('Neural bubble geometry build failed');
       const canvas = createCanvas(pageWidth, pageHeight);
       const ctx = canvas.getContext('2d');
       ctx.drawImage(cleanedImage, 0, 0);

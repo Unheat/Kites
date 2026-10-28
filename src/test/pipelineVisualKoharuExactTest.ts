@@ -8,7 +8,8 @@ import { createCanvas, loadImage, registerFont } from 'canvas';
 import type { Point2D } from '../shared/utils/geometry';
 import type { BoxRect } from '../offscreen/utils/bubbleExpansion';
 import { NeuralBubbleDetector } from '../offscreen/engines/bubble/NeuralBubbleDetector';
-import { acquireBubbleGeometry, resolveBubbleLayoutsDetailed } from '../offscreen/services/BubbleLayoutService';
+import { resolveBubbleLayoutsDetailed } from '../offscreen/services/BubbleLayoutService';
+import { NeuralBubbleEngine } from '../offscreen/engines/bubble/NeuralBubbleEngine';
 import { HyphenationService } from '../offscreen/utils/hyphenation/HyphenationService';
 import * as ort from 'onnxruntime-node';
 
@@ -155,7 +156,11 @@ async function runKoharuExactTest() {
   rawCtx.drawImage(rawImage, 0, 0);
   const rawImageData = rawCtx.getImageData(0, 0, pageWidth, pageHeight);
 
-  const neuralGeometry = acquireBubbleGeometry(rawImageData, boxes, parsedNeural.bubbles, neuralShapes);
+  const neuralGeometry = await NeuralBubbleEngine.buildGeometry(null, rawImageData, boxes, undefined, {
+    bubbles: parsedNeural.bubbles,
+    shapes: neuralShapes,
+  });
+  if (!neuralGeometry) throw new Error('Neural bubble geometry build failed');
 
   const canvas = createCanvas(pageWidth, pageHeight);
   const ctx = canvas.getContext('2d');

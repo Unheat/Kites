@@ -14,7 +14,7 @@ import { resolveRenderFontFamily } from '../../shared/renderFontPresets';
 import { isBubbleGpuAvailable, isColorGpuAvailable } from '../../shared/utils/hardwareUtils';
 import type { BubbleEngineOptions } from '../engines/bubble/BaseBubbleEngine';
 import { BubbleManager, bubbleManager as defaultBubbleManager } from './BubbleManager';
-import { acquireBubbleGeometry, resolveBubbleLayoutsDetailed, type BubbleGeometry } from './BubbleLayoutService';
+import { resolveBubbleLayoutsDetailed, type BubbleGeometry } from './BubbleLayoutService';
 import { loadHyphenationLanguage } from '../utils/hyphenation';
 import type { ColorTierId } from '../../shared/colorTiers';
 import { ColorManager } from './ColorManager';
@@ -296,22 +296,21 @@ export class PipelineOrchestrator {
       if (bubbleMode !== 'off' && supportsBubbleLayout && rawCanvas && rawCtx && ocrResult.boxes && ocrResult.boxes.length > 0 && !ocrResult.typesetBoxes) {
         try {
           console.log('[PipelineOrchestrator] Acquiring bubble engine...');
-          // Acquire engine through BubbleManager (OOP lifecycle & clean eviction)
+          // Acquire engine through BubbleManager (OOP lifecycle & clean eviction).
+          // The engine owns all tier-specific geometry rules; the orchestrator is tier-blind.
           const { engine, release } = await this.services.bubbleManager.acquireEngine(bubbleMode, popupState, makeLifecycle('bubble', bubbleMode));
           try {
-            const isNeuralMode = bubbleMode === 'neural';
-            const bubbleOptions: BubbleEngineOptions = {
-              preferGpu: popupState ? isBubbleGpuAvailable(popupState) : false,
-            };
-            const neuralResult = isNeuralMode && engine
-              ? await engine.detect(rawCanvas, ocrResult.boxes, bubbleOptions)
-              : undefined;
-            bubbleGeometry = acquireBubbleGeometry(
-              rawCtx.getImageData(0, 0, rawWidth, rawHeight),
-              ocrResult.boxes,
-              neuralResult?.bubbles,
-              neuralResult?.shapes
-            );
+            if (engine) {
+              const bubbleOptions: BubbleEngineOptions = {
+                preferGpu: popupState ? isBubbleGpuAvailable(popupState) : false,
+              };
+              bubbleGeometry = await engine.acquireGeometry(
+                rawCanvas,
+                rawCtx.getImageData(0, 0, rawWidth, rawHeight),
+                ocrResult.boxes,
+                bubbleOptions
+              ) ?? undefined;
+            }
           } finally {
             release();
           }

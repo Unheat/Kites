@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import { acquireBubbleGeometry, computeMaskCurvature, MIN_SHARED_FONT_RATIO, resolveBubbleLayouts, resolveBubbleLayoutsDetailed, significantOverlap, type BubbleLayoutInput } from './BubbleLayoutService';
+import { computeMaskCurvature, MIN_SHARED_FONT_RATIO, resolveBubbleLayouts, resolveBubbleLayoutsDetailed, significantOverlap, type BubbleLayoutInput } from './BubbleLayoutService';
+import { HeuristicBubbleEngine, XIANSCAN_SHARED_BUBBLE_IOU } from '../engines/bubble/HeuristicBubbleEngine';
+import { NeuralBubbleEngine } from '../engines/bubble/NeuralBubbleEngine';
 import type { Point2D } from '../../shared/utils/geometry';
 import { computeTypesetBox, type BoxRect } from '../utils/bubbleExpansion';
 import type { BubbleShapeEvidence, ImagePatchData } from '../engines/bubble/HeuristicBubbleExtractor';
@@ -177,13 +179,15 @@ describe('conservative bubble layouts', () => {
     expect(accept).not.toHaveBeenCalled();
   });
 
-  it('acquisition retains exact proposal identity and does not mutate source boxes', () => {
+  it('acquisition retains exact proposal identity and does not mutate source boxes', async () => {
     const data = new Uint8ClampedArray(400 * 400 * 4).fill(255);
     const boxes = [{ x: 100, y: 100, w: 30, h: 40 }];
     const proposal = { x: 80, y: 80, w: 90, h: 100 };
-    const geometry = acquireBubbleGeometry({ width: 400, height: 400, data }, boxes, [proposal]);
-    expect(geometry.proposals[0]).toBe(proposal);
-    expect(geometry.carriers[0]).toBe(proposal);
+    const geometry = await NeuralBubbleEngine.buildGeometry(null, { width: 400, height: 400, data }, boxes, undefined, { bubbles: [proposal] });
+    expect(geometry).not.toBeNull();
+    expect(geometry!.proposals[0]).toBe(proposal);
+    expect(geometry!.carriers[0]).toBe(proposal);
+    expect(geometry!.tier).toBe('neural');
     expect(boxes).toEqual([{ x: 100, y: 100, w: 30, h: 40 }]);
   });
 
@@ -458,13 +462,15 @@ describe('conservative bubble layouts', () => {
       return points;
     }
 
-    it('merges heuristic utterances whose carriers share one chamber (IoU >= 0.5) and splits them via Koharu flow cells', () => {
+    it('partitions heuristic utterances sharing one chamber proposal via Koharu flow cells', () => {
       const top: BoxRect = { x: 80, y: 70, w: 60, h: 40 };
       const bottom: BoxRect = { x: 75, y: 220, w: 70, h: 50 };
-      // Same physical chamber extracted twice: carrier IoU = 19200 / 36800 ≈ 0.52
-      // (above the 0.5 shared-bubble threshold, below the 0.7 cross-tier container threshold).
+      // Same physical chamber extracted twice: the heuristic engine assigns the SAME
+      // proposal object (see associateSharedChambers), and the tier-blind resolver
+      // groups and partitions the pair through its normal flow-cell path.
       const carrierTop: BoxRect = { x: 40, y: 40, w: 140, h: 200 };
       const carrierBottom: BoxRect = { x: 60, y: 80, w: 140, h: 200 };
+      const sharedProposal: BoxRect = { ...carrierTop };
       const contour = ovalContour(115, 155, 80, 120);
 
       let diagnostics = { single: -1, xy: -1, fallback: -1 };
@@ -473,7 +479,7 @@ describe('conservative bubble layouts', () => {
         pageHeight: 400,
         boxes: [top, bottom],
         carriers: [carrierTop, carrierBottom],
-        proposals: [null, null],
+        proposals: [sharedProposal, sharedProposal],
         shapes: [],
         curvatures: [{ isRounded: true, borderRadius: 40 }, { isRounded: true, borderRadius: 40 }],
         contours: [contour, contour],
@@ -490,57 +496,33 @@ describe('conservative bubble layouts', () => {
       expect(detailed.typesetBoxes[0]!.y + detailed.typesetBoxes[0]!.h).toBeLessThanOrEqual(detailed.typesetBoxes[1]!.y);
     });
 
-    it('keeps heuristic carriers below the 0.5 shared-chamber threshold ungrouped', () => {
+    it('heuristic association keeps carriers below the 0.5 shared-chamber threshold ungrouped', () => {
       const box1: BoxRect = { x: 60, y: 60, w: 60, h: 40 };
       const box2: BoxRect = { x: 210, y: 60, w: 60, h: 40 };
       // Overlapping bounding boxes but low IoU (inter 90x80 / union 23200 ≈ 0.31).
       const carrier1: BoxRect = { x: 40, y: 40, w: 190, h: 80 };
       const carrier2: BoxRect = { x: 130, y: 40, w: 190, h: 80 };
 
-      let diagnostics = { single: -1, xy: -1, fallback: -1 };
-      const detailed = resolveBubbleLayoutsDetailed({
-        pageWidth: 400,
-        pageHeight: 400,
-        boxes: [box1, box2],
-        carriers: [carrier1, carrier2],
-        proposals: [null, null],
-        shapes: [],
-        directions: ['h', 'h'],
-        accept: () => true,
-        onDiagnostics: (counts) => { diagnostics = counts; },
-      });
+      const proposals = HeuristicBubbleEngine.associateSharedChambers([box1, box2], [carrier1, carrier2]);
 
-      // Two independent single-bubble expansions, never merged into a shared balloon.
-      expect(diagnostics.single).toBe(2);
-      expect(diagnostics.xy).toBe(0);
-      expect(detailed.typesetBoxes[0]).toBeDefined();
-      expect(detailed.typesetBoxes[1]).toBeDefined();
+      // Two independent single-chamber bubbles: no shared proposal identity.
+      expect(proposals[0]).toBeNull();
+      expect(proposals[1]).toBeNull();
     });
 
-    it('never merges neural runs by carrier overlap alone (distinct proposals stay separate)', () => {
-      const top: BoxRect = { x: 80, y: 70, w: 60, h: 40 };
-      const bottom: BoxRect = { x: 75, y: 220, w: 70, h: 50 };
-      // Same heavily-overlapping carriers as the heuristic merge test (IoU ≈ 0.52),
-      // but YOLO assigned distinct proposal identities: the merge clause must stay inert.
-      const carrierTop: BoxRect = { x: 40, y: 40, w: 140, h: 200 };
-      const carrierBottom: BoxRect = { x: 60, y: 80, w: 140, h: 200 };
+    it('heuristic association merges carriers at or above the XianScan 0.5 threshold', () => {
+      const box1: BoxRect = { x: 60, y: 60, w: 60, h: 40 };
+      const box2: BoxRect = { x: 210, y: 60, w: 60, h: 40 };
+      // Same physical chamber extracted twice: IoU 19200 / 36800 ≈ 0.52.
+      const carrier1: BoxRect = { x: 40, y: 40, w: 140, h: 200 };
+      const carrier2: BoxRect = { x: 60, y: 80, w: 140, h: 200 };
+      expect((19200 / 36800)).toBeGreaterThanOrEqual(XIANSCAN_SHARED_BUBBLE_IOU);
 
-      let diagnostics = { single: -1, xy: -1, fallback: -1 };
-      resolveBubbleLayoutsDetailed({
-        pageWidth: 400,
-        pageHeight: 400,
-        boxes: [top, bottom],
-        carriers: [carrierTop, carrierBottom],
-        proposals: [{ ...carrierTop }, { ...carrierBottom }],
-        shapes: [],
-        curvatures: [{ isRounded: true, borderRadius: 40 }, { isRounded: true, borderRadius: 40 }],
-        directions: ['h', 'h'],
-        accept: () => true,
-        onDiagnostics: (counts) => { diagnostics = counts; },
-      });
+      const proposals = HeuristicBubbleEngine.associateSharedChambers([box1, box2], [carrier1, carrier2]);
 
-      expect(diagnostics.single).toBe(2);
-      expect(diagnostics.xy).toBe(0);
+      // Same chamber => identical proposal object => grouped downstream.
+      expect(proposals[0]).not.toBeNull();
+      expect(proposals[0]).toBe(proposals[1]);
     });
 
     it('does not group distant captions into a shared bubble', () => {
@@ -566,8 +548,9 @@ describe('conservative bubble layouts', () => {
       const boxRight: BoxRect = { x: 340, y: 140, w: 20, h: 20 };
       const boxes = [boxLeft, boxRight];
 
-      const geom = acquireBubbleGeometry(image, boxes);
+      const geom = HeuristicBubbleEngine.buildGeometry(image, boxes);
       // Independent bubbles keep null proposal identities (not grouped into multi-utterance)
+      expect(geom.tier).toBe('heuristic');
       expect(geom.proposals[0]).toBeNull();
       expect(geom.proposals[1]).toBeNull();
     });

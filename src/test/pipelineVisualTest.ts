@@ -7,7 +7,8 @@ import { GoogleTranslateEngine } from '../offscreen/engines/translation/GoogleTr
 import { renderTextBlocksBatch, measureBubbleLayoutFontSize, type TextBlockItem } from '../offscreen/utils/canvasTypesetting';
 import { createCanvas, loadImage } from 'canvas';
 import type { Point2D } from '../shared/utils/geometry';
-import { acquireBubbleGeometry, resolveBubbleLayoutsDetailed } from '../offscreen/services/BubbleLayoutService';
+import { resolveBubbleLayoutsDetailed } from '../offscreen/services/BubbleLayoutService';
+import { HeuristicBubbleEngine } from '../offscreen/engines/bubble/HeuristicBubbleEngine';
 import { detectBlockTextColorsFromContext } from '../offscreen/utils/textColorDetection';
 import { DEFAULT_RENDER_FONT_FAMILY } from '../offscreen/utils/canvasTypesetting';
 
@@ -73,7 +74,7 @@ async function runPipelineVisualTest() {
 
     // 4. Heuristic bubble geometry acquisition (production default)
     const rawImageData = rawCtx.getImageData(0, 0, pageWidth, pageHeight);
-    const bubbleGeometry = acquireBubbleGeometry(
+    const bubbleGeometry = HeuristicBubbleEngine.buildGeometry(
       { data: rawImageData.data, width: pageWidth, height: pageHeight },
       boxes
     );
