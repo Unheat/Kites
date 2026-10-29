@@ -228,15 +228,15 @@ $$\text{WebLLM} \longrightarrow \text{Cloudflare Shared Pool} \longrightarrow \t
 
 ### Stage 5: Bubble Container Extraction & Layout Resolution
 
-Current runtime modes are `off`, `heuristic` and `neural`. The separate `neural-mask` mode has been removed; neural processing with text boxes can consume mask evidence when provided. Both active tiers converge on `acquireBubbleGeometry()` and `resolveBubbleLayoutsDetailed()` in `src/offscreen/services/BubbleLayoutService.ts`.
+Current runtime modes are `off`, `heuristic` and `neural`. The separate `neural-mask` mode has been removed. Each tier's geometry rules live inside its engine class (`HeuristicBubbleEngine.buildGeometry` / `NeuralBubbleEngine.buildGeometry`, contract `IBubbleEngine.acquireGeometry` in `BaseBubbleEngine.ts`); both converge on the tier-blind `resolveBubbleLayoutsDetailed()` in `src/offscreen/services/BubbleLayoutService.ts`, which never branches on the detection mode.
 
 ```mermaid
 flowchart TD
     Mode{"Bubble mode"} -->|off| Free["Keep free OCR-region route"]
     Mode -->|heuristic| Heuristic["Morphological carrier + shape evidence from source pixels"]
     Mode -->|neural| Neural["Class-0 proposals; optional mask evidence; match OCR boxes"]
-    Heuristic --> Acquire["acquireBubbleGeometry: carriers, curvatures, page-space contours"]
-    Neural --> Acquire
+    Heuristic --> Acquire["HeuristicBubbleEngine.buildGeometry: carriers, shared-chamber proposals, curvatures, page-space contours"]
+    Neural --> Acquire["NeuralBubbleEngine.buildGeometry: matched proposals, mask shapes, curvatures, contours"]
     Acquire --> Groups{"Single or shared container?"}
     Groups -->|single| Single["Contour bounds when available or computed safe box; pairwise clamp"]
     Groups -->|rectangular / no shared contour| Rect["partitionSharedContainer; compute safe sub-boxes"]

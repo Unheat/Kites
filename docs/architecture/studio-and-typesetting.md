@@ -162,7 +162,7 @@ The current pipeline supports per-block ink/background clustering (`textColor.ts
 
 ```mermaid
 flowchart TD
-    Source["Original pixels + OCR boxes"] --> Geometry["acquireBubbleGeometry: heuristic or neural class-0 proposal + shape"]
+    Source["Original pixels + OCR boxes"] --> Geometry["engine.acquireGeometry: tier-owned heuristic carriers + shared-chamber proposals, or neural matched proposals + mask shapes"]
     Geometry --> Raw["Page-space raw contour; independent scaleX / scaleY"]
     Raw --> Resolve["resolveBubbleLayoutsDetailed: chambers, noise fragments, collision rollback, sibling clearance"]
     Resolve --> Accepted["Accepted axis-aligned typesetBox + local contour + skipped flags"]

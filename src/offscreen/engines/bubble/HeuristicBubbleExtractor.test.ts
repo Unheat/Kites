@@ -111,12 +111,13 @@ describe('HeuristicBubbleExtractor', () => {
   it('detects a translucent grey bubble via adaptive luminance (legacy 200 threshold fails)', () => {
     const W = 120;
     const H = 120;
-    // Translucent bubble interior over dark artwork renders as grey (~170), not white
+    // Translucent bubble interior over dark artwork renders as grey (~170), not white.
+    // Keep the circle fully on-page; a cropped circle is not evidence of enclosure.
     const data = new Uint8ClampedArray(W * H * 4).fill(170);
     // Dark bubble border disc (radius 45) so the chamber is enclosed
     for (let y = 0; y < H; y++) {
       for (let x = 0; x < W; x++) {
-        const dist = (x - 100) ** 2 + (y - 100) ** 2;
+        const dist = (x - 60) ** 2 + (y - 60) ** 2;
         if (dist > 45 ** 2) {
           const idx = (y * W + x) * 4;
           data[idx] = 40;
@@ -126,7 +127,7 @@ describe('HeuristicBubbleExtractor', () => {
       }
     }
     const image: ImagePatchData = { width: W, height: H, data };
-    const textBox: BoxRect = { x: 90, y: 90, w: 20, h: 20 };
+    const textBox: BoxRect = { x: 50, y: 50, w: 20, h: 20 };
 
     // Adaptive: background 170 -> threshold max(130, 170-35) = 135 -> grey interior detected
     const adaptive = HeuristicBubbleExtractor.extractCarrierBox(image, textBox);
@@ -231,5 +232,121 @@ describe('HeuristicBubbleExtractor', () => {
       expect(carrier.h).toBeGreaterThan(80);
     }
     expect(evidence?.observedInterior.some((val) => val === 1)).toBe(true);
+  });
+
+  it('connects multi-utterance stacked bubbles into shared chamber and marks connectedBoxIndices', () => {
+    const W = 300;
+    const H = 400;
+    // Dark background (gray 40)
+    const data = new Uint8ClampedArray(W * H * 4).fill(40);
+    // Draw figure-8 / joined bubble with two connected circular lobes
+    // Top lobe center (150, 120, radius 50)
+    // Bottom lobe center (150, 220, radius 60)
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const inTopLobe = (x - 150) ** 2 + (y - 120) ** 2 <= 50 ** 2;
+        const inBottomLobe = (x - 150) ** 2 + (y - 220) ** 2 <= 60 ** 2;
+        if (inTopLobe || inBottomLobe) {
+          const idx = (y * W + x) * 4;
+          data[idx] = 255;
+          data[idx + 1] = 255;
+          data[idx + 2] = 255;
+          data[idx + 3] = 255;
+        }
+      }
+    }
+
+    const image: ImagePatchData = { width: W, height: H, data };
+    const boxTop: BoxRect = { x: 135, y: 105, w: 30, h: 30 };
+    const boxBottom: BoxRect = { x: 130, y: 200, w: 40, h: 40 };
+    const allBoxes = [boxTop, boxBottom];
+
+    const carrier = HeuristicBubbleExtractor.extractCarrierBox(image, boxTop, {
+      allTextBoxes: allBoxes,
+    });
+
+    expect(carrier).not.toBeNull();
+    // Carrier encloses boxTop within its localized chamber
+    expect(carrier!.y).toBeLessThanOrEqual(boxTop.y);
+    expect(carrier!.y + carrier!.h).toBeGreaterThanOrEqual(boxTop.y + boxTop.h);
+  });
+
+  it('rejects open artwork or uniform clothing texture via leakGuard (null carrier)', () => {
+    const W = 300;
+    const H = 300;
+    // Uniform clothing or solid dark area (dark gray 30 across entire canvas)
+    const data = new Uint8ClampedArray(W * H * 4).fill(30);
+    const image: ImagePatchData = { width: W, height: H, data };
+    const textBox: BoxRect = { x: 100, y: 100, w: 40, h: 40 };
+
+    // Since the dark color fills the entire local patch (>= 96%), leakGuard rejects it
+    const carrier = HeuristicBubbleExtractor.extractCarrierBox(image, textBox);
+    expect(carrier).toBeNull();
+  });
+
+  it('does not connect distant text boxes separated by non-paper artwork', () => {
+    const W = 400;
+    const H = 300;
+    // Dark background (gray 40)
+    const data = new Uint8ClampedArray(W * H * 4).fill(40);
+    // Draw bubble 1 on left (center 100, 150, radius 40)
+    // Draw bubble 2 on right (center 300, 150, radius 40)
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const inB1 = (x - 100) ** 2 + (y - 150) ** 2 <= 40 ** 2;
+        const inB2 = (x - 300) ** 2 + (y - 150) ** 2 <= 40 ** 2;
+        if (inB1 || inB2) {
+          const idx = (y * W + x) * 4;
+          data[idx] = 255;
+          data[idx + 1] = 255;
+          data[idx + 2] = 255;
+          data[idx + 3] = 255;
+        }
+      }
+    }
+    const image: ImagePatchData = { width: W, height: H, data };
+    const boxLeft: BoxRect = { x: 90, y: 140, w: 20, h: 20 };
+    const boxRight: BoxRect = { x: 290, y: 140, w: 20, h: 20 };
+
+    let leftEvidence: import('./HeuristicBubbleExtractor').BubbleShapeEvidence | undefined;
+    const carrierLeft = HeuristicBubbleExtractor.extractCarrierBox(image, boxLeft, {
+      allTextBoxes: [boxLeft, boxRight],
+      onShapeEvidence: (s) => { leftEvidence = s; }
+    });
+
+    expect(carrierLeft).not.toBeNull();
+    // Carrier of boxLeft must NOT contain boxRight: the two chambers stay separate
+    // because no observed paper path connects them across the dark artwork.
+    expect(carrierLeft!.x + carrierLeft!.w).toBeLessThan(boxRight.x);
+    expect(leftEvidence).toBeDefined();
+  });
+
+  it('preserves bubble stroke boundary and does not leak outside when text touches border stroke', () => {
+    const W = 250;
+    const H = 250;
+    // Dark artwork background (gray 40)
+    const data = new Uint8ClampedArray(W * H * 4).fill(40);
+    // White bubble from x=50..150, y=50..150
+    // Black border stroke (0) around x=150 (stroke width 4px: x=148..152)
+    // White background outside border at x > 152
+    for (let y = 50; y <= 150; y++) {
+      for (let x = 50; x < 220; x++) {
+        const isBorder = x >= 148 && x <= 152;
+        const idx = (y * W + x) * 4;
+        if (isBorder) {
+          data[idx] = 0; data[idx + 1] = 0; data[idx + 2] = 0; data[idx + 3] = 255;
+        } else {
+          data[idx] = 255; data[idx + 1] = 255; data[idx + 2] = 255; data[idx + 3] = 255;
+        }
+      }
+    }
+    const image: ImagePatchData = { width: W, height: H, data };
+    // Text box touches the black stroke border at x=148
+    const textBox: BoxRect = { x: 80, y: 80, w: 68, h: 40 };
+
+    const carrier = HeuristicBubbleExtractor.extractCarrierBox(image, textBox);
+    expect(carrier).not.toBeNull();
+    // Carrier must be contained within the bubble and NOT leak across the border to x > 155
+    expect(carrier!.x + carrier!.w).toBeLessThanOrEqual(155);
   });
 });

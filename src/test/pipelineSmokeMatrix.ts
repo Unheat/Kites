@@ -6,7 +6,8 @@ import { OcrManager } from '../offscreen/services/OcrManager';
 import { InpaintManager } from '../offscreen/services/InpaintManager';
 import { ColorManager } from '../offscreen/services/ColorManager';
 import { GoogleTranslateEngine } from '../offscreen/engines/translation/GoogleTranslateEngine';
-import { acquireBubbleGeometry, resolveBubbleLayouts, resolveBubbleLayoutsDetailed } from '../offscreen/services/BubbleLayoutService';
+import { resolveBubbleLayouts, resolveBubbleLayoutsDetailed } from '../offscreen/services/BubbleLayoutService';
+import { HeuristicBubbleEngine } from '../offscreen/engines/bubble/HeuristicBubbleEngine';
 import {
   renderTextBlocksBatch,
   measureBubbleLayoutFontSize,
@@ -154,7 +155,7 @@ export async function runPipelineSmokeMatrix(): Promise<void> {
     rawCtx.drawImage(probe, 0, 0);
     const imgData = rawCtx.getImageData(0, 0, probe.width, probe.height);
 
-    const bubbleGeom = acquireBubbleGeometry(
+    const bubbleGeom = HeuristicBubbleEngine.buildGeometry(
       { data: imgData.data, width: probe.width, height: probe.height },
       ocrResult.boxes
     );
@@ -219,7 +220,7 @@ export async function runPipelineSmokeMatrix(): Promise<void> {
     const cleaned = await inpaintManager.eraseText(arrayBuffer, ocrResult.polygons as any, 'simple');
     const translated = await translator.translate(ocrResult.texts, 'auto', 'en');
 
-    const bubbleGeom = acquireBubbleGeometry(
+    const bubbleGeom = HeuristicBubbleEngine.buildGeometry(
       { data: imgData.data, width: probe.width, height: probe.height },
       ocrResult.boxes
     );

@@ -409,6 +409,7 @@ export function recalculateBlockTypeset(
         fontFamily || 'sans-serif',
         {
           minFontSize: 9,
+          maxFontSize: MAX_FONT_SIZE_CEILING,
           targetLang,
           isBold: style.bold,
           isItalic: style.italic

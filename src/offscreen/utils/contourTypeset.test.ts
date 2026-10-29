@@ -167,4 +167,49 @@ describe('Koharu contourTypeset', () => {
       ]);
     });
   });
+
+  describe('wrapTextContour positionedLines fallback guarantee', () => {
+    it('always synthesizes positionedLines within contour bounds even when text severely overflows', () => {
+      const tinyContour = [
+        { x: 10, y: 50 },
+        { x: 30, y: 50 },
+        { x: 30, y: 70 },
+        { x: 10, y: 70 },
+      ];
+      const hugeText = 'VERY LONG SENTENCE THAT CANNOT FIT IN A TINY TWENTY PIXEL BOX AT ALL';
+      const result = wrapTextContour(hugeText, tinyContour, mockCtx, 'sans-serif', {
+        minFontSize: 9,
+      });
+
+      expect(result.positionedLines).toBeDefined();
+      expect(result.positionedLines!.length).toBeGreaterThanOrEqual(1);
+      const line = result.positionedLines![0];
+      expect(Number.isFinite(line.x)).toBe(true);
+      expect(Number.isFinite(line.y)).toBe(true);
+      // y must be within or very close to contour bounds [50, 70]
+      expect(line.y).toBeGreaterThanOrEqual(50);
+      expect(line.y).toBeLessThanOrEqual(80);
+    });
+
+    it('allows font size to expand above 18px in large speech bubbles without artificial clamps', () => {
+      // 300px wide x 200px tall rectangular bubble contour
+      const largeContour: Point2D[] = [
+        { x: 0, y: 0 },
+        { x: 300, y: 0 },
+        { x: 300, y: 200 },
+        { x: 0, y: 200 },
+      ];
+      const dialogueText = 'I will stand up to the teacher here! Retreat and get reinforcements!';
+
+      const result = wrapTextContour(dialogueText, largeContour, mockCtx, 'sans-serif', {
+        minFontSize: 9,
+        maxFontSize: 48,
+      });
+
+      expect(result.overflowed).toBe(false);
+      // Previously, dialogueCeil clamped dense dialogue to 18.0px.
+      // Now it should scale up into the 20s or 30s to fit the large container.
+      expect(result.fontSize).toBeGreaterThan(18.0);
+    });
+  });
 });

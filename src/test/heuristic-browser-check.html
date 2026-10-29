@@ -1,0 +1,37 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Heuristic bubble regression</title>
+<style>body{background:#17171d;color:#fff;font:16px sans-serif}canvas{max-width:100%;height:auto}pre{max-height:120px;overflow:auto}</style>
+<h1>Frozen image6 heuristic check</h1><pre id="status">Running browser Canvas checks…</pre><canvas></canvas>
+<script type="module">
+import {HeuristicBubbleEngine} from '../offscreen/engines/bubble/HeuristicBubbleEngine.ts';
+import {resolveBubbleLayoutsDetailed} from '../offscreen/services/BubbleLayoutService.ts';
+import {renderTextBlocksBatch,measureBubbleLayoutFontSize} from '../offscreen/utils/canvasTypesetting.ts';
+import fixture from './fixtures/image6_ocr_v6_medium.json';
+import transcription from './fixtures/image6_koharu_exact_transcription.json';
+const status=document.querySelector('#status');
+try {
+const font=new FontFace('CCWildWords','url(/fonts/cc-wild-words.ttf)');
+await font.load();document.fonts.add(font);await document.fonts.ready;
+const image=new Image();image.src='/src/test/test-img/image6.jpg';await image.decode();
+const canvas=document.querySelector('canvas');canvas.width=image.width;canvas.height=image.height;
+const ctx=canvas.getContext('2d',{willReadFrequently:true});ctx.drawImage(image,0,0);
+const geometry=HeuristicBubbleEngine.buildGeometry(ctx.getImageData(0,0,image.width,image.height),fixture.boxes);
+const entries=transcription.entries??transcription.transcriptions??transcription;
+const texts=fixture.texts.map((text,i)=>({
+'其他人也都是无法战斗的状态':'EVERYONE ELSE IS ALSO IN A STATE OF BEING UNABLE TO FIGHT.',
+'这样下去的话…':'IF THIS CONTINUES…','可恶…':'DAMN…','敌人太强了…！':'THE ENEMY IS TOO STRONG…!',
+'我知道了！':'…I KNOW!','但是千万不要勉強自己！':'BUT NEVER FORCE YOURSELF!'
+}[text]??text));
+const items=texts.map((text,i)=>({text,polygon:fixture.polygons[i],direction:'h',fontSize:fixture.fontSizes[i],originalText:fixture.texts[i],sourceLineCount:fixture.lineCounts[i],typesetMode:'balloon'}));
+const layout=resolveBubbleLayoutsDetailed({...geometry,boxes:fixture.boxes,directions:fixture.directions,angles:fixture.angles,pageWidth:image.width,pageHeight:image.height,accept:(i,box)=>measureBubbleLayoutFontSize(ctx,{...items[i],typesetBox:box,typesetMode:'contour',contourPoints:geometry.contours[i]?.map(p=>({x:p.x-box.x,y:p.y-box.y}))},box,'CCWildWords',false,'en')>0});
+// White paper clearing here is diagnostic only; inference and masks still use untouched source pixels.
+for(let i=0;i<items.length;i++){
+items[i].typesetBox=layout.typesetBoxes[i];items[i].contourPoints=layout.contourPoints[i];items[i].typesetMode=layout.typesetBoxes[i]?'contour':'balloon';
+if([1,2,3,4,12,13].includes(i)){const b=fixture.boxes[i];ctx.fillStyle='white';ctx.fillRect(b.x,b.y,b.w,b.h);}
+}
+const infos=renderTextBlocksBatch(ctx,items,'en',{width:image.width,height:image.height},'CCWildWords',false);
+const result={accepted:geometry.carriers.map((b,i)=>b?i:null).filter(i=>i!==null),groups:geometry.proposals.map((p,i)=>p?geometry.proposals.indexOf(p):null),fixed:layout.typesetBoxes.map((b,i)=>b?i:null).filter(i=>i!==null),rendered:infos.filter(Boolean).length,joined:[[1,2],[3,4],[12,13]].map(([a,b])=>geometry.proposals[a]!=null&&geometry.proposals[a]===geometry.proposals[b])};
+window.regressionResult=result;status.textContent=JSON.stringify(result,null,2);
+}catch(error){status.textContent=String(error.stack??error);window.regressionError=String(error);}
+</script>

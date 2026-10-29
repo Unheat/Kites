@@ -1,7 +1,5 @@
 import type { Point2D } from '../../shared/utils/geometry';
-import { HeuristicBubbleExtractor, type BubbleShapeEvidence, type ImagePatchData } from '../engines/bubble/HeuristicBubbleExtractor';
-import { NeuralBubbleDetector } from '../engines/bubble/NeuralBubbleDetector';
-import { extractMaskContour } from '../utils/maskContourExtractor';
+import type { BubbleGeometry } from '../engines/bubble/BaseBubbleEngine';
 import { generateBubbleContour } from '../utils/contourTypeset';
 import {
   applySiblingBoundaryConstraints,
@@ -17,27 +15,18 @@ import {
 
 /** Experimental fit guard, compared only with a caller-supplied valid source reference. */
 export const MIN_SHARED_FONT_RATIO = 0.85;
-/** Production and visual harness intentionally share the same association threshold. */
-export const BUBBLE_MATCH_COVERAGE = 0.50;
 /**
- * Fragments up to this fraction of the dominant box's area are OCR noise
- * (stray punctuation strokes, unmerged column slivers) rather than real utterances.
- * Larger stacked siblings are genuine utterances sharing the balloon and keep
- * their own sub-chamber through normal flow-cell partitioning.
+ * Fragments up to this fraction of the dominant box's area (AND below the absolute area ceiling)
+ * are OCR noise (stray punctuation strokes, unmerged column slivers) rather than real utterances.
+ * Substantial stacked siblings (e.g. short dialogue like "HASUMI!" or "DAMN...") are genuine
+ * utterances sharing the balloon and keep their own sub-chamber through normal flow-cell partitioning.
  */
-export const NOISE_AREA_RATIO = 0.35;
+export const NOISE_AREA_RATIO = 0.10;
+export const NOISE_MAX_ABSOLUTE_AREA = 400;
 
-export interface BubbleGeometry {
-  pageWidth: number;
-  carriers: (BoxRect | null)[];
-  /** Object identity is the neural proposal identity, not rectangle overlap. */
-  proposals: (BoxRect | null)[];
-  shapes: (BubbleShapeEvidence | undefined)[];
-  /** Calculated corner curvature radius and roundness per box. */
-  curvatures?: { isRounded: boolean; borderRadius: number }[];
-  /** Closed 2D polygon contour in native page coordinates. */
-  contours?: (Point2D[] | undefined)[];
-}
+export type { BubbleGeometry } from '../engines/bubble/BaseBubbleEngine';
+export { BUBBLE_MATCH_COVERAGE } from '../engines/bubble/NeuralBubbleEngine';
+export { computeMaskCurvature } from '../engines/bubble/bubbleGeometry';
 
 export interface BubbleLayoutInput extends BubbleGeometry {
   boxes: BoxRect[];
@@ -49,159 +38,6 @@ export interface BubbleLayoutInput extends BubbleGeometry {
   accept: (index: number, proposed: BoxRect, minimumFontRatio?: number) => boolean;
   /** Optional concise production/harness diagnostics; counts reflect final post-rollback results. */
   onDiagnostics?: (counts: { single: number; xy: number; fallback: number }) => void;
-}
-
-/**
- * Calculates corner curvature radius and roundness from carrier mask evidence.
- * Uses the exact 2D corner-area formula: R = sqrt(max(0, W*H - maskArea) / (4 - pi)).
- *
- * @param shape - Local morphology shape evidence if available.
- * @param carrier - Computed carrier bounding box.
- * @returns Object with isRounded flag and calculated borderRadius in pixels.
- */
-export function computeMaskCurvature(
-  shape: BubbleShapeEvidence | undefined,
-  carrier: BoxRect | null
-): { isRounded: boolean; borderRadius: number } {
-  if (!carrier || !Number.isFinite(carrier.w) || !Number.isFinite(carrier.h) || carrier.w <= 0 || carrier.h <= 0) {
-    return { isRounded: false, borderRadius: 0 };
-  }
-
-  // If no interior mask is available (e.g. raw bbox without shape), default to oval speech bubble
-  if (!shape || !shape.interior || shape.width <= 0 || shape.height <= 0) {
-    const rMax = Math.min(carrier.w / 2, carrier.h / 2);
-    return { isRounded: true, borderRadius: Math.round(rMax) };
-  }
-
-  // Count active mask pixels
-  let maskArea = 0;
-  const totalPixels = shape.width * shape.height;
-  for (let i = 0; i < totalPixels; i++) {
-    if (shape.interior[i] > 0) maskArea++;
-  }
-
-  const fillRatio = maskArea / totalPixels;
-  const w = shape.width;
-  const h = shape.height;
-
-  // Measure mask horizontal width at top (10%), center (50%), and bottom (90%)
-  const yTop = Math.min(h - 1, Math.max(0, Math.round(0.10 * h)));
-  const yCenter = Math.min(h - 1, Math.max(0, Math.round(0.50 * h)));
-  const yBot = Math.min(h - 1, Math.max(0, Math.round(0.90 * h)));
-
-  const getWidthAtY = (targetY: number): number => {
-    let minX = w;
-    let maxX = -1;
-    const rowOffset = targetY * w;
-    for (let x = 0; x < w; x++) {
-      if (shape.interior[rowOffset + x] > 0) {
-        if (x < minX) minX = x;
-        if (x > maxX) maxX = x;
-      }
-    }
-    return maxX >= minX ? maxX - minX + 1 : 0;
-  };
-
-  const wCenter = getWidthAtY(yCenter);
-  const wTop = getWidthAtY(yTop);
-  const wBot = getWidthAtY(yBot);
-  const endRatio = wCenter > 0 ? (wTop + wBot) / (2 * wCenter) : 0.5;
-
-  // 1. Rectangular Narration / Caption Box:
-  // Only shapes that fill nearly 100% of the bounding quad with sharp square corners are rectangular captions.
-  // Speech bubbles with curved or vertical walls must not be falsely downgraded to rectangles.
-  if (fillRatio >= 0.94) {
-    return { isRounded: false, borderRadius: 0 };
-  }
-
-  const rMax = Math.min(carrier.w / 2, carrier.h / 2);
-
-  // 2. Spiky Burst / Shout Balloon:
-  // Outward spikes and wide collar spread the top or bottom wide (endRatio >= 0.65),
-  // so the interior chamber is a wide cylindrical body rather than a pinched oval.
-  // Sets strength ~0.25 - 0.30 (gently rounded corners with 88% chord width at ends matching Torii).
-  if (endRatio >= 0.65) {
-    const burstRadius = Math.max(8, Math.round(rMax * 0.30));
-    return { isRounded: true, borderRadius: burstRadius };
-  }
-
-  // 3. Smooth Oval / Round Dialogue Balloon:
-  // Natural oval contours pinch inward at top and bottom (endRatio < 0.65).
-  // Sets full oval curvature strength (0.85 - 1.0).
-  const ovalRadius = Math.max(12, Math.round(rMax * 0.90));
-  return { isRounded: true, borderRadius: ovalRadius };
-}
-
-/**
- * Acquires geometry without translating, fitting fonts, or mutating OCR/inpaint geometry.
- * @param image - Original image pixels.
- * @param boxes - Original utterance boxes.
- * @param neuralProposals - Optional class-0 proposals; missing matches use heuristic carriers.
- * @param neuralShapes - Optional morphology shape evidence from neural segmentation (neural).
- * @returns Aligned carriers, exact proposal references, and existing morphology evidence.
- */
-export function acquireBubbleGeometry(
-  image: ImagePatchData,
-  boxes: BoxRect[],
-  neuralProposals?: BoxRect[] | null,
-  neuralShapes?: (BubbleShapeEvidence | undefined)[] | null
-): BubbleGeometry {
-  const carriers: (BoxRect | null)[] = [];
-  const proposals: (BoxRect | null)[] = [];
-  const shapes: (BubbleShapeEvidence | undefined)[] = [];
-  const curvatures: { isRounded: boolean; borderRadius: number }[] = [];
-  const contours: (Point2D[] | undefined)[] = [];
-  const isNeuralMode = neuralProposals !== undefined && neuralProposals !== null;
-  boxes.forEach((box, index) => {
-    const proposal = isNeuralMode
-      ? NeuralBubbleDetector.matchBubble(box, neuralProposals, BUBBLE_MATCH_COVERAGE)
-      : null;
-    proposals[index] = proposal;
-
-    if (isNeuralMode) {
-      if (proposal) {
-        shapes[index] = neuralShapes?.[index];
-        carriers[index] = neuralShapes?.[index]?.carrierBox ?? proposal;
-      } else {
-        // Free Text: Not inside any neural bubble proposal. Lock to original OCR bounding box.
-        shapes[index] = undefined;
-        carriers[index] = null;
-      }
-    } else {
-      // Heuristic Mode (Tier 1): extract carrier via morphological opening on pixel buffer
-      const heuristic = HeuristicBubbleExtractor.extractCarrierBox(image, box, {
-        allTextBoxes: boxes,
-        onShapeEvidence: (shape) => { shapes[index] = shape; }
-      });
-      carriers[index] = heuristic;
-    }
-    curvatures[index] = computeMaskCurvature(shapes[index], carriers[index]);
-
-    // Extract closed 2D polygon contour from shape evidence if available
-    const shape = shapes[index];
-    if (shape && shape.interior && shape.width > 0 && shape.height > 0) {
-      const mask = shape.reconstructed ?? shape.interior;
-      const scaleX = shape.scaleX ?? shape.scale;
-      const scaleY = shape.scaleY ?? shape.scale;
-      const textCenterX = (box.x + box.w / 2 - shape.x) * scaleX;
-      const textCenterY = (box.y + box.h / 2 - shape.y) * scaleY;
-      const poly = extractMaskContour(
-        mask,
-        shape.width,
-        shape.height,
-        shape.x,
-        shape.y,
-        scaleX,
-        scaleY,
-        textCenterX,
-        textCenterY
-      );
-      contours[index] = poly ?? undefined;
-    } else {
-      contours[index] = undefined;
-    }
-  });
-  return { pageWidth: image.width, carriers, proposals, shapes, curvatures, contours };
 }
 
 /** @param a - Outer rectangle. @param b - Inner rectangle. @returns Whether all inner edges are contained. */
@@ -261,6 +97,9 @@ export function resolveBubbleLayoutsDetailed(input: BubbleLayoutInput): Resolved
   const groups = boxes.map((_, index) => [index]);
   // True multi-utterance container grouping: identical proposal or high-overlap / nested container.
   // Distinct adjacent bubbles must not be falsely grouped as multi-lobe balloons.
+  // Tier-blind: shared-balloon identity arrives via identical proposal objects assigned
+  // by the producing engine (neural instance match, or heuristic XianScan shared-chamber
+  // association in HeuristicBubbleEngine.associateSharedChambers).
   for (let i = 0; i < boxes.length; i++) {
     for (let j = 0; j < i; j++) {
       const a = carriers[i], b = carriers[j];

@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { acquireBubbleGeometry, computeMaskCurvature, MIN_SHARED_FONT_RATIO, resolveBubbleLayouts, resolveBubbleLayoutsDetailed, significantOverlap, type BubbleLayoutInput } from './BubbleLayoutService';
+import { computeMaskCurvature, MIN_SHARED_FONT_RATIO, resolveBubbleLayouts, resolveBubbleLayoutsDetailed, significantOverlap, type BubbleLayoutInput } from './BubbleLayoutService';
+import { HeuristicBubbleEngine } from '../engines/bubble/HeuristicBubbleEngine';
+import { NeuralBubbleEngine } from '../engines/bubble/NeuralBubbleEngine';
 import type { Point2D } from '../../shared/utils/geometry';
 import { computeTypesetBox, type BoxRect } from '../utils/bubbleExpansion';
-import type { BubbleShapeEvidence } from '../engines/bubble/HeuristicBubbleExtractor';
+import type { BubbleShapeEvidence, ImagePatchData } from '../engines/bubble/HeuristicBubbleExtractor';
 
 const carrier = { x: 0, y: 20, w: 200, h: 300 };
 const verticalPair = [{ x: 80, y: 70, w: 40, h: 40 }, { x: 80, y: 220, w: 40, h: 40 }];
@@ -177,13 +179,15 @@ describe('conservative bubble layouts', () => {
     expect(accept).not.toHaveBeenCalled();
   });
 
-  it('acquisition retains exact proposal identity and does not mutate source boxes', () => {
+  it('acquisition retains exact proposal identity and does not mutate source boxes', async () => {
     const data = new Uint8ClampedArray(400 * 400 * 4).fill(255);
     const boxes = [{ x: 100, y: 100, w: 30, h: 40 }];
     const proposal = { x: 80, y: 80, w: 90, h: 100 };
-    const geometry = acquireBubbleGeometry({ width: 400, height: 400, data }, boxes, [proposal]);
-    expect(geometry.proposals[0]).toBe(proposal);
-    expect(geometry.carriers[0]).toBe(proposal);
+    const geometry = await NeuralBubbleEngine.buildGeometry(null, { width: 400, height: 400, data }, boxes, undefined, { bubbles: [proposal] });
+    expect(geometry).not.toBeNull();
+    expect(geometry!.proposals[0]).toBe(proposal);
+    expect(geometry!.carriers[0]).toBe(proposal);
+    expect(geometry!.tier).toBe('neural');
     expect(boxes).toEqual([{ x: 100, y: 100, w: 30, h: 40 }]);
   });
 
@@ -391,7 +395,7 @@ describe('conservative bubble layouts', () => {
     }
 
     const dominant: BoxRect = { x: 150, y: 160, w: 120, h: 80 };
-    const fragment: BoxRect = { x: 160, y: 170, w: 40, h: 30 };
+    const fragment: BoxRect = { x: 160, y: 170, w: 20, h: 15 };
     const sharedProposal: BoxRect = { x: 120, y: 130, w: 220, h: 140 };
 
     function noiseInput(accept: BubbleLayoutInput['accept']): BubbleLayoutInput {
@@ -443,6 +447,115 @@ describe('conservative bubble layouts', () => {
         accept: () => true,
       });
       expect(detailed.typesetBoxes.every(Boolean)).toBe(true);
+      expect(detailed.skipped).toEqual([false, false]);
+    });
+  });
+
+  describe('heuristic shared-chamber grouping (XianScan expansion.rs:186-194 parity)', () => {
+    /** @returns Closed 24-point oval polygon around a center. */
+    function ovalContour(cx: number, cy: number, rx: number, ry: number): Point2D[] {
+      const points: Point2D[] = [];
+      for (let step = 0; step < 24; step++) {
+        const angle = (step / 24) * Math.PI * 2;
+        points.push({ x: Math.round(cx + rx * Math.cos(angle)), y: Math.round(cy + ry * Math.sin(angle)) });
+      }
+      return points;
+    }
+
+    it('partitions heuristic utterances sharing one chamber proposal via Koharu flow cells', () => {
+      const top: BoxRect = { x: 80, y: 70, w: 60, h: 40 };
+      const bottom: BoxRect = { x: 75, y: 220, w: 70, h: 50 };
+      // Same physical chamber extracted twice: the heuristic engine assigns the SAME
+      // proposal object (see associateSharedChambers), and the tier-blind resolver
+      // groups and partitions the pair through its normal flow-cell path.
+      const carrierTop: BoxRect = { x: 40, y: 40, w: 140, h: 200 };
+      const carrierBottom: BoxRect = { x: 60, y: 80, w: 140, h: 200 };
+      const sharedProposal: BoxRect = { ...carrierTop };
+      const contour = ovalContour(115, 155, 80, 120);
+
+      let diagnostics = { single: -1, xy: -1, fallback: -1 };
+      const detailed = resolveBubbleLayoutsDetailed({
+        pageWidth: 400,
+        pageHeight: 400,
+        boxes: [top, bottom],
+        carriers: [carrierTop, carrierBottom],
+        proposals: [sharedProposal, sharedProposal],
+        shapes: [],
+        curvatures: [{ isRounded: true, borderRadius: 40 }, { isRounded: true, borderRadius: 40 }],
+        contours: [contour, contour],
+        directions: ['h', 'h'],
+        accept: () => true,
+        onDiagnostics: (counts) => { diagnostics = counts; },
+      });
+
+      // Grouped into one shared balloon (xy = 2), not treated as two independent bubbles.
+      expect(diagnostics.xy).toBe(2);
+      expect(diagnostics.single).toBe(0);
+      expect(detailed.typesetBoxes[0]).toBeDefined();
+      expect(detailed.typesetBoxes[1]).toBeDefined();
+      expect(detailed.typesetBoxes[0]!.y + detailed.typesetBoxes[0]!.h).toBeLessThanOrEqual(detailed.typesetBoxes[1]!.y);
+    });
+
+    it('does not group distant captions into a shared bubble', () => {
+      const W = 500, H = 400;
+      const data = new Uint8ClampedArray(W * H * 4).fill(40);
+      // Bubble 1 on left (center 100, 150, radius 40)
+      // Bubble 2 on right (center 350, 150, radius 40)
+      for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+          const inLeft = (x - 100) ** 2 + (y - 150) ** 2 <= 40 ** 2;
+          const inRight = (x - 350) ** 2 + (y - 150) ** 2 <= 40 ** 2;
+          if (inLeft || inRight) {
+            const idx = (y * W + x) * 4;
+            data[idx] = 255;
+            data[idx + 1] = 255;
+            data[idx + 2] = 255;
+            data[idx + 3] = 255;
+          }
+        }
+      }
+      const image: ImagePatchData = { width: W, height: H, data };
+      const boxLeft: BoxRect = { x: 90, y: 140, w: 20, h: 20 };
+      const boxRight: BoxRect = { x: 340, y: 140, w: 20, h: 20 };
+      const boxes = [boxLeft, boxRight];
+
+      const geom = HeuristicBubbleEngine.buildGeometry(image, boxes);
+      // Independent bubbles keep null proposal identities (not grouped into multi-utterance)
+      expect(geom.tier).toBe('heuristic');
+      expect(geom.proposals[0]).toBeNull();
+      expect(geom.proposals[1]).toBeNull();
+    });
+
+    it('does not absorb short dialogue lines (e.g. "HASUMI!") as noise, partitioning both subchambers', () => {
+      // Dominant box: 120x80 (area 9600)
+      // Short dialogue box: 40x25 (area 1000, > 400px absolute ceiling)
+      const dominant: BoxRect = { x: 150, y: 140, w: 120, h: 80 };
+      const shortDialogue: BoxRect = { x: 160, y: 230, w: 40, h: 25 };
+      const sharedProposal: BoxRect = { x: 120, y: 120, w: 220, h: 160 };
+
+      // Synthetic 24-point oval contour enclosing both
+      const points: Point2D[] = [];
+      for (let step = 0; step < 24; step++) {
+        const angle = (step / 24) * Math.PI * 2;
+        points.push({ x: Math.round(230 + 110 * Math.cos(angle)), y: Math.round(200 + 90 * Math.sin(angle)) });
+      }
+
+      const detailed = resolveBubbleLayoutsDetailed({
+        pageWidth: 500,
+        pageHeight: 500,
+        boxes: [dominant, shortDialogue],
+        carriers: [{ ...dominant }, { ...shortDialogue }],
+        proposals: [sharedProposal, sharedProposal],
+        shapes: [],
+        curvatures: [{ isRounded: true, borderRadius: 40 }, { isRounded: true, borderRadius: 40 }],
+        contours: [points, points],
+        directions: ['h', 'h'],
+        accept: () => true,
+      });
+
+      // Both must receive their own subchamber; shortDialogue is NOT skipped
+      expect(detailed.typesetBoxes[0]).toBeDefined();
+      expect(detailed.typesetBoxes[1]).toBeDefined();
       expect(detailed.skipped).toEqual([false, false]);
     });
   });
