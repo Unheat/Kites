@@ -496,6 +496,166 @@ describe('conservative bubble layouts', () => {
       expect(detailed.typesetBoxes[0]!.y + detailed.typesetBoxes[0]!.h).toBeLessThanOrEqual(detailed.typesetBoxes[1]!.y);
     });
 
+    it('passes each partition sibling its own assigned contour to acceptance (rectangular path)', () => {
+      const left: BoxRect = { x: 60, y: 100, w: 40, h: 60 };
+      const right: BoxRect = { x: 160, y: 100, w: 40, h: 60 };
+      const chamber: BoxRect = { x: 40, y: 60, w: 180, h: 160 };
+      const seen: Array<{ box: BoxRect; contour?: Point2D[] }> = [];
+      const detailed = resolveBubbleLayoutsDetailed({
+        pageWidth: 400,
+        pageHeight: 400,
+        boxes: [left, right],
+        carriers: [chamber, chamber],
+        proposals: [chamber, chamber],
+        shapes: [],
+        curvatures: [{ isRounded: false, borderRadius: 0 }, { isRounded: false, borderRadius: 0 }],
+        contours: [],
+        directions: ['h', 'h'],
+        accept: (index, proposed, _ratio, proposedContour) => {
+          seen[index] = { box: proposed, contour: proposedContour };
+          return true;
+        },
+      });
+
+      for (let index = 0; index < 2; index++) {
+        const proposed = seen[index].box;
+        const contour = seen[index].contour;
+        expect(contour).toBeDefined();
+        // The offered polygon must describe this sibling's own partition area, not the
+        // whole shared chamber: its extent stays inside the proposed box (+2px pad).
+        const xs = contour!.map((p) => p.x);
+        const ys = contour!.map((p) => p.y);
+        expect(Math.min(...xs)).toBeGreaterThanOrEqual(-2);
+        expect(Math.min(...ys)).toBeGreaterThanOrEqual(-2);
+        expect(Math.max(...xs)).toBeLessThanOrEqual(proposed.w + 2);
+        expect(Math.max(...ys)).toBeLessThanOrEqual(proposed.h + 2);
+        // Acceptance and assignment are the same geometry — no second contour source.
+        expect(detailed.contourPoints[index]).toEqual(contour);
+        expect(detailed.typesetBoxes[index]).toEqual(proposed);
+      }
+      expect(seen[0].box!.x + seen[0].box!.w + 6).toBeLessThanOrEqual(seen[1].box!.x);
+    });
+
+    it('passes the flow-cell contour that assignment will store to acceptance', () => {
+      const top: BoxRect = { x: 80, y: 70, w: 60, h: 40 };
+      const bottom: BoxRect = { x: 75, y: 220, w: 70, h: 50 };
+      const carrierTop: BoxRect = { x: 40, y: 40, w: 140, h: 200 };
+      const carrierBottom: BoxRect = { x: 60, y: 80, w: 140, h: 200 };
+      const sharedProposal: BoxRect = { ...carrierTop };
+      const contour = ovalContour(115, 155, 80, 120);
+      const offered: Array<Point2D[] | undefined> = [];
+
+      const detailed = resolveBubbleLayoutsDetailed({
+        pageWidth: 400,
+        pageHeight: 400,
+        boxes: [top, bottom],
+        carriers: [carrierTop, carrierBottom],
+        proposals: [sharedProposal, sharedProposal],
+        shapes: [],
+        curvatures: [{ isRounded: true, borderRadius: 40 }, { isRounded: true, borderRadius: 40 }],
+        contours: [contour, contour],
+        directions: ['h', 'h'],
+        accept: (index, _proposed, _ratio, proposedContour) => {
+          offered[index] = proposedContour;
+          return true;
+        },
+      });
+
+      expect(offered[0]).toBeDefined();
+      expect(offered[1]).toBeDefined();
+      // Assigned contours are exactly the polygons acceptance measured against.
+      expect(detailed.contourPoints[0]).toEqual(offered[0]);
+      expect(detailed.contourPoints[1]).toEqual(offered[1]);
+    });
+
+    it('passes the translated chamber contour to acceptance on the single-region path', () => {
+      const box: BoxRect = { x: 60, y: 80, w: 50, h: 70 };
+      const chamber: BoxRect = { x: 40, y: 60, w: 120, h: 140 };
+      const contour = ovalContour(100, 130, 60, 70);
+      let offeredContour: Point2D[] | undefined;
+      let offeredBox: BoxRect | undefined;
+      const detailed = resolveBubbleLayoutsDetailed({
+        pageWidth: 400,
+        pageHeight: 400,
+        boxes: [box],
+        carriers: [chamber],
+        proposals: [chamber],
+        shapes: [],
+        curvatures: [{ isRounded: true, borderRadius: 30 }],
+        contours: [contour],
+        directions: ['h'],
+        accept: (_index, proposed, _ratio, proposedContour) => {
+          offeredBox = proposed;
+          offeredContour = proposedContour;
+          return true;
+        },
+      });
+
+      expect(offeredContour).toBeDefined();
+      expect(detailed.contourPoints[0]).toEqual(offeredContour);
+      expect(detailed.typesetBoxes[0]).toEqual(offeredBox);
+      // Contour is chamber geometry translated into the assigned box's local frame.
+      const shifted = contour.map((p) => ({ x: p.x - offeredBox!.x, y: p.y - offeredBox!.y }));
+      expect(offeredContour).toEqual(shifted);
+    });
+
+    it('groups unlinked regions that extracted the same chamber contour, partitions and keeps both', () => {
+      // Two side-by-side utterances in one chamber. The engine left their carriers and
+      // proposals unlinked (low IoU, distinct proposals) — the historical grouping miss
+      // that produced incoherent clamped slivers — but both extracted the chamber contour.
+      const left: BoxRect = { x: 55, y: 120, w: 45, h: 80 };
+      const right: BoxRect = { x: 150, y: 120, w: 45, h: 80 };
+      const leftCarrier: BoxRect = { x: 50, y: 115, w: 55, h: 90 };
+      const rightCarrier: BoxRect = { x: 145, y: 115, w: 55, h: 90 };
+      const chamberContour = ovalContour(115, 155, 85, 110);
+      let diagnostics = { single: -1, xy: -1, fallback: -1 };
+      const detailed = resolveBubbleLayoutsDetailed({
+        pageWidth: 400,
+        pageHeight: 400,
+        boxes: [left, right],
+        carriers: [leftCarrier, rightCarrier],
+        proposals: [leftCarrier, rightCarrier],
+        shapes: [],
+        curvatures: [{ isRounded: true, borderRadius: 40 }, { isRounded: true, borderRadius: 40 }],
+        contours: [chamberContour, chamberContour.map((p) => ({ ...p }))],
+        directions: ['h', 'h'],
+        accept: () => true,
+        onDiagnostics: (counts) => { diagnostics = counts; },
+      });
+
+      expect(diagnostics.xy).toBe(2);
+      expect(diagnostics.single).toBe(0);
+      expect(detailed.typesetBoxes[0]).toBeDefined();
+      expect(detailed.typesetBoxes[1]).toBeDefined();
+      // Siblings partition the chamber instead of clamping against each other.
+      expect(detailed.typesetBoxes[0]!.x + detailed.typesetBoxes[0]!.w + 6)
+        .toBeLessThanOrEqual(detailed.typesetBoxes[1]!.x);
+      for (const contour of detailed.contourPoints) {
+        expect(contour).toBeDefined();
+      }
+    });
+
+    it('does not group regions whose contours occupy different areas', () => {
+      const left: BoxRect = { x: 30, y: 120, w: 45, h: 80 };
+      const right: BoxRect = { x: 250, y: 120, w: 45, h: 80 };
+      let diagnostics = { single: -1, xy: -1, fallback: -1 };
+      resolveBubbleLayoutsDetailed({
+        pageWidth: 400,
+        pageHeight: 400,
+        boxes: [left, right],
+        carriers: [{ x: 20, y: 110, w: 65, h: 100 }, { x: 240, y: 110, w: 65, h: 100 }],
+        proposals: [{ x: 20, y: 110, w: 65, h: 100 }, { x: 240, y: 110, w: 65, h: 100 }],
+        shapes: [],
+        curvatures: [{ isRounded: true, borderRadius: 30 }, { isRounded: true, borderRadius: 30 }],
+        contours: [ovalContour(55, 160, 35, 55), ovalContour(275, 160, 35, 55)],
+        directions: ['h', 'h'],
+        accept: () => true,
+        onDiagnostics: (counts) => { diagnostics = counts; },
+      });
+      expect(diagnostics.single).toBe(2);
+      expect(diagnostics.xy).toBe(0);
+    });
+
     it('does not group distant captions into a shared bubble', () => {
       const W = 500, H = 400;
       const data = new Uint8ClampedArray(W * H * 4).fill(40);

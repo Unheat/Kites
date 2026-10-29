@@ -304,6 +304,48 @@ describe('PipelineOrchestrator', () => {
     bitmapSpy.mockRestore(); blobSpy.mockRestore(); measureSpy.mockRestore(); renderSpy.mockRestore();
   });
 
+  it('partitions two utterances sharing one rectangular chamber into expanded sibling regions', async () => {
+    ((db.images as any).first as any).mockResolvedValue({ id: 31, jobId: 3100,
+      rawImageBlob: new Blob(['fake image data'], { type: 'image/png' }) });
+    vi.spyOn(chrome.runtime, 'sendMessage').mockImplementation((_message: any, callback: any) => {
+      callback?.({ activeInpaintId: 'none', bubbleMode: 'heuristic', targetLang: 'en' });
+    });
+    const source = createCanvas(200, 340);
+    const context = source.getContext('2d')!;
+    context.fillStyle = '#222'; context.fillRect(0, 0, 200, 340);
+    context.fillStyle = '#fff'; context.fillRect(40, 40, 120, 260);
+    const bitmapSpy = vi.spyOn(global, 'createImageBitmap').mockResolvedValue(source as any);
+    // Two stacked utterance regions inside one shared rectangular chamber.
+    processImageMock.mockResolvedValue({ texts: ['テスト', 'だよ'], boxes: [
+        { x: 70, y: 60, w: 60, h: 60 }, { x: 70, y: 210, w: 60, h: 60 },
+      ], directions: ['v', 'v'], fontSizes: [18, 18], angles: [0, 0],
+      polygons: [
+        [{ x: 70, y: 60 }, { x: 130, y: 60 }, { x: 130, y: 120 }, { x: 70, y: 120 }],
+        [{ x: 70, y: 210 }, { x: 130, y: 210 }, { x: 130, y: 270 }, { x: 70, y: 270 }],
+      ] });
+    const blobSpy = vi.spyOn(pipelineOrchestrator as any, 'blobToArrayBuffer').mockResolvedValue(new ArrayBuffer(8));
+    const renderSpy = vi.spyOn(canvasTypesetting, 'renderTextBlocksBatch');
+    await pipelineOrchestrator.runPipeline(3100);
+    const saved = vi.mocked(db.textBlocks.bulkAdd).mock.calls[0][0] as any[];
+    const fixed = saved.filter((block) => block.posX !== undefined);
+    expect(fixed).toHaveLength(2);
+    for (const block of fixed) {
+      // Each sibling expands well past its narrow 60px OCR region inside the shared chamber.
+      expect(block.height).toBeGreaterThan(80);
+      // The partition contour describes the sibling's own region, not the whole chamber.
+      expect(block.contourPoints.length).toBeGreaterThanOrEqual(3);
+      const xs = block.contourPoints.map((p: { x: number }) => p.x);
+      const ys = block.contourPoints.map((p: { y: number }) => p.y);
+      expect(Math.min(...xs)).toBeGreaterThanOrEqual(-2);
+      expect(Math.min(...ys)).toBeGreaterThanOrEqual(-2);
+      expect(Math.max(...xs)).toBeLessThanOrEqual(block.width + 2);
+      expect(Math.max(...ys)).toBeLessThanOrEqual(block.height + 2);
+    }
+    const [top, bottom] = fixed;
+    expect(top.posY + top.height).toBeLessThanOrEqual(bottom.posY + 2);
+    bitmapSpy.mockRestore(); blobSpy.mockRestore(); renderSpy.mockRestore();
+  });
+
   it('persists canonical typesetMode contour for Heuristic tier when speech bubble is rounded', async () => {
     ((db.images as any).first as any).mockResolvedValue({ id: 15, jobId: 1500,
       rawImageBlob: new Blob(['fake image data'], { type: 'image/png' }) });

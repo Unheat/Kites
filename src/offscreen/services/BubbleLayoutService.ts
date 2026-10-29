@@ -34,8 +34,14 @@ export interface BubbleLayoutInput extends BubbleGeometry {
   angles?: number[];
   pageWidth: number;
   pageHeight: number;
-  /** Runs after translation and font readiness. False rolls the entire candidate group back. */
-  accept: (index: number, proposed: BoxRect, minimumFontRatio?: number) => boolean;
+  /**
+   * Runs after translation and font readiness. False rolls the entire candidate group back.
+   * `proposedContour` is the exact box-local polygon that will be assigned to this region on
+   * acceptance (partition cell, generated sub-chamber, or translated chamber contour). Fitting
+   * must measure against it — the raw chamber-level `contours[index]` does not describe a
+   * partitioned sibling's usable area and rejects valid shared-chamber layouts.
+   */
+  accept: (index: number, proposed: BoxRect, minimumFontRatio?: number, proposedContour?: Point2D[]) => boolean;
   /** Optional concise production/harness diagnostics; counts reflect final post-rollback results. */
   onDiagnostics?: (counts: { single: number; xy: number; fallback: number }) => void;
 }
@@ -43,6 +49,34 @@ export interface BubbleLayoutInput extends BubbleGeometry {
 /** @param a - Outer rectangle. @param b - Inner rectangle. @returns Whether all inner edges are contained. */
 function contains(a: BoxRect, b: BoxRect): boolean {
   return b.x >= a.x && b.y >= a.y && b.x + b.w <= a.x + a.w && b.y + b.h <= a.y + a.h;
+}
+
+/** @param points - Polygon. @returns Axis-aligned bounding box; empty polygon yields zero-area box. */
+function contourBoundingBox(points: Point2D[]): BoxRect {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const point of points) {
+    if (point.x < minX) minX = point.x;
+    if (point.x > maxX) maxX = point.x;
+    if (point.y < minY) minY = point.y;
+    if (point.y > maxY) maxY = point.y;
+  }
+  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+}
+
+/**
+ * Same-chamber contour evidence. Each region's contour is its own extraction of the chamber
+ * mask (finalizeBubbleGeometry re-traces per box), so two utterances inside one chamber carry
+ * near-identical chamber polygons even when the producing engine never linked their carriers
+ * or proposals. Distinct adjacent bubbles extract disjoint contours and stay ungrouped.
+ * @param a - First region's chamber contour. @param b - Second region's chamber contour.
+ * @returns Whether both contours occupy the same area (bbox IoU >= shared-container threshold).
+ */
+function sameChamberContours(a?: Point2D[], b?: Point2D[]): boolean {
+  if (!a || !b || a.length < 3 || b.length < 3) return false;
+  const boxA = contourBoundingBox(a);
+  const boxB = contourBoundingBox(b);
+  return boxA.w > 0 && boxA.h > 0 && boxB.w > 0 && boxB.h > 0
+    && boxIoU(boxA, boxB) >= SHARED_CONTAINER_IOU;
 }
 
 /** @param a - First rectangle. @param b - Second rectangle. @returns Positive-area intersection. */
@@ -95,16 +129,19 @@ export function resolveBubbleLayoutsDetailed(input: BubbleLayoutInput): Resolved
   const resultContours: (Point2D[] | undefined)[] = new Array(boxes.length).fill(undefined);
   const skipped: boolean[] = new Array(boxes.length).fill(false);
   const groups = boxes.map((_, index) => [index]);
-  // True multi-utterance container grouping: identical proposal or high-overlap / nested container.
-  // Distinct adjacent bubbles must not be falsely grouped as multi-lobe balloons.
+  // True multi-utterance container grouping: identical proposal, high-overlap / nested
+  // container, or identical chamber contours. Distinct adjacent bubbles must not be falsely
+  // grouped as multi-lobe balloons.
   // Tier-blind: shared-balloon identity arrives via identical proposal objects assigned
   // by the producing engine (neural instance match, or heuristic XianScan shared-chamber
-  // association in HeuristicBubbleEngine.associateSharedChambers).
+  // association in HeuristicBubbleEngine.associateSharedChambers). Contour evidence covers
+  // engines that extracted one chamber but left the utterances' carriers/proposals unlinked.
   for (let i = 0; i < boxes.length; i++) {
     for (let j = 0; j < i; j++) {
       const a = carriers[i], b = carriers[j];
       const candidate = (proposals[i] && proposals[i] === proposals[j])
-        || (a && b && (boxIoU(a, b) >= SHARED_CONTAINER_IOU || contains(a, b) || contains(b, a)));
+        || (a && b && (boxIoU(a, b) >= SHARED_CONTAINER_IOU || contains(a, b) || contains(b, a)))
+        || sameChamberContours(contours?.[i], contours?.[j]);
       if (!candidate) continue;
       const first = groups.find((g) => g.includes(i))!;
       const second = groups.find((g) => g.includes(j))!;
@@ -148,7 +185,7 @@ export function resolveBubbleLayoutsDetailed(input: BubbleLayoutInput): Resolved
           : undefined;
       }
 
-      if (validBox(box) && accept(i, box, MIN_SHARED_FONT_RATIO)) {
+      if (validBox(box) && accept(i, box, MIN_SHARED_FONT_RATIO, localContour)) {
         result[i] = box;
         resultContours[i] = localContour;
       }
@@ -181,13 +218,16 @@ export function resolveBubbleLayoutsDetailed(input: BubbleLayoutInput): Resolved
         );
         return pairwiseClampBox(rawBox, boxes[i], boxes, i, subChambers[position], SIBLING_GAP, group);
       });
+      // Acceptance must measure the same sub-chamber contour that assignment will use;
+      // measuring the whole chamber polygon against a partitioned box rejects valid layouts.
+      const candidateContours = candidates.map((box, position) =>
+        generateBubbleContour(box.w, box.h, curvatures?.[group[position]]?.borderRadius ?? 0));
 
-      if (candidates.every((box, position) => validBox(box) && accept(group[position], box, MIN_SHARED_FONT_RATIO))) {
+      if (candidates.every((box, position) =>
+        validBox(box) && accept(group[position], box, MIN_SHARED_FONT_RATIO, candidateContours[position]))) {
         group.forEach((i, position) => {
-          const candidateBox = candidates[position];
-          result[i] = candidateBox;
-          const radius = curvatures?.[i]?.borderRadius ?? 0;
-          resultContours[i] = generateBubbleContour(candidateBox.w, candidateBox.h, radius);
+          result[i] = candidates[position];
+          resultContours[i] = candidateContours[position];
         });
       }
     } else {
@@ -251,19 +291,18 @@ export function resolveBubbleLayoutsDetailed(input: BubbleLayoutInput): Resolved
         const chamber = subChambers[position];
         return pairwiseClampBox(chamber, boxes[i], boxes, i, chamber, SIBLING_GAP, group);
       });
+      // Same contract as the rectangular path: acceptance sees the exact cell-local
+      // contour (or none) that assignment will store for this sibling.
+      const candidateContours = cellContours.map((cell, position) =>
+        cell && cell.length >= 3
+          ? cell.map((p) => ({ x: p.x - candidates[position].x, y: p.y - candidates[position].y }))
+          : undefined);
 
-      if (candidates.every((box, position) => validBox(box) && accept(group[position], box, MIN_SHARED_FONT_RATIO))) {
+      if (candidates.every((box, position) =>
+        validBox(box) && accept(group[position], box, MIN_SHARED_FONT_RATIO, candidateContours[position]))) {
         group.forEach((i, position) => {
           result[i] = candidates[position];
-          const rawCellContour = cellContours[position];
-          if (rawCellContour && rawCellContour.length >= 3) {
-            resultContours[i] = rawCellContour.map((p) => ({
-              x: p.x - candidates[position].x,
-              y: p.y - candidates[position].y
-            }));
-          } else {
-            resultContours[i] = undefined;
-          }
+          resultContours[i] = candidateContours[position];
         });
       }
     }

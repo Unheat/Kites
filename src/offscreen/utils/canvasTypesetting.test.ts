@@ -352,6 +352,29 @@ describe('Canvas Typesetting', () => {
     expect(captureDefaultRender([block]).results).toEqual([null]);
   });
 
+  it('keeps the contour route usable when only an overflowing minimum layout exists', () => {
+    // Donor best-effort: the contour solver reports overflow but still produces the
+    // minimum-size layout. The acceptance gate must prefer it over falling back to the
+    // smaller auto-balloon box, which would overflow strictly more.
+    const box = { x: 10, y: 10, w: 70, h: 220 };
+    const chamber = [
+      { x: 0, y: 0 }, { x: 200, y: 0 }, { x: 200, y: 260 }, { x: 0, y: 260 },
+    ];
+    const block: TextBlockItem = {
+      text: 'EVERYONE ELSE IS ALSO IN A STATE OF BEING UNABLE TO FIGHT.',
+      polygon: quad(10, 10, 70, 220),
+      typesetBox: box,
+      contourPoints: chamber,
+      typesetMode: 'contour',
+      isRounded: true,
+      fontSize: 20,
+    };
+    const ctx = createCanvas(500, 500).getContext('2d');
+    const fitted = measureBubbleLayoutFontSize(ctx, block, box, 'sans-serif', false, 'en', undefined,
+      { width: box.w, height: box.h });
+    expect(fitted).toBeGreaterThanOrEqual(9);
+  });
+
   it('retains undefined/Disabled resize, rotation and global free-box decollision', () => {
     const source = quad(50, 50, 100, 100);
     const blocks: TextBlockItem[] = [

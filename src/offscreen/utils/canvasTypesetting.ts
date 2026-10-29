@@ -381,7 +381,8 @@ function bubbleLayoutFontTarget(block: TextBlockItem): number {
  * @param targetLang - Hyphenation language for the layout.
  * @param minFontSize - Optional user minimum override forwarded to the strategy.
  * @param frame - Explicit inset layout frame. Omitted keeps the legacy box dimensions.
- * @returns Fitted font size, or 0 for empty text, invalid dimensions, or an unfit minimum fallback.
+ * @returns Fitted font size, or 0 for empty text, invalid dimensions, or no layout at all.
+ *          A minimum-size overflow layout still returns its fitted size (donor best-effort).
  */
 export function measureBubbleLayoutFontSize(
   ctx: Parameters<typeof measureDefaultLayout>[0],
@@ -431,9 +432,12 @@ export function measureBubbleLayoutFontSize(
         frame: layoutFrame
       }
     );
-    if (!res || res.lines.length === 0 || res.overflowed) {
+    if (!res || res.lines.length === 0) {
       return 0;
     }
+    // An overflowing minimum-size layout still returns its fitted size: the donor renders
+    // the best contour layout and only reports overflow. Rejecting it here would fall
+    // back to the smaller auto-balloon box, which overflows strictly more.
     return res.fontSize;
   }
 
