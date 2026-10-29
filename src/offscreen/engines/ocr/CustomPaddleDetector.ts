@@ -1,4 +1,5 @@
 import { extractPolygons, type Point2D } from './extractPolygons';
+import { prepareHighQualityDetectionCanvas } from './DetectionResize';
 
 /**
  * DBNet polygon expansion factor (PaddleOCR `--det_db_unclip_ratio`). Controls how far the
@@ -49,12 +50,29 @@ export class CustomPaddleDetector {
     const detector = this.service.detector;
     const platform = this.service.platform;
 
-    // 1. Load image and preprocess it into the tensor format (reuse existing canvas if provided)
+    // 1. Load image and preprocess it into the tensor format (reuse existing canvas if provided).
+    // The high-quality adapter resamples once with explicit smoothing at the dependency's exact
+    // unpadded target size, so the internal draw becomes 1:1 and its default-quality kernel no
+    // longer applies. Padding/normalization stay inside the dependency.
     console.log('[CustomPaddleDetector] Preprocessing image for WebGPU/WASM...');
     const canvas = (imageInput && typeof imageInput.width === 'number' && typeof imageInput.height === 'number')
       ? imageInput
       : await platform.canvas.prepareCanvas(imageInput);
-    const input = await detector.preprocessDetection(canvas);
+    // The adapter must use the same limit preprocessDetection will apply (its merged options).
+    const maxSideLength = detector.options?.maxSideLength
+      ?? this.service.options.detection?.maxSideLength ?? 640;
+    const prepared = prepareHighQualityDetectionCanvas(
+      canvas, maxSideLength, (width, height) => platform.createCanvas(width, height),
+    );
+    const input = await detector.preprocessDetection(prepared.canvas);
+    // preprocessDetection recomputes resizeRatio from the prepared canvas (1:1 after our
+    // resample), so restore the true original dimensions and original-to-model scale here.
+    const detectionInput = {
+      ...input,
+      originalWidth: prepared.originalWidth,
+      originalHeight: prepared.originalHeight,
+      resizeRatio: prepared.resizeRatio,
+    };
 
     // 2. Run inference with explicit input and output tensor disposal
     console.log(`[CustomPaddleDetector] Running ONNX inference (${input.width}x${input.height})...`);
@@ -91,11 +109,11 @@ export class CustomPaddleDetector {
       probabilityMap,
       input.width,
       input.height,
-      input.originalWidth,
-      input.originalHeight,
+      detectionInput.originalWidth,
+      detectionInput.originalHeight,
       thresh,
       UNCLIP_RATIO,
-      input.resizeRatio
+      detectionInput.resizeRatio
     );
 
     const polygons = detected.map(d => d.points);

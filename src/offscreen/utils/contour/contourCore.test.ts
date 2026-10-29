@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { Point2D } from '../../../shared/utils/geometry';
-import { largestFittingFontSize, searchLastResort } from './fontSearch';
+import { largestFittingFontSize, searchFillPolicy, searchLastResort } from './fontSearch';
 import { exactProfiledLineBreaks, optimalUniformLineBreaks, betterLineBreak, breaksOverflow } from './lineBreaks';
 import { comicLineCapacity, resolveBalloonAir } from './profiles';
 import { buildSegmentTemplates, buildSegmentMeasures } from './segments';
@@ -98,6 +98,62 @@ describe('contour core donor semantics', () => {
       overflowed: true,
       cost: lastResort ? 1 : 2,
     }));
+    expect(result.fontSize).toBe(9);
+    expect(result.cost).toBe(1);
+  });
+
+  it('fill policy takes a meaningfully larger split even far above the floor', () => {
+    // Clean fits at ~12, split fits at ~15: +25% gain clears the fill threshold where the
+    // donor policy would return the unbroken 12px line ("reinforcements" regression class).
+    const evaluate = (size: number, lastResort: boolean) => ({
+      fontSize: size,
+      overflowed: size > (lastResort ? 15.2 : 12.2),
+    });
+    expect(searchFillPolicy(9, 30, evaluate).fontSize).toBeGreaterThan(15);
+    expect(searchLastResort(9, 30, evaluate).fontSize).toBeLessThanOrEqual(12.2 + 1e-6);
+  });
+
+  it('fill policy keeps the clean fit when the split gain is negligible', () => {
+    const evaluate = (size: number, lastResort: boolean) => ({
+      fontSize: size,
+      overflowed: size > (lastResort ? 13.3 : 12.2),
+    });
+    // +9% gain is below the fill threshold: donor clean line wins over the split.
+    expect(searchFillPolicy(9, 30, evaluate).fontSize).toBeLessThanOrEqual(12.2 + 1e-6);
+  });
+
+  it('fill policy keeps the clean fit exactly at the gain threshold boundary', () => {
+    const evaluate = (size: number, lastResort: boolean) => ({
+      fontSize: size,
+      overflowed: size > (lastResort ? 11.5 : 10),
+    });
+    // 11.5 == 10 * 1.15 exactly: not a strict gain, so the clean line stays.
+    expect(searchFillPolicy(9, 30, evaluate).fontSize).toBeLessThanOrEqual(10 + 1e-6);
+  });
+
+  it('fill policy rejects a split that only exists as overflow and keeps clean', () => {
+    const evaluate = (size: number, lastResort: boolean) => ({
+      fontSize: size,
+      overflowed: lastResort ? true : size > 12.2,
+    });
+    expect(searchFillPolicy(9, 30, evaluate).fontSize).toBeLessThanOrEqual(12.2 + 1e-6);
+  });
+
+  it('fill policy uses the split when clean never fits', () => {
+    const evaluate = (size: number, lastResort: boolean) => ({
+      fontSize: size,
+      overflowed: lastResort ? size > 13 : true,
+    });
+    expect(searchFillPolicy(9, 30, evaluate).fontSize).toBeGreaterThan(12.9);
+  });
+
+  it('fill policy preserves the donor uniform fallback when nothing fits', () => {
+    const evaluate = (size: number, lastResort: boolean) => ({
+      fontSize: size,
+      overflowed: true,
+      cost: lastResort ? 1 : 2,
+    });
+    const result = searchFillPolicy(9, 30, evaluate);
     expect(result.fontSize).toBe(9);
     expect(result.cost).toBe(1);
   });

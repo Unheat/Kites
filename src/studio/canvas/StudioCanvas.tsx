@@ -36,8 +36,13 @@ import { StudioSourceSampler } from './StudioSourceSampler';
 import { ToolViewModePolicy } from './tools/ToolViewModePolicy';
 import { requestStudioInpaint, requestStudioOcr } from '../bridge/offscreenStudioBridge';
 import { computeRotatedBounds, getHandleCursor } from './transformMath';
-import { applyTextObjectUpdates, prepareInitialTextObject, CJK_CHARACTER_REGEX } from './studioTypeset';
+import { applyTextObjectUpdates, prepareInitialTextObject, CJK_CHARACTER_REGEX, getTypesetMeasureContext } from './studioTypeset';
 import { unwrapWrappedText } from '../../offscreen/utils/typography';
+import {
+  canUseContourEditorGeometry, charIndexFromPoint, computeContourEditorGeometry,
+  type ContourEditorGeometry,
+} from './contourInlineEditing';
+import { ContourSelectionOverlay } from './ContourSelectionOverlay';
 import { extractTypographyStyle } from '../state/studioStore';
 import { ensureFontsRegistered, preloadFontFamilies } from '../../shared/fontLibrary';
 import type {
@@ -1531,6 +1536,51 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
           const hasCjk = CJK_CHARACTER_REGEX.test(editingObj.text);
           const isVerticalMode = Boolean(editingObj.isVertical && hasCjk);
 
+          // Contour geometry: derive exact per-char cells from the solver placements so the
+          // selection highlight, caret, and pointer mapping agree with the painted text
+          // instead of the textarea's uniform layout. Falls back to native editing when the
+          // editor value's lines no longer match the placements (e.g. healed hyphens).
+          const rawEditorValue =
+            (!isVerticalMode && !editingObj.text.includes('\n') && editingObj.lines && editingObj.lines.length > 1)
+              ? unwrapWrappedText(editingObj.lines.join('\n'))
+              : editingObj.text;
+          const measureCtx = getTypesetMeasureContext();
+          let contourGeometry: ContourEditorGeometry | null = null;
+          if (measureCtx && canUseContourEditorGeometry(editingObj)) {
+            const previousLetterSpacing = measureCtx.letterSpacing;
+            measureCtx.letterSpacing = `${editingObj.letterSpacing ?? 0}px`;
+            try {
+              const candidate = computeContourEditorGeometry(editingObj, zoom, (font, char) => {
+                measureCtx.font = font;
+                return measureCtx.measureText(char).width;
+              });
+              // Offsets must address exactly the text the textarea edits.
+              if (candidate && candidate.value === rawEditorValue) contourGeometry = candidate;
+            } finally {
+              measureCtx.letterSpacing = previousLetterSpacing;
+            }
+          }
+          // The local inlineSelection is editing-session scoped (reset with the editor).
+          const selection = inlineSelection;
+          const selectionStart = selection ? Math.min(selection.start, selection.end) : null;
+          const selectionEnd = selection ? Math.max(selection.start, selection.end) : null;
+
+          const syncInlineSelection = (start: number, end: number) => {
+            setInlineSelection({ start, end });
+            studioStore.setState({
+              inlineSelection: { textId: editingObj.id, start, end },
+            });
+          };
+          const indexAtPointer = (e: React.PointerEvent | React.MouseEvent): number => {
+            if (!contourGeometry) return 0;
+            const hostRect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+            return charIndexFromPoint(
+              contourGeometry,
+              e.clientX - hostRect.left,
+              e.clientY - hostRect.top,
+            );
+          };
+
           return (
             <div
               style={{
@@ -1625,10 +1675,23 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
                   resize: 'none',
                   boxSizing: 'border-box',
                   overflow: 'hidden',
-                  caretColor: '#f4446d',
+                  // With exact contour geometry the overlay paints highlight and caret, so
+                  // the textarea's uniform-layout selection and caret stay invisible.
+                  caretColor: contourGeometry ? 'transparent' : '#f4446d',
+                  pointerEvents: contourGeometry ? 'none' : undefined,
                 }}
                 autoFocus
               />
+              {contourGeometry && (
+                <ContourSelectionOverlay
+                  geometry={contourGeometry}
+                  selectionStart={selectionStart}
+                  selectionEnd={selectionEnd}
+                  onIndexAtPointer={indexAtPointer}
+                  onSelectionChange={syncInlineSelection}
+                  onFocusEditor={() => inlineTextareaRef.current?.focus()}
+                />
+              )}
             </div>
           );
         })()}

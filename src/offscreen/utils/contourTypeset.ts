@@ -12,13 +12,13 @@ export {
   DIALOGUE_SENTENCE_MAX_FONT_SIZE, DIALOGUE_DENSE_MAX_FONT_SIZE,
   CONTAINER_WIDTH_CEILING_RATIO, CONTAINER_HEIGHT_CEILING_RATIO,
   LINE_SLACK_WEIGHT, LINE_OVERFLOW_WEIGHT, DISCRETIONARY_HYPHEN_PENALTY,
-  MIN_HYPHEN_WORD_LENGTH, MIN_HYPHEN_SIDE_LENGTH,
+  MIN_HYPHEN_WORD_LENGTH, MIN_HYPHEN_SIDE_LENGTH, CONTOUR_FILL_MIN_GAIN,
   CONTOUR_ELLIPSE_POINTS, CORNER_CONTOUR_SEGMENTS,
 } from './contour/constants';
 
 export type {
   LineProfile, SegmentMeasure, LineBreakResult, PositionedLine, WrapContourResult,
-  WrapContourOptions, ContourBounds, SegmentTemplate,
+  WrapContourOptions, ContourBounds, SegmentTemplate, ContourSizingPolicy,
 } from './contour/types';
 
 export {

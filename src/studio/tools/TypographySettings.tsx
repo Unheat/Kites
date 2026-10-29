@@ -30,7 +30,7 @@ function displayFontFamily(stack: string): string {
 }
 import { studioStore, useStudioStore, extractTypographyStyle } from '../state/studioStore';
 import { studioUndoStack } from '../state/undoStack';
-import { applyTextObjectUpdates, prepareInitialTextObject } from '../canvas/studioTypeset';
+import { applyTextObjectUpdates, CJK_CHARACTER_REGEX, prepareInitialTextObject } from '../canvas/studioTypeset';
 import type { TextObject, CharStyleOverride } from '../types';
 
 const SELECTION_ELIGIBLE_KEYS: (keyof CharStyleOverride)[] = [
@@ -84,6 +84,10 @@ export const TypographySettings: React.FC = () => {
   const effectiveTypesetMode = globalEditMode
     ? globalTypesetMode
     : selectedObj?.typesetMode ?? globalTypesetMode;
+  // Contour fitting owns baseline pitch, except vertical CJK columns still consume lineSpacing
+  // (recalculateBlockTypeset routes isVertical CJK through the vertical branch before mode).
+  const isVerticalCjk = Boolean(selectedObj?.isVertical && CJK_CHARACTER_REGEX.test(selectedObj.text));
+  const lineSpacingEffective = effectiveTypesetMode !== 'contour' || isVerticalCjk;
 
   const clipboardStyle = useStudioStore((s) => s.clipboardStyle);
   const [copiedOriginal, setCopiedOriginal] = useState(false);
@@ -93,6 +97,8 @@ export const TypographySettings: React.FC = () => {
 
   const cropCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const initialTextObjectsRef = useRef<TextObject[] | null>(null);
+  /** Open slider gesture snapshot; one drag/keyboard hold commits a single undo entry. */
+  const sliderGestureRef = useRef<{ before: TextObject[] } | null>(null);
 
   const isSelectionActive = Boolean(
     !globalEditMode &&
@@ -173,9 +179,10 @@ export const TypographySettings: React.FC = () => {
   /**
    * Updates current selection or all boxes, reflowing only layout-affecting changes.
    * @param partial Changed typography or paint fields.
-   * @returns Nothing; updates store and records one undo entry.
+   * @param options Transient updates (drag frames) defer the undo entry to gesture commit.
+   * @returns Nothing; updates store and records one undo entry unless transient.
    */
-  const updateSelected = (partial: Partial<TextObject>) => {
+  const updateSelected = (partial: Partial<TextObject>, options: { transient?: boolean } = {}) => {
     const prev = [...textObjects];
     let next: TextObject[];
 
@@ -237,11 +244,42 @@ export const TypographySettings: React.FC = () => {
     }
 
     studioStore.setState({ textObjects: next });
+    if (options.transient) return;
     studioUndoStack.push({
       id: `text-edit-${Date.now()}`,
       timestamp: Date.now(),
       description: isSelectionActive ? 'Format Selected Text' : 'Update Typography',
       textObjects: { before: prev, after: next },
+    });
+  };
+
+  /**
+   * Opens a slider gesture: snapshots the scene once before the first drag frame so the
+   * whole gesture (pointer drag or held arrow key) becomes a single undo entry, matching
+   * the canvas drag handles' commit-on-release behavior.
+   * @returns Nothing.
+   */
+  const beginSliderGesture = () => {
+    if (!sliderGestureRef.current) {
+      sliderGestureRef.current = { before: [...studioStore.getState().textObjects] };
+    }
+  };
+
+  /**
+   * Commits the open slider gesture as one undo entry when the scene actually changed.
+   * @returns Nothing.
+   */
+  const commitSliderGesture = () => {
+    const gesture = sliderGestureRef.current;
+    sliderGestureRef.current = null;
+    if (!gesture) return;
+    const current = studioStore.getState().textObjects;
+    if (JSON.stringify(gesture.before) === JSON.stringify(current)) return;
+    studioUndoStack.push({
+      id: `slider-gesture-${Date.now()}`,
+      timestamp: Date.now(),
+      description: 'Update Typography',
+      textObjects: { before: gesture.before, after: current },
     });
   };
 
@@ -779,14 +817,24 @@ export const TypographySettings: React.FC = () => {
             min="8"
             max="120"
             value={effectiveFontSize}
-            onChange={(e) => updateSelected({ fontSize: Number(e.target.value) })}
+            onPointerDown={beginSliderGesture}
+            onChange={(e) => {
+              beginSliderGesture();
+              updateSelected({ fontSize: Number(e.target.value) }, { transient: true });
+            }}
+            onPointerUp={commitSliderGesture}
+            onPointerCancel={commitSliderGesture}
+            onBlur={commitSliderGesture}
+            onKeyUp={(e) => { if (!e.repeat) commitSliderGesture(); }}
             className="w-full accent-[#f4446d]"
           />
         </div>
         <div>
           <div className="flex justify-between text-slate-400 mb-1">
             <span>Line Space</span>
-            <span className="font-mono text-slate-200">{(obj.lineSpacing || 1.2).toFixed(1)}x</span>
+            <span className="font-mono text-slate-200">
+              {lineSpacingEffective ? (obj.lineSpacing || 1.2).toFixed(1) + 'x' : '1.2x'}
+            </span>
           </div>
           <input
             type="range"
@@ -794,11 +842,28 @@ export const TypographySettings: React.FC = () => {
             max="2.5"
             step="0.1"
             value={obj.lineSpacing || 1.2}
-            onChange={(e) => updateSelected({ lineSpacing: Number(e.target.value) })}
-            className="w-full accent-[#f4446d]"
+            disabled={!lineSpacingEffective}
+            title={lineSpacingEffective
+              ? undefined
+              : 'Contour typesetting fits lines to the bubble shape; line spacing stays at the engine default.'}
+            onPointerDown={beginSliderGesture}
+            onChange={(e) => {
+              beginSliderGesture();
+              updateSelected({ lineSpacing: Number(e.target.value) }, { transient: true });
+            }}
+            onPointerUp={commitSliderGesture}
+            onPointerCancel={commitSliderGesture}
+            onBlur={commitSliderGesture}
+            onKeyUp={(e) => { if (!e.repeat) commitSliderGesture(); }}
+            className="w-full accent-[#f4446d] disabled:opacity-40 disabled:cursor-not-allowed"
           />
         </div>
       </div>
+      {!lineSpacingEffective && (
+        <p className="text-[11px] text-slate-500 -mt-1">
+          Line spacing is fixed while Contour typesetting fits text to the bubble outline.
+        </p>
+      )}
 
       {/* Formatting & Alignment */}
       <div className="flex items-center gap-1.5">
@@ -925,7 +990,15 @@ export const TypographySettings: React.FC = () => {
             max="180"
             step="1"
             value={obj.rotation || 0}
-            onChange={(e) => updateSelected({ rotation: Number(e.target.value) })}
+            onPointerDown={beginSliderGesture}
+            onChange={(e) => {
+              beginSliderGesture();
+              updateSelected({ rotation: Number(e.target.value) }, { transient: true });
+            }}
+            onPointerUp={commitSliderGesture}
+            onPointerCancel={commitSliderGesture}
+            onBlur={commitSliderGesture}
+            onKeyUp={(e) => { if (!e.repeat) commitSliderGesture(); }}
             className="flex-1 accent-[#f4446d]"
           />
           <div className="flex items-center gap-1 shrink-0">

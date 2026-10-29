@@ -1,4 +1,4 @@
-import { FONT_BINARY_SEARCH_MAX_ITER, FONT_PROBE_STEPS, FONT_SEARCH_TOLERANCE } from './constants';
+import { CONTOUR_FILL_MIN_GAIN, FONT_BINARY_SEARCH_MAX_ITER, FONT_PROBE_STEPS, FONT_SEARCH_TOLERANCE } from './constants';
 import { add, div, F32_EPSILON, f32, mul, sub } from './numeric';
 
 /**
@@ -51,5 +51,27 @@ export function searchLastResort<T extends { fontSize: number; overflowed: boole
   if (clean && Math.floor(clean.fontSize) > Math.floor(minimum)) return clean;
   const hyphenated = largestFittingFontSize(minimum, maximum, (size) => evaluate(size, true), fits);
   if (clean && hyphenated && Math.floor(hyphenated.fontSize) > Math.floor(clean.fontSize)) return hyphenated;
+  return clean ?? hyphenated ?? evaluate(minimum, true);
+}
+
+/**
+ * Kites fill policy over the same core: compare the largest clean fit with the largest fit
+ * that allows discretionary breaks, and take the split when it gains meaningfully more size
+ * even far above the readability floor. Each hyphenated probe still tries clean breaks first,
+ * and the donor tail (minimum-size uniform fallback) is preserved when nothing fits.
+ * @param minimum Readability floor. @param maximum Font ceiling.
+ * @param evaluate Evaluator taking font size and LastResort toggle.
+ * @param minGain Relative size gain required for the split to win (Kites constant).
+ * @returns Selected layout.
+ */
+export function searchFillPolicy<T extends { fontSize: number; overflowed: boolean }>(
+  minimum: number, maximum: number,
+  evaluate: (size: number, lastResort: boolean) => T,
+  minGain: number = CONTOUR_FILL_MIN_GAIN,
+): T {
+  const fits = (candidate: T): boolean => !candidate.overflowed;
+  const clean = largestFittingFontSize(minimum, maximum, (size) => evaluate(size, false), fits);
+  const hyphenated = largestFittingFontSize(minimum, maximum, (size) => evaluate(size, true), fits);
+  if (clean && hyphenated && hyphenated.fontSize > mul(clean.fontSize, add(1, minGain))) return hyphenated;
   return clean ?? hyphenated ?? evaluate(minimum, true);
 }

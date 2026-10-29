@@ -45,7 +45,9 @@ export class SimpleRectTypesetter implements ITypesetStrategy {
         inlineAir: options.inlineAir,
         targetLang: options.targetLang ?? 'en',
         isBold: options.isBold,
-        isItalic: options.isItalic
+        isItalic: options.isItalic,
+        // Caption boxes keep the donor search unless a caller explicitly selects a policy.
+        sizingPolicy: options.sizingPolicy
       }
     );
 

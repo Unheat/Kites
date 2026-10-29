@@ -38,6 +38,14 @@ export interface ContourTextMetrics {
 }
 /** Records when width-only adapters cannot provide true glyph ink bounds. */
 export type MetricsSource = 'actual-ink' | 'font-bounds-fallback' | 'advance-only-fallback';
+/**
+ * Font search policy over the shared donor core.
+ * `donor` reproduces the pinned Koharu global clean-first search (hyphenation only near the
+ * readability floor). `fill` is a Kites extension: it compares the largest clean fit with the
+ * largest fit that allows discretionary breaks and prefers the split when it gains meaningfully
+ * more size, regardless of the floor bucket. Selection only — geometry, DP, and placement stay donor.
+ */
+export type ContourSizingPolicy = 'donor' | 'fill';
 /** Public positioned contour result. */
 export interface WrapContourResult {
   lines: string[]; positionedLines?: PositionedLine[]; fontSize: number;
@@ -53,6 +61,8 @@ export interface WrapContourOptions {
   /** Explicit inset layout frame. Contour coordinates are frame-local and may extend outside it. */
   frame?: { width: number; height: number };
   measureMetrics?: (text: string, fontSize: number) => ContourTextMetrics;
+  /** Font search selection. Default `donor` keeps pinned renderer behavior. */
+  sizingPolicy?: ContourSizingPolicy;
 }
 /** Measured glyph ink before and after baseline. */
 export interface InkBand { before: number; after: number }

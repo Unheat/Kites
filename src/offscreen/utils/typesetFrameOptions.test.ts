@@ -64,6 +64,18 @@ describe('Explicit typeset frame propagation', () => {
     );
 
     expect(captured.calls[0].options.frame).toEqual({ width: 320, height: 180 });
+    // The contour route defaults to the Kites fill policy so acceptance and render agree.
+    expect(captured.calls[0].options.sizingPolicy).toBe('fill');
+    // An explicit caller policy always wins over the route default.
+    captured.calls.length = 0;
+    new ContourDpTypesetter().typeset(
+      'Hello there',
+      { x: 0, y: 0, w: 100, h: 50 },
+      undefined,
+      {} as CanvasRenderingContext2D,
+      { fontFamily: 'sans-serif', frame: { width: 320, height: 180 }, sizingPolicy: 'donor' },
+    );
+    expect(captured.calls[0].options.sizingPolicy).toBe('donor');
   });
 
   it('uses the explicit frame for simple rectangular typesetting and contour coordinates', () => {
@@ -76,6 +88,8 @@ describe('Explicit typeset frame propagation', () => {
     );
 
     expect(captured.calls[0].options.frame).toEqual({ width: 260, height: 140 });
+    // Caption boxes keep the donor clean-first search unless a caller opts into a policy.
+    expect(captured.calls[0].options.sizingPolicy).toBeUndefined();
   });
 
   it('applies the frame directly for Studio contour edits (no double inset)', () => {
@@ -83,6 +97,7 @@ describe('Explicit typeset frame propagation', () => {
     // The chamber inset belongs to callers that own a whole-chamber contour; Studio already
     // supplies the box frame, so solver placements must pass through unshifted.
     expect(captured.calls[0].options.frame).toEqual({ width: 200, height: 100 });
+    expect(captured.calls[0].options.sizingPolicy).toBe('fill');
     expect(result.positionedLines?.[0]).toMatchObject({ x: 0, y: 0, baseline: 8 });
   });
 

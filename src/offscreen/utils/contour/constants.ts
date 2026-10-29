@@ -25,6 +25,13 @@ export const INK_PAD = 1;
 /** Exact donor minimum hyphenatable word length and compact fragment bounds. */
 export const MIN_HYPHEN_WORD_LENGTH = 5;
 export const MIN_HYPHEN_SIDE_LENGTH = 2;
+/**
+ * Kites fill policy: minimum relative font-size gain the hyphenated candidate must offer over
+ * the clean fit before the split wins. Kites extension constant — not a donor value. Calibrated
+ * so a split must buy visibly larger text (reinforcements-class cases) while near ties keep
+ * the donor's unbroken line.
+ */
+export const CONTOUR_FILL_MIN_GAIN = 0.15;
 /** Ellipse approximation used by existing adapters, not native donor ellipse fallback. */
 export const CONTOUR_ELLIPSE_POINTS = 32;
 /** Existing rounded-rectangle approximation resolution. */

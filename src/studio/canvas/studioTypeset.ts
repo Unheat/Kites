@@ -449,7 +449,10 @@ export function recalculateBlockTypeset(
           frame: { width, height },
           targetLang,
           isBold: style.bold,
-          isItalic: style.italic
+          isItalic: style.italic,
+          // Same Kites fill policy as the pipeline contour route (ContourDpTypesetter
+          // default) so acceptance measurement, final render, and Studio reflow agree.
+          sizingPolicy: 'fill'
         }
       );
       if (!result) return { fontSize: fallbackSize, lines: [sourceText] };

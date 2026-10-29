@@ -4,7 +4,7 @@ import type {
 } from './types';
 import { buildSegmentTemplates, measureSegments, buildSegmentMeasures } from './segments';
 import { exactProfiledLineBreaks, uniformWithPolicy, betterLineBreak } from './lineBreaks';
-import { largestFittingFontSize, searchLastResort } from './fontSearch';
+import { largestFittingFontSize, searchFillPolicy, searchLastResort } from './fontSearch';
 import { contourProfiles, computeContourProfiles, resolveBalloonAir, comicLineCapacity } from './profiles';
 import { polygonInlineSpans } from './geometry';
 import { resolveMetrics, measureInkBandWithSource, type ResolvedMetrics } from './metrics';
@@ -14,7 +14,7 @@ import { finalizeContourLayout } from './placement';
 
 export {
   buildSegmentTemplates, measureSegments, buildSegmentMeasures, exactProfiledLineBreaks,
-  uniformWithPolicy, betterLineBreak, largestFittingFontSize, searchLastResort,
+  uniformWithPolicy, betterLineBreak, largestFittingFontSize, searchLastResort, searchFillPolicy,
   contourProfiles, computeContourProfiles, polygonInlineSpans, resolveMetrics,
   resolveBalloonAir, comicLineCapacity,
 };
@@ -125,7 +125,11 @@ export function wrapTextContour(text: string, contour: Point2D[], ctx: CanvasRen
     const placed = finalizeContourLayout(broken, size, mul(size, linePitch), metricsAt(size), frame);
     return { ...broken, width: placed.width, height: placed.height, overflowed: placed.overflowed, fontSize: size };
   };
-  const selected = searchLastResort(minFont, maxFont, probe);
+  // Donor global policy: clean-first with floor-bucket LastResort recovery. The Kites
+  // `fill` policy compares the largest clean fit against the largest split fit instead.
+  const selected = options.sizingPolicy === 'fill'
+    ? searchFillPolicy(minFont, maxFont, probe)
+    : searchLastResort(minFont, maxFont, probe);
 
   const finalSize = selected.fontSize ?? minFont;
   const finalMetrics = metricsAt(finalSize);

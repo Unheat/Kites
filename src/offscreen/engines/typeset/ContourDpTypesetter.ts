@@ -7,9 +7,12 @@
 
 import type { Point2D } from '../../../shared/utils/geometry';
 import type { BoxRect } from '../../utils/bubbleExpansion';
-import { MINIMUM_READABLE_FONT_SIZE } from '../../utils/contourTypeset';
+import { MINIMUM_READABLE_FONT_SIZE, type ContourSizingPolicy } from '../../utils/contourTypeset';
 import { wrapTextContour } from '../../utils/contourTypeset';
 import type { ITypesetStrategy, TypesetMode, TypesetOptions, TypesetResult } from './ITypesetStrategy';
+
+/** Contour route default: Kites fill policy. Simple Rect and Auto Balloon keep the donor search. */
+export const DEFAULT_CONTOUR_SIZING_POLICY: ContourSizingPolicy = 'fill';
 
 export class ContourDpTypesetter implements ITypesetStrategy {
   readonly mode: TypesetMode = 'contour';
@@ -60,7 +63,8 @@ export class ContourDpTypesetter implements ITypesetStrategy {
         isBold: options.isBold,
         isItalic: options.isItalic,
         targetCenterY: options.targetCenterY,
-        measureCache: options.measureCache
+        measureCache: options.measureCache,
+        sizingPolicy: options.sizingPolicy ?? DEFAULT_CONTOUR_SIZING_POLICY
       }
     );
 
