@@ -122,12 +122,42 @@ describe('contour core donor semantics', () => {
     expect(searchFillPolicy(9, 30, evaluate).fontSize).toBeLessThanOrEqual(12.2 + 1e-6);
   });
 
+  it('fill policy taxes each extra cut so spray-cut layouts need far more gain', () => {
+    // Five cuts at +18% gain: required = 0.2 + 4 × 0.2 = 1.0, so the clean line stays.
+    const evaluate = (size: number, lastResort: boolean) => ({
+      fontSize: size,
+      overflowed: size > (lastResort ? 13 : 11),
+      discretionaryCuts: lastResort ? 5 : 0,
+    });
+    expect(searchFillPolicy(9, 30, evaluate).fontSize).toBeLessThanOrEqual(11 + 1e-6);
+  });
+
+  it('fill policy accepts a multi-cut split only when it clears the taxed threshold', () => {
+    // Five cuts at +105% gain clear 0.2 + 4 × 0.2 = 1.0 required.
+    const evaluate = (size: number, lastResort: boolean) => ({
+      fontSize: size,
+      overflowed: size > (lastResort ? 22.6 : 11),
+      discretionaryCuts: lastResort ? 5 : 0,
+    });
+    expect(searchFillPolicy(9, 30, evaluate).fontSize).toBeGreaterThan(22.5);
+  });
+
+  it('fill policy charges the single long-word cut only the base threshold', () => {
+    // One cut (the REINFORCEMENTS case): required stays at the base 0.2.
+    const evaluate = (size: number, lastResort: boolean) => ({
+      fontSize: size,
+      overflowed: size > (lastResort ? 12.5 : 10),
+      discretionaryCuts: lastResort ? 1 : 0,
+    });
+    expect(searchFillPolicy(9, 30, evaluate).fontSize).toBeGreaterThan(12.4);
+  });
+
   it('fill policy keeps the clean fit exactly at the gain threshold boundary', () => {
     const evaluate = (size: number, lastResort: boolean) => ({
       fontSize: size,
-      overflowed: size > (lastResort ? 11.5 : 10),
+      overflowed: size > (lastResort ? 12 : 10),
     });
-    // 11.5 == 10 * 1.15 exactly: not a strict gain, so the clean line stays.
+    // 12 == 10 * 1.2 exactly: not a strict gain, so the clean line stays.
     expect(searchFillPolicy(9, 30, evaluate).fontSize).toBeLessThanOrEqual(10 + 1e-6);
   });
 

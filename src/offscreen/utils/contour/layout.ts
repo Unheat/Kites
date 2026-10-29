@@ -98,7 +98,11 @@ export function wrapTextContour(text: string, contour: Point2D[], ctx: CanvasRen
     return templateCache.get(hyphenate)!;
   };
 
-  const evaluate = (size: number, hyphenate: boolean): LineBreakResult => {
+  /** Count discretionary hyphen cuts among the chosen break points. */
+  const countHyphenCuts = (chosen: LineBreakResult, measured: ReturnType<typeof measureSegments>): number =>
+    chosen.breaks.filter((index) => measured[index - 1]?.isHyphenBreak).length;
+
+  const evaluate = (size: number, hyphenate: boolean): LineBreakResult & { discretionaryCuts: number } => {
     const templates = templatesFor(hyphenate);
     const segments = measureSegments(templates, measureAt(size));
     const ink = measureInkBandWithSource(templates, metricsAt(size));
@@ -106,7 +110,13 @@ export function wrapTextContour(text: string, contour: Point2D[], ctx: CanvasRen
     const air = resolveBalloonAir(inlineAir, ink.band);
     const maxLines = comicLineCapacity(frame.height, air, ink.band, lineHeight, segments.length);
     const fallbackWidth = Math.max(1, sub(frame.width, mul(air, 2)));
-    if (maxLines <= 0) return { ...uniformWithPolicy(segments, fallbackWidth, hyphenate), overflowed: true };
+    // The Kites fill policy prices cut count, so the evaluator reports how many of the
+    // chosen break points are discretionary hyphens (clean templates can never cut).
+    const withCuts = (chosen: LineBreakResult): LineBreakResult & { discretionaryCuts: number } =>
+      ({ ...chosen, discretionaryCuts: hyphenate ? countHyphenCuts(chosen, segments) : 0 });
+    if (maxLines <= 0) {
+      return withCuts({ ...uniformWithPolicy(segments, fallbackWidth, hyphenate), overflowed: true });
+    }
     let best: LineBreakResult | null = null;
     for (let count = 1; count <= maxLines; count++) {
       const profiles = contourProfiles(local, count, lineHeight, ink.band, frame, air, air);
@@ -114,16 +124,19 @@ export function wrapTextContour(text: string, contour: Point2D[], ctx: CanvasRen
       const candidate = exactProfiledLineBreaks(segments, profiles, hyphenate);
       if (candidate && betterLineBreak(candidate, best)) best = candidate;
     }
-    return best ?? { ...uniformWithPolicy(segments, fallbackWidth, hyphenate), overflowed: true };
+    return withCuts(best ?? { ...uniformWithPolicy(segments, fallbackWidth, hyphenate), overflowed: true });
   };
 
   // Each probe still prefers clean breaks; hyphenation is a last resort within the size.
-  const probe = (size: number, lastResort: boolean): LineBreakResult & { fontSize: number } => {
+  const probe = (size: number, lastResort: boolean): LineBreakResult & { fontSize: number; discretionaryCuts: number } => {
     const clean = evaluate(size, false);
     // LastResort is selected by chord overflow before padded run bounds are checked.
     const broken = !clean.overflowed || !lastResort ? clean : evaluate(size, true);
     const placed = finalizeContourLayout(broken, size, mul(size, linePitch), metricsAt(size), frame);
-    return { ...broken, width: placed.width, height: placed.height, overflowed: placed.overflowed, fontSize: size };
+    return {
+      ...broken, width: placed.width, height: placed.height, overflowed: placed.overflowed,
+      fontSize: size, discretionaryCuts: broken.discretionaryCuts,
+    };
   };
   // Donor global policy: clean-first with floor-bucket LastResort recovery. The Kites
   // `fill` policy compares the largest clean fit against the largest split fit instead.

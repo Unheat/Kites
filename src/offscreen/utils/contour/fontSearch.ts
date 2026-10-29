@@ -1,4 +1,7 @@
-import { CONTOUR_FILL_MIN_GAIN, FONT_BINARY_SEARCH_MAX_ITER, FONT_PROBE_STEPS, FONT_SEARCH_TOLERANCE } from './constants';
+import {
+  CONTOUR_FILL_EXTRA_CUT_PENALTY, CONTOUR_FILL_MIN_GAIN,
+  FONT_BINARY_SEARCH_MAX_ITER, FONT_PROBE_STEPS, FONT_SEARCH_TOLERANCE,
+} from './constants';
 import { add, div, F32_EPSILON, f32, mul, sub } from './numeric';
 
 /**
@@ -57,21 +60,31 @@ export function searchLastResort<T extends { fontSize: number; overflowed: boole
 /**
  * Kites fill policy over the same core: compare the largest clean fit with the largest fit
  * that allows discretionary breaks, and take the split when it gains meaningfully more size
- * even far above the readability floor. Each hyphenated probe still tries clean breaks first,
- * and the donor tail (minimum-size uniform fallback) is preserved when nothing fits.
+ * even far above the readability floor. The required gain grows by
+ * {@link CONTOUR_FILL_EXTRA_CUT_PENALTY} for each discretionary cut beyond the first, so
+ * single long-word cuts pass while spray-cut layouts fall back to the clean fit. Each
+ * hyphenated probe still tries clean breaks first, and the donor tail (minimum-size uniform
+ * fallback) is preserved when nothing fits.
  * @param minimum Readability floor. @param maximum Font ceiling.
- * @param evaluate Evaluator taking font size and LastResort toggle.
- * @param minGain Relative size gain required for the split to win (Kites constant).
+ * @param evaluate Evaluator taking font size and LastResort toggle; may report the winning
+ * layout's discretionary cut count via `discretionaryCuts` (missing counts as zero).
+ * @param minGain Base relative size gain required for the split to win (Kites constant).
+ * @param extraCutPenalty Additional required gain per cut beyond the first (Kites constant).
  * @returns Selected layout.
  */
-export function searchFillPolicy<T extends { fontSize: number; overflowed: boolean }>(
+export function searchFillPolicy<T extends { fontSize: number; overflowed: boolean; discretionaryCuts?: number }>(
   minimum: number, maximum: number,
   evaluate: (size: number, lastResort: boolean) => T,
   minGain: number = CONTOUR_FILL_MIN_GAIN,
+  extraCutPenalty: number = CONTOUR_FILL_EXTRA_CUT_PENALTY,
 ): T {
   const fits = (candidate: T): boolean => !candidate.overflowed;
   const clean = largestFittingFontSize(minimum, maximum, (size) => evaluate(size, false), fits);
   const hyphenated = largestFittingFontSize(minimum, maximum, (size) => evaluate(size, true), fits);
-  if (clean && hyphenated && hyphenated.fontSize > mul(clean.fontSize, add(1, minGain))) return hyphenated;
+  if (clean && hyphenated) {
+    const extraCuts = Math.max(0, (hyphenated.discretionaryCuts ?? 0) - 1);
+    const requiredGain = add(minGain, mul(extraCutPenalty, extraCuts));
+    if (hyphenated.fontSize > mul(clean.fontSize, add(1, requiredGain))) return hyphenated;
+  }
   return clean ?? hyphenated ?? evaluate(minimum, true);
 }
