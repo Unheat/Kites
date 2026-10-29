@@ -15,7 +15,7 @@ The factory gives fixed contours priority, even when `typesetMode` is `simple`. 
 
 ## 2. Offscreen Strategy: Rectangle Through Contour DP
 
-`SimpleRectTypesetter.typeset()` preserves authored line breaks and constructs the box-local quad `(0,0), (W,0), (W,H), (0,H)`. The shared inset adapter supplies an explicit inset frame and shifted contour to the source-ported core, with selected font and language. Generated-wrap healing belongs to the restore/edit boundary, not the pure strategy. It does not implement a separate greedy backend solver.
+`SimpleRectTypesetter.typeset()` preserves authored line breaks and constructs the box-local quad `(0,0), (W,0), (W,H), (0,H)` and passes the explicit frame directly to the source-ported core with the selected font and language. Generated-wrap healing belongs to the restore/edit boundary, not the pure strategy. It does not implement a separate greedy backend solver.
 
 Rectangle scanlines provide constant interior spans; profile construction still applies the shared contour air, line-band sampling, and block-tip constraints. The useful width is therefore not universally captured by the old `W - 2 * 4px` formula alone.
 

@@ -105,7 +105,7 @@ Rust arithmetic is reproduced with focused `Math.fround` operations at layout bo
 
 ### Current automatic contour policy
 
-- Whole chamber dimensions and local contour enter a shared inset adapter. The pure solver receives an explicit inset frame, not a polygon bounding box masquerading as a frame.
+- Callers pass an explicit frame, and every production contour is already box-local (the geometry owner translates it), so the pure solver receives the frame directly. No hidden inset applies; the former whole-chamber inset adapter was removed once its callers moved to direct frames.
 - Default minimum is 9 px; deliberate authored constraints remain explicit. Default descriptor line pitch is 1.2.
 - Automatic horizontal maximum is the inset frame width. There is no implicit 48 px, word-count, width-percentage, or height-percentage cap in the contour route. Page-level XianScan harmonization applies only to free boxes.
 - Font probes and selected sizes remain fractional. Search uses eight intervals, up to ten refinements, and 0.01 px tolerance.
