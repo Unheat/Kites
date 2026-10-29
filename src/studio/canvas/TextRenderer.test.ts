@@ -267,4 +267,31 @@ describe('TextRenderer Rich Text (charStyles)', () => {
 
     expect(ctx.font).toContain('15.5px');
   });
+
+  it('keeps the positioned scanline path for styled runs instead of rectangular fallback', () => {
+    const ctx = createMockContext();
+    // One oversized styled span previously forced the whole block back to rectangular
+    // layout, spilling sized text outside the contour. It must stay chord-centered.
+    TextRenderer.renderText(ctx, {
+      id: 'styled-positioned', x: 0, y: 0, width: 200, height: 100,
+      text: 'AB\nCD', lines: ['AB', 'CD'],
+      positionedLines: [
+        { text: 'AB', x: 10, y: 6, width: 100, height: 20, baseline: 18 },
+        { text: 'CD', x: 12, y: 32, width: 90, height: 20, baseline: 44 },
+      ],
+      charStyles: [null, { fontSize: 24 } as any],
+      fontSize: 16, fontFamily: 'sans-serif', color: '#000',
+    });
+
+    const fills = vi.mocked(ctx.fillText).mock.calls;
+    // Styled runs paint per run: 'A' (base) and 'B' (sized override) at chord-centered X.
+    // Run widths use the mock's 8/char: total 16 → start at 10 + (100 - 16) / 2 = 52.
+    const firstLineFills = fills.filter((call) => call[2] === 18);
+    expect(firstLineFills.map((call) => call[0])).toEqual(['A', 'B']);
+    expect(firstLineFills[0][1]).toBe(52);
+    expect(firstLineFills[1][1]).toBe(60);
+    // Baselines stay at the solver placements for both lines.
+    expect(fills.map((call) => call[2])).toEqual(expect.arrayContaining([18, 44]));
+    expect(ctx.textBaseline).toBe('alphabetic');
+  });
 });

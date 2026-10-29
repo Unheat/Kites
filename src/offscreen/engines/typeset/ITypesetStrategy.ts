@@ -9,7 +9,7 @@
 
 import type { Point2D } from '../../../shared/utils/geometry';
 import type { BoxRect } from '../../utils/bubbleExpansion';
-import type { PositionedLine } from '../../utils/contourTypeset';
+import type { ContourSizingPolicy, PositionedLine } from '../../utils/contourTypeset';
 import type { MeasureCache } from '../../utils/typesetLayout';
 
 /**
@@ -32,6 +32,11 @@ export interface TypesetOptions {
   measureCache?: MeasureCache;
   /** Whole-chamber dimensions; fixed adapters apply the descriptor text inset once. Omit for container dims. */
   frame?: { width: number; height: number };
+  /**
+   * Contour font-search selection. Undefined lets each strategy apply its documented default
+   * (contour: Kites fill policy; simple: donor search) so acceptance and render stay consistent.
+   */
+  sizingPolicy?: ContourSizingPolicy;
 }
 
 export interface TypesetResult {

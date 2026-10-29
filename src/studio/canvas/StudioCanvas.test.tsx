@@ -11,6 +11,9 @@ vi.mock('./studioTypeset', () => ({
   applyTextObjectUpdates: layout.apply,
   prepareInitialTextObject: layout.prepare,
   CJK_CHARACTER_REGEX: /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/,
+  // No shared measure context in this suite: the contour selection overlay stays disabled
+  // and the inline editor keeps its native textarea selection behavior.
+  getTypesetMeasureContext: () => null,
 }));
 vi.mock('./TextRenderer', () => ({ TextRenderer: { renderText: vi.fn() } }));
 vi.mock('./CanvasFurniture', () => ({ CanvasFurniture: { drawSelectionFurniture: vi.fn() } }));

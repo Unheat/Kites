@@ -47,6 +47,18 @@ async function change(selector: string, value: string): Promise<void> {
   });
 }
 
+/**
+ * Drives a slider through a full pointer gesture: pointerdown, one change frame, pointerup.
+ * @param selector - Slider selector. @param value - Final native value.
+ */
+async function dragSlider(selector: string, value: string): Promise<void> {
+  const element = container.querySelector(selector) as HTMLInputElement;
+  if (!element) throw new Error(`Missing slider: ${selector}`);
+  await act(async () => { element.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); });
+  await change(selector, value);
+  await act(async () => { element.dispatchEvent(new PointerEvent('pointerup', { bubbles: true })); });
+}
+
 /** Mounts current store data without triggering any layout initialization from the sidebar. */
 async function render(): Promise<void> {
   await act(async () => { root.render(<TypographySettings />); });
@@ -241,6 +253,60 @@ describe('TypographySettings editing intent and reflow', () => {
     await change('input[type="range"]', '18');
     expect(studioStore.getState().textObjects[0].lines).toBe(lines);
     expect(measureDefaultLayout).not.toHaveBeenCalled();
+  });
+
+  it('commits a whole slider drag as one undo entry instead of one per frame', async () => {
+    await render();
+    await dragSlider('input[type="range"]', '26');
+    await dragSlider('input[type="range"]', '30');
+    // The mocked fitter returns a fixed 31px for every probe.
+    expect(studioStore.getState().textObjects[0].fontSize).toBe(31);
+    const undoActions = studioUndoStack['undoEntries'] as unknown[];
+    // Second drag produced an identical scene (mock size), so only the first gesture commits.
+    expect(undoActions).toHaveLength(1);
+    await act(async () => {
+      studioUndoStack.undo({ applyTextObjects: (objects) => studioStore.setState({ textObjects: objects }) });
+    });
+    expect(studioStore.getState().textObjects[0].fontSize).toBe(18);
+  });
+
+  it('commits keyboard slider steps on key release and skips empty gestures', async () => {
+    await render();
+    const slider = container.querySelector('input[type="range"]') as HTMLInputElement;
+    await act(async () => { slider.focus(); });
+    await change('input[type="range"]', '24');
+    await act(async () => {
+      slider.dispatchEvent(new KeyboardEvent('keyup', { key: 'ArrowRight', bubbles: true }));
+    });
+    expect(studioStore.getState().textObjects[0].fontSize).toBe(31);
+    expect((studioUndoStack['undoEntries'] as unknown[]).length).toBeGreaterThanOrEqual(1);
+    // Releasing a key without any change since the last commit records nothing.
+    const entriesBefore = (studioUndoStack['undoEntries'] as unknown[]).length;
+    await act(async () => {
+      slider.dispatchEvent(new KeyboardEvent('keyup', { key: 'ArrowRight', bubbles: true }));
+    });
+    expect((studioUndoStack['undoEntries'] as unknown[]).length).toBe(entriesBefore);
+  });
+
+  it('disables Line Space for contour objects with an explanation', async () => {
+    studioStore.setState({
+      textObjects: [makeObject('first', { typesetMode: 'contour' })], selectedTextId: 'first',
+    });
+    await render();
+    const lineSpaceSlider = container.querySelector('input[type="range"][step="0.1"]') as HTMLInputElement;
+    expect(lineSpaceSlider.disabled).toBe(true);
+    expect(lineSpaceSlider.title).toContain('Contour');
+    expect(container.textContent).toContain('Line spacing is fixed while Contour typesetting');
+  });
+
+  it('keeps Line Space enabled for vertical CJK contour columns that consume spacing', async () => {
+    studioStore.setState({
+      textObjects: [makeObject('first', { typesetMode: 'contour', isVertical: true, text: '注释对话' })],
+      selectedTextId: 'first',
+    });
+    await render();
+    const lineSpaceSlider = container.querySelector('input[type="range"][step="0.1"]') as HTMLInputElement;
+    expect(lineSpaceSlider.disabled).toBe(false);
   });
 
   it('initializes manual dialogue with Balanced Fit despite Caption Box editing default', async () => {

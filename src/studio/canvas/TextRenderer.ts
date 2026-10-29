@@ -102,8 +102,9 @@ export class TextRenderer {
 
   /**
    * Decides whether the Koharu scanline placements can drive painting directly.
-   * Requires one placement per line, finite geometry, and no per-character style
-   * overrides (the positioned bake path measures uniform object-level typography).
+   * Requires one placement per line and finite geometry. Per-character style overrides are
+   * supported through the styled-runs branch (they no longer force the whole block back to
+   * uniform rectangular layout, which made sized ranges spill outside the contour).
    *
    * @param obj - Text object carrying optional pipeline/reflow placements.
    * @param lines - Display-cased lines about to be painted.
@@ -112,7 +113,6 @@ export class TextRenderer {
   private static canUsePositionedLines(obj: TextObject, lines: string[]): boolean {
     const pls = obj.positionedLines;
     if (!pls || pls.length !== lines.length) return false;
-    if (Array.isArray(obj.charStyles) && obj.charStyles.some(Boolean)) return false;
     return pls.every((pl) =>
       [pl.x, pl.y, pl.width, pl.height].every((v) => Number.isFinite(v)) &&
       (pl.baseline === undefined || Number.isFinite(pl.baseline))
@@ -136,18 +136,46 @@ export class TextRenderer {
     obj: TextObject
   ): void {
     const pls = obj.positionedLines!;
+    const hasCharStyles = Array.isArray(obj.charStyles) && obj.charStyles.some(Boolean);
     ctx.textAlign = 'left';
+    let globalCharOffset = 0;
     for (let i = 0; i < lines.length; i++) {
       const pl = pls[i];
-      const lineWidth = ctx.measureText(lines[i]).width;
-      const x = pl.x + (pl.width - lineWidth) / 2;
-      if (pl.baseline !== undefined) {
-        ctx.textBaseline = 'alphabetic';
-        this.strokeAndFillText(ctx, lines[i], x, pl.baseline, obj);
+      if (hasCharStyles) {
+        // Styled runs keep their per-character fonts but center within the same scanline
+        // chord as the uniform path, so a sized range reflows inside the contour instead
+        // of falling back to full-width rectangular layout.
+        const runs = this.decomposeLineIntoStyledRuns(ctx, lines[i], globalCharOffset, obj);
+        const totalLineWidth = runs.reduce((sum, r) => sum + r.width, 0);
+        const startX = pl.x + (pl.width - totalLineWidth) / 2;
+        // Resolve the alphabetic baseline (or ink-top fallback) once for the whole line;
+        // the run painters inherit the ambient textBaseline.
+        ctx.textBaseline = pl.baseline !== undefined ? 'alphabetic' : 'top';
+        const runY = pl.baseline !== undefined ? pl.baseline : pl.y;
+        let curX = startX;
+        for (const run of runs) {
+          ctx.font = `${run.style.italic ? 'italic ' : ''}${run.style.bold ? 'bold ' : ''}${run.style.fontSize}px ${run.style.fontFamily || 'sans-serif'}`;
+          this.strokeOnlyText(ctx, run.text, curX, runY, run.style);
+          curX += run.width;
+        }
+        curX = startX;
+        for (const run of runs) {
+          ctx.font = `${run.style.italic ? 'italic ' : ''}${run.style.bold ? 'bold ' : ''}${run.style.fontSize}px ${run.style.fontFamily || 'sans-serif'}`;
+          this.fillOnlyText(ctx, run.text, curX, runY, run.style);
+          curX += run.width;
+        }
       } else {
-        ctx.textBaseline = 'top';
-        this.strokeAndFillText(ctx, lines[i], x, pl.y, obj);
+        const lineWidth = ctx.measureText(lines[i]).width;
+        const x = pl.x + (pl.width - lineWidth) / 2;
+        if (pl.baseline !== undefined) {
+          ctx.textBaseline = 'alphabetic';
+          this.strokeAndFillText(ctx, lines[i], x, pl.baseline, obj);
+        } else {
+          ctx.textBaseline = 'top';
+          this.strokeAndFillText(ctx, lines[i], x, pl.y, obj);
+        }
       }
+      globalCharOffset += lines[i].length + 1;
     }
   }
 
