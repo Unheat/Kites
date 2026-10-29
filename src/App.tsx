@@ -28,7 +28,7 @@ import {
 } from './shared/studioUpload';
 import { STUDIO_IMAGE_INPUT_ACCEPT } from './shared/constants';
 import { restoreTextObject } from './studio/state/persistedTextObjects';
-import { loadHyphenationLanguage } from './offscreen/utils/hyphenation';
+import { useLayoutReadiness } from './studio/state/layoutReadiness';
 
 export type DragHandle = 'move' | 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
 
@@ -262,8 +262,20 @@ export default function App() {
     return () => chrome.runtime.onMessage.removeListener(handleRuntimeMessage);
   }, [activeJobId, loadJobs, loadJobDetails]);
 
+  const activeJob = jobs.find((j) => j.id === activeJobId);
+  const activeJobTargetLang = activeJob?.targetLang;
+
   // Map Dexie TextBlocks to Studio TextObjects; keep identity stable during upload/UI updates.
-  const studioTextObjects = useMemo(() => textBlocks.map(restoreTextObject), [textBlocks]);
+  // The job language seeds hyphenation for legacy blocks that need a first-time reflow.
+  const studioTextObjects = useMemo(
+    () => textBlocks.map((block) => restoreTextObject(block, activeJobTargetLang)),
+    [textBlocks, activeJobTargetLang]
+  );
+
+  // Re-flow only layouts measured while hyphenation/fonts were still loading; persisted
+  // lines, moves, selections, edits, and undo stacks are never touched or reset.
+  // Page id is a dependency so a job switch cancels the previous wait instead of retrying it.
+  useLayoutReadiness(activeJobTargetLang, activeJobId);
 
   /**
    * Uploads one or more pages through the same persisted pipeline entry point.
@@ -390,15 +402,6 @@ export default function App() {
       console.error('[Studio] Failed saving to database:', err);
     }
   };
-
-  const activeJob = jobs.find((j) => j.id === activeJobId);
-
-  // Pre-load hyphenation dictionary for the active project's translation language
-  useEffect(() => {
-    if (activeJob?.targetLang) {
-      void loadHyphenationLanguage(activeJob.targetLang);
-    }
-  }, [activeJob?.targetLang]);
 
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-[#090a0f] text-slate-100 flex">

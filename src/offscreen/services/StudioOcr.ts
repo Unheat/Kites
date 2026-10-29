@@ -10,7 +10,7 @@ import { SUPPORTED_INPAINT_IDS } from '../../shared/inpaintTiers';
 import { getRenderedBlockGeometry } from '../utils/canvasTypesetting';
 import { detectBlockTextColors, type DetectedTextColor } from '../utils/textColorDetection';
 import { resolveBubbleLayoutsDetailed, type BubbleGeometry } from './BubbleLayoutService';
-import { wrapTextContour } from '../utils/contourTypeset';
+import { precomputeStudioOcrLayouts } from './studioOcrTypeset';
 import type { BoxRect } from '../utils/bubbleExpansion';
 
 // Preserve Studio's minimum editable text-handle dimensions.
@@ -59,6 +59,10 @@ export interface StudioOcrResponse {
     text: string;
     originalText: string;
     fontSize?: number;
+    fontFamily?: string;
+    bold?: boolean;
+    targetLang?: string;
+    positionedLines?: import('../utils/contourTypeset').PositionedLine[];
     lines?: string[];
     lineSpacing?: number;
     typesetMode?: string;
@@ -298,24 +302,6 @@ export async function runStudioOcr(
       { x: 0, y: geometry.h }
     ];
 
-    let precomputedLines: string[] | undefined = undefined;
-    let precomputedFontSize: number | undefined = undefined;
-    let precomputedPositionedLines: Array<{ text: string; x: number; y: number; width: number; height: number }> | undefined = undefined;
-
-    if (!isVertical && texts[index]) {
-      const safeMeasure = createSafeCanvas(geometry.w, geometry.h);
-      if (safeMeasure?.ctx) {
-        const contourRes = wrapTextContour(texts[index], contourPoints, safeMeasure.ctx, 'WildWords, CCWildWords, sans-serif', {
-          minFontSize: 9,
-          targetLang: popupState.targetLang || 'en'
-        });
-        if (contourRes.lines.length > 0) {
-          precomputedLines = contourRes.lines;
-          precomputedFontSize = contourRes.fontSize;
-          precomputedPositionedLines = contourRes.positionedLines;
-        }
-      }
-    }
 
     // Prefer OcrManager's snapped block angle; older/partial engine results fall back to
     // the source polygon's top-edge rotation. Missing angle must stay an upright block.
@@ -329,9 +315,9 @@ export async function runStudioOcr(
     const hasOrganicContour = Boolean(rawContour && rawContour.length >= 3 && rawContour.length !== 4);
     const isRounded = hasOrganicContour || Boolean(curvature?.isRounded);
     const borderRadius = curvature?.borderRadius ?? (isRounded ? Math.round(Math.min(geometry.w, geometry.h) / 2) : 0);
-    const typesetMode = expandedBox
-      ? (isRounded ? 'contour' : 'simple')
-      : 'balloon';
+      const typesetMode: 'contour' | 'simple' | 'balloon' = expandedBox
+        ? (isRounded ? 'contour' : 'simple')
+        : 'balloon';
 
     return {
       id: `ocr-${timestamp}-${index}`,
@@ -341,11 +327,9 @@ export async function runStudioOcr(
       height: Math.max(MIN_TEXT_OBJECT_SIZE, geometry.h),
       text: texts[index],
       originalText,
-      fontSize: precomputedFontSize || (typeof detectedFontSize === 'number' && Number.isFinite(detectedFontSize) && detectedFontSize > 0
-        ? Math.round(detectedFontSize)
-        : undefined),
-      lines: precomputedLines,
-      positionedLines: precomputedPositionedLines,
+        fontSize: typeof detectedFontSize === 'number' && Number.isFinite(detectedFontSize) && detectedFontSize > 0
+          ? Math.round(detectedFontSize)
+          : undefined,
       typesetMode,
       borderRadius,
       isRounded,
@@ -359,5 +343,13 @@ export async function runStudioOcr(
       strokeColor: detectedTextColors[resolvedIndex]?.strokeColor,
     };
   });
-  return { inpaintedPatchBase64, textObjects };
+    const typography = await precomputeStudioOcrLayouts(textObjects.map((object) => ({
+      text: object.text, box: { x: 0, y: 0, w: object.width, h: object.height },
+      mode: object.typesetMode, isVertical: object.isVertical, contourPoints: object.contourPoints,
+    })), popupState, (width, height) => createSafeCanvas(width, height)?.ctx ?? null);
+    return { inpaintedPatchBase64, textObjects: textObjects.map((object, index) => ({
+      ...object, fontFamily: typography.fontFamily, bold: typography.bold, targetLang: typography.targetLang,
+      ...(typography.layouts[index] ? { fontSize: typography.layouts[index]!.fontSize,
+        lines: typography.layouts[index]!.lines, positionedLines: typography.layouts[index]!.positionedLines } : {}),
+    })) };
 }

@@ -15,32 +15,23 @@ The factory gives fixed contours priority, even when `typesetMode` is `simple`. 
 
 ## 2. Offscreen Strategy: Rectangle Through Contour DP
 
-`SimpleRectTypesetter.typeset()` first unwraps temporary typesetter line breaks. It constructs the box-local quad `(0,0), (W,0), (W,H), (0,H)` and calls `wrapTextContour()` with the selected font and language. It does not implement a separate greedy backend solver.
+`SimpleRectTypesetter.typeset()` preserves authored line breaks and constructs the box-local quad `(0,0), (W,0), (W,H), (0,H)`. The shared inset adapter supplies an explicit inset frame and shifted contour to the source-ported core, with selected font and language. Generated-wrap healing belongs to the restore/edit boundary, not the pure strategy. It does not implement a separate greedy backend solver.
 
 Rectangle scanlines provide constant interior spans; profile construction still applies the shared contour air, line-band sampling, and block-tip constraints. The useful width is therefore not universally captured by the old `W - 2 * 4px` formula alone.
 
-The shared DP scores line slack, overflow, grammatical breaks and discretionary hyphens. Its weights include `LINE_SLACK_WEIGHT = 1000`, `LINE_OVERFLOW_WEIGHT = 1000000`, and `DISCRETIONARY_HYPHEN_PENALTY = 2000`; individual grammatical break penalties come from shared tokenization. Candidate comparison prefers non-overflowed layouts, then fewer lines among non-overflowed candidates, then lower cost. Overflow candidates are compared by cost, not an unconditional fewer-lines rule.
+The shared DP scores line slack, overflow, grammatical breaks and discretionary hyphens. Its weights include `LINE_SLACK_WEIGHT = 1000`, `LINE_OVERFLOW_WEIGHT = 1000000`, and `DISCRETIONARY_HYPHEN_PENALTY = 2000`; individual grammatical break penalties come from shared tokenization. Candidate comparison prefers non-overflowed layouts, then fewer lines for all candidates, then lower cost, matching the pinned donor comparator.
 
-## 3. Font Probes & Current Custom Caps
+## 3. Font Probes and Explicit Constraints
 
-The strategy's requested maximum is:
+Backend rectangular DP uses the same fractional font search and LastResort policy as contour layout. The default minimum is 9 px, and automatic maximum follows the inset horizontal frame width. Explicit authored maximum/cap settings remain inputs; there are no implicit 18/20/24, 48 px, or height-percentage caps in this route.
 
-- With `maxFontSizeCap`: `min(cap, max(16, round(H * 0.6)))`.
-- Otherwise: explicit `maxFontSize`, or `max(16, round(H * 0.6))`.
+Clean fitting above the minimum integer bucket is retained. At the minimum bucket, LastResort can recover a larger bucket; at each size a fitting clean layout still wins. See the source mapping and platform limitations in [the Koharu specification](koharu_typesetting_pipeline_spec.md).
 
-Its minimum defaults to `MINIMUM_READABLE_FONT_SIZE = 9`, but callers may supply a different minimum. This maximum is then passed into `wrapTextContour()`, whose current dialogue policy further constrains it:
-
-- Single uppercase/digit/punctuation scream: 24px.
-- Other text with at most three whitespace-delimited words: 20px.
-- Denser text: 18px.
-
-Without an explicit maximum, the shared contour automatic ceiling also considers `0.85 * containerW` and `max(9, 0.40 * containerH)`. These **18/20/24 caps are Kites customization**, not upstream Koharu parity. Koharu's `automatic_maximum()` uses **bubble width for horizontal writing, bubble height for vertical writing, and 24 only for nonbubble text**.
-
-The shared contour fallback may return `overflowed: true` when no fitting result exists at its floor. A 9px minimum is not a promise that arbitrary text remains contained.
+Uniform fallback may return `overflowed: true`; no minimum font size guarantees arbitrary text fits. Acceptance rejects an overflowing fixed result instead of treating any returned lines as proof of containment.
 
 ## 4. Studio Simple Edits Are Deliberately Different
 
-`recalculateBlockTypeset(..., 'simple', ...)` retains the current/user font size and calls `wrapRectangular()` for rectangular word wrapping. It does not rerun the backend `SimpleRectTypesetter` font-size search. It heals soft line-break hyphens first, preserves valid CSS font stacks, and returns newly wrapped lines at the existing size.
+`recalculateBlockTypeset(..., 'simple', ...)` retains the current/user font size and calls `wrapRectangular()` for rectangular word wrapping. It does not rerun the backend `SimpleRectTypesetter` font-size search. Generated soft-hyphen wraps are healed at the restore boundary; in-session authored line breaks remain distinct. It preserves valid CSS font stacks and returns newly wrapped lines at the existing size.
 
 Thus initial backend caption fitting and subsequent Studio Caption Box edits do not share identical sizing policy. Contour Studio edits instead call `wrapTextContour()` with stored contour points or generated geometry; Auto Balloon edits use `measureDefaultLayout()`.
 

@@ -6,8 +6,8 @@
 
 import type { Point2D } from '../../../shared/utils/geometry';
 import type { BoxRect } from '../../utils/bubbleExpansion';
-import { wrapTextContour, MINIMUM_READABLE_FONT_SIZE } from '../../utils/contourTypeset';
-import { unwrapWrappedText } from '../../utils/typography';
+import { MINIMUM_READABLE_FONT_SIZE } from '../../utils/contourTypeset';
+import { wrapTextContour } from '../../utils/contourTypeset';
 import type { ITypesetStrategy, TypesetMode, TypesetOptions, TypesetResult } from './ITypesetStrategy';
 
 export class SimpleRectTypesetter implements ITypesetStrategy {
@@ -20,26 +20,25 @@ export class SimpleRectTypesetter implements ITypesetStrategy {
     ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
     options: TypesetOptions
   ): TypesetResult | null {
-    const unhyphenated = unwrapWrappedText(text);
+    const frame = options.frame ?? { width: container.w, height: container.h };
     const rectContour: Point2D[] = [
       { x: 0, y: 0 },
-      { x: container.w, y: 0 },
-      { x: container.w, y: container.h },
-      { x: 0, y: container.h }
+      { x: frame.width, y: 0 },
+      { x: frame.width, y: frame.height },
+      { x: 0, y: frame.height }
     ];
 
-    const maxFont = options.maxFontSizeCap
-      ? Math.min(options.maxFontSizeCap, Math.max(16, Math.round(container.h * 0.6)))
-      : (options.maxFontSize ?? Math.max(16, Math.round(container.h * 0.6)));
+    const maxFont = options.maxFontSize ?? options.maxFontSizeCap;
 
     const minFont = options.minFontSize ?? MINIMUM_READABLE_FONT_SIZE;
 
     const res = wrapTextContour(
-      unhyphenated,
+      text,
       rectContour,
       ctx as any,
       options.fontFamily,
       {
+        frame,
         minFontSize: minFont,
         maxFontSize: maxFont,
         linePitch: options.linePitch,

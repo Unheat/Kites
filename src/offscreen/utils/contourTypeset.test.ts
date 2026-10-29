@@ -10,6 +10,13 @@ import {
 } from './contourTypeset';
 import type { Point2D } from '../../shared/utils/geometry';
 
+/** Runs the solver for a valid frame and narrows away its null invalid-frame result. */
+function mustWrap(...args: Parameters<typeof wrapTextContour>) {
+  const result = wrapTextContour(...args);
+  if (!result) throw new Error('Expected a layout for a valid frame');
+  return result;
+}
+
 describe('Koharu contourTypeset', () => {
   let mockCtx: any;
 
@@ -128,7 +135,7 @@ describe('Koharu contourTypeset', () => {
     ];
 
     const text = 'IF THIS CONTINUES, WE CANNOT LAST ANOTHER FIVE MINUTES!';
-    const result = wrapTextContour(text, contour, mockCtx, 'CCWildWords', {
+    const result = mustWrap(text, contour, mockCtx, 'CCWildWords', {
       minFontSize: 8,
       maxFontSize: 24
     });
@@ -169,7 +176,7 @@ describe('Koharu contourTypeset', () => {
   });
 
   describe('wrapTextContour positionedLines fallback guarantee', () => {
-    it('always synthesizes positionedLines within contour bounds even when text severely overflows', () => {
+    it('returns positioned uniform fallback lines and reports severe overflow honestly', () => {
       const tinyContour = [
         { x: 10, y: 50 },
         { x: 30, y: 50 },
@@ -177,7 +184,7 @@ describe('Koharu contourTypeset', () => {
         { x: 10, y: 70 },
       ];
       const hugeText = 'VERY LONG SENTENCE THAT CANNOT FIT IN A TINY TWENTY PIXEL BOX AT ALL';
-      const result = wrapTextContour(hugeText, tinyContour, mockCtx, 'sans-serif', {
+      const result = mustWrap(hugeText, tinyContour, mockCtx, 'sans-serif', {
         minFontSize: 9,
       });
 
@@ -186,9 +193,10 @@ describe('Koharu contourTypeset', () => {
       const line = result.positionedLines![0];
       expect(Number.isFinite(line.x)).toBe(true);
       expect(Number.isFinite(line.y)).toBe(true);
-      // y must be within or very close to contour bounds [50, 70]
-      expect(line.y).toBeGreaterThanOrEqual(50);
-      expect(line.y).toBeLessThanOrEqual(80);
+      expect(result.overflowed).toBe(true);
+      expect(result.positionedLines!.length).toBeGreaterThan(1);
+      expect(result.positionedLines![1].baseline).toBeGreaterThan(line.baseline!);
+      expect(result.height).toBeGreaterThan(20);
     });
 
     it('allows font size to expand above 18px in large speech bubbles without artificial clamps', () => {
@@ -201,7 +209,7 @@ describe('Koharu contourTypeset', () => {
       ];
       const dialogueText = 'I will stand up to the teacher here! Retreat and get reinforcements!';
 
-      const result = wrapTextContour(dialogueText, largeContour, mockCtx, 'sans-serif', {
+      const result = mustWrap(dialogueText, largeContour, mockCtx, 'sans-serif', {
         minFontSize: 9,
         maxFontSize: 48,
       });

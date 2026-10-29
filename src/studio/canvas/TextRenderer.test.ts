@@ -222,4 +222,49 @@ describe('TextRenderer Rich Text (charStyles)', () => {
     expect(renderedChars).toContain('\ufe19'); // … mapped to ︙
     expect(renderedChars).toContain('\ufe42'); // 」 mapped to ﹂
   });
+
+  it('keeps the legacy ink-top y when a placement has no baseline', () => {
+    const ctx = createMockContext();
+    TextRenderer.renderText(ctx, {
+      id: 'positioned-top', x: 0, y: 0, width: 200, height: 100,
+      text: 'Line one\nLine two', lines: ['Line one', 'Line two'],
+      positionedLines: [
+        { text: 'Line one', x: 4, y: 6, width: 180, height: 20 },
+        { text: 'Line two', x: 8, y: 32, width: 170, height: 20 },
+      ],
+      fontSize: 16, fontFamily: 'sans-serif', color: '#000',
+    });
+
+    const calls = vi.mocked(ctx.fillText).mock.calls;
+    expect(calls.map((call) => call[2])).toEqual([6, 32]);
+    expect(ctx.textBaseline).toBe('top');
+  });
+
+  it('paints at the alphabetic baseline when the solver supplies one', () => {
+    const ctx = createMockContext();
+    TextRenderer.renderText(ctx, {
+      id: 'positioned-baseline', x: 0, y: 0, width: 200, height: 100,
+      text: 'Line one\nLine two', lines: ['Line one', 'Line two'],
+      positionedLines: [
+        { text: 'Line one', x: 4, y: 6, width: 180, height: 20, baseline: 18.25 },
+        { text: 'Line two', x: 8, y: 32, width: 170, height: 20, baseline: 47.75 },
+      ],
+      fontSize: 16, fontFamily: 'sans-serif', color: '#000',
+    });
+
+    const calls = vi.mocked(ctx.fillText).mock.calls;
+    expect(calls.map((call) => call[2])).toEqual([18.25, 47.75]);
+    expect(ctx.textBaseline).toBe('alphabetic');
+  });
+
+  it('paints fractional font sizes without rounding the font string', () => {
+    const ctx = createMockContext();
+    TextRenderer.renderText(ctx, {
+      id: 'fractional', x: 0, y: 0, width: 200, height: 100,
+      text: 'Fractional', lines: ['Fractional'],
+      fontSize: 15.5, fontFamily: 'sans-serif', color: '#000',
+    });
+
+    expect(ctx.font).toContain('15.5px');
+  });
 });

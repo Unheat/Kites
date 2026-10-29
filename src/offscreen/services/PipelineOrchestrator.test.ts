@@ -290,7 +290,11 @@ describe('PipelineOrchestrator', () => {
     const renderSpy = vi.spyOn(canvasTypesetting, 'renderTextBlocksBatch');
     await pipelineOrchestrator.runPipeline(500);
     expect(measureSpy).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ text: 'Hello', fontSize: 18 }),
-      expect.any(Object), expect.any(String), expect.any(Boolean), expect.any(String));
+      expect.any(Object), expect.any(String), expect.any(Boolean), expect.any(String), undefined,
+      expect.objectContaining({ width: expect.any(Number), height: expect.any(Number) }));
+    for (const call of measureSpy.mock.calls) {
+      expect(call[7]).toEqual({ width: call[2].w, height: call[2].h });
+    }
     const fixed = renderSpy.mock.calls[0][1][0].typesetBox!;
     expect(fixed).toBeDefined();
     expect(fixed.w).toBeGreaterThan(20);

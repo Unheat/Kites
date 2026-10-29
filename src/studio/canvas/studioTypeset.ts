@@ -1,13 +1,28 @@
 import { measureDefaultLayout } from '../../offscreen/utils/cotransDefaultRenderer';
-import { wrapTextContour, generateBubbleContour } from '../../offscreen/utils/contourTypeset';
+import { generateBubbleContour, wrapTextContour, MINIMUM_READABLE_FONT_SIZE } from '../../offscreen/utils/contourTypeset';
 import { wrapRectangular } from '../../offscreen/utils/ellipseTypeset';
 import { unwrapWrappedText } from '../../offscreen/utils/typography';
 import type { TypesetMode } from '../../shared/constants';
 import type { TextObject } from '../types';
+import { recordGeneratedLayout } from '../state/layoutGenerations';
 
 export type StudioTypesetMode = TypesetMode;
 
-type TypesetStyle = Pick<TextObject, 'bold' | 'italic' | 'letterSpacing' | 'lineSpacing' | 'isVertical' | 'borderRadius' | 'targetLang' | 'contourPoints'>;
+type TypesetStyle = Pick<TextObject, 'bold' | 'italic' | 'letterSpacing' | 'lineSpacing' | 'isVertical' | 'borderRadius' | 'targetLang' | 'contourPoints'> &
+  Pick<TextObject, 'textFromGeneratedLines'>;
+
+/**
+ * Chooses the canonical source text for a typeset run.
+ * Generated layout text may be un-wrapped (soft hyphen/line-break healing); authored
+ * text keeps explicit line breaks so user intent is never flattened by unwrapping.
+ *
+ * @param text - Raw object text or pre-measured lines.
+ * @param style - Object-level marker for generated layout text.
+ * @returns Source text safe for the chosen engine.
+ */
+function resolveTypesetSource(text: string, style: Pick<TextObject, 'textFromGeneratedLines'>): string {
+  return style.textFromGeneratedLines ? unwrapWrappedText(text) : text;
+}
 
 /** Small boxes cannot reliably run the fitting engine. */
 export const MIN_LAYOUT_DIMENSION = 15;
@@ -25,6 +40,9 @@ const DEFAULT_VERTICAL_LINE_SPACING = 1.15;
 const MIN_VERTICAL_FONT_SIZE = 8;
 /** Standard CJK character range regex matching Japanese Kana, Kanji, and Chinese Hanzi. */
 export const CJK_CHARACTER_REGEX = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/;
+
+/** Canonical minimum font size for contour layout (9px); Auto Balloon stays unchanged. */
+export { MINIMUM_READABLE_FONT_SIZE };
 
 /** Fields whose actual changes invalidate measured lines; paint/selection changes do not. */
 const LAYOUT_FIELDS = [
@@ -81,6 +99,9 @@ export function applyTextObjectUpdates(
     return object;
   }
   const updated = { ...object, ...updates };
+  // A user-authored text edit is no longer generated layout output: never unwrap its
+  // explicit line breaks on the next reflow.
+  if (updates.text !== undefined) updated.textFromGeneratedLines = false;
   if (!LAYOUT_FIELDS.some((field) => {
     if (field === 'charStyles') {
       // Keep indices for metric overrides, ignoring color/stroke-only array entries.
@@ -113,7 +134,7 @@ export interface BlockTypesetResult {
  * @param mode - Engine to use for this layout operation.
  * @returns Object copy containing newly measured lines and font size.
  */
-function reflowTextObject(object: TextObject, mode: StudioTypesetMode): TextObject {
+export function reflowTextObject(object: TextObject, mode: StudioTypesetMode): TextObject {
   let width = object.width;
   let fontSize = object.fontSize;
   const startWidth = width;
@@ -148,6 +169,9 @@ function reflowTextObject(object: TextObject, mode: StudioTypesetMode): TextObje
   } else {
     delete updated.roundFit;
   }
+  // Register this generation so a resource-readiness retry can detect that the lines
+  // were measured while fonts/dictionaries were still settling.
+  recordGeneratedLayout(updated);
   return updated;
 }
 
@@ -168,7 +192,7 @@ export function getTypesetMeasureContext(): CanvasRenderingContext2D | null {
 /** Inset ratio applied to bounding box for bubble interior padding (5%). */
 export const BOX_INSET_RATIO = 0.05;
 
-/** Maximum allowable font size in pixels during interactive resizing, matching pipeline ceiling. */
+/** Existing Auto Balloon/vertical ceiling. Never pass this to contour layout. */
 export const MAX_FONT_SIZE_CEILING = 48;
 
 /**
@@ -379,45 +403,59 @@ export function recalculateBlockTypeset(
 
     // Simple Mode: Rectangular greedy wrap without auto font scaling on subsequent edits (Route 3).
     if (mode === 'simple') {
-      const unhyphenated = unwrapWrappedText(text);
+      // Generated pipeline text is re-joined from soft line breaks; authored text keeps newlines.
+      const sourceText = resolveTypesetSource(text, style);
       const stylePrefix = `${style.italic ? 'italic ' : ''}${style.bold ? 'bold ' : ''}`;
       const cleanFamily = (fontFamily || 'sans-serif').trim();
       const familyStack = cleanFamily.includes(',')
         ? cleanFamily
         : (cleanFamily.startsWith('"') || cleanFamily.startsWith("'") ? cleanFamily : `"${cleanFamily}"`);
-      ctx.font = `${stylePrefix}${Math.round(fallbackSize)}px ${familyStack}`;
+      // Fractional sizes stay fractional: measurement and paint must share the same
+      // font string, otherwise widths measured at a rounded size drift at paint time.
+      ctx.font = `${stylePrefix}${fallbackSize}px ${familyStack}`;
       const measure = (s: string) => ctx.measureText(s).width;
-      const words = unhyphenated.split(/\s+/).filter(Boolean);
-      const lines = wrapRectangular(words, width, measure, targetLang);
+      const wrapParagraph = (paragraph: string): string[] =>
+        wrapRectangular(paragraph.split(/\s+/).filter(Boolean), width, measure, targetLang);
+      // Authored text: each source line is a mandatory break; generated text: one stream.
+      const lines = style.textFromGeneratedLines
+        ? wrapParagraph(sourceText)
+        : sourceText.split(/\r?\n/).flatMap((paragraph) =>
+            paragraph.trim() ? wrapParagraph(paragraph) : ['']);
       return {
         fontSize: fallbackSize,
-        lines: lines.length > 0 ? lines : [unhyphenated],
+        lines: lines.length > 0 ? lines : [sourceText],
       };
     }
 
     // Contour Mode: Koharu 2D scanline ray-casting on bubble polygon or curved contour (Route 2)
     if (mode === 'contour') {
-      const unhyphenated = unwrapWrappedText(text);
+      const sourceText = resolveTypesetSource(text, style);
       const contour = (style.contourPoints && style.contourPoints.length >= 3)
         ? style.contourPoints
         : generateBubbleContour(width, height, style.borderRadius);
 
       const result = wrapTextContour(
-        unhyphenated,
+        sourceText,
         contour,
         ctx,
         fontFamily || 'sans-serif',
         {
-          minFontSize: 9,
-          maxFontSize: MAX_FONT_SIZE_CEILING,
+          minFontSize: MINIMUM_READABLE_FONT_SIZE,
+          // No explicit cap: the contour solver derives its automatic maximum from the
+          // supplied frame width (donor semantics). Only callers with an authored/user
+          // ceiling may override it.
+          // Explicit frame: the contour polygon may extend outside the author's box,
+          // so layout bounds must come from the box, not the contour bounding box.
+          frame: { width, height },
           targetLang,
           isBold: style.bold,
           isItalic: style.italic
         }
       );
+      if (!result) return { fontSize: fallbackSize, lines: [sourceText] };
       return {
         fontSize: result.fontSize,
-        lines: result.lines && result.lines.length > 0 ? result.lines : [unhyphenated],
+        lines: result.lines && result.lines.length > 0 ? result.lines : [sourceText],
         height: result.height,
         positionedLines: result.positionedLines,
       };
@@ -425,10 +463,8 @@ export function recalculateBlockTypeset(
 
     // Auto Balloon Mode: full pipeline diamond envelopes, hyphenation, and auto font fitting
     const isList = /^\s*[-*•\d+.]/m.test(text);
-  // Marker-aware unwrapper (shared with the contour route) rejoins soft line-break hyphens
-  // so resizing does not permanently bake line-wrap syllable breaks into the dialogue text.
-  // The inline regex previously used here missed the INSERTED_HYPHEN Word Joiner marker,
-  // letting wrapText glue "Every-\u2060" + "one" back into a permanently hyphenated word.
+  // Marker-aware unwrapper rejoins soft line-break hyphens for the existing Auto
+  // Balloon route. Authored mandatory-break handling is scoped to contour/simple.
   const unhyphenated = unwrapWrappedText(text);
   const normalizedText = isList || unhyphenated.includes('\n\n')
     ? unhyphenated

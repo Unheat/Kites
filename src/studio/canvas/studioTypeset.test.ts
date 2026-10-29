@@ -141,20 +141,22 @@ describe('Studio Algorithmic Typeset & Line Reflow', () => {
 
   it('un-hyphenates soft line-break syllables when box is widened in Auto Balloon and Simple Wrap', () => {
     const textWithHyphen = 'Summer at the\ncom-\nmunity pool with my\nsisters';
+    // Persisted pipeline lines set this marker; authored text keeps its newlines instead.
+    const generated = { textFromGeneratedLines: true };
     // Widened box (300 x 200) where "community" fits comfortably on one line
-    const balloonWide = recalculateBlockTypeset(textWithHyphen, 'sans-serif', 300, 200, 18, 'balloon');
+    const balloonWide = recalculateBlockTypeset(textWithHyphen, 'sans-serif', 300, 200, 18, 'balloon', generated);
     const balloonJoined = balloonWide.lines.join(' ');
     expect(balloonJoined).toContain('community');
     expect(balloonJoined).not.toContain('com-munity');
     expect(balloonJoined).not.toContain('com- munity');
 
-    const simpleWide = recalculateBlockTypeset(textWithHyphen, 'sans-serif', 300, 200, 18, 'simple');
+    const simpleWide = recalculateBlockTypeset(textWithHyphen, 'sans-serif', 300, 200, 18, 'simple', generated);
     const simpleJoined = simpleWide.lines.join(' ');
     expect(simpleJoined).toContain('community');
     expect(simpleJoined).not.toContain('com-munity');
     expect(simpleJoined).not.toContain('com- munity');
 
-    const contourWide = recalculateBlockTypeset(textWithHyphen, 'sans-serif', 300, 200, 18, 'contour');
+    const contourWide = recalculateBlockTypeset(textWithHyphen, 'sans-serif', 300, 200, 18, 'contour', generated);
     const contourJoined = contourWide.lines.join(' ');
     expect(contourJoined).toContain('community');
   });
@@ -164,7 +166,9 @@ describe('Studio Algorithmic Typeset & Line Reflow', () => {
     // the Word Joiner marker, letting wrapText glue "Every-\u2060" + "one" into a
     // permanently hyphenated "Every-one" on a single line after widening.
     const markerText = 'Every-\u2060\none else is also\nin a state of being\nunable to fight.';
-    const wide = recalculateBlockTypeset(markerText, 'sans-serif', 300, 200, 18, 'balloon');
+    const wide = recalculateBlockTypeset(markerText, 'sans-serif', 300, 200, 18, 'balloon', {
+      textFromGeneratedLines: true,
+    });
     const joined = wide.lines.join(' ');
     expect(joined).not.toContain('\u2060');
     expect(joined).not.toContain('Every-');
@@ -224,10 +228,38 @@ describe('Studio Algorithmic Typeset & Line Reflow', () => {
     for (const pl of contour.positionedLines!) {
       expect(pl.text).toBeTypeOf('string');
       expect([pl.x, pl.y, pl.width, pl.height].every((v) => Number.isFinite(v))).toBe(true);
+      // Baseline is optional but, when supplied by the solver, must be finite.
+      if (pl.baseline !== undefined) expect(Number.isFinite(pl.baseline)).toBe(true);
     }
     // Simple/balloon routes keep even spacing (Koharu's non-balloon fallback).
     const simple = recalculateBlockTypeset(text, 'sans-serif', 220, 160, 16, 'simple');
     expect(simple.positionedLines).toBeUndefined();
+  });
+
+  it('keeps authored newlines when text did not come from generated layout lines', () => {
+    const authored = 'First thought\nSecond thought';
+    const simple = recalculateBlockTypeset(authored, 'sans-serif', 400, 300, 16, 'simple');
+    expect(simple.lines).toEqual(['First thought', 'Second thought']);
+
+    const contour = recalculateBlockTypeset(authored, 'sans-serif', 400, 300, 16, 'contour');
+    expect(contour.lines.length).toBeGreaterThanOrEqual(2);
+    expect(contour.lines.some((line) => line.includes('thought Second'))).toBe(false);
+  });
+
+  it('heals soft hyphen line breaks only for generated layout text', () => {
+    const generated = 'Summer at the com-\nmunity pool';
+    const healed = recalculateBlockTypeset(generated, 'sans-serif', 400, 300, 16, 'simple', {
+      textFromGeneratedLines: true,
+    });
+    expect(healed.lines.join(' ')).toContain('community');
+    expect(healed.lines.join(' ')).not.toContain('com-');
+  });
+
+  it('clears the generated-text marker when the user edits text', () => {
+    const generated: TextObject = { ...object, textFromGeneratedLines: true };
+    const edited = applyTextObjectUpdates(generated, { text: 'Typed\nlines' }, 'simple');
+    expect(edited.textFromGeneratedLines).toBe(false);
+    expect(edited.text).toBe('Typed\nlines');
   });
 
   describe('CJK Vertical Layout & Column Wrapping', () => {

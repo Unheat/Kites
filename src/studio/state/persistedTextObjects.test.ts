@@ -98,4 +98,21 @@ describe('persisted renderer layout restoration', () => {
     };
     expect(restoreTextObject(upperBlock).text).toBe('EVERYONE ELSE IS HERE');
   });
+
+  it('threads the active job target language into the restored object', () => {
+    const restored = restoreTextObject({ ...block, lines: ['Hallo Welt'] }, 'de');
+    expect(restored.targetLang).toBe('de');
+    // Omitted language stays undefined so the typesetter's documented 'en' default applies.
+    expect(restoreTextObject({ ...block, lines: ['Hello world'] }).targetLang).toBeUndefined();
+  });
+
+  it('distinguishes generated pipeline lines from authored translation text', () => {
+    // Persisted renderer lines are generated layout: a later resize may heal soft breaks.
+    expect(restoreTextObject({ ...block, translatedText: 'Hello there', lines: ['Hello', 'there'] }).textFromGeneratedLines)
+      .toBe(true);
+    // Legacy translation without measured lines is authored: explicit newlines must survive.
+    const authored = restoreTextObject({ ...block, translatedText: 'Line one\nLine two' });
+    expect(authored.textFromGeneratedLines).toBe(false);
+    expect(authored.text).toBe('Line one\nLine two');
+  });
 });

@@ -49,14 +49,14 @@ describe('Studio OCR initial layout boundary', () => {
       args[1]({ status: 'success', inpaintedPatchBase64: 'data:image/png;base64,clean', textObjects: [{
         id: 'prepared', x: 0, y: 0, width: 100, height: 80, text: 'Already laid out', originalText: 'source',
         lines: ['Already', 'laid out'], lineSpacing: 19, fontSize: 17, fontFamily: 'persisted-font', typesetMode: 'contour',
-        borderRadius: 24, isRounded: true,
+        borderRadius: 24, isRounded: true, bold: true, targetLang: 'de',
       }] });
     });
     const result = await requestStudioOcr({ toDataURL: () => 'source' } as HTMLCanvasElement,
       { x: 0, y: 0, width: 100, height: 80 });
     expect(result.textObjects[0]).toMatchObject({
       lines: ['Already', 'laid out'], lineSpacing: 19, fontSize: 17, fontFamily: 'persisted-font', typesetMode: 'contour',
-      borderRadius: 24, isRounded: true,
+      borderRadius: 24, isRounded: true, bold: true, targetLang: 'de',
     });
   });
 });

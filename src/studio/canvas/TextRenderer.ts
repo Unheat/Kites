@@ -114,14 +114,17 @@ export class TextRenderer {
     if (!pls || pls.length !== lines.length) return false;
     if (Array.isArray(obj.charStyles) && obj.charStyles.some(Boolean)) return false;
     return pls.every((pl) =>
-      [pl.x, pl.y, pl.width, pl.height].every((v) => Number.isFinite(v))
+      [pl.x, pl.y, pl.width, pl.height].every((v) => Number.isFinite(v)) &&
+      (pl.baseline === undefined || Number.isFinite(pl.baseline))
     );
   }
 
   /**
-   * Paints lines at their Koharu scanline placements, replicating the bake's
-   * per-line math (top baseline, line centered within its contour chord) so the
-   * editor shows the exact baked layout until the user re-typesets.
+   * Paints lines at their solver-provided scanline placements, replicating the bake's
+   * per-line math (line centered within its contour chord) so the editor shows the exact
+   * baked layout until the user re-typesets. Placement y is the ink-top coordinate;
+   * when a solver supplies an alphabetic frame-local baseline, paint at that baseline
+   * with textBaseline='alphabetic' instead of recomputing pitch from font size.
    *
    * @param ctx - Target context with base typography configured.
    * @param lines - Canonical layout lines already transformed to display casing.
@@ -133,13 +136,18 @@ export class TextRenderer {
     obj: TextObject
   ): void {
     const pls = obj.positionedLines!;
-    ctx.textBaseline = 'top';
     ctx.textAlign = 'left';
     for (let i = 0; i < lines.length; i++) {
       const pl = pls[i];
       const lineWidth = ctx.measureText(lines[i]).width;
       const x = pl.x + (pl.width - lineWidth) / 2;
-      this.strokeAndFillText(ctx, lines[i], x, pl.y, obj);
+      if (pl.baseline !== undefined) {
+        ctx.textBaseline = 'alphabetic';
+        this.strokeAndFillText(ctx, lines[i], x, pl.baseline, obj);
+      } else {
+        ctx.textBaseline = 'top';
+        this.strokeAndFillText(ctx, lines[i], x, pl.y, obj);
+      }
     }
   }
 
