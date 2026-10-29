@@ -93,6 +93,34 @@ describe('Studio layout ownership', () => {
     expect(getTypesetDisplayText('MiXeD', { uppercase: true, lowercase: true })).toBe('MIXED');
     expect(getTypesetDisplayText('MiXeD', { lowercase: true })).toBe('mixed');
   });
+
+  it('pins contour reflow to a manual fontSize so the size slider holds its value', () => {
+    const contourStyle = { borderRadius: 0 };
+    const pinnedUp = recalculateBlockTypeset(object.text, 'sans-serif', 200, 150, 16, 'contour', contourStyle, 24);
+    const pinnedDown = recalculateBlockTypeset(object.text, 'sans-serif', 200, 150, 16, 'contour', contourStyle, 11);
+    // The solver renders exactly the dragged size in both directions instead of
+    // auto-fitting and snapping the slider back.
+    expect(pinnedUp.fontSize).toBe(24);
+    expect(pinnedDown.fontSize).toBe(11);
+    expect(pinnedUp.lines).not.toEqual(pinnedDown.lines);
+  });
+
+  it('keeps contour auto-fit when no manual size pin is supplied', () => {
+    const contourStyle = { borderRadius: 0 };
+    const auto = recalculateBlockTypeset(object.text, 'sans-serif', 200, 150, 16, 'contour', contourStyle);
+    expect(auto.fontSize).toBeGreaterThan(0);
+    // Auto-fit is not the pinned value: the floor stays the readability minimum.
+    expect(auto.fontSize).not.toBe(11);
+  });
+
+  it('preserves a dragged fontSize through applyTextObjectUpdates on contour objects', () => {
+    const contour = { ...object, typesetMode: 'contour' as const, lines: undefined };
+    const updated = applyTextObjectUpdates(contour, { fontSize: 24 }, 'contour');
+    expect(updated.fontSize).toBe(24);
+    // Later geometry edits drop the pin and auto-fit again from the readability floor.
+    const resized = applyTextObjectUpdates(updated, { width: 180 }, 'contour');
+    expect(resized.fontSize).not.toBe(24);
+  });
 });
 
 describe('Studio Algorithmic Typeset & Line Reflow', () => {

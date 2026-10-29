@@ -83,6 +83,8 @@ export function prepareInitialTextObject(object: TextObject): TextObject {
  * Merges an edit and recomputes layout only when measured inputs actually change.
  * Engine preference alone never changes existing layout. Character overrides invalidate
  * lines, but the shared fitter currently measures uniform object-level typography, not runs.
+ * A box-level fontSize change is a manual sizing constraint: contour reflow pins the solver
+ * to that exact size instead of auto-fitting, so the size slider holds its dragged value.
  * @param object - Existing object and its canonical layout.
  * @param updates - Partial text, geometry, typography, or paint edit.
  * @param globalMode - Editing fallback when object has no engine preference.
@@ -114,7 +116,10 @@ export function applyTextObjectUpdates(
     }
     return object[field] !== updated[field];
   })) return updated;
-  return reflowTextObject(updated, chosenMode ?? updated.typesetMode ?? globalMode);
+  const pinnedFontSize = updates.fontSize !== undefined && updates.fontSize !== object.fontSize
+    ? updates.fontSize
+    : undefined;
+  return reflowTextObject(updated, chosenMode ?? updated.typesetMode ?? globalMode, pinnedFontSize);
 }
 
 export interface BlockTypesetResult {
@@ -132,9 +137,11 @@ export interface BlockTypesetResult {
  *
  * @param object - Complete text object with current geometry and style.
  * @param mode - Engine to use for this layout operation.
+ * @param pinnedFontSize - Manual sizing constraint from an explicit fontSize edit; contour
+ *                         reflow pins the solver to this size instead of auto-fitting.
  * @returns Object copy containing newly measured lines and font size.
  */
-export function reflowTextObject(object: TextObject, mode: StudioTypesetMode): TextObject {
+export function reflowTextObject(object: TextObject, mode: StudioTypesetMode, pinnedFontSize?: number): TextObject {
   let width = object.width;
   let fontSize = object.fontSize;
   const startWidth = width;
@@ -155,7 +162,8 @@ export function reflowTextObject(object: TextObject, mode: StudioTypesetMode): T
     object.height,
     fontSize,
     mode,
-    object
+    object,
+    pinnedFontSize
   );
 
   const updated: TextObject = { ...object, width, fontSize: layout.fontSize, lines: layout.lines, positionedLines: layout.positionedLines };
@@ -381,7 +389,8 @@ export function recalculateBlockTypeset(
   height: number,
   fallbackSize: number = 16,
   mode: StudioTypesetMode = 'balloon',
-  style: TypesetStyle = {}
+  style: TypesetStyle = {},
+  pinnedFontSize?: number
 ): BlockTypesetResult {
   const ctx = getTypesetMeasureContext();
   if (!ctx || !text || !text.trim() || width <= MIN_LAYOUT_DIMENSION || height <= MIN_LAYOUT_DIMENSION) {
@@ -434,16 +443,21 @@ export function recalculateBlockTypeset(
         ? style.contourPoints
         : generateBubbleContour(width, height, style.borderRadius);
 
+      // A manual fontSize edit is an explicit authored constraint (donor authored-override
+      // semantics): pin the solver to the dragged size so the slider holds its value, even
+      // when the result overflows the contour. Without a pin the solver auto-fits from the
+      // readability floor and snaps the slider back.
+      const pinned = pinnedFontSize !== undefined
+        ? Math.max(MINIMUM_READABLE_FONT_SIZE, pinnedFontSize)
+        : undefined;
       const result = wrapTextContour(
         sourceText,
         contour,
         ctx,
         fontFamily || 'sans-serif',
         {
-          minFontSize: MINIMUM_READABLE_FONT_SIZE,
-          // No explicit cap: the contour solver derives its automatic maximum from the
-          // supplied frame width (donor semantics). Only callers with an authored/user
-          // ceiling may override it.
+          minFontSize: pinned ?? MINIMUM_READABLE_FONT_SIZE,
+          maxFontSize: pinned,
           // Explicit frame: the contour polygon may extend outside the author's box,
           // so layout bounds must come from the box, not the contour bounding box.
           frame: { width, height },
