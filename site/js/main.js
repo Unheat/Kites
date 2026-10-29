@@ -23,6 +23,17 @@ document.addEventListener('DOMContentLoaded', () => {
       originalAlt: 'Original Japanese Manga Scan - Romance comedy panel',
       translatedAlt: 'Kites English Translation - Balanced lettering and line breaks'
     },
+    'color-bubble': {
+      split: 50,
+      targetLang: 'English',
+      langLabel: '中文',
+      lang: 'zh',
+      caption: 'Color-bubble detection & wrapping (Chinese → English) — New in v1.3',
+      original: 'assets/color-bubble-input.png',
+      translated: 'assets/color-bubble-result.png',
+      originalAlt: 'Original Chinese Manga Scan - Colored text bubbles',
+      translatedAlt: 'Kites English Translation - Color detection & bubble wrapping'
+    },
     demo7: {
       split: 50,
       targetLang: 'Tiếng Việt',
@@ -172,6 +183,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Preload both initially
     preloadPage('demo2');
+    preloadPage('color-bubble');
     preloadPage('demo7');
 
     // Thumbnail selector switching

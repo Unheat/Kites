@@ -44,12 +44,33 @@ Traditional manga translators require installing complex Python scripts, gigabyt
 - 🎨 **Intelligent Background Repair:** AI inpainting erases foreign text cleanly while preserving linework, screentones, and textures.
 - ✍️ **Natural Typesetting:** Automatically measures speech balloons, balances line breaks, fits font sizes, and adapts font colors.
 - 🗨️ **Smart Speech Bubble Fit:** Advanced bubble detection (Heuristic & Neural YOLO) expands narrow CJK columns into roomy balloon chambers, eliminating tiny squeezed fonts.
+- 🌈 **Color-Bubble Detection & Wrap:** Detects per-bubble text color automatically, matches font color, and wraps translated text inside original speech balloon shapes.
 - 📜 **Full Webtoon Strip Support:** Seamlessly translates extreme long-strip webtoons ($>14,000\text{ px}$) with 1D in-memory canvas tiling at full native resolution.
 - 🛠️ **Built-in Studio:** Fix mistranslations, resize text balloons, or tweak typography on the fly.
 
 ---
 
 ## 🖼️ See It in Action
+
+### Color-Bubble Detection & Wrapping (Chinese → English)
+> *New in v1.3: Per-bubble text color detection with automatic font color matching and speech balloon wrapping*
+
+<div align="center">
+<table>
+  <tr>
+    <th width="50%" align="center">Original Chinese</th>
+    <th width="50%" align="center">Kites Translated (Color + Wrap)</th>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src="./README_images/input/demo6" alt="Original Chinese Manga with Colored Text" width="100%" />
+    </td>
+    <td align="center">
+      <img src="./README_images/result/color-bubble.png" alt="Kites English Translation with Color Detection & Bubble Wrap" width="100%" />
+    </td>
+  </tr>
+</table>
+</div>
 
 ### Japanese → English
 > *Story: 佐藤さんは知っていた by [@09ra_19ra](https://x.com/09ra_19ra)*
@@ -176,6 +197,7 @@ Customize target languages, neural OCR models, and inpainting algorithms from th
 | **Inpainting** | **LaMa Manga** *(Neural)*<br/>**AOT-GAN** *(Fast Neural)*<br/>**Telea Diffusion** *(Instant)*<br/>**Simple Fill** | Erases text strictly inside character boundaries to preserve comic art. |
 | **OCR** | **PaddleOCR v3 – v6** | Industry-standard multilingual text detection and recognition with seamless 1D webtoon strip tiling. |
 | **Bubble Fit** | **Neural YOLO** *(WebGPU)*<br/>**Heuristic** *(Instant)*<br/>**Classic MST** | Expands dialogue into natural balloon whitespace with tail severing, eliminating tiny fonts. |
+| **Color-Bubble** | **Per-Bubble Detection** *(WebGPU)*<br/>**Font Color Match** *(Instant)*<br/>**Balloon Wrap** *(Instant)* | Detects individual bubble text color, matches font color to original, wraps translated text in original balloon shapes. |
 
 ---
 
