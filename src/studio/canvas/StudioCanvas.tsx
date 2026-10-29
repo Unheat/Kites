@@ -39,6 +39,7 @@ import { computeRotatedBounds, getHandleCursor } from './transformMath';
 import { applyTextObjectUpdates, prepareInitialTextObject, CJK_CHARACTER_REGEX } from './studioTypeset';
 import { unwrapWrappedText } from '../../offscreen/utils/typography';
 import { extractTypographyStyle } from '../state/studioStore';
+import { ensureFontsRegistered } from '../../shared/fontLibrary';
 import type {
   BoundingBox,
   Point,
@@ -252,6 +253,24 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
 
   useEffect(() => {
     redrawOverlay();
+  }, [redrawOverlay]);
+
+  // Font-library faces register asynchronously (IndexedDB read + FontFace.load),
+  // usually after the first overlay paint. Canvas fillText never triggers webfont
+  // loads and registration changes no redraw dependency above, so the first paint
+  // would keep fallback glyphs until the next user interaction. Repaint once when
+  // registration settles; the call is memoized in fontLibrary, so re-runs of this
+  // effect join the same in-flight promise and cost one cheap no-op repaint.
+  useEffect(() => {
+    let cancelled = false;
+    void ensureFontsRegistered()
+      .then(() => {
+        if (!cancelled) redrawOverlay();
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, [redrawOverlay]);
 
   // Interactive dialogue box actions (reading live store to prevent stale closures)
