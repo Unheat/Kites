@@ -7,7 +7,6 @@ import {
   HYPHENATION_DICTIONARY_MAP,
   HYPHEN_MIN_SIDE,
   INDIC_SYLLABLE_LANGS,
-  type ParsedPatterns,
   VOWEL_SYLLABLE_LANGS,
 } from './types';
 import {
@@ -16,6 +15,10 @@ import {
   syllablesFromPoints,
 } from './LiangEngine';
 import { getIndicSyllablePoints, getVowelSyllablePoints } from './RuleBasedEngine';
+import { hyphenation_lang_from_tag } from './hypherCompat';
+import { HyphenationDataStore } from './HyphenationDataStore';
+import { hasUsablePatterns, isPlausibleHypherTrie } from './hyphenationValidation';
+import { contourSyllables, findContourHyphenationPoints } from './contourHyphenation';
 
 export class HyphenationService {
   private static instance: HyphenationService | null = null;
@@ -26,11 +29,8 @@ export class HyphenationService {
   /** Custom loader hook for testing/node environments to avoid bundling Node built-ins. */
   private static customLoader?: (dictName: string) => Promise<string | null | undefined>;
 
-  /** Cache of parsed Liang pattern collections keyed by dictionary name (e.g. 'en_US', 'de_DE'). */
-  private patternsCache = new Map<string, ParsedPatterns>();
-
-  /** Active load promises to prevent redundant simultaneous fetches for the same dictionary. */
-  private pendingLoads = new Map<string, Promise<void>>();
+  /** Composed data ownership and loading, independent of word lookup policy. */
+  private readonly data = new HyphenationDataStore(() => this.wordPointsCache.clear());
 
   /** Word-level memoization cache for hyphenation points: key = `${targetLang}:${word}:${minSide}` */
   private wordPointsCache = new Map<string, number[]>();
@@ -59,15 +59,15 @@ export class HyphenationService {
    */
   public static resetInstance(): void {
     if (HyphenationService.instance) {
-      HyphenationService.instance.patternsCache.clear();
-      HyphenationService.instance.pendingLoads.clear();
+      HyphenationService.instance.data.clear();
       HyphenationService.instance.wordPointsCache.clear();
       HyphenationService.instance = null;
     }
   }
 
   /**
-   * Maps a source or target language code to its canonical dictionary filename.
+   * Maps a source or target language code to its canonical legacy Liang dictionary filename.
+   * Signature preserved for existing XianScan/auto-balloon callers.
    *
    * @param lang - ISO 639-1 or composite language code (e.g. 'en', 'es-419', 'pt-BR').
    * @returns Dictionary filename without extension, or undefined if not dictionary-backed.
@@ -81,92 +81,97 @@ export class HyphenationService {
   }
 
   /**
-   * Checks whether the hyphenation rules/dictionary for a given language are ready for synchronous queries.
+   * Maps a language tag to its hypher ISO 639-1 key for contour trie loading.
    *
-   * @param lang - Target language code.
-   * @returns True if the dictionary is cached or if the language is rule-based / monosyllabic.
+   * @param lang - BCP-47 language tag.
+   * @returns ISO 639-1 key, or undefined when hypher has no data.
    */
-  public isLoaded(lang: string): boolean {
-    const dictName = this.resolveDictionaryName(lang);
-    if (!dictName) return true; // Rule-based or CJK needs no dictionary
-    return this.patternsCache.has(dictName);
+  public resolveHypherKey(lang: string): string | undefined {
+    return hyphenation_lang_from_tag(lang)?.key;
   }
 
   /**
-   * Manually registers raw pattern text into the in-memory cache.
+   * Checks whether the legacy hyphenation dictionary for a language is ready for
+   * synchronous queries. Preserves original XianScan/auto-balloon semantics:
+   * rule-based and CJK languages are always ready.
+   *
+   * @param lang - Target language code.
+   * @returns True if the legacy dictionary is cached or not required.
+   */
+  public isLoaded(lang: string): boolean {
+    const baseLang = (lang || 'en').split('-')[0].toLowerCase();
+
+    // Rule-based engines (Indic syllables, vowel syllables) need no dictionary.
+    // Keep this precedence identical to findHyphenationPoints.
+    if (INDIC_SYLLABLE_LANGS.has(baseLang) || VOWEL_SYLLABLE_LANGS.has(baseLang)) {
+      return true;
+    }
+
+    const dictName = this.resolveDictionaryName(lang);
+    if (!dictName) return true; // Rule-based or CJK needs no dictionary
+    return this.data.patternsCache.has(dictName);
+  }
+
+  /**
+   * Checks whether the contour-specific hypher trie is ready for a language.
+   * Contour segmentation must not fall back to the legacy Liang dictionary, so
+   * callers should await `loadLanguage(lang)` when this returns false.
+   *
+   * @param lang - BCP-47 language tag.
+   * @returns True when the trie is cached, or when hypher has no data for the language.
+   */
+  public isContourReady(lang: string): boolean {
+    const hypherKey = this.resolveHypherKey(lang);
+    if (!hypherKey) return true; // No contour hyphenation expected
+    return this.data.hypherTrieCache.has(hypherKey);
+  }
+
+  /**
+   * Manually registers raw pattern text into the in-memory cache (legacy Liang format).
    *
    * @param dictName - Target dictionary key (e.g. 'en_US', 'es').
    * @param text - Raw Liang pattern text content.
    */
   public registerPatterns(dictName: string, text: string): void {
-    this.patternsCache.set(dictName, parseHyphenationPatterns(text));
+    const parsed = parseHyphenationPatterns(text);
+    if (!hasUsablePatterns(parsed)) {
+      throw new Error(`Malformed hyphenation dictionary "${dictName}": no weighted patterns`);
+    }
+    this.data.patternsCache.set(dictName, parsed);
+    this.wordPointsCache.clear();
   }
 
   /**
-   * Asynchronously loads and parses the pattern dictionary for a given language.
-   * Safe to call multiple times concurrently; subsequent calls share the in-flight Promise.
+   * Manually registers hypher trie binary data.
    *
-   * @param lang - Target language code (e.g. 'en', 'es', 'de', 'fr').
+   * @param hypherKey - ISO 639-1 language code (e.g. 'en', 'de').
+   * @param trieData - Raw trie binary data (Uint8Array).
+   */
+  public registerHypherTrie(hypherKey: string, trieData: Uint8Array): void {
+    if (!isPlausibleHypherTrie(trieData)) {
+      throw new Error(`Malformed hypher trie "${hypherKey}": invalid header`);
+    }
+    this.data.hypherTrieCache.set(hypherKey, trieData);
+    this.wordPointsCache.clear();
+  }
+
+  /**
+   * Primes independent legacy dictionaries and contour tries for a language.
+   * Concurrent callers share an in-flight load and failures can be retried.
+   * @param lang - Target language tag.
+   * @returns Promise settled when mapped data loading finishes.
    */
   public async loadLanguage(lang: string): Promise<void> {
-    const dictName = this.resolveDictionaryName(lang);
-    if (!dictName) return; // No dictionary required for this language
-
-    if (this.patternsCache.has(dictName)) {
-      return;
-    }
-
-    const inFlight = this.pendingLoads.get(dictName);
-    if (inFlight) {
-      return inFlight;
-    }
-
-    const loadPromise = this.fetchAndParseDictionary(dictName)
-      .finally(() => {
-        this.pendingLoads.delete(dictName);
-      });
-
-    this.pendingLoads.set(dictName, loadPromise);
-    return loadPromise;
-  }
-
-  /**
-   * Internal loader that fetches pattern text from extension assets or custom loader fallback.
-   */
-  private async fetchAndParseDictionary(dictName: string): Promise<void> {
-    // 1. Try registered custom loader (e.g. test environment Node reader)
-    if (HyphenationService.customLoader) {
-      try {
-        const customContent = await HyphenationService.customLoader(dictName);
-        if (customContent) {
-          this.patternsCache.set(dictName, parseHyphenationPatterns(customContent));
-          return;
-        }
-      } catch {
-        // Fall through to runtime fetch
-      }
-    }
-
-    // 2. Browser / Chrome Extension runtime fetch
-    try {
-      const assetUrl =
-        typeof chrome !== 'undefined' && chrome.runtime?.getURL
-          ? chrome.runtime.getURL(`assets/hyphenation/${dictName}.txt`)
-          : `/assets/hyphenation/${dictName}.txt`;
-
-      const response = await fetch(assetUrl);
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status} fetching ${dictName}.txt`);
-      }
-      const text = await response.text();
-      this.patternsCache.set(dictName, parseHyphenationPatterns(text));
-    } catch (err) {
-      console.warn(`[HyphenationService] Failed to load hyphenation dictionary "${dictName}":`, err);
-    }
+    return this.data.load(this.resolveDictionaryName(lang), this.resolveHypherKey(lang),
+      HyphenationService.customLoader);
   }
 
   /**
    * Computes legal hyphenation slice points for a word in the specified language.
+   * Legacy XianScan policy: Indic/vowel rule engines first, then the legacy Liang
+   * dictionary. This method intentionally does NOT use hypher tries, so existing
+   * typesetLayout behavior is unchanged. Contour typesetting uses
+   * `findContourHyphenationPoints` instead.
    *
    * @param word - Raw alphabetic token.
    * @param targetLang - Language of the word (default: 'en').
@@ -183,34 +188,65 @@ export class HyphenationService {
     const cached = this.wordPointsCache.get(cacheKey);
     if (cached) return cached;
 
+    // Dictionary-backed languages must not memoize "no points" before the data is ready.
+    // Prior defect: an early lookup cached [] forever, so a later successful load
+    // never took effect for that word. Rule-based languages are always ready.
+    const dictionaryBacked =
+      !INDIC_SYLLABLE_LANGS.has(baseLang) && !VOWEL_SYLLABLE_LANGS.has(baseLang);
+    const cacheable = !dictionaryBacked || this.isLoaded(targetLang);
+
     let points: number[] = [];
 
-    // 1. Indic scripts (Devanagari, Bengali, Tamil, etc.)
+    // 1. Indic scripts (Devanagari, Bengali, Tamil, etc.) - rule-based
     if (INDIC_SYLLABLE_LANGS.has(baseLang)) {
       points = getIndicSyllablePoints(word, minSide);
     } else if (VOWEL_SYLLABLE_LANGS.has(baseLang)) {
-      // 2. Vowel-syllabic languages (Turkish, Finnish, Azerbaijani)
+      // 2. Vowel-syllabic languages (Turkish, Finnish, Azerbaijani) - rule-based
       points = getVowelSyllablePoints(word, baseLang, minSide);
     } else {
-      // 3. Dictionary-backed Liang engine
+      // 3. Dictionary-backed Liang engine (legacy XianScan policy, unchanged)
       const dictName = this.resolveDictionaryName(targetLang);
       if (dictName) {
-        const patterns = this.patternsCache.get(dictName);
+        const patterns = this.data.patternsCache.get(dictName);
         if (patterns) {
           points = hyphenationPoints(word, patterns, minSide);
         }
       }
     }
 
-    if (this.wordPointsCache.size >= HyphenationService.MAX_WORD_POINTS_CACHE) {
-      this.wordPointsCache.clear();
+    // Cache management
+    if (cacheable) {
+      if (this.wordPointsCache.size >= HyphenationService.MAX_WORD_POINTS_CACHE) {
+        this.wordPointsCache.clear();
+      }
+      this.wordPointsCache.set(cacheKey, points);
     }
-    this.wordPointsCache.set(cacheKey, points);
     return points;
   }
 
   /**
+   * @param word - Alphabetic core. @param targetLang - Language tag.
+   * @param leftMin - Minimum prefix scalars. @param rightMin - Minimum suffix scalars.
+   * @returns Contour-only UTF-16 cuts, or [] until trie data is ready.
+   */
+  public findContourHyphenationPoints(word: string, targetLang: string,
+    leftMin: number, rightMin: number): number[] {
+    return findContourHyphenationPoints(this.data.hypherTrieCache, word, targetLang, leftMin, rightMin);
+  }
+
+  /**
+   * @param word - Alphabetic core. @param targetLang - Language tag.
+   * @param leftMin - Minimum prefix scalars. @param rightMin - Minimum suffix scalars.
+   * @returns Contour-only syllables, preserving the original word when data is unavailable.
+   */
+  public contourSyllables(word: string, targetLang: string,
+    leftMin: number, rightMin: number): string[] {
+    return contourSyllables(this.data.hypherTrieCache, word, targetLang, leftMin, rightMin);
+  }
+
+  /**
    * Splits a word into ordered syllables for line-breaking and text measurement.
+   * Uses hypher trie if available, otherwise legacy Liang engine.
    *
    * @param word - Source word string without whitespace.
    * @param targetLang - Language of the word (default: 'en').

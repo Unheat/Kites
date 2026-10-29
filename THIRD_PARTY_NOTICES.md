@@ -146,6 +146,21 @@ The permissions, disclaimers, and copyright notices of all upstream authors are 
 - **Copyright:** Copyright (c) 2025-2026 Mayo Takanashi and Koharu contributors
 - **License:** Dual MIT / Apache-2.0
 - **Reference Role:** Architectural patterns for manga translation models and pipeline separation.
+- **Renderer revision:** `56787dc90606bd630ba7401441b32ab2f76afc18`.
+- **Ported functionality:** Horizontal contour font search, LastResort selection, profiled and uniform dynamic-programming line breaking, profile placement, and floating-point helpers under `src/offscreen/utils/contour/`. Canvas font measurement remains a platform adapter; see the Koharu typesetting specification for validation scope.
+
+### hypher
+
+- **Source:** `typst/hypher`, crate version `0.1.8`, revision `d81cc506416bffef2a75ee2dc969d4b41bc36613`.
+- **License:** Crate code is MIT OR Apache-2.0. Individual hyphenation patterns retain their own LPPL, MPL, MIT, BSD, and other notices.
+- **Ported functionality:** Trie decoding, bounded hyphenation, language bounds, and on-demand pattern data for the contour route.
+- **Original sources and notices:** `src/offscreen/utils/hyphenation/hypherData/patterns/` and `src/offscreen/utils/hyphenation/hypherData/licenses/`.
+
+### linebreak
+
+- **Source:** `devongovett/linebreaker`, npm package `linebreak` version `1.1.0`.
+- **License:** MIT; the package's bundled license and dependency notices apply.
+- **Role:** UAX #14 break opportunities for the browser contour adapter. This is not the donor's ICU4X locale-tailored segmenter or Chinese word-protection implementation.
 
 ---
 

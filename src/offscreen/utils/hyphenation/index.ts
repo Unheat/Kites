@@ -6,6 +6,7 @@ export * from './types';
 export * from './LiangEngine';
 export * from './RuleBasedEngine';
 export * from './HyphenationService';
+export * from './hypherCompat';
 
 import { HyphenationService } from './HyphenationService';
 import { HYPHEN_MIN_SIDE } from './types';
@@ -28,6 +29,7 @@ export function syllables(
 
 /**
  * Functional convenience helper to pre-load a language dictionary into memory.
+ * Primes both legacy Liang dictionary and hypher trie (if available).
  *
  * @param targetLang - Target language code.
  */

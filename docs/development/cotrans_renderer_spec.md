@@ -39,9 +39,9 @@ flowchart TD
 
 Font registration is document-local. Catalog downloads verify pinned SHA-256 before storing bytes; user imports do not have catalog hash verification. `ensureFontsRegistered()` caches its registration promise, so the diagram is a startup lifecycle, not a guaranteed cross-document live-update mechanism. Studio triggers registration asynchronously. Registration failures and the bake's explicit family-load failures can fall back to browser fonts; `fonts.ready` alone does not guarantee a requested face exists or that every route awaited it.
 
-`fontSpec()` keeps comma-separated CSS stacks unquoted as a whole and orders CJK fallbacks according to sample text. Contour and Studio simple probes construct their own valid shorthand from the supplied family. Font availability and script fallback can therefore still differ between routes. `runStudioOcr()` currently precomputes horizontal contour layout with a hardcoded comic family; it does not perform the live bake's selected-preset preload/measurement sequence. Do not infer font or pixel parity from shared geometry alone.
+`fontSpec()` keeps comma-separated CSS stacks unquoted as a whole and orders CJK fallbacks according to sample text. Contour probes retain fractional sizes. Studio OCR precomputes only accepted fixed boxes with the canonical strategy, selected family/weight/language, and awaited font/dictionary resources; free boxes retain the Auto Balloon route rather than receiving accidental contour precomputation.
 
-Current Contour DP's 18/20/24px dialogue caps are custom policy. Upstream Koharu bubble automatic maximum is width (height for vertical writing); 24 applies only to nonbubble text.
+The contour default maximum follows the inset frame width without 18/20/24 or 48 px caps. Explicit user constraints remain separate; page-level XianScan harmonization affects only free boxes. See [the Koharu port mapping](koharu_typesetting_pipeline_spec.md) for algorithm proof and measurement limitations.
 
 ## 3. Rigid 2D Affine Transformation Matrix
 
@@ -86,7 +86,7 @@ $$y_{\text{start}} = \frac{\text{normV} - \text{totalBlockHeight}}{2}$$
 In a figure-8 or hourglass bubble, this midpoint falls directly in the narrow constriction neck (20px width), pulling text 40–60px upward away from the bulb.
 
 ### 4.2 Positioned Line Scanlines
-When the typesetter provides `PositionedLine[]` matching the drawable line count, each line uses its computed box-local top offset (`ctx.textBaseline = 'top'`), not an alphabetic baseline:
+When the typesetter provides `PositionedLine[]` matching the drawable line count, new records use `baseline` as an **absolute box-local alphabetic baseline**. The painter selects `ctx.textBaseline = 'alphabetic'` and draws directly at that value, not `y + baseline`. Legacy records without this optional field retain `textBaseline = 'top'` at stored `y`. Fractional size and profile placement are not rounded or reconstructed from a competing pitch:
 
 $$y_i = \begin{cases} \text{positionedLine}[i].y & \text{if positionedLines present} \\ y_{\text{start}} + i \cdot \text{lineStep} & \text{otherwise} \end{cases}$$
 
@@ -109,7 +109,7 @@ This ensures dialogue text sits comfortably in the wide belly of the bubble lobe
 * **Drawing Order**: `ctx.strokeText()` is drawn first with `lineJoin = 'round'` and `miterLimit = 2`, followed by `ctx.fillText()`. This guarantees the outline never eats into the interior of thin letter glyphs.
 
 ### 5.2 Left-Edge Bleed Shield
-To prevent text strokes from clipping off the left edge of the page canvas on dialogue hugging the margin:
+For legacy/free placements only, the existing left-edge shield prevents text strokes from clipping off the page. It does not shift solver-owned positioned contour lines away from their computed frame:
 
 $$\text{if } (x_{tl} + x_i < 4) \implies x_i = 4 - x_{tl}$$
 

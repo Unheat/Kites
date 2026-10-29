@@ -30,6 +30,8 @@ export interface TypesetOptions {
   targetLang?: string;
   targetCenterY?: number;
   measureCache?: MeasureCache;
+  /** Whole-chamber dimensions; fixed adapters apply the descriptor text inset once. Omit for container dims. */
+  frame?: { width: number; height: number };
 }
 
 export interface TypesetResult {

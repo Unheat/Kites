@@ -10,7 +10,7 @@
 import type { Point2D } from '../../shared/utils/geometry';
 import type { BoxRect } from './bubbleExpansion';
 import { fontSpec, type MeasureCache } from './typesetLayout';
-import type { PositionedLine } from './contourTypeset';
+import { MINIMUM_READABLE_FONT_SIZE, type PositionedLine } from './contourTypeset';
 import { TypesetStrategyFactory, measureDefaultLayout } from '../engines/typeset';
 import { compactSpecialSymbols } from '../../shared/utils/textCleaning';
 import { DEFAULT_RENDER_FONT_FAMILY, calcHorizontal, makeMeasurer } from './renderer/cotransLineBreaker';
@@ -106,6 +106,7 @@ export interface DefaultRenderResult {
  * @param maxFontSizeCap - Optional ceiling on fitted font size.
  * @param fontFamily - CSS font-family stack to render and measure with.
  * @param isBold - Whether to render text in bold weight.
+ * @param frame - Explicit inset layout frame. Omitted keeps quad-derived dimensions.
  * @returns Render info, or null if nothing was drawn.
  */
 export function renderRegionDefault(
@@ -117,7 +118,8 @@ export function renderRegionDefault(
   fontFamily: string = DEFAULT_RENDER_FONT_FAMILY,
   isBold: boolean = false,
   measureCache?: MeasureCache,
-  targetLang: string = 'en'
+  targetLang: string = 'en',
+  frame?: { width: number; height: number }
 ): DefaultRenderResult | null {
   const [tl, tr, br, bl] = dstPoints;
   const normH = dist({ x: (tl.x + bl.x) / 2, y: (tl.y + bl.y) / 2 }, { x: (tr.x + br.x) / 2, y: (tr.y + br.y) / 2 });
@@ -149,7 +151,7 @@ export function renderRegionDefault(
     targetCenterY = polyCentroidY - tl.y;
   }
 
-  const containerBox: BoxRect = { x: 0, y: 0, w: normH, h: normV };
+  const containerBox: BoxRect = { x: 0, y: 0, w: frame?.width ?? normH, h: frame?.height ?? normV };
   const typesetRes = strategy.typeset(
     region.translation,
     containerBox,
@@ -157,12 +159,13 @@ export function renderRegionDefault(
     ctx,
     {
       fontFamily: fontFamily || DEFAULT_RENDER_FONT_FAMILY,
-      minFontSize: isFixed ? 9.0 : (fontSize > 0 ? fontSize : 9.0),
+      minFontSize: isFixed ? MINIMUM_READABLE_FONT_SIZE : (fontSize > 0 ? fontSize : MINIMUM_READABLE_FONT_SIZE),
       maxFontSizeCap,
       targetLang,
       isBold,
       targetCenterY,
-      measureCache
+      measureCache,
+      frame: frame ?? { width: normH, height: normV }
     }
   );
   if (!typesetRes || typesetRes.lines.length === 0) return null;
@@ -221,12 +224,12 @@ export function renderRegionDefault(
       if (hasPositionedLines && fitted.positionedLines?.[i]) {
         lineX = fitted.positionedLines[i].x + (fitted.positionedLines[i].width - widths[i]) / 2;
       }
-      if (tl.x + lineX < 4) {
+      if (!hasPositionedLines && tl.x + lineX < 4) {
         lineX = 4 - tl.x;
       }
-      const lineY = (hasPositionedLines && fitted.positionedLines?.[i])
-        ? fitted.positionedLines[i].y
-        : startY + i * lineStep;
+      const positioned = hasPositionedLines ? fitted.positionedLines?.[i] : undefined;
+      const lineY = positioned?.baseline ?? positioned?.y ?? startY + i * lineStep;
+      ctx.textBaseline = positioned?.baseline !== undefined ? 'alphabetic' : 'top';
       ctx.strokeText(drawableLines[i], lineX, lineY);
     }
   }
@@ -241,16 +244,19 @@ export function renderRegionDefault(
     if (hasPositionedLines && fitted.positionedLines?.[i]) {
       lineX = fitted.positionedLines[i].x + (fitted.positionedLines[i].width - widths[i]) / 2;
     }
-    if (tl.x + lineX < 4) {
+    if (!hasPositionedLines && tl.x + lineX < 4) {
       lineX = 4 - tl.x;
     }
-    const lineY = (hasPositionedLines && fitted.positionedLines?.[i])
-      ? fitted.positionedLines[i].y
-      : startY + i * lineStep;
+    const positioned = hasPositionedLines ? fitted.positionedLines?.[i] : undefined;
+    const lineY = positioned?.baseline ?? positioned?.y ?? startY + i * lineStep;
+    ctx.textBaseline = positioned?.baseline !== undefined ? 'alphabetic' : 'top';
     ctx.fillText(drawableLines[i], lineX, lineY);
   }
 
   ctx.restore();
 
-  return { fontSize: fitted.size, lineCount: drawableLines.length, lines: drawableLines, lineSpacing: lineStep / fitted.size, positionedLines: hasPositionedLines ? fitted.positionedLines : undefined };
+  const measuredLineStep = hasPositionedLines && fitted.positionedLines!.length > 1
+    ? fitted.positionedLines![1].y - fitted.positionedLines![0].y
+    : lineStep;
+  return { fontSize: fitted.size, lineCount: drawableLines.length, lines: drawableLines, lineSpacing: measuredLineStep / fitted.size, positionedLines: hasPositionedLines ? fitted.positionedLines : undefined };
 }

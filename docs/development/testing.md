@@ -52,6 +52,12 @@ npm test
 - **Translation Glossary:** Bounded dictionary normalization, per-request terminology snapshots, prompt data boundaries, and forwarding through the translation waterfall (`glossary.test.ts`, `BaseLlmTranslationEngine.test.ts`, `TranslationManager.test.ts`).
 - **Reading Shortcuts:** Editable-field and modifier guards, original/translated toggling, and top-frame command routing (`readingShortcuts.test.ts`, `readingCommands.test.ts`).
 
+### Source-port contour validation
+
+The `utils/contour/` suites test pinned donor search/policy, profiled/uniform DP, f32 boundaries, ink placement, and honest overflow. `typography/contourSegments.test.ts` and `HyphenationService.test.ts` include source-derived hypher vectors and readiness/cache isolation. Studio generation/readiness tests guard cancellation, manual resize, undo, deletion, and resource-wait edits. These are source-derived TypeScript checks; no live Rust oracle has been executed in the current host environment.
+
+`npm run test:visual:koharu` remains separate. It renders `src/test/result/pipeline_bubble_neural/image6_koharu_exact.png` and writes a JSON sidecar with source/font hashes and each block's actual strategy and output. The transcription uses `UNDERSTOOD!` without pre-inserted hyphens. Several regions can still fall back to Auto Balloon after geometry rejection; inspect the sidecar before attributing every visible hyphen to contour DP. A clean runner exit is not full-page visual parity, and original ink/inpainting artifacts are outside the pure solver proof.
+
 Use the supported `npm test` command. Bare `npx vitest run` also discovers archived engines under `archive/`; those preserved tests refer to removed dependencies and old import paths and are not part of the active source suite.
 
 ---

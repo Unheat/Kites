@@ -112,8 +112,10 @@ describe('Studio OCR independent optional steps', () => {
       expect(object).toMatchObject({
         id: expect.stringMatching(/^ocr-\d+-0$/),
         text: 'Xin chào', originalText: 'こんにちは',
-        fontSize: 13, isVertical: false,
+        fontSize: ocrResult().fontSizes![0], isVertical: false, typesetMode: 'balloon',
       });
+      // Free OCR boxes preserve detected size; contour fitting belongs only to accepted bubbles.
+      expect(object.lines).toBeUndefined();
       // Centered unrotated rectangle (edge-midpoint dimensions), not the rotated AABB.
       expect(object.x).toBeCloseTo(212.3753, 4);
       expect(object.y).toBeCloseTo(312.3223, 4);

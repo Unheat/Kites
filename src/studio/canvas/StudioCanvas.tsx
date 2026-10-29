@@ -39,7 +39,7 @@ import { computeRotatedBounds, getHandleCursor } from './transformMath';
 import { applyTextObjectUpdates, prepareInitialTextObject, CJK_CHARACTER_REGEX } from './studioTypeset';
 import { unwrapWrappedText } from '../../offscreen/utils/typography';
 import { extractTypographyStyle } from '../state/studioStore';
-import { ensureFontsRegistered } from '../../shared/fontLibrary';
+import { ensureFontsRegistered, preloadFontFamilies } from '../../shared/fontLibrary';
 import type {
   BoundingBox,
   Point,
@@ -255,23 +255,28 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
     redrawOverlay();
   }, [redrawOverlay]);
 
-  // Font-library faces register asynchronously (IndexedDB read + FontFace.load),
-  // usually after the first overlay paint. Canvas fillText never triggers webfont
-  // loads and registration changes no redraw dependency above, so the first paint
-  // would keep fallback glyphs until the next user interaction. Repaint once when
-  // registration settles; the call is memoized in fontLibrary, so re-runs of this
-  // effect join the same in-flight promise and cost one cheap no-op repaint.
+  // Canvas fillText never triggers webfont loads. CSS @font-face presets (Kites Comic,
+  // CC Wild Words, Patrick Hand SC) stay unloaded until DOM text requests them, and
+  // library faces register asynchronously after the first overlay paint. Without an
+  // explicit load plus repaint, the first paint keeps fallback glyphs until selecting
+  // a box renders DOM text in that family. Requested per text-object change so refonted
+  // boxes repaint with their newly selected face.
   useEffect(() => {
     let cancelled = false;
+    const stacks = textObjects.map((obj) => obj.fontFamily ?? '');
     void ensureFontsRegistered()
+      .catch(() => {})
+      .then(() => preloadFontFamilies(stacks))
       .then(() => {
         if (!cancelled) redrawOverlay();
       })
-      .catch(() => {});
+      .catch((err) => {
+        console.warn('[StudioCanvas] Font preload repaint failed:', err);
+      });
     return () => {
       cancelled = true;
     };
-  }, [redrawOverlay]);
+  }, [textObjects, redrawOverlay]);
 
   // Interactive dialogue box actions (reading live store to prevent stale closures)
   const handleDuplicateSelectedText = useCallback(() => {

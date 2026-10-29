@@ -6,3 +6,4 @@
 export * from './kinsokuShori';
 export * from './textUnwrap';
 export * from './tokenizer';
+export * from './contourSegments';

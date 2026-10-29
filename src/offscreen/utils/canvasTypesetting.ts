@@ -7,7 +7,7 @@ import {
   defaultLayoutFits,
   type DefaultRenderRegion
 } from './cotransDefaultRenderer';
-import type { PositionedLine } from './contourTypeset';
+import { MINIMUM_READABLE_FONT_SIZE, type PositionedLine } from './contourTypeset';
 import { fitFontSizeWithLines, decollideBoxes, fontSpec, createMeasureCache } from './typesetLayout';
 import { pickTextColor } from '../../shared/utils/textColor';
 import { getFontSizeMinimumBase } from '../engines/ocr/tallStripTiling';
@@ -377,6 +377,10 @@ function bubbleLayoutFontTarget(block: TextBlockItem): number {
  * @param block - Text and source OCR font metadata.
  * @param box - Final axis-aligned layout rectangle; coordinates are not modified.
  * @param fontFamily - CSS font-family stack used by the renderer.
+ * @param isBold - Whether the layout is rendered bold.
+ * @param targetLang - Hyphenation language for the layout.
+ * @param minFontSize - Optional user minimum override forwarded to the strategy.
+ * @param frame - Explicit inset layout frame. Omitted keeps the legacy box dimensions.
  * @returns Fitted font size, or 0 for empty text, invalid dimensions, or an unfit minimum fallback.
  */
 export function measureBubbleLayoutFontSize(
@@ -386,9 +390,11 @@ export function measureBubbleLayoutFontSize(
   fontFamily: string = DEFAULT_RENDER_FONT_FAMILY,
   isBold: boolean = false,
   targetLang: string = 'en',
-  minFontSize?: number
+  minFontSize?: number,
+  frame?: { width: number; height: number }
 ): number {
   if (!block.text?.trim() || !Number.isFinite(box.w) || !Number.isFinite(box.h) || box.w < 1 || box.h < 1) return 0;
+  const layoutFrame = frame ?? { width: box.w, height: box.h };
 
   const hasContour = Boolean(block.contourPoints && block.contourPoints.length >= 3);
   const isFixed = true;
@@ -418,21 +424,21 @@ export function measureBubbleLayoutFontSize(
       ctx as any,
       {
         fontFamily,
-        minFontSize: minFontSize ?? 6,
-        maxFontSize: Math.max(16, Math.round(box.h * 0.5)),
+        minFontSize: minFontSize ?? MINIMUM_READABLE_FONT_SIZE,
         targetLang,
         isBold,
-        targetCenterY
+        targetCenterY,
+        frame: layoutFrame
       }
     );
-    if (!res || !res.lines || res.lines.length === 0) {
+    if (!res || res.lines.length === 0 || res.overflowed) {
       return 0;
     }
     return res.fontSize;
   }
 
-  const fitted = measureDefaultLayout(ctx, block.text.trim(), box.w, box.h, bubbleLayoutFontTarget(block), undefined, fontFamily, isBold, undefined, targetLang);
-  return defaultLayoutFits(ctx, fitted, box.w, box.h, fontFamily, isBold) ? fitted.size : 0;
+  const fitted = measureDefaultLayout(ctx, block.text.trim(), layoutFrame.width, layoutFrame.height, bubbleLayoutFontTarget(block), undefined, fontFamily, isBold, undefined, targetLang);
+  return defaultLayoutFits(ctx, fitted, layoutFrame.width, layoutFrame.height, fontFamily, isBold) ? fitted.size : 0;
 }
 
 /** Per-block render outcome, aligned with the input blocks array. */
@@ -786,10 +792,14 @@ function renderTextBlocksDefault(
       // paragraphs and genuine screams/SFX keep their fitted size.
       const isScream = plan.wordCount === 1 && /^[A-Z0-9\s!！?？]+$/.test(plan.region.translation);
       const isShortNonScream = plan.wordCount <= 3 && !isScream;
-      const baselineCap = pageDialogueBaseline > 0 && isShortNonScream
+      const baselineCap = !plan.fixed && pageDialogueBaseline > 0 && isShortNonScream
         ? Math.max(18, Math.round(pageDialogueBaseline * 1.25))
         : undefined;
-      const info = renderRegionDefault(ctx, plan.region, plan.dstPoints, plan.targetFontSize, baselineCap, fontFamily, isBold, pageMeasureCache, targetLang);
+      // Explicit frame from edge midpoints: never let a contour bbox define layout bounds.
+      const [qtl, qtr, qbr, qbl] = plan.dstPoints;
+      const frameWidth = Math.hypot((qtr.x + qbr.x) / 2 - (qtl.x + qbl.x) / 2, (qtr.y + qbr.y) / 2 - (qtl.y + qbl.y) / 2);
+      const frameHeight = Math.hypot((qbl.x + qbr.x) / 2 - (qtl.x + qtr.x) / 2, (qbl.y + qbr.y) / 2 - (qtl.y + qtr.y) / 2);
+      const info = renderRegionDefault(ctx, plan.region, plan.dstPoints, plan.targetFontSize, baselineCap, fontFamily, isBold, pageMeasureCache, targetLang, { width: frameWidth, height: frameHeight });
       if (info) {
         results[plan.index] = {
           fontSize: info.fontSize,

@@ -1,6 +1,6 @@
 # Koharu and Kites Typesetting: Current Contract and Parity Assessment
 
-**Reviewed:** 2026-10-28, local `main` through `656d720`.
+**Reviewed:** 2026-10-29, source-port work on `fix/koharu-contour-source-parity`; donor revision `56787dc90606bd630ba7401441b32ab2f76afc18`.
 
 **Purpose:** describe the shipped local implementation, its donor lineage, and remaining differences. “Exact” in a test filename or historical commit subject is not an acceptance result.
 
@@ -83,31 +83,35 @@ Bubble geometry affects layout, not erasure ownership. Inpainting remains polygo
 
 ### Contour DP
 
-`ContourDpTypesetter` delegates to `wrapTextContour()`:
+`contourTypeset.ts` is a compatibility facade; `utils/contour/` owns the portable horizontal layout core. `ContourDpTypesetter` and backend `SimpleRectTypesetter` compose that core. Studio simple edits retain their separate greedy/current-size behavior.
 
-- Token/segment templates and hyphenation opportunities are built once per pass, outside font probes.
-- Candidate measurement uses Canvas glyph advances; an optional `MeasureCache` keys widths by the live font string and text.
-- Each line samples five positions across an approximate glyph ink band. At each sample the widest valid polygon span is chosen, then the spans are intersected across the band.
-- A common horizontal center keeps the paragraph aligned rather than zig-zagging between asymmetric chords.
-- Dynamic programming scores slack, overflow, break penalties, and discretionary hyphens. Non-overflowing candidates beat overflowing candidates; among clean candidates fewer lines beat more lines before penalty tie-breaking.
-- Coarse downward font probes followed by refinement handle non-monotonic profile changes.
-- `positionedLines` preserves line-local placement rather than asking the painter to reconstruct uniform spacing.
+### Source mapping and port classification
 
-This shares donor structure, but it is not byte-for-byte equivalence: JavaScript numbers, Canvas shaping, approximate ink height, raster-size rounding, line pitch, font bounds, and wrapper options differ.
+| Responsibility | Pinned donor | Kites implementation | Evidence/qualification |
+| --- | --- | --- | --- |
+| Descending search and LastResort | `layout.rs:194–238`, `:387–435` | `contour/fontSearch.ts` | Source-derived tests for probes, floor buckets, clean preference, and recovery. |
+| Profile/chord geometry | `layout.rs` profile and balloon helpers | `contour/profiles.ts`, `geometry.ts` | Five ink-band samples, common axis, 64-line cap, measured-ink air; injected-metric tests. |
+| Profiled and uniform DP | `layout.rs:1411–1741` | `contour/lineBreaks.ts` | Overflow/line-count/cost ordering, cubic uniform fallback, f32 epsilon. |
+| Tight ink bounds and placement | `layout.rs:744–893` | `contour/placement.ts` | PAD1, absolute baselines, full-frame fit; Canvas line bounds substitute for native per-glyph bounds. |
+| Bounded hyphenation | `hypher 0.1.8` | `hyphenation/hypherTrie.ts`, lazy trie data | All 48 binary payloads copied exactly; source-derived multilingual vectors. |
+| Line opportunities | ICU4X and Chinese word protection | `typography/contourSegments.ts`, `linebreak@1.1.0` | Same responsibility, not identical dependency: Unicode-13 UAX #14, approximate Korean KeepAll, no Chinese word dictionary. Injected opportunities bypass this adapter. |
+| Font shaping and ink metrics | HarfRust/skrifa | Canvas `measureText` adapter | Explicit runtime difference; actual ink/font bounds provenance is reported. Width-only mocks are tagged fallback. |
 
-### Current local sizing policy
+Rust arithmetic is reproduced with focused `Math.fround` operations at layout boundaries. Native shaping/rasterization equality and live Rust differential execution have not been established. Rust/Cargo was not installed in the validation environment; TypeScript source-derived tests are not described as an executed Rust oracle.
 
-Current constants in `contourTypeset.ts`:
+### Current automatic contour policy
 
-- Default minimum readable size: 9px. Acceptance probes may explicitly pass 6px or a user minimum; a default is not a universal floor.
-- Dense dialogue ceiling: 18px; short dialogue ceiling: 20px; matching single-word scream ceiling: 24px.
-- Automatic ceiling ratios: width 0.85 and height 0.40.
-- Vertical clearance uses `max(inlineAir, round(fontSize * 0.35))`.
-- Minimum candidate hyphenated token length: 7, with at least two characters on each side of an accepted cut.
+- Whole chamber dimensions and local contour enter a shared inset adapter. The pure solver receives an explicit inset frame, not a polygon bounding box masquerading as a frame.
+- Default minimum is 9 px; deliberate authored constraints remain explicit. Default descriptor line pitch is 1.2.
+- Automatic horizontal maximum is the inset frame width. There is no implicit 48 px, word-count, width-percentage, or height-percentage cap in the contour route. Page-level XianScan harmonization applies only to free boxes.
+- Font probes and selected sizes remain fractional. Search uses eight intervals, up to ten refinements, and 0.01 px tolerance.
+- Search whole words first. Return early only when `floor(cleanSize) > floor(minimum)`; at the minimum bucket search LastResort and select it only if it gains a strictly larger floor bucket. At each candidate size LastResort still prefers a fitting clean layout.
+- Clearance is the maximum of configured minimum air and measured ink-band thickness. Candidate ordering compares overflow, line count, then cost for all candidates.
+- Uniform fallback preserves multiple lines and reports overflow rather than fabricating one contained line. Tight ink dimensions plus one-pixel padding are checked against the frame.
+- Contour eligibility uses five Unicode scalar characters in the alphabetic core and compact two-character fragment bounds. Donor hypher opportunities do not inherit the legacy seven-character English heuristic wrapper.
+- Dictionary loading primes the independent legacy and contour resources without overwriting registered legacy patterns. Pre-load empty queries cannot remain cached after resources arrive.
 
-**These are Kites adaptations introduced during debugging.** Naming constants does not demonstrate that values are optimal or donor-derived.
-
-In the inspected donor, `text_renderer.rs::automatic_maximum()` uses bubble width horizontally, bubble height vertically, and 24px for nonbubble text. The donor does not contain the Kites 18/20/24 word-count cap policy. The donor also uses measured ink metrics and a different clean-fit floor comparison. Earlier claims that the local caps were an exact port were incorrect.
+The XianScan/Auto Balloon fitter and its four-pass policy remain separate. Shared cache correctness is not permission to change its break-selection policy.
 
 ### Strategy routing
 
@@ -127,7 +131,7 @@ The contour fitter previously wrapped a complete CSS stack in quotes. An already
 
 The fix preserves comma-separated stacks and quotes individual unquoted family names only when necessary. The same contract applies to Studio simple wrapping. The Node runner's former `CCWildWords, sans-serif` string was not the same as the quoted preset stack; enclosing it as a single family could silently select a fallback there too.
 
-`PipelineOrchestrator` explicitly preloads selected family candidates before measurement. Studio library registration occurs asynchronously at boot; it is not proof every preset has been loaded before the first synchronous edit. Font syntax validity, face availability, weight/style, and readiness must all be checked separately.
+`PipelineOrchestrator` explicitly preloads selected family candidates and dictionaries before measurement. Studio keeps persisted lines on restore, then retries only tracked layouts generated while resources were pending; job switches, deletion, undo, and manual resize transactions are guarded. Resource readiness does not remap all stored objects. Font syntax, face availability, weight/style, and readiness remain separate requirements.
 
 Koharu resolves font resources through its own native font system and shapes glyphs using its native stack. Kites uses FontFace/CSS and Canvas 2D. No per-family hardcoded geometry algorithm is justified by the reference investigation.
 
@@ -149,7 +153,7 @@ Koharu distinguishes the original automatic analysis region from authored geomet
 
 ### Why the Node runner is not an end-to-end oracle
 
-`pipelineVisualKoharuExactTest.ts` uses hardcoded semantic transcription, native OCR/inference, a directly registered reference font, bold drawing, and manually constructed neural mask evidence. It does not instantiate `PipelineOrchestrator`, and its acceptance callback does not pass the same contour metadata as production. It does not exercise Chrome's font setter, background state normalization, database restore, Studio font switching, undo, or export.
+`pipelineVisualKoharuExactTest.ts` uses hardcoded semantic transcription, native OCR/inference, a directly registered reference font, bold drawing, and manually constructed neural mask evidence. It does not instantiate `PipelineOrchestrator`, and still differs from full production orchestration. Its acceptance callback now passes frame-local contour metadata and it writes per-block JSON with actual strategy, frame, lines, sizes, and placements. It does not exercise Chrome's font setter, background state normalization, database restore, Studio font switching, undo, or export.
 
 `chromeBubbleProbe.mjs` drives Studio OCR, not a live-web bake; its returned inpainted patch is not a rendered English Studio canvas. The standalone Chrome bake harness uses a temporary exposed orchestrator in an extension page, seeds model cache, and prints blocks. It currently calls the orchestrator directly, not the addressed `PROCESS_JOB` path, and has no automated image-diff assertion. Browser execution success is not visual acceptance.
 
@@ -165,7 +169,7 @@ Koharu distinguishes the original automatic analysis region from authored geomet
 ## 8. Module ownership and retained history
 
 - `engines/typeset/`: strategy interface/factory and three concrete strategies.
-- `utils/contourTypeset.ts`: profiles, segment templates, DP, sizing policy, polygon generation.
+- `utils/contourTypeset.ts`: compatibility exports; `utils/contour/`: portable profiles, segments, DP, font policy, geometry, measurement adaptation, and placement.
 - `utils/typography/`: shared tokenization, kinsoku rules, and marker-aware unwrapping.
 - `utils/geometry/`: polygon math, neck decomposition, partitioning, sibling clearance.
 - `services/BubbleLayoutService.ts`: association, geometry resolution, noise suppression, acceptance/rollback.

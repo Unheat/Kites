@@ -529,7 +529,8 @@ export class PipelineOrchestrator {
                   resolvedFontFamily,
                   renderFontBold,
                   targetLang,
-                  popupState.renderFontMinSize
+                  popupState.renderFontMinSize,
+                  { width: proposed.w, height: proposed.h }
                 )
               : measureBubbleLayoutFontSize(
                   ctx,
@@ -537,7 +538,9 @@ export class PipelineOrchestrator {
                   proposed,
                   resolvedFontFamily,
                   renderFontBold,
-                  targetLang
+                  targetLang,
+                  undefined,
+                  { width: proposed.w, height: proposed.h }
                 );
             const ok = fitted > 0;
             console.log(`[PipelineOrchestrator accept #${index}] ok=${ok} fitted=${fitted} text="${block.text}" proposed=${JSON.stringify(proposed)}`);

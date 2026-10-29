@@ -76,7 +76,8 @@ export interface TextObject {
   text: string;
   lines?: string[];
   /** Koharu scanline placements (box-local). Present after contour typesetting or pipeline restore; absent falls back to even spacing. */
-  positionedLines?: Array<{ text: string; x: number; y: number; width: number; height: number }>;
+  /** Optional absolute frame-local alphabetic baseline; legacy y remains ink-top. */
+  positionedLines?: Array<{ text: string; x: number; y: number; width: number; height: number; baseline?: number }>;
   originalText?: string;
   charStyles?: (CharStyleOverride | null)[];
   fontSize: number;
@@ -116,6 +117,13 @@ export interface TextObject {
   isSkipped?: boolean;
   /** Preferred engine for future edits, independent of already measured lines. */
   typesetMode?: TypesetMode;
+  /**
+   * True when `text` was reconstructed from pipeline-generated layout lines.
+   * Generated text may be un-wrapped before re-typesetting; authored text
+   * (user-typed or legacy translation) keeps its explicit line breaks.
+   * Cleared automatically whenever the user edits `text`.
+   */
+  textFromGeneratedLines?: boolean;
   /** Mathematical bubble corner radius in image pixels (0 = rectangle, >0 = oval/ellipse curvature). */
   borderRadius?: number;
   /** Whether this text object is positioned inside a curved bubble or a rectangular box. */

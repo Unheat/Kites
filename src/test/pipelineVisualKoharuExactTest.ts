@@ -1,6 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
+import { createHash } from 'node:crypto';
+import { TypesetStrategyFactory } from '../offscreen/engines/typeset';
 import { OcrManager } from '../offscreen/services/OcrManager';
 import { InpaintManager } from '../offscreen/services/InpaintManager';
 import { renderTextBlocksBatch, measureBubbleLayoutFontSize, type TextBlockItem } from '../offscreen/utils/canvasTypesetting';
@@ -38,7 +40,7 @@ export function mapOcrTextToKoharuExact(text: string, box: BoxRect): string {
   if (text.includes('我知道了')) return 'I GET IT NOW..';
   if (text.includes('勉强') || text.includes('勉強')) return "BUT PLEASE DON'T FORCE YOURSELF TOO MUCH!";
   if (text.includes('要是情况危险') || text.includes('要是情況')) return 'IN CASE THINGS GET DANGEROUS, YOU SHOULD ALL RETREAT IMMEDIATELY!';
-  if (text.includes('明白')) return 'UN-DER-STOOD!';
+  if (text.includes('明白')) return 'UNDERSTOOD!';
   if (text.includes('全力')) return 'THIS IS WHEN WE REALLY PUSH OURSELVES!';
   if (text.includes('精神')) return "LET'S GET OUR SPIRITS BACK UP!";
   if (text.includes('莲实') || text.includes('蓮實') || text.includes('实！')) return 'LION! YOU HAVE TO GO!';
@@ -177,6 +179,8 @@ async function runKoharuExactTest() {
     pageHeight,
     accept: (index, proposed) => {
       const curv = neuralGeometry.curvatures?.[index];
+      const rawContour = neuralGeometry.contours?.[index];
+      const isContour = Boolean(rawContour && rawContour.length >= 3) || Boolean(curv?.isRounded);
       const block: TextBlockItem = {
         text: translatedTexts[index],
         polygon: polygons[index],
@@ -187,7 +191,8 @@ async function runKoharuExactTest() {
         sourceLineCount: ocrResult.lineCounts?.[index],
         isRounded: curv?.isRounded,
         borderRadius: curv?.borderRadius,
-        typesetMode: curv?.isRounded ? 'contour' : 'simple',
+        typesetMode: isContour ? 'contour' : 'simple',
+        contourPoints: rawContour?.map((point) => ({ x: point.x - proposed.x, y: point.y - proposed.y })),
       };
       const fitted = measureBubbleLayoutFontSize(ctx as any, block, proposed, fontFamily, true);
       if (index === 15) {
@@ -246,7 +251,23 @@ async function runKoharuExactTest() {
 
   const outPath = path.join(outDir, 'image6_koharu_exact.png');
   fs.writeFileSync(outPath, canvas.toBuffer('image/png'));
-  console.log(`\n[Done] Saved baked image: ${outPath}`);
+  const evidence = {
+    donorCommit: '56787dc90606bd630ba7401441b32ab2f76afc18',
+    runtime: 'node-canvas', targetLang: 'en', pageWidth, pageHeight, fontFamily, bold: true,
+    sourceSha256: createHash('sha256').update(buffer).digest('hex'),
+    fontSha256: fs.existsSync(ccWildWordsPath)
+      ? createHash('sha256').update(fs.readFileSync(ccWildWordsPath)).digest('hex') : null,
+    blocks: textBlockItems.map((block, index) => ({
+      input: block,
+      strategy: TypesetStrategyFactory.resolve({
+        typesetMode: block.typesetMode, isFixed: block.typesetBox !== undefined,
+        hasContour: Boolean(block.contourPoints && block.contourPoints.length >= 3), isRounded: block.isRounded,
+      }).mode,
+      output: renderInfos[index],
+    })),
+  };
+  fs.writeFileSync(path.join(outDir, 'image6_koharu_exact.json'), JSON.stringify(evidence, null, 2));
+  console.log(`\n[Done] Saved baked image and layout evidence: ${outPath}`);
 
   await ocrManager.cleanup();
   await inpaintManager.cleanup();
