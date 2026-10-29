@@ -504,11 +504,16 @@ export class PipelineOrchestrator {
           angles: ocrResult.angles,
           pageWidth,
           pageHeight,
-          accept: (index, proposed) => {
+          accept: (index, proposed, _minimumFontRatio, proposedContour) => {
             const block = blockByOcrIndex.get(index);
             if (!block) return false;
+            // Measure with the exact polygon this region will keep: a partition cell or
+            // sub-chamber contour, not the whole shared chamber, whose wide chords reject
+            // valid partitioned layouts at the explicit frame.
+            const contourPoints = proposedContour
+              ?? bubbleGeometry?.contours?.[index]?.map((p) => ({ x: p.x - proposed.x, y: p.y - proposed.y }));
+            const hasContour = Boolean(contourPoints && contourPoints.length >= 3);
             const curv = bubbleGeometry?.curvatures?.[index];
-            const hasContour = Boolean(bubbleGeometry?.contours?.[index] && bubbleGeometry.contours[index]!.length >= 3);
             const isContour = hasContour || Boolean(curv?.isRounded);
             const blockWithCurvature = isContour
               ? {
@@ -516,9 +521,7 @@ export class PipelineOrchestrator {
                   isRounded: true,
                   borderRadius: curv?.borderRadius || Math.round(Math.min(proposed.w, proposed.h) / 2),
                   typesetMode: 'contour' as const,
-                  contourPoints: bubbleGeometry?.contours?.[index]
-                    ? bubbleGeometry.contours[index]!.map((p) => ({ x: p.x - proposed.x, y: p.y - proposed.y }))
-                    : undefined,
+                  contourPoints,
                 }
               : { ...block, isRounded: false, borderRadius: 0, typesetMode: 'simple' as const };
             const fitted = popupState?.renderFontMinSize !== undefined

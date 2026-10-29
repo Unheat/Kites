@@ -61,6 +61,10 @@ Do not attribute these differences to JavaScript integer arithmetic. Model outpu
 
 The pipeline acceptance callback subtracts the candidate box origin from raw contour vertices. This keeps the contour and local text anchor in the same frame. `wrapTextContour()` also derives bounds from the supplied polygon, so absolute coordinates do not inherently mean zero intersections. Mixed frames can instead misplace anchors or downstream positions.
 
+The resolver hands `accept()` the exact box-local polygon that assignment will store (`proposedContour`): a partition cell contour, a generated sub-chamber contour, or the translated chamber contour on the single-region path. Measuring a partitioned sibling against the whole shared chamber's wide chords rejects valid layouts at the explicit frame, so acceptance and assignment must never read different contour sources. The gate keeps the donor's best-effort semantics: an overflowing minimum-size layout is reported and rendered rather than rejected into the smaller auto-balloon fallback.
+
+Grouping additionally treats two regions whose chamber contours occupy the same area (contour bbox IoU ≥ 0.7) as one shared chamber, covering engines that extracted the chamber but left carriers/proposals unlinked; `finalizeBubbleGeometry()` re-traces the chamber mask per region, so same-chamber utterances carry near-identical contours.
+
 ### Shared chambers
 
 `resolveBubbleLayoutsDetailed()` groups common/nested/high-overlap carriers. It uses:
