@@ -387,8 +387,15 @@ export class OcrManager {
           console.log(`[OcrManager] Battery: dropped slanted non-native line "${t}" (${angleDeg.toFixed(1)}deg)`);
           continue;
         }
-        // 4. Margin-flush architectural / border texture noise
-        if ((box.x <= 5 || box.x + box.width >= pageWidth - 5) && score < 0.75) {
+        // 4. Margin-flush architectural / border texture noise. Legitimate speech bubbles
+        // often sit flush against the page edge (left vertical CJK columns especially), so
+        // a low recognition score alone must not kill them: keep boxes whose recognized
+        // text contains the source language's native script (border texture does not
+        // recognize as real characters) or whose portrait shape marks a vertical column.
+        const isMarginFlush = box.x <= 5 || box.x + box.width >= pageWidth - 5;
+        if (isMarginFlush && score < 0.75
+          && !hasNativeScriptForLang(t, sourceLang)
+          && !(box.height >= 100 && box.height > box.width * 1.25)) {
           console.log(`[OcrManager] Battery: dropped margin-flush line "${t}" (score=${score.toFixed(2)})`);
           continue;
         }

@@ -340,6 +340,35 @@ describe('OcrManager', () => {
       const result = await ocrManager.processImage(new ArrayBuffer(16), 'v6-small', { sourceLang: 'ja', pageWidth: 1000, pageHeight: 1400 });
       expect(result.texts).toHaveLength(2);
     });
+
+    it('keeps an edge-flush vertical CJK column with marginal recognition score', async () => {
+      // Reported regression: 请老师相信我! sits flush at the page's left edge; marginal
+      // recognition (< 0.75) must not trigger the margin-flush noise rule for it.
+      mockBatteryEngine({
+        texts: ['老信我！', 'other dialogue'],
+        polygons: [
+          [{ x: 0, y: 565 }, { x: 99, y: 565 }, { x: 99, y: 747 }, { x: 0, y: 747 }],
+          [{ x: 300, y: 500 }, { x: 500, y: 500 }, { x: 500, y: 560 }, { x: 300, y: 560 }]
+        ],
+        scores: [0.70, 0.95]
+      });
+      const result = await ocrManager.processImage(new ArrayBuffer(16), 'v6-small', { sourceLang: 'zh', pageWidth: 1280, pageHeight: 1808 });
+      expect(result.texts.some((text) => text.includes('老信我'))).toBe(true);
+    });
+
+    it('still drops margin-flush landscape latin noise with low score', async () => {
+      mockBatteryEngine({
+        texts: ['今日はいい天気', 'mwmw mwmw'],
+        polygons: [
+          [{ x: 50, y: 50 }, { x: 150, y: 50 }, { x: 150, y: 90 }, { x: 50, y: 90 }],
+          [{ x: 0, y: 900 }, { x: 260, y: 900 }, { x: 260, y: 940 }, { x: 0, y: 940 }]
+        ],
+        scores: [0.95, 0.50]
+      });
+      const result = await ocrManager.processImage(new ArrayBuffer(16), 'v6-small', { sourceLang: 'zh', pageWidth: 1280, pageHeight: 1400 });
+      expect(result.texts).toHaveLength(1);
+      expect(result.texts[0]).toContain('今日はいい天気');
+    });
   });
 
   describe('processImage & cleanup', () => {
