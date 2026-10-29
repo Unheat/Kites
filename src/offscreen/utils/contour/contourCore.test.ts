@@ -202,4 +202,15 @@ describe('contour core donor semantics', () => {
     });
     expect(result.fontSize).toBeGreaterThan(48);
   });
+
+  it('returns null when the resolved frame has no usable area', () => {
+    // Explicit frame with zero extent fails the same precondition as a degenerate contour.
+    expect(wrapTextContour('Hi', rect(0, 0), mockCanvas(), 'sans-serif',
+      { minFontSize: 9, frame: { width: 0, height: 100 } })).toBeNull();
+    expect(wrapTextContour('Hi', rect(200, 0), mockCanvas(), 'sans-serif',
+      { minFontSize: 9, frame: { width: 200, height: 0 } })).toBeNull();
+    // Degenerate contour without a frame collapses its bounding box to zero width.
+    expect(wrapTextContour('Hi', [{ x: 5, y: 5 }, { x: 5, y: 5 }, { x: 5, y: 5 }], mockCanvas(),
+      'sans-serif', { minFontSize: 9 })).toBeNull();
+  });
 });

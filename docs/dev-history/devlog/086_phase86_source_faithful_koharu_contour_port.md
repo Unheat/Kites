@@ -82,7 +82,7 @@ The renderer recomputed line pitch from font size instead of using the solver's 
 * Dictionary loading now primes legacy Liang and contour trie caches independently, and any successful load invalidates word-level memoization so a pre-load empty lookup cannot persist.
 
 #### 4.5 Adapter isolation
-* `utils/contourFrame.ts` owns the whole-chamber 4 px descriptor inset. Only callers that pass an un-inset chamber use it.
+* `utils/contourFrame.ts` owned the whole-chamber 4 px descriptor inset. (Postscript, same day: its last production callers moved to direct explicit frames during the shared-chamber regression work — Devlog 087 — leaving zero callers, so the adapter and its test were removed to prevent a double-inset reintroduction. See `wrapTextContour`'s null contract in `contourCore.test.ts`.)
 * `ContourDpTypesetter`, `SimpleRectTypesetter`, Studio contour reflow, and `precomputeStudioOcrLayouts` pass an explicit frame to the pure solver directly, because their contours are already frame-local.
 * Pipeline acceptance measurement and final painting now receive the same frame (`PipelineOrchestrator` forwards `{ width: proposed.w, height: proposed.h }`; `canvasTypesetting` derives the frame from edge midpoints instead of the contour bbox).
 * Studio OCR uses the canonical `TypesetStrategyFactory`, preloads the selected font faces and one dictionary, and only precomputes accepted fixed (`contour`/`simple`) horizontal regions.
