@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { downloadCatalogFont, sha256Hex } from './fontLibrary';
+import { downloadCatalogFont, preloadFontFamilies, sha256Hex } from './fontLibrary';
 import { FONT_CATALOG, type FontCatalogEntry } from './fontCatalog';
 
 // db is stubbed: the service must persist through db.fonts.put and register in-document.
@@ -31,7 +31,10 @@ vi.stubGlobal('FontFace', class {
     return Promise.resolve(this);
   }
 });
-vi.stubGlobal('document', { fonts: { add: vi.fn() } });
+// document.fonts.load stands in for the browser's explicit face requests;
+// preloadFontFamilies must call it per family because canvas text never triggers loads.
+const fontLoadMock = vi.fn(async (_spec: string = '') => [] as unknown[]);
+vi.stubGlobal('document', { fonts: { add: vi.fn(), load: fontLoadMock, ready: Promise.resolve() } });
 
 const fixtureBytes = new TextEncoder().encode('kites');
 // sha256("kites"), precomputed with shasum -a 256
@@ -73,5 +76,34 @@ describe('fontLibrary', () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 404 })));
     await expect(downloadCatalogFont(FONT_CATALOG[0])).rejects.toThrow(/HTTP 404/);
     expect(putMock).not.toHaveBeenCalled();
+  });
+
+  describe('preloadFontFamilies', () => {
+    beforeEach(() => {
+      fontLoadMock.mockClear();
+    });
+
+    it('requests every non-generic family in a stack, quoted, normal and bold', async () => {
+      await preloadFontFamilies(['"Kites Comic", "CC Wild Words", sans-serif']);
+      const requested = fontLoadMock.mock.calls.map(([spec]) => spec);
+      expect(requested).toEqual([
+        '16px "Kites Comic"',
+        'bold 16px "Kites Comic"',
+        '16px "CC Wild Words"',
+        'bold 16px "CC Wild Words"',
+      ]);
+    });
+
+    it('deduplicates families shared across stacks', async () => {
+      await preloadFontFamilies(['"Kites Comic", "CC Wild Words"', 'WildWords, "CC Wild Words"']);
+      const requested = fontLoadMock.mock.calls.map(([spec]) => String(spec));
+      expect(requested).toHaveLength(6);
+      expect(requested.filter((spec) => spec.includes('CC Wild Words'))).toHaveLength(2);
+    });
+
+    it('resolves when a face fails to load so the stack falls back instead of blocking', async () => {
+      fontLoadMock.mockRejectedValueOnce(new Error('missing face'));
+      await expect(preloadFontFamilies(['"Absent Font"'])).resolves.toBeUndefined();
+    });
   });
 });

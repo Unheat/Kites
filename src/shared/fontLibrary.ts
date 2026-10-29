@@ -57,6 +57,46 @@ export function ensureFontsRegistered(): Promise<void> {
   return registrationPromise;
 }
 
+/** Generic CSS families with no downloadable face; nothing to request for them. */
+const GENERIC_FAMILIES = new Set([
+  'sans-serif', 'serif', 'monospace', 'cursive', 'fantasy',
+  'system-ui', 'ui-serif', 'ui-sans-serif', 'ui-monospace', 'ui-rounded',
+  'emoji', 'math', 'fangsong',
+]);
+
+/**
+ * Requests every font family referenced by the given CSS stacks so canvas text can
+ * paint with them. Canvas `fillText` never triggers webfont loading: CSS @font-face
+ * presets (Kites Comic, CC Wild Words, Patrick Hand SC) stay unloaded until some DOM
+ * text asks for them, and library faces only exist after ensureFontsRegistered().
+ * `document.fonts.ready` alone is insufficient — it only waits for loads already
+ * triggered, so each family is requested explicitly first.
+ *
+ * @param stacks - CSS font-family stacks (comma-separated family lists allowed).
+ * @returns Resolves when every requested face has loaded or failed. Failures are
+ *          non-fatal: a missing family simply falls back down its CSS stack.
+ */
+export async function preloadFontFamilies(stacks: Iterable<string>): Promise<void> {
+  if (typeof document === 'undefined' || !document.fonts) return;
+  const families = new Set<string>();
+  for (const stack of stacks) {
+    for (const part of stack.split(',')) {
+      const family = part.trim().replace(/^["']|["']$/g, '');
+      if (family && !GENERIC_FAMILIES.has(family.toLowerCase())) families.add(family);
+    }
+  }
+  await Promise.all(
+    Array.from(families, (family) =>
+      // Dialogue weights vary per box; request both so bold boxes don't fall back.
+      Promise.all([
+        document.fonts.load(`16px "${family}"`).catch(() => {}),
+        document.fonts.load(`bold 16px "${family}"`).catch(() => {}),
+      ]),
+    ),
+  );
+  await document.fonts.ready;
+}
+
 /**
  * Computes the hex SHA-256 of raw bytes (catalog downloads are pinned to hashes).
  *
