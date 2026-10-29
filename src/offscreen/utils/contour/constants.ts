@@ -31,7 +31,7 @@ export const MIN_HYPHEN_SIDE_LENGTH = 2;
  * so a split must buy visibly larger text (reinforcements-class cases) while near ties keep
  * the donor's unbroken line.
  */
-export const CONTOUR_FILL_MIN_GAIN = 0.15;
+export const CONTOUR_FILL_MIN_GAIN = 0.2;
 /** Ellipse approximation used by existing adapters, not native donor ellipse fallback. */
 export const CONTOUR_ELLIPSE_POINTS = 32;
 /** Existing rounded-rectangle approximation resolution. */
