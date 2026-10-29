@@ -36,7 +36,7 @@ import { StudioSourceSampler } from './StudioSourceSampler';
 import { ToolViewModePolicy } from './tools/ToolViewModePolicy';
 import { requestStudioInpaint, requestStudioOcr } from '../bridge/offscreenStudioBridge';
 import { computeRotatedBounds, getHandleCursor } from './transformMath';
-import { applyTextObjectUpdates, prepareInitialTextObject, CJK_CHARACTER_REGEX, getTypesetMeasureContext } from './studioTypeset';
+import { applyTextObjectUpdates, prepareInitialTextObject, CJK_CHARACTER_REGEX, FONT_SIZE_SLIDER_MAX, getTypesetMeasureContext } from './studioTypeset';
 import { unwrapWrappedText } from '../../offscreen/utils/typography';
 import {
   canUseContourEditorGeometry, charIndexFromPoint, computeContourEditorGeometry,
@@ -705,7 +705,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       const localDeltaX = latestDeltaX * Math.cos(rad) + latestDeltaY * Math.sin(rad);
       const localDeltaY = -latestDeltaX * Math.sin(rad) + latestDeltaY * Math.cos(rad);
       const scaleStep = Math.round((localDeltaX - localDeltaY) * 0.25);
-      const newFontSize = Math.max(6, Math.min(140, Math.round(initialTransform.fontSize + scaleStep)));
+      const newFontSize = Math.max(6, Math.min(FONT_SIZE_SLIDER_MAX, Math.round(initialTransform.fontSize + scaleStep)));
       updated.fontSize = newFontSize;
     } else {
       const newBounds = computeRotatedBounds(initialTransform, handle, latestDeltaX, latestDeltaY);

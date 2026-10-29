@@ -30,7 +30,7 @@ function displayFontFamily(stack: string): string {
 }
 import { studioStore, useStudioStore, extractTypographyStyle } from '../state/studioStore';
 import { studioUndoStack } from '../state/undoStack';
-import { applyTextObjectUpdates, CJK_CHARACTER_REGEX, prepareInitialTextObject } from '../canvas/studioTypeset';
+import { applyTextObjectUpdates, CJK_CHARACTER_REGEX, FONT_SIZE_SLIDER_MAX, prepareInitialTextObject } from '../canvas/studioTypeset';
 import type { TextObject, CharStyleOverride } from '../types';
 
 const SELECTION_ELIGIBLE_KEYS: (keyof CharStyleOverride)[] = [
@@ -815,7 +815,7 @@ export const TypographySettings: React.FC = () => {
           <input
             type="range"
             min="8"
-            max="120"
+            max={FONT_SIZE_SLIDER_MAX}
             value={effectiveFontSize}
             onPointerDown={beginSliderGesture}
             onChange={(e) => {

@@ -143,6 +143,12 @@ describe('Studio Algorithmic Typeset & Line Reflow', () => {
     expect(large.fontSize).toBeGreaterThan(tall.fontSize);
   });
 
+  it('lets Auto Balloon scale past the legacy 48px ceiling up to the slider maximum', () => {
+    // The reported regression: a short title in a big free box snapped back to 48px.
+    const big = recalculateBlockTypeset('BIG TITLE!', 'WildWords', 500, 400, 90, 'balloon');
+    expect(big.fontSize).toBeGreaterThan(48);
+  });
+
   it('handles empty or blank text gracefully with fallback', () => {
     const res = recalculateBlockTypeset('', 'WildWords', 100, 100, 18);
     expect(res.fontSize).toBe(18);

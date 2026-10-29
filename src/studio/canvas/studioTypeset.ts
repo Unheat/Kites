@@ -200,8 +200,15 @@ export function getTypesetMeasureContext(): CanvasRenderingContext2D | null {
 /** Inset ratio applied to bounding box for bubble interior padding (5%). */
 export const BOX_INSET_RATIO = 0.05;
 
-/** Existing Auto Balloon/vertical ceiling. Never pass this to contour layout. */
-export const MAX_FONT_SIZE_CEILING = 48;
+/**
+ * Single source for the largest font size Studio allows: the size slider's maximum, the
+ * Auto Balloon/vertical fitting ceiling, and the canvas font-size drag clamp all read this,
+ * so raising one raises all. Never pass it to contour layout (contour is auto-fit or pinned).
+ */
+export const FONT_SIZE_SLIDER_MAX = 120;
+
+/** @deprecated Legacy name; identical to {@link FONT_SIZE_SLIDER_MAX}. */
+export const MAX_FONT_SIZE_CEILING = FONT_SIZE_SLIDER_MAX;
 
 /**
  * Fast, greedy word-wrapping without diamond balancing (Torii ported mode).
