@@ -326,5 +326,102 @@ describe('utteranceSplitter', () => {
       expect(result[0][0].text).toBe('……我知道了！');
       expect(result[1][0].text).toBe('但是千万不要勉强自己！');
     });
+
+    it('keeps a continuous single column merged when terminal punctuation is followed by sub-character OCR slack', () => {
+      // One continuous vertical column the author wrote as a single line; PaddleOCR chunked it
+      // into two quads with a 20px segmentation gap (0.67x the 30px character height). The first
+      // quad ends with '？'. Donor floor max(6, 0.45x30)=13.5 split this; the raised one-character
+      // floor max(12, 1.0x30)=30 must keep it merged.
+      const lines: InputLine[] = [
+        {
+          id: 0,
+          polygon: [
+            { x: 100, y: 50 },
+            { x: 130, y: 50 },
+            { x: 130, y: 200 },
+            { x: 100, y: 200 }
+          ],
+          text: '莲实酱感觉如何？'
+        },
+        {
+          id: 1,
+          polygon: [
+            { x: 100, y: 220 },
+            { x: 130, y: 220 },
+            { x: 130, y: 380 },
+            { x: 100, y: 380 }
+          ],
+          text: '有很舒服地高潮吧？w（）'
+        }
+      ];
+
+      const result = clusterLinesIntoUtterances(lines, true, true);
+      expect(result).toHaveLength(1);
+      expect(result[0].map((l) => l.text)).toEqual(['莲实酱感觉如何？', '有很舒服地高潮吧？w（）']);
+    });
+
+    it('splits a same-column utterance when punctuation is followed by a visible one-character break', () => {
+      // Same column, but the author left a real 32px empty cell (> 1.0x30 floor, < 1.35x30 rule A)
+      // after the terminal punctuation: a visible paragraph break, must still split.
+      const lines: InputLine[] = [
+        {
+          id: 0,
+          polygon: [
+            { x: 100, y: 50 },
+            { x: 130, y: 50 },
+            { x: 130, y: 200 },
+            { x: 100, y: 200 }
+          ],
+          text: '莲实酱感觉如何？'
+        },
+        {
+          id: 1,
+          polygon: [
+            { x: 100, y: 232 },
+            { x: 130, y: 232 },
+            { x: 130, y: 380 },
+            { x: 100, y: 380 }
+          ],
+          text: '有很舒服地高潮吧？'
+        }
+      ];
+
+      const result = clusterLinesIntoUtterances(lines, true, true);
+      expect(result).toHaveLength(2);
+      expect(result[0][0].text).toBe('莲实酱感觉如何？');
+      expect(result[1][0].text).toBe('有很舒服地高潮吧？');
+    });
+
+    it('splits a same-column utterance without punctuation when the gap exceeds 1.35x character height', () => {
+      // Rule A guard: no terminal punctuation anywhere, but a 45px gap (> 1.35x30) is a physical
+      // break regardless of punctuation.
+      const lines: InputLine[] = [
+        {
+          id: 0,
+          polygon: [
+            { x: 100, y: 50 },
+            { x: 130, y: 50 },
+            { x: 130, y: 200 },
+            { x: 100, y: 200 }
+          ],
+          text: '今天天气真不错'
+        },
+        {
+          id: 1,
+          polygon: [
+            { x: 100, y: 245 },
+            { x: 130, y: 245 },
+            { x: 130, y: 380 },
+            { x: 100, y: 380 }
+          ],
+          text: '我们出门散步吧'
+        }
+      ];
+
+      const result = clusterLinesIntoUtterances(lines, true, true);
+      expect(result).toHaveLength(2);
+      expect(result[0][0].text).toBe('今天天气真不错');
+      expect(result[1][0].text).toBe('我们出门散步吧');
+    });
   });
 });

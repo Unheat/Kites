@@ -18,6 +18,27 @@ export const VERTICAL_COLUMN_MIN_HORIZ_STEP = 15;
 /** Maximum horizontal step in pixels within the same vertical column. */
 export const SAME_COLUMN_MAX_HORIZ_STEP = 18;
 
+/** Unconditional same-column split floor (no punctuation needed), as an absolute pixel floor and
+ *  a ratio of median character thickness (~1.35 characters of visible empty space). */
+export const SAME_COLUMN_MIN_GAP_PIXELS = 22.0;
+export const SAME_COLUMN_MIN_GAP_RATIO = 1.35;
+
+/**
+ * Punctuation-gated same-column split floor, as an absolute pixel floor and a ratio of median
+ * character thickness.
+ *
+ * Deliberate donor deviation from XianScan `clustering.rs` (donor: `max(6, 0.45 x thickness)`):
+ * the donor's OCR segmenter emits per-utterance columns with near-zero intra-column slack, so a
+ * sub-character gap after terminal punctuation is meaningful there. PaddleOCR chunks one
+ * continuous column into quads with sub-character segmentation slack, so a sub-character gap is
+ * noise, not a paragraph break — it false-split continuous speech the author wrote as a single
+ * line. A visible paragraph break is at least one full character tall, so the bar is one full
+ * character height. Only applies to the SAME-column path; the staggered-lobe path keeps the
+ * donor threshold because those columns are physically distinct (horizStep >= 15).
+ */
+export const SAME_COLUMN_PUNCT_GAP_MIN_PIXELS = 12.0;
+export const SAME_COLUMN_PUNCT_GAP_RATIO = 1.0;
+
 /** Minimum vertical center translation in font size multiples for non-punctuated box splits. */
 export const BOX_TRANSLATION_CENTER_SHIFT_RATIO = 0.85;
 /** Minimum absolute vertical center translation in pixels for non-punctuated box splits. */
@@ -205,11 +226,14 @@ export function clusterLinesIntoUtterances(
           const currCenterY = b.y + b.h / 2;
           const centerShiftY = currCenterY - prevCenterY;
 
-          // 1. Same-column vertical split (one utterance above another in same column)
+          // 1. Same-column vertical split (one utterance above another in same column).
+          // Terminal punctuation lowers the gap bar only for a VISIBLE paragraph break
+          // (one full character height); sub-character gaps inside a continuous column are
+          // PaddleOCR segmentation slack and must stay merged (see SAME_COLUMN_PUNCT_GAP_* docs).
           const isSameColumnSplit =
             horizStep < SAME_COLUMN_MAX_HORIZ_STEP &&
-            (vertGap >= Math.max(22.0, medianTh * 1.35) ||
-              (endsWithTerm && vertGap >= Math.max(6.0, medianTh * 0.45)));
+            (vertGap >= Math.max(SAME_COLUMN_MIN_GAP_PIXELS, medianTh * SAME_COLUMN_MIN_GAP_RATIO) ||
+              (endsWithTerm && vertGap >= Math.max(SAME_COLUMN_PUNCT_GAP_MIN_PIXELS, medianTh * SAME_COLUMN_PUNCT_GAP_RATIO)));
 
           const overlapY = Math.min(prevBounds.y + prevBounds.h, b.y + b.h) - Math.max(prevBounds.y, b.y);
 
