@@ -28,11 +28,11 @@ document.addEventListener('DOMContentLoaded', () => {
       targetLang: 'English',
       langLabel: '中文',
       lang: 'zh',
-      caption: 'Color-bubble detection & wrapping (Chinese → English) — New in v1.3',
-      original: 'assets/color-bubble-input.png',
+      caption: 'Full translation + colorization (Chinese → English) — Original grayscale page and colorized result',
+      original: 'assets/color-bubble-original.jpg',
       translated: 'assets/color-bubble-result.png',
-      originalAlt: 'Original Chinese Manga Scan - Colored text bubbles',
-      translatedAlt: 'Kites English Translation - Color detection & bubble wrapping'
+      originalAlt: 'Original grayscale Chinese manga page',
+      translatedAlt: 'Kites English translation with full-page colorization and speech balloon wrapping'
     },
     demo7: {
       split: 50,

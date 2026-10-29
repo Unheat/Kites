@@ -52,21 +52,21 @@ Traditional manga translators require installing complex Python scripts, gigabyt
 
 ## 🖼️ See It in Action
 
-### Color-Bubble Detection & Wrapping (Chinese → English)
-> *New in v1.3: Per-bubble text color detection with automatic font color matching and speech balloon wrapping*
+### Full Translation + Colorization (Chinese → English)
+> *Original grayscale Chinese page alongside the fully translated and colorized English result, with speech balloon wrapping.*
 
 <div align="center">
 <table>
   <tr>
     <th width="50%" align="center">Original Chinese</th>
-    <th width="50%" align="center">Kites Translated (Color + Wrap)</th>
+    <th width="50%" align="center">Kites Translated + Colorized</th>
   </tr>
   <tr>
     <td align="center">
-      <img src="./README_images/input/demo6" alt="Original Chinese Manga with Colored Text" width="100%" />
+      <img src="./README_images/input/color-bubble-original.jpg" alt="Original grayscale Chinese manga page" width="100%" />
     </td>
     <td align="center">
-      <img src="./README_images/result/color-bubble.png" alt="Kites English Translation with Color Detection & Bubble Wrap" width="100%" />
+      <img src="./README_images/result/color-bubble.png" alt="Kites fully translated and colorized English manga page with speech balloon wrapping" width="100%" />
     </td>
   </tr>
 </table>
