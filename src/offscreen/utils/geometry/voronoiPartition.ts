@@ -11,66 +11,6 @@ import { topologicalFlowCells } from './polygonMath';
 export const SIBLING_GAP = 6;
 const EPSILON = 1e-5;
 
-/** Minimum height-to-width ratio for a box to qualify as a vertical CJK column. */
-const VERTICAL_COLUMN_RATIO = 1.3;
-/** Side-by-side detection: horizontal center distance must dominate vertical offset. */
-const SIDE_BY_SIDE_DOMINANCE = 0.8;
-
-/**
- * Computes Voronoi flow-cell anchors for the partition container.
- *
- * Default: anchor at each OCR box center (Koharu parity).
- * Side-by-side vertical CJK columns: rearrange into vertical reading order
- * (rightmost column → top chamber) so the bisector is horizontal and each
- * horizontal-target utterance receives the full balloon width.
- *
- * @param container - Shared balloon container in page coordinates.
- * @param boxes - Per-utterance OCR boxes inside the container.
- * @param directions - Optional per-box source text directions ('v' = vertical CJK).
- * @returns Container-relative anchor positions in original index order.
- */
-function computeFlowCellAnchors(
-  container: BoxRect,
-  boxes: BoxRect[],
-  directions?: (string | undefined)[]
-): { anchors: Point2D[]; rearranged: boolean } {
-  const defaultAnchors = boxes.map(b => ({
-    x: Math.max(0, Math.min(container.w, b.x + b.w / 2 - container.x)),
-    y: Math.max(0, Math.min(container.h, b.y + b.h / 2 - container.y)),
-  }));
-
-  if (!directions || boxes.length < 2) return { anchors: defaultAnchors, rearranged: false };
-
-  const isAllVertical = boxes.every((b, i) =>
-    directions[i] === 'v' || b.h > b.w * VERTICAL_COLUMN_RATIO
-  );
-  if (!isAllVertical) return { anchors: defaultAnchors, rearranged: false };
-
-  // Side-by-side: horizontal center separation dominates, vertical spans overlap.
-  const isSideBySide = boxes.every((b1, i) =>
-    boxes.every((b2, j) => {
-      if (i === j) return true;
-      const dx = Math.abs((b1.x + b1.w / 2) - (b2.x + b2.w / 2));
-      const dy = Math.abs((b1.y + b1.h / 2) - (b2.y + b2.h / 2));
-      const yOverlap = (b1.y + b1.h > b2.y) && (b2.y + b2.h > b1.y);
-      return dx > dy * SIDE_BY_SIDE_DOMINANCE && yOverlap;
-    })
-  );
-  if (!isSideBySide) return { anchors: defaultAnchors, rearranged: false };
-
-  // Vertical CJK reading order: rightmost column read first → top chamber.
-  const readingOrder = boxes.map((_, i) => i).sort((a, b) => boxes[b].x - boxes[a].x);
-  const stepY = container.h / boxes.length;
-  const anchors: Point2D[] = new Array(boxes.length);
-  for (let order = 0; order < readingOrder.length; order++) {
-    anchors[readingOrder[order]] = {
-      x: container.w / 2,
-      y: Math.round(stepY * (order + 0.5)),
-    };
-  }
-  return { anchors, rearranged: true };
-}
-
 /**
  * Clips a polygon with an oriented half-plane (Sutherland-Hodgman).
  * Keeps points satisfying: point.x * normal.x + point.y * normal.y <= offset.
@@ -229,18 +169,11 @@ export interface BalloonFlowPartitionResult {
  * Partitions a shared balloon container among multiple text utterances,
  * returning both the bounded sub-chamber rectangles and the exact virtual lobe polygons.
  */
-/**
- * Partitions a shared balloon container among multiple text utterances.
- * When all source directions are vertical CJK and columns sit side-by-side,
- * anchors are rearranged into vertical reading order so horizontal target text
- * receives wide top/bottom sub-chambers instead of narrow vertical strips.
- */
 export function partitionBalloonFlowCells(
   container: BoxRect,
   boxes: BoxRect[],
   contour?: Point2D[],
-  siblingGap: number = SIBLING_GAP,
-  directions?: (string | undefined)[]
+  siblingGap: number = SIBLING_GAP
 ): BalloonFlowPartitionResult {
   if (boxes.length <= 1) {
     return {
@@ -256,14 +189,13 @@ export function partitionBalloonFlowCells(
     };
   }
 
-  const { anchors, rearranged } = computeFlowCellAnchors(container, boxes, directions);
+  const anchors: Point2D[] = boxes.map(b => ({
+    x: Math.max(0, Math.min(container.w, b.x + b.w / 2 - container.x)),
+    y: Math.max(0, Math.min(container.h, b.y + b.h / 2 - container.y)),
+  }));
 
-  // When anchors are rearranged for vertical reading order, skip topological neck
-  // decomposition (which follows the physical shape designed for vertical CJK).
-  // The Voronoi fallback with rearranged anchors produces horizontal bands instead.
-  const effectiveContour = rearranged ? undefined : contour;
-  const localContour = effectiveContour
-    ? effectiveContour.map(p => ({ x: p.x - container.x, y: p.y - container.y }))
+  const localContour = contour
+    ? contour.map(p => ({ x: p.x - container.x, y: p.y - container.y }))
     : undefined;
 
   const cells = flowCells(container.w, container.h, anchors, localContour, siblingGap);
