@@ -32,6 +32,14 @@ export const MIN_HYPHEN_SIDE_LENGTH = 2;
  * the donor's unbroken line.
  */
 export const CONTOUR_FILL_MIN_GAIN = 0.2;
+/**
+ * Kites fill policy: additional relative size gain required per discretionary cut beyond the
+ * first. Taxing cut count implements "long words hyphenate, spray-cuts don't": a single
+ * long-word cut (the common case) pays only the base threshold, while layouts that sprawl
+ * cuts across many words must earn proportionally more size or fall back to the clean fit.
+ * Kites extension constant — not a donor value.
+ */
+export const CONTOUR_FILL_EXTRA_CUT_PENALTY = 0.2;
 /** Ellipse approximation used by existing adapters, not native donor ellipse fallback. */
 export const CONTOUR_ELLIPSE_POINTS = 32;
 /** Existing rounded-rectangle approximation resolution. */
