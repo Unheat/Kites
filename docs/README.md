@@ -151,9 +151,8 @@ Key technical decisions and architectural trade-offs are documented under [`docs
 - **[Testing & Quality Gates](development/testing.md)** — Automated unit testing (`npm test`), E2E browser tests, and standalone visual tests.
 - **[Coding Standards & Invariants](development/coding-standards.md)** — WebGPU lifecycle, defensive programming, docstring requirements, and no magic numbers/strings.
 - **[Workarounds & Upstream Mitigations](development/workarounds.md)** — Documented mitigations for Vite 8 / Rolldown, CRXJS 2.7.1, SPA image replacement, WebGPU state restoration, and Telea Taylor gradient stabilization.
-- **[Speech Bubble Detection & Typesetting Plan](development/bubble_detection_and_typesetting_upgrade_plan.md)** — Complete specification for Tier 1 Heuristic, Tier 2 Neural YOLO, sub-chamber partitioning, and future segmentation research.
+- **[CI/CD & Release Pipeline](development/ci-cd.md)** — GitHub Actions workflows (CI, pipeline smoke matrix, model registry URL validation), extension release packaging, and the Cloudflare Worker preview → staging → production ladder.
 - **[Reader & Studio Runtime Improvement Plan](development/reader-studio-runtime-improvement-plan.md)** — Architectural blueprint for gesture state machines, AI cold-start lifecycle feedback, and chapter memory bounding.
-- **[Typesetting & Text Post-Processing Improvement Plan](development/typesetting-text-postprocess-plan.md)** — Specifications for Korean Hangul hygiene, Japanese Kinsoku Shori line breaking, comic crossbar "I" convention, and MeasureCache layout memoization.
 
 ---
 
@@ -161,6 +160,9 @@ Key technical decisions and architectural trade-offs are documented under [`docs
 
 All historical development records, research reports, and phase logs are preserved in:
 - **[`docs/dev-history/devlog/`](dev-history/devlog/)** — Historical phase logs; older claims are qualified by the current specifications.
+- **[Speech Bubble Detection & Typesetting Plan](dev-history/bubble_detection_and_typesetting_upgrade_plan.md)** — Finished plan (Phases 23+): Tier 1 Heuristic, Tier 2 Neural YOLO, sub-chamber partitioning, and future segmentation research; superseded as a living spec by the Koharu/Kites pipeline contract and ADR-010.
+- **[Typesetting & Text Post-Processing Improvement Plan](dev-history/typesetting-text-postprocess-plan.md)** — Finished plan: Korean Hangul hygiene, Japanese Kinsoku Shori line breaking, comic crossbar "I" convention, and MeasureCache layout memoization; shipped on `feat/typesetting-text-postprocess-improvements`.
+- **[Studio V2 Rebuild & Editor Port Specification](dev-history/editor_port_full_plan.md)** — Finished rebuild specification (local copy, untracked by git); the V2 Studio (`src/studio/`) implements its phases.
 - **[Devlog 078: Browser Font and Contour Investigation](dev-history/devlog/078_phase78_koharu_typesetting_visual_parity_browser_canvas_discrepancy.md)** — Reproduced syntax defect, rejected hypotheses, custom tuning, and visual-validation limits.
 - **[Devlog 079: Font Catalog and Picker](dev-history/devlog/079_phase79_on_demand_font_catalog_and_picker.md)** — On-demand library, imports, schema, and search-index crash.
 - **[Devlog 080: Cumulative Integration Catch-up](dev-history/devlog/080_phase80_cumulative_integration_documentation_catchup.md)** — Storage, translation, export, inference scheduling, and Studio integration changes outside the font incident.

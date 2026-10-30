@@ -31,7 +31,7 @@ skills-lock.json
 .codebase-memory/
 
 !docs/fullplan.md
-docs/editor_port_full_plan.md
+docs/dev-history/editor_port_full_plan.md
 .zcodeignore
 .env
 .env*

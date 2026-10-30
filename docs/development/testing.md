@@ -12,7 +12,7 @@ graph TD
     classDef e2e fill:#1e293b,stroke:#a855f7,stroke-width:2px,color:#fff;
     classDef visual fill:#1e293b,stroke:#10b981,stroke-width:2px,color:#fff;
 
-    subgraph Tier1["Tier 1: Fast Automated Checks (CI/CD)"]
+    subgraph Tier1["Tier 1: Fast Automated Checks (CI/CD — see ci-cd.md)"]
         Lint["Oxlint Static Analysis<br/>(npm run lint)"]:::unit
         Unit["Vitest Unit Suite<br/>(npm test — 200+ tests)"]:::unit
     end
