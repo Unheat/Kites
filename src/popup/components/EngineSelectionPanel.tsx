@@ -592,8 +592,8 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                   </div>
                 </>
               ) : (
-                <div className="p-2">
-                  <AddApiForm 
+                <div className="p-2 overflow-y-auto flex-1 custom-scrollbar">
+                  <AddApiForm
                     onSave={(api) => {
                       updateState({ customApis: [...state.customApis, api] });
                       setShowAddApi(false);
