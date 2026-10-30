@@ -51,6 +51,26 @@
 
 ## 🖼️ 效果展示
 
+### 全页翻译 + 上色 (中文 → 英文)
+> *原始灰度中文页与完整翻译、上色后的英文结果对比，气泡贴合自然。*
+
+<div align="center">
+<table>
+  <tr>
+    <th width="50%" align="center">原始中文页 (Original Chinese)</th>
+    <th width="50%" align="center">Kites 翻译 + 上色 (Translated + Colorized)</th>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src="./README_images/input/color-bubble-original.jpg" alt="Original grayscale Chinese manga page" width="100%" />
+    </td>
+    <td align="center">
+      <img src="./README_images/result/color-bubble.png" alt="Kites fully translated and colorized English manga page with speech balloon wrapping" width="100%" />
+    </td>
+  </tr>
+</table>
+</div>
+
 ### 日文 → 英文 (Japanese → English)
 > *作品: 佐藤さんは知っていた by [@09ra_19ra](https://x.com/09ra_19ra)*
 
@@ -247,8 +267,16 @@ Kites 遵循 **[GNU General Public License v3.0](LICENSE)** 开源协议。
 衷心感谢以下为 Kites 提供核心启发与算法支撑的卓越开源项目：
 - **[manga-image-translator (Cotrans)](https://github.com/zyddnys/manga-image-translator):** 奠基性的空间文本分组与排版渲染算法。
 - **[xianscan-rust](https://github.com/ArbenApura/xianscan-rust):** 动态补丁修复架构与 OCR 噪点过滤算法。
+- **[koharu](https://github.com/koharu-rs/koharu):** 轮廓排版核心 — 1:1 移植的 DP 断行、轮廓字号搜索与连字符回退。
 - **[PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR):** 高性能端到端多语言神经网络文字检测与识别模型。
 - **[@mlc-ai/web-llm](https://github.com/mlc-ai/web-llm):** 浏览器原生 WebGPU 大语言模型推理运行时。
+- **[pyheal](https://github.com/olvb/pyheal) & [OpenCV](https://github.com/opencv/opencv):** Telea 快速行进法（FMM）修复算法的 TypeScript 移植来源。
+- **[InpaintWeb](https://github.com/lxfater/inpaint-web):** 浏览器端 LaMa 修复架构参考。
+- **[hypher](https://github.com/typst/hypher) & [linebreak](https://github.com/devongovett/linebreaker):** 按需 Liang 连字符模式库与 UAX #14 断行机会。
+- **[CRXJS (chrome-extension-tools)](https://github.com/crxjs/chrome-extension-tools):** 构建工具链所用的 Manifest V3 Vite 插件。
+- **MTO Comic Fonts:** 字体库内置的越南语 scanlation 优化社区字体。
+
+完整许可证文本、锁定版本与移植功能明细：[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 ---
 

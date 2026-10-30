@@ -73,7 +73,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const knob = card.querySelector('[data-demo-knob]');
     const thumbs = document.querySelectorAll('[data-demo-page]');
 
-    let currentPageKey = card.dataset.page || 'demo2';
+    let currentPageKey = card.dataset.page || 'color-bubble';
     let page = DEMO_PAGES[currentPageKey];
     let animationId = 0;
 
@@ -182,8 +182,8 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     // Preload both initially
-    preloadPage('demo2');
     preloadPage('color-bubble');
+    preloadPage('demo2');
     preloadPage('demo7');
 
     // Thumbnail selector switching

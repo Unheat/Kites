@@ -269,8 +269,16 @@ Kites is licensed under the **[GNU General Public License v3.0](LICENSE)**.
 Heartfelt thanks to the incredible open-source projects that made Kites possible:
 - **[manga-image-translator (Cotrans)](https://github.com/zyddnys/manga-image-translator):** Groundbreaking spatial text grouping and typesetting algorithms.
 - **[xianscan-rust](https://github.com/ArbenApura/xianscan-rust):** Dynamic patch inpainting architectures and OCR noise filters.
+- **[koharu](https://github.com/koharu-rs/koharu):** Contour typesetting core — DP line breaking, contour font search, and hyphenation recovery ported 1:1.
 - **[PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR):** High-speed neural text detection models.
 - **[@mlc-ai/web-llm](https://github.com/mlc-ai/web-llm):** Browser-native WebGPU runtime for large language models.
+- **[pyheal](https://github.com/olvb/pyheal) & [OpenCV](https://github.com/opencv/opencv):** The Telea Fast Marching Method inpainting implementation ported to TypeScript.
+- **[InpaintWeb](https://github.com/lxfater/inpaint-web):** Browser-side LaMa inpainting architecture reference.
+- **[hypher](https://github.com/typst/hypher) & [linebreak](https://github.com/devongovett/linebreaker):** On-demand Liang hyphenation patterns and UAX #14 line break opportunities.
+- **[CRXJS (chrome-extension-tools)](https://github.com/crxjs/chrome-extension-tools):** Manifest V3 Vite plugin powering the build toolchain.
+- **MTO Comic Fonts:** Vietnamese scanlation-optimized community fonts bundled with the font library.
+
+Full license texts, pinned revisions, and ported-functionality details: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ---
 

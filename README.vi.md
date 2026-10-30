@@ -51,6 +51,26 @@ Các công cụ dịch manga truyền thống thường đòi hỏi cài đặt 
 
 ## 🖼️ Trải nghiệm thực tế
 
+### Dịch toàn trang + Tô màu (Tiếng Trung → Tiếng Anh)
+> *Trang truyện grayscale tiếng Trung gốc cùng kết quả tiếng Anh đã dịch và tô màu hoàn chỉnh, với khung bong bóng thoại bao quanh chữ.*
+
+<div align="center">
+<table>
+  <tr>
+    <th width="50%" align="center">Bản gốc tiếng Trung (Original Chinese)</th>
+    <th width="50%" align="center">Kites đã dịch + tô màu (Translated + Colorized)</th>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src="./README_images/input/color-bubble-original.jpg" alt="Original grayscale Chinese manga page" width="100%" />
+    </td>
+    <td align="center">
+      <img src="./README_images/result/color-bubble.png" alt="Kites fully translated and colorized English manga page with speech balloon wrapping" width="100%" />
+    </td>
+  </tr>
+</table>
+</div>
+
 ### Tiếng Nhật → Tiếng Anh (Japanese → English)
 > *Tác phẩm: 佐藤さんは知っていた của [@09ra_19ra](https://x.com/09ra_19ra)*
 
@@ -247,8 +267,16 @@ Kites được phát hành theo giấy phép **[GNU General Public License v3.0]
 Gửi lời cảm ơn chân thành đến các dự án mã nguồn mở tuyệt vời đã đặt nền tảng cho Kites:
 - **[manga-image-translator (Cotrans)](https://github.com/zyddnys/manga-image-translator):** Thuật toán mang tính đột phá về phân nhóm không gian văn bản và dàn trang.
 - **[xianscan-rust](https://github.com/ArbenApura/xianscan-rust):** Kiến trúc inpainting chia mảng động và bộ lọc nhiễu OCR.
+- **[koharu](https://github.com/koharu-rs/koharu):** Lõi dàn trang theo đường viền — DP ngắt dòng, tìm kiếm font theo contour và phục hồi gạch nối được port 1:1.
 - **[PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR):** Mô hình mạng nơ-ron nhận diện văn bản đa ngôn ngữ hiệu suất cao.
 - **[@mlc-ai/web-llm](https://github.com/mlc-ai/web-llm):** Runtime chạy mô hình ngôn ngữ lớn (LLM) trên WebGPU ngay trong trình duyệt.
+- **[pyheal](https://github.com/olvb/pyheal) & [OpenCV](https://github.com/opencv/opencv):** Cài đặt inpainting Telea Fast Marching Method được port sang TypeScript.
+- **[InpaintWeb](https://github.com/lxfater/inpaint-web):** Kiến trúc tham khảo cho inpainting LaMa phía trình duyệt.
+- **[hypher](https://github.com/typst/hypher) & [linebreak](https://github.com/devongovett/linebreaker):** Bộ mẫu gạch nối Liang theo yêu cầu và cơ hội ngắt dòng UAX #14.
+- **[CRXJS (chrome-extension-tools)](https://github.com/crxjs/chrome-extension-tools):** Plugin Vite Manifest V3 cho chuỗi công cụ build.
+- **MTO Comic Fonts:** Font cộng đồng tối ưu cho scanlation tiếng Việt, đi kèm thư viện font.
+
+Toàn văn giấy phép, revision đã ghim và chi tiết chức năng được port: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ---
 

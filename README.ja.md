@@ -51,6 +51,26 @@
 
 ## 🖼️ 実際の動作デモ
 
+### 全ページ翻訳 + カラー化（中国語 → 英語）
+> *グレースケールの中国語原稿と、翻訳・カラー化された英語結果の比較。吹き出しに自然に文字が収まっています。*
+
+<div align="center">
+<table>
+  <tr>
+    <th width="50%" align="center">中国語原文 (Original Chinese)</th>
+    <th width="50%" align="center">Kites 翻訳 + カラー化 (Translated + Colorized)</th>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src="./README_images/input/color-bubble-original.jpg" alt="Original grayscale Chinese manga page" width="100%" />
+    </td>
+    <td align="center">
+      <img src="./README_images/result/color-bubble.png" alt="Kites fully translated and colorized English manga page with speech balloon wrapping" width="100%" />
+    </td>
+  </tr>
+</table>
+</div>
+
 ### 日本語 → 英語 (Japanese → English)
 > *作品: 佐藤さんは知っていた by [@09ra_19ra](https://x.com/09ra_19ra)*
 
@@ -247,8 +267,16 @@ Kites は **[GNU General Public License v3.0](LICENSE)** のもとで公開さ�
 Kites の実現に不可欠だった素晴らしいオープンソースプロジェクトに心より感謝申し上げます：
 - **[manga-image-translator (Cotrans)](https://github.com/zyddnys/manga-image-translator):** 画期的な空間テキストグループ化および写植レンダリングアルゴリズム。
 - **[xianscan-rust](https://github.com/ArbenApura/xianscan-rust):** 動的パッチインペインティングアーキテクチャおよび OCR ノイズ除去フィルター。
+- **[koharu](https://github.com/koharu-rs/koharu):** 輪郭組版コア — DP 改行、輪郭フォント探索、ハイフネーション回復を 1:1 で移植。
 - **[PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR):** 高速かつ高精度な多言語ニューラルテキスト検出・認識モデル。
 - **[@mlc-ai/web-llm](https://github.com/mlc-ai/web-llm):** 大規模言語モデル向けのブラウザネイティブ WebGPU 推論ランタイム。
+- **[pyheal](https://github.com/olvb/pyheal) & [OpenCV](https://github.com/opencv/opencv):** Telea Fast Marching Method インペインティングの TypeScript 実装。
+- **[InpaintWeb](https://github.com/lxfater/inpaint-web):** ブラウザ側 LaMa インペインティングのアーキテクチャ参照。
+- **[hypher](https://github.com/typst/hypher) & [linebreak](https://github.com/devongovett/linebreaker):** オンデマンド Liang ハイフネーションパターンと UAX #14 改行機会。
+- **[CRXJS (chrome-extension-tools)](https://github.com/crxjs/chrome-extension-tools):** ビルド基盤となる Manifest V3 Vite プラグイン。
+- **MTO Comic Fonts:** フォントライブラリに同梱のベトナム scanlation 向けコミュニティフォント。
+
+ライセンス全文、固定リビジョン、移植機能の詳細：[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 ---
 

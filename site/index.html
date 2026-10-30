@@ -93,16 +93,16 @@
       <!-- Right Column: Interactive Torii-Style Comparison Showcase -->
       <div class="hero-showcase-wrap">
         <div aria-hidden="true" class="dot-field hero-dots"></div>
-        <div id="hero-demo" data-page="demo2" style="--split: 52%;" class="demo-card select-none">
-          <!-- Base Layer: Raw Japanese Scan -->
-          <img data-demo="original" src="assets/demo2-input.jpeg" alt="Original Japanese Manga Scan - Romance comedy panel" class="demo-img" />
+        <div id="hero-demo" data-page="color-bubble" style="--split: 50%;" class="demo-card select-none">
+          <!-- Base Layer: Raw Chinese Scan -->
+          <img data-demo="original" src="assets/color-bubble-original.jpg" alt="Original grayscale Chinese manga page" class="demo-img" />
 
           <!-- Overlay Layer: Translated (clipped via clip-path) -->
-          <img data-demo="translated" src="assets/demo2-result.png" alt="Kites English Translation - Balanced lettering and line breaks" class="demo-img demo-after" />
+          <img data-demo="translated" src="assets/color-bubble-result.png" alt="Kites English translation with full-page colorization and speech balloon wrapping" class="demo-img demo-after" />
 
           <!-- Floating Language Tags -->
           <span data-demo-tag="after" class="demo-tag demo-tag-after">English</span>
-          <span data-demo-tag="before" class="demo-tag demo-tag-before" lang="ja">日本語</span>
+          <span data-demo-tag="before" class="demo-tag demo-tag-before" lang="zh">中文</span>
 
           <!-- Seam Line and Knob -->
           <div aria-hidden="true" class="demo-seam"></div>
@@ -114,7 +114,7 @@
           </span>
 
           <!-- Range Input for Native Drag -->
-          <input id="hero-demo-range" type="range" min="0" max="100" value="52" step="0.1" aria-label="Compare raw manga with Kites translation" class="demo-range" />
+          <input id="hero-demo-range" type="range" min="0" max="100" value="50" step="0.1" aria-label="Compare raw manga with Kites translation" class="demo-range" />
 
           <!-- In-Page Translate Gate Button (triggers translation sweep) -->
           <button id="hero-gate" type="button" aria-label="Simulate in-page translation sweep" class="demo-gate is-inviting" title="Click to trigger translation sweep">
@@ -125,17 +125,17 @@
         <!-- Thumbnail Page Picker with Multi-Image Selection -->
         <div class="demo-picker-section">
           <div role="group" aria-label="Choose a demo page" class="demo-picker">
-            <button type="button" data-demo-page="demo2" aria-pressed="true" class="demo-thumb" title="Romance comedy manga (Japanese to English)">
-              <img src="assets/demo2-thumb.jpg" alt="Romance manga thumbnail" width="46" height="64" />
-            </button>
-            <button type="button" data-demo-page="color-bubble" aria-pressed="false" class="demo-thumb" title="Full translation + colorization (Chinese to English)">
+            <button type="button" data-demo-page="color-bubble" aria-pressed="true" class="demo-thumb" title="Full translation + colorization (Chinese to English)">
               <img src="assets/color-bubble-original-thumb.jpg" alt="Original grayscale Chinese manga thumbnail" width="46" height="64" />
+            </button>
+            <button type="button" data-demo-page="demo2" aria-pressed="false" class="demo-thumb" title="Romance comedy manga (Japanese to English)">
+              <img src="assets/demo2-thumb.jpg" alt="Romance manga thumbnail" width="46" height="64" />
             </button>
             <button type="button" data-demo-page="demo7" aria-pressed="false" class="demo-thumb" title="Dialogue-heavy manga (Japanese to Vietnamese)">
               <img src="assets/demo7-thumb.jpg" alt="Dialogue manga thumbnail" width="46" height="64" />
             </button>
           </div>
-          <p class="demo-caption" id="demo-caption-text">Story: 佐藤さんは知っていた by @09ra_19ra</p>
+          <p class="demo-caption" id="demo-caption-text">Full translation + colorization (Chinese → English) — Original grayscale page and colorized result</p>
           <p class="demo-hint">Click the kite icon or drag the slider to compare.</p>
         </div>
       </div>
