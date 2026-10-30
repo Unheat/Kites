@@ -44,6 +44,7 @@ Các công cụ dịch manga truyền thống thường đòi hỏi cài đặt 
 - 🎨 **Tẩy trắng & Khôi phục nền thông minh:** Công nghệ AI inpainting xóa sạch chữ gốc nhưng giữ trọn từng nét vẽ, hiệu ứng chuyển màu và lớp lưới screentone đặc trưng của manga.
 - ✍️ **Typeset & Canh chỉnh tự nhiên:** Tự động đo kích thước khung thoại, cân bằng ngắt dòng hợp lý, tự co giãn cỡ chữ (font size) và chọn màu chữ/viền tương phản tối ưu.
 - 🗨️ **Tự động mở rộng theo khung thoại (Smart Bubble Fit):** Sử dụng thuật toán nhận diện bóng thoại thông minh (Heuristic & Neural YOLO) để mở rộng các cột chữ hẹp CJK thành khung bong bóng tròn rộng rãi, loại bỏ hoàn toàn tình trạng chữ bị bóp nghẹt li ti.
+- 🌈 **Nhận diện màu chữ theo bong bóng (Color-Bubble Detection & Wrap):** Tự động phát hiện màu chữ gốc của từng bong bóng, áp dụng lên bản dịch và bao quanh chữ bằng chính hình dạng bong bóng gốc.
 - 📜 **Hỗ trợ trọn vẹn truyện tranh Webtoon dài tập:** Xử lý mượt mà các dải webtoon cuộn dọc cực dài ($>14.000\text{ px}$) nhờ thuật toán phân mảnh 1D trên bộ nhớ canvas ở độ phân giải gốc.
 - 🛠️ **Tích hợp Kites Studio:** Dễ dàng sửa lại câu từ chưa ưng ý, kéo giãn khung thoại hoặc tinh chỉnh typography trực tiếp ngay tức thì.
 
