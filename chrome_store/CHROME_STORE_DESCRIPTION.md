@@ -4,7 +4,7 @@ Read raw manga, comics, and webtoons in your language directly on the page. 100%
 
 No subscriptions. No token caps. No wait time.
 
-Kites is a local-first manga translator built specifically for comic readers. Powered directly by your computer’s graphics card (WebGPU), Kites detects speech balloons, cleanly erases foreign text without blurring the artwork, and typesets beautiful translations right inside the comic panels.
+Kites is a local-first manga translator built specifically for comic readers. Powered directly by your computer’s graphics card (WebGPU), Kites detects speech balloons, cleanly erases foreign text without blurring the artwork, and typesets beautiful translations right inside the comic panels — matched to each bubble’s original color.
 
 Whether you are reading raw chapters on manga sites, scrolling long webtoons, or browsing artists on X (Twitter) and Pixiv, Kites translates everything seamlessly in place.
 
@@ -18,7 +18,7 @@ Kites runs cutting-edge AI directly inside your browser:
 • 100 Free Community Translations/Day: Sign in with Google to get 100 free high-speed cloud translations daily from our shared AI pool—zero setup, no API key required.
 • Unlimited Free Translations: Run on-device WebLLM locally on your GPU or use unlimited Google Translate with no subscriptions, no paywalls, and no wait times.
 • 100% Private On-Device AI: Your images never touch a third-party server. All OCR detection and background cleaning happen locally on your GPU.
-• Seamless In-Panel Lettering: No floating white boxes. Text replaces the original dialogue naturally with balanced comic fonts and contrast-aware colors.
+• Seamless In-Panel Lettering: No floating white boxes. Text replaces the original dialogue naturally with authentic comic fonts, hyphenation-aware contour fitting, and colors matched to the original bubble.
 
 
 ★ Frictionless Reading Experience
@@ -32,16 +32,19 @@ Kites runs cutting-edge AI directly inside your browser:
 
 ★ AI Quality & Artwork Preservation
 
-• Smart Speech Balloon Fit: Vertical Japanese and Chinese text creates narrow columns that ruin English font size in ordinary tools. Kites uses Heuristic whitespace expansion and YOLO vision AI to expand text into the full bubble chamber, eliminating tiny, unreadable fonts.
-• Artwork Preservation Inpainting: Cleanly removes foreign text along the actual character strokes. Screentones, hatching, complex line art, and colored backgrounds remain intact without ugly blur boxes.
+• Contour Bubble Typesetting: Vertical Japanese and Chinese text creates narrow columns that ruin English font size in ordinary tools. Kites fits text into the actual bubble outline with scanline measurement and dynamic line breaking, filling the whole chamber instead of leaving tiny, unreadable fonts — and long words hyphenate intelligently so dialogue stays big.
+• Original Color Preservation: Detects each bubble’s text color — white, black, pastel, or neon — and applies it to the translation, on grayscale pages and full-color work alike.
+• Artwork Preservation Inpainting: Cleanly removes foreign text along the actual character strokes with Telea diffusion by default, or neural LaMa inpainting for tough pages. Screentones, hatching, complex line art, and colored backgrounds remain intact without ugly blur boxes.
 • Next-Gen Translation AI: Enjoy unlimited on-device WebLLM (Qwen 3.5, Gemma 3, Llama 3.2), unlimited Google Translate, 100 free daily cloud translations from our community pool, or connect private API keys (OpenAI, Claude, Gemini, DeepSeek).
 • Custom Translation Glossary: Lock character names, attack moves, and honorifics so your translations stay consistent across whole series.
 
 
 ★ Built-in Studio Editor
 
-• Direct Inline Editing: Double-click any speech bubble to edit dialogue directly on the canvas with live font reflow.
+• Direct Inline Editing: Double-click any speech bubble to edit dialogue directly on the canvas, with selection and caret following the exact typeset layout and live font reflow.
+• Searchable Font Catalog: Pick from bundled comic fonts or your own loaded fonts in a searchable picker, in both the popup and the Studio.
 • Localized AI Inpaint Brush: Cleanly erase artwork defects, character strokes, or untranslated sound effects with brush-level precision.
+• Layered PSD Export: Download any edited page as a layered Photoshop file for professional cleanup and typesetting workflows.
 • High-Resolution Export: Download clean, edited pages at original 1:1 image resolution.
 
 
