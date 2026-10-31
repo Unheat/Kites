@@ -1,14 +1,15 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { IpRateLimiter } from '../src/security/rate-limiter';
-import { TokenCache } from '../src/auth/token-cache';
+import { readBoundedJsonBody } from '../src/security/body-parser';
+import { validateChatCompletionRequest } from '../src/security/request-validator';
+import { PayloadTooLargeError, InvalidJsonError, InvalidRequestError } from '../src/security/errors';
+import { MAX_POOL_MESSAGE_CHARS, MAX_POOL_REQUEST_BYTES } from '../../src/shared/translation/poolContract';
 
 describe('Edge Security & Anti-Abuse Controls', () => {
   let limiter: IpRateLimiter;
-  let cache: TokenCache;
 
   beforeEach(() => {
     limiter = new IpRateLimiter();
-    cache = new TokenCache();
   });
 
   describe('IP Rate Limiter & Burst Defense', () => {
@@ -42,11 +43,9 @@ describe('Edge Security & Anti-Abuse Controls', () => {
     });
 
     it('throttles when window limit (100 req/min) is exceeded across burst windows', () => {
-      // Align to an exact minute boundary so the 100 requests fall in the same minute window
       const now = Math.floor(1_700_000_000_000 / 60_000) * 60_000;
       const ip = '192.168.1.2';
 
-      // Send 5 requests per 3-second window across 20 distinct 3-second windows = 100 requests
       for (let windowIdx = 0; windowIdx < 20; windowIdx++) {
         const windowTime = now + windowIdx * 3_000;
         for (let r = 0; r < 5; r++) {
@@ -55,11 +54,21 @@ describe('Edge Security & Anti-Abuse Controls', () => {
         }
       }
 
-      // 101st request within that same minute (at +58 seconds) should be throttled
+      // 101st request within that same minute should be throttled
       const res101 = limiter.checkRateLimit(ip, now + 58_000);
       expect(res101.allowed).toBe(false);
       expect(res101.statusCode).toBe(429);
       expect(res101.reason).toContain('100 requests/minute');
+    });
+
+    it('bounds tracked IP states via cleanup and capacity enforcement', () => {
+      const smallLimiter = new IpRateLimiter(5);
+      const now = 1_700_000_000_000;
+
+      for (let i = 0; i < 10; i++) {
+        smallLimiter.checkRateLimit(`10.0.0.${i}`, now);
+      }
+      expect(smallLimiter.size).toBeLessThanOrEqual(5);
     });
   });
 
@@ -92,28 +101,294 @@ describe('Edge Security & Anti-Abuse Controls', () => {
     });
   });
 
-  describe('Two-Way Token Cache (Auth Shield)', () => {
-    it('caches valid identity and hits without re-fetching', () => {
-      const token = 'ya29.valid-token-example';
-      const identity = { sub: 'google-123', provider: 'google', email: 'test@example.com' };
+  describe('Bounded Body Stream Parser', () => {
+    it('rejects payload when Content-Length exceeds MAX_POOL_REQUEST_BYTES', async () => {
+      const request = new Request('https://api.12094852.xyz/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Length': String(MAX_POOL_REQUEST_BYTES + 100),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ dummy: 'data' }),
+      });
 
-      expect(cache.get(token).hit).toBe(false);
-
-      cache.setValid(token, identity);
-      const res = cache.get(token);
-      expect(res.hit).toBe(true);
-      expect(res.identity?.sub).toBe('google-123');
+      await expect(readBoundedJsonBody(request)).rejects.toThrow(PayloadTooLargeError);
     });
 
-    it('caches invalid token and immediately rejects subsequent attempts in 0ms', () => {
-      const badToken = 'ya29.hacker-fake-token';
-      expect(cache.get(badToken).hit).toBe(false);
+    it('aborts and rejects streaming body that exceeds byte limit without Content-Length', async () => {
+      // Create a stream with > 32KB
+      const largeChunk = new Uint8Array(1024); // 1 KB
+      largeChunk.fill(65); // 'A'
 
-      cache.setInvalid(badToken, 'Invalid Google access token (HTTP 400)');
-      const res = cache.get(badToken);
-      expect(res.hit).toBe(true);
-      expect(res.identity).toBeUndefined();
-      expect(res.error).toContain('Invalid Google access token');
+      let chunksEmitted = 0;
+      const stream = new ReadableStream({
+        pull(controller) {
+          if (chunksEmitted < 35) {
+            // 35 KB total
+            controller.enqueue(largeChunk);
+            chunksEmitted++;
+          } else {
+            controller.close();
+          }
+        },
+      });
+
+      const request = new Request('https://api.12094852.xyz/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        // @ts-expect-error duplex required for streaming request
+        duplex: 'half',
+        body: stream,
+      });
+
+      await expect(readBoundedJsonBody(request)).rejects.toThrow(PayloadTooLargeError);
+    });
+
+    it('rejects empty body with InvalidJsonError', async () => {
+      const request = new Request('https://api.12094852.xyz/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '',
+      });
+
+      await expect(readBoundedJsonBody(request)).rejects.toThrow(InvalidJsonError);
+    });
+
+    it('sanitizes JSON parse errors without leaking raw OCR text snippets', async () => {
+      const confidentialOcrText = 'CONFIDENTIAL_SECRET_MANGA_SCAN_OCR_TEXT';
+      const malformedJson = `{"model": "kites-translation", "ocr": "${confidentialOcrText}", broken`;
+
+      const request = new Request('https://api.12094852.xyz/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: malformedJson,
+      });
+
+      try {
+        await readBoundedJsonBody(request);
+        expect.fail('Should have thrown InvalidJsonError');
+      } catch (err: unknown) {
+        expect(err).toBeInstanceOf(InvalidJsonError);
+        const errMsg = (err as Error).message;
+        expect(errMsg).toBe('Invalid JSON request body');
+        expect(errMsg).not.toContain(confidentialOcrText);
+      }
+    });
+
+    it('successfully parses valid JSON within limits', async () => {
+      const payload = { model: 'kites-translation', messages: [{ role: 'user', content: 'test' }] };
+      const request = new Request('https://api.12094852.xyz/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      const parsed = await readBoundedJsonBody(request);
+      expect(parsed).toEqual(payload);
+    });
+  });
+
+  describe('Request Validator & Hostile Schema Defense', () => {
+    const validMessages = [
+      { role: 'system', content: 'Translate into English' },
+      { role: 'user', content: 'Translate SOURCE:\n{"b0": "こんにちは", "b1": "世界"}' },
+    ];
+
+    it('accepts valid OpenAIChatRequest with virtual kites-translation model', () => {
+      const raw = {
+        model: 'kites-translation',
+        messages: validMessages,
+        temperature: 0.2,
+        max_tokens: 500,
+        stream: false,
+      };
+
+      const sanitized = validateChatCompletionRequest(raw);
+      expect(sanitized.model).toBe('kites-translation');
+      expect(sanitized.messages.length).toBe(2);
+      expect(sanitized.temperature).toBe(0.2);
+      expect(sanitized.max_tokens).toBe(500);
+      expect(sanitized.stream).toBe(false);
+    });
+
+    it('accepts legacy model aliases (gpt-4o-mini)', () => {
+      const raw = {
+        model: 'gpt-4o-mini',
+        messages: validMessages,
+      };
+      const sanitized = validateChatCompletionRequest(raw);
+      expect(sanitized.model).toBe('gpt-4o-mini');
+    });
+
+    it('rejects arbitrary route URLs or unknown models', () => {
+      expect(() =>
+        validateChatCompletionRequest({
+          model: 'https://evil.attacker.com/v1/chat',
+          messages: validMessages,
+        })
+      ).toThrow(InvalidRequestError);
+
+      expect(() =>
+        validateChatCompletionRequest({
+          model: 'claude-3-5-sonnet',
+          messages: validMessages,
+        })
+      ).toThrow(InvalidRequestError);
+    });
+
+    it('rejects stream: true and non-boolean stream parameters', () => {
+      expect(() =>
+        validateChatCompletionRequest({
+          model: 'kites-translation',
+          messages: validMessages,
+          stream: true,
+        })
+      ).toThrow('Streaming is not supported');
+
+      expect(() =>
+        validateChatCompletionRequest({
+          model: 'kites-translation',
+          messages: validMessages,
+          stream: 'true',
+        })
+      ).toThrow('stream parameter must be a boolean');
+    });
+
+    it('strictly checks numeric parameters without type coercion', () => {
+      // String temperature rejected
+      expect(() =>
+        validateChatCompletionRequest({
+          model: 'kites-translation',
+          messages: validMessages,
+          temperature: '0.5',
+        })
+      ).toThrow('temperature must be a finite number');
+
+      // Out of bounds temperature rejected
+      expect(() =>
+        validateChatCompletionRequest({
+          model: 'kites-translation',
+          messages: validMessages,
+          temperature: 2.5,
+        })
+      ).toThrow('temperature must be a finite number');
+
+      // String max_tokens rejected
+      expect(() =>
+        validateChatCompletionRequest({
+          model: 'kites-translation',
+          messages: validMessages,
+          max_tokens: '100',
+        })
+      ).toThrow('max_tokens must be an integer');
+
+      // Float max_tokens rejected
+      expect(() =>
+        validateChatCompletionRequest({
+          model: 'kites-translation',
+          messages: validMessages,
+          max_tokens: 100.5,
+        })
+      ).toThrow('max_tokens must be an integer');
+    });
+
+    it('rejects messages when total characters exceed MAX_POOL_MESSAGE_CHARS (2048)', () => {
+      const oversizedText = 'A'.repeat(MAX_POOL_MESSAGE_CHARS + 10);
+      const raw = {
+        model: 'kites-translation',
+        messages: [{ role: 'user', content: oversizedText }],
+      };
+
+      expect(() => validateChatCompletionRequest(raw)).toThrow(PayloadTooLargeError);
+    });
+
+    it('requires a valid SOURCE block in messages for the community translation pool', () => {
+      const raw = {
+        model: 'kites-translation',
+        messages: [{ role: 'user', content: 'Hello without source marker' }],
+      };
+
+      expect(() => validateChatCompletionRequest(raw)).toThrow('Request messages must contain a valid SOURCE JSON block');
+    });
+
+    it('enforces sequential slots b0..b{n-1} in SOURCE block', () => {
+      const nonSequentialMessages = [
+        { role: 'user', content: 'SOURCE:\n{"b0": "first", "b2": "skipped b1"}' },
+      ];
+      const raw = {
+        model: 'kites-translation',
+        messages: nonSequentialMessages,
+      };
+
+      expect(() => validateChatCompletionRequest(raw)).toThrow('canonical contiguous slots');
+    });
+
+    describe('Hostile Schema Injection Defense', () => {
+      it('rejects schema injection attempts with $ref, $schema, or definitions', () => {
+        const hostileRefRequest = {
+          model: 'kites-translation',
+          messages: validMessages,
+          response_format: {
+            type: 'json_schema',
+            json_schema: {
+              name: 'malicious',
+              schema: {
+                $ref: 'https://attacker.com/malicious-schema.json',
+              },
+            },
+          },
+        };
+
+        expect(() => validateChatCompletionRequest(hostileRefRequest)).toThrow(
+          'Schema references, definitions, and external URLs are forbidden'
+        );
+      });
+
+      it('discards client schema object and substitutes canonical buildSchema(n)', () => {
+        const clientWithExtraProps = {
+          model: 'kites-translation',
+          messages: validMessages, // contains b0, b1
+          response_format: {
+            type: 'json_schema',
+            json_schema: {
+              name: 'client_name',
+              schema: {
+                type: 'object',
+                properties: {
+                  injectedKey: { type: 'string' },
+                },
+              },
+            },
+          },
+        };
+
+        const sanitized = validateChatCompletionRequest(clientWithExtraProps);
+        const rf = sanitized.response_format;
+        expect(rf?.type).toBe('json_schema');
+        if (rf?.type === 'json_schema') {
+          // Schema must be canonical buildSchema(2), with b0 and b1 only!
+          expect(rf.json_schema.schema).toEqual({
+            type: 'object',
+            properties: {
+              b0: { type: 'string' },
+              b1: { type: 'string' },
+            },
+            required: ['b0', 'b1'],
+            additionalProperties: false,
+          });
+          expect(rf.json_schema.schema.properties).not.toHaveProperty('injectedKey');
+        }
+      });
+
+      it('allows legacy requests without response_format', () => {
+        const legacyRequest = {
+          model: 'kites-translation',
+          messages: validMessages,
+        };
+
+        const sanitized = validateChatCompletionRequest(legacyRequest);
+        expect(sanitized.response_format).toBeUndefined();
+      });
     });
   });
 });

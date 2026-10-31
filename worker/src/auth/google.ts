@@ -1,180 +1,128 @@
 /**
- * Google ID Token Verification via Web Crypto API
- * 
- * Verifies RS256 signatures against https://www.googleapis.com/oauth2/v3/certs
- * Implements IAuthProviderVerifier for the AuthManager Strategy Pattern.
+ * Google ID Token & Access Token Verification
+ *
+ * Implements:
+ * 1. OIDC ID Token (RS256 JWT) verification against Google JWKS with OIDC-compliant aud/azp validation.
+ * 2. Chrome Extension OAuth Access Token (ya29.) verification via Google tokeninfo with fail-closed audience normalization.
+ * 3. Strict positive cache TTL handling: requires finite positive lifetime (>0); expired or unknown lifetime never cached positive.
+ * 4. Privacy-preserving HMAC-SHA256 user subject hashing requiring non-empty JWT_SALT.
  */
 
 import { Env } from '../types';
-import { IAuthProviderVerifier, VerifiedIdentity } from './types';
+import { IAuthProviderVerifier, VerifiedIdentity, GoogleTokenPayload } from './types';
 import { tokenCache } from './token-cache';
+import { AuthInvalidTokenError, AuthTransientError, ServerConfigurationError } from '../security/errors';
+import { findGoogleKeyByKid, importRsaKey } from './jwks';
+import { fetchGoogleTokeninfo, normalizeAndMatchAudience } from './tokeninfo';
+import { base64UrlToUint8Array, safeParseBase64UrlJson, decodeJwtPayloadUnsafe } from './jwt-utils';
 
-interface GoogleJwksKey {
-  kty: string;
-  alg: string;
-  use: string;
-  kid: string;
-  n: string;
-  e: string;
-}
+// Preserve existing exports for consumers and test suites
+export { getGoogleJwks, _resetJwksStateForTesting } from './jwks';
+export { normalizeAndMatchAudience } from './tokeninfo';
+export { decodeJwtPayloadUnsafe } from './jwt-utils';
 
-interface GoogleJwksResponse {
-  keys: GoogleJwksKey[];
-}
-
-export interface GoogleTokenPayload {
-  iss: string;
-  sub: string;
-  aud: string;
-  exp: number;
-  nbf?: number;
-  email?: string;
-  name?: string;
-  [key: string]: any;
-}
-
-let jwksCache: { keys: GoogleJwksKey[]; expiresAt: number } | null = null;
-const JWKS_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
-
-/**
- * Fetch Google's public JSON Web Key Set (JWKS) for verifying ID token signatures.
- * Results are cached in-memory for 6 hours to minimize network calls.
- *
- * @returns The array of Google RSA public keys used for RS256 JWT verification.
- */
-export async function getGoogleJwks(): Promise<GoogleJwksKey[]> {
-  const now = Date.now();
-  if (jwksCache && now < jwksCache.expiresAt) {
-    return jwksCache.keys;
-  }
-
-  const response = await fetch('https://www.googleapis.com/oauth2/v3/certs', {
-    headers: { 'User-Agent': 'Kites-Translate-Worker' },
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to fetch Google JWKS: HTTP ${response.status}`);
-  }
-
-  const data = (await response.json()) as GoogleJwksResponse;
-  jwksCache = {
-    keys: data.keys,
-    expiresAt: now + JWKS_CACHE_TTL_MS,
-  };
-  return data.keys;
-}
-
-/**
- * Decode a Base64-URL-encoded string into a Uint8Array.
- * Handles the URL-safe alphabet (- and _) and adds required padding.
- *
- * @param base64Url - The Base64-URL-encoded string to decode.
- * @returns A Uint8Array containing the decoded binary data.
- */
-function base64UrlToUint8Array(base64Url: string): Uint8Array {
-  const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-  const padLen = (4 - (base64.length % 4)) % 4;
-  const padded = base64 + '='.repeat(padLen);
-  const binary = atob(padded);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes;
-}
-
-/**
- * Decode the payload section of a JWT without verifying its signature.
- * Used for quick inspection (e.g., reading the issuer) before full verification.
- *
- * @param token - The raw JWT string (header.payload.signature).
- * @returns The parsed payload object, or null if the token is malformed.
- */
-export function decodeJwtPayloadUnsafe(token: string): any {
-  const parts = token.split('.');
-  if (parts.length !== 3) return null;
-  try {
-    return JSON.parse(new TextDecoder().decode(base64UrlToUint8Array(parts[1])));
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Import a Google JWKS RSA public key into the Web Crypto API for RS256 verification.
- *
- * @param jwk - The Google JWKS key object containing RSA modulus (n) and exponent (e).
- * @returns A CryptoKey usable with crypto.subtle.verify for RSASSA-PKCS1-v1_5.
- */
-async function importRsaKey(jwk: GoogleJwksKey): Promise<CryptoKey> {
-  return await crypto.subtle.importKey(
-    'jwk',
-    {
-      kty: jwk.kty,
-      n: jwk.n,
-      e: jwk.e,
-      alg: 'RS256',
-      ext: true,
-    },
-    {
-      name: 'RSASSA-PKCS1-v1_5',
-      hash: { name: 'SHA-256' },
-    },
-    false,
-    ['verify']
-  );
-}
+const CLOCK_SKEW_SEC = 60; // 60 seconds tolerance
 
 /**
  * Cryptographically verify a Google OIDC ID token using Google's public JWKS.
- * Validates the RS256 signature, expiry, issuer, and optionally the audience (Client ID).
+ * Validates RS256 signature, expiry, issuer, not-before, and audience.
+ * Follows OIDC Core specification for multiple audiences requiring azp verification.
  *
  * @param token - The raw JWT ID token string from the Authorization header.
- * @param expectedAudience - Optional Google OAuth Client ID to assert against the aud claim.
+ * @param expectedAudience - Required Google OAuth Client ID to assert against aud/azp.
  * @returns The parsed and verified token payload.
- * @throws Error if the token is expired, has an invalid signature, wrong issuer/audience, or is malformed.
+ * @throws AuthInvalidTokenError or AuthTransientError if verification fails.
  */
 export async function verifyGoogleIdToken(
   token: string,
-  expectedAudience?: string
+  expectedAudience: string
 ): Promise<GoogleTokenPayload> {
+  if (!expectedAudience || typeof expectedAudience !== 'string' || expectedAudience.trim() === '') {
+    throw new ServerConfigurationError('Server authentication configuration missing: GOOGLE_CLIENT_ID is required');
+  }
+
   const parts = token.split('.');
   if (parts.length !== 3) {
-    throw new Error('Malformed JWT: must contain header, payload, and signature');
+    throw new AuthInvalidTokenError('Malformed JWT: must contain header, payload, and signature');
   }
 
   const [headerB64, payloadB64, signatureB64] = parts;
-  const header = JSON.parse(new TextDecoder().decode(base64UrlToUint8Array(headerB64)));
-  const payload = JSON.parse(
-    new TextDecoder().decode(base64UrlToUint8Array(payloadB64))
-  ) as GoogleTokenPayload;
+  const header = safeParseBase64UrlJson(headerB64);
+  const payload = safeParseBase64UrlJson(payloadB64) as GoogleTokenPayload | null;
+
+  if (!header || !payload) {
+    throw new AuthInvalidTokenError('Malformed JWT: unable to decode header or payload JSON');
+  }
 
   if (header.alg !== 'RS256') {
-    throw new Error(`Unsupported JWT algorithm: ${header.alg}`);
+    throw new AuthInvalidTokenError(`Unsupported JWT algorithm: ${String(header.alg)}`);
   }
 
+  const kid = header.kid;
+  if (!kid || typeof kid !== 'string') {
+    throw new AuthInvalidTokenError('Malformed JWT: missing or invalid kid in header');
+  }
+
+  // 1. Validate subject (sub)
+  if (!payload.sub || typeof payload.sub !== 'string' || payload.sub.trim() === '') {
+    throw new AuthInvalidTokenError('Malformed JWT: missing or empty sub claim');
+  }
+
+  // 2. Validate issuer (iss)
+  if (payload.iss !== 'https://accounts.google.com' && payload.iss !== 'accounts.google.com') {
+    throw new AuthInvalidTokenError(`Invalid token issuer: ${String(payload.iss)}`);
+  }
+
+  // 3. Validate audience (aud) & authorized party (azp) per OIDC Core spec:
+  // - If aud is an array, it must include expectedAudience.
+  // - If multiple audiences are present in aud, azp is strictly required and must match expectedAudience.
+  // - If aud is a string, it must match expectedAudience.
+  // - If azp is present, it must match expectedAudience.
+  if (Array.isArray(payload.aud)) {
+    if (!payload.aud.includes(expectedAudience)) {
+      throw new AuthInvalidTokenError(`Audience mismatch: expected ${expectedAudience}`);
+    }
+    if (payload.aud.length > 1) {
+      if (typeof payload.azp !== 'string' || payload.azp.trim() !== expectedAudience) {
+        throw new AuthInvalidTokenError(`Authorized party (azp) mismatch for multi-audience token: expected ${expectedAudience}`);
+      }
+    }
+  } else if (payload.aud !== expectedAudience) {
+    throw new AuthInvalidTokenError(`Audience mismatch: expected ${expectedAudience}`);
+  }
+
+  if (payload.azp !== undefined && payload.azp !== null) {
+    if (typeof payload.azp !== 'string' || payload.azp.trim() !== expectedAudience) {
+      throw new AuthInvalidTokenError(`Authorized party (azp) mismatch: expected ${expectedAudience}`);
+    }
+  }
+
+  // 4. Validate expiration (exp)
   const nowSec = Math.floor(Date.now() / 1000);
-  if (payload.exp && payload.exp < nowSec - 60) {
-    throw new Error('Token has expired');
+  if (typeof payload.exp !== 'number' || !Number.isFinite(payload.exp)) {
+    throw new AuthInvalidTokenError('Malformed JWT: missing or non-numeric exp claim');
+  }
+  if (payload.exp < nowSec - CLOCK_SKEW_SEC) {
+    throw new AuthInvalidTokenError('Token has expired');
   }
 
-  if (
-    payload.iss !== 'https://accounts.google.com' &&
-    payload.iss !== 'accounts.google.com'
-  ) {
-    throw new Error(`Invalid token issuer: ${payload.iss}`);
+  // 5. Validate not-before (nbf) if present
+  if (payload.nbf !== undefined) {
+    if (typeof payload.nbf !== 'number' || !Number.isFinite(payload.nbf)) {
+      throw new AuthInvalidTokenError('Malformed JWT: non-numeric nbf claim');
+    }
+    if (payload.nbf > nowSec + CLOCK_SKEW_SEC) {
+      throw new AuthInvalidTokenError('Token not yet valid (nbf)');
+    }
   }
 
-  if (expectedAudience && payload.aud !== expectedAudience) {
-    throw new Error(`Audience mismatch: expected ${expectedAudience}, got ${payload.aud}`);
-  }
-
-  const keys = await getGoogleJwks();
-  const matchedKey = keys.find((k) => k.kid === header.kid);
+  // 6. Find JWKS key matching kid
+  const matchedKey = await findGoogleKeyByKid(kid);
   if (!matchedKey) {
-    throw new Error(`No matching key found in Google JWKS for kid: ${header.kid}`);
+    throw new AuthInvalidTokenError(`No matching key found in Google JWKS for kid: ${kid}`);
   }
 
+  // 7. Verify RS256 signature
   const cryptoKey = await importRsaKey(matchedKey);
   const dataBytes = new TextEncoder().encode(`${headerB64}.${payloadB64}`);
   const signatureBytes = base64UrlToUint8Array(signatureB64);
@@ -187,7 +135,7 @@ export async function verifyGoogleIdToken(
   );
 
   if (!isValid) {
-    throw new Error('Cryptographic signature verification failed');
+    throw new AuthInvalidTokenError('Cryptographic signature verification failed');
   }
 
   return payload;
@@ -196,109 +144,132 @@ export async function verifyGoogleIdToken(
 export class GoogleAuthVerifier implements IAuthProviderVerifier {
   readonly provider = 'google';
 
-  /**
-   * Determine whether this verifier can handle the given token.
-   * Recognizes Chrome Extension OAuth access tokens (starts with 'ya29.')
-   * and standard Google OIDC JWTs (by inspecting the iss claim).
-   *
-   * @param token - The raw token string from the Authorization header.
-   * @returns True if the token belongs to Google authentication, false otherwise.
-   */
   canHandle(token: string): boolean {
-    // 1. Chrome Extension OAuth Access Token (starts with ya29.)
     if (token.startsWith('ya29.')) {
       return true;
     }
-    // 2. Standard Google OIDC ID Token (JWT)
     const payload = decodeJwtPayloadUnsafe(token);
     return payload?.iss === 'https://accounts.google.com' || payload?.iss === 'accounts.google.com';
   }
 
-  /**
-   * Verify a Google authentication token (either a Chrome Extension OAuth access token
-   * via the tokeninfo endpoint, or an OIDC JWT via Web Crypto).
-   *
-   * @param token - The raw bearer token string.
-   * @param env - Worker environment bindings containing GOOGLE_CLIENT_ID for audience checks.
-   * @returns The extracted and verified user identity.
-   * @throws Error if the token verification fails or audience mismatches.
-   */
   async verify(token: string, env: Env): Promise<VerifiedIdentity> {
-    // 0. Check in-memory token cache first (saves latency and Google subrequests)
+    if (!env.GOOGLE_CLIENT_ID || typeof env.GOOGLE_CLIENT_ID !== 'string' || env.GOOGLE_CLIENT_ID.trim() === '') {
+      throw new ServerConfigurationError('Server authentication configuration missing: GOOGLE_CLIENT_ID is required');
+    }
+
     const cached = tokenCache.get(token);
     if (cached.hit) {
       if (cached.identity) return cached.identity;
-      throw new Error(cached.error || 'Invalid Google access token (cached rejection)');
+      throw new AuthInvalidTokenError(cached.error || 'Invalid Google access token');
     }
 
-    // Handle Chrome Extension OAuth Access Token
+    // Path A: Chrome Extension OAuth Access Token (ya29.)
     if (token.startsWith('ya29.')) {
+      let info: Record<string, unknown>;
       try {
-        const response = await fetch(`https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(token)}`, {
-          headers: { 'User-Agent': 'Kites-Translate-Worker' },
-        });
-
-        if (!response.ok) {
-          const errMsg = `Invalid Google access token (HTTP ${response.status})`;
-          tokenCache.setInvalid(token, errMsg);
-          throw new Error(errMsg);
-        }
-
-        const info = (await response.json()) as any;
-
-        if (env.GOOGLE_CLIENT_ID && info.issued_to && info.issued_to !== env.GOOGLE_CLIENT_ID && info.audience !== env.GOOGLE_CLIENT_ID) {
-          const errMsg = `Token audience mismatch: expected ${env.GOOGLE_CLIENT_ID}`;
-          tokenCache.setInvalid(token, errMsg);
-          throw new Error(errMsg);
-        }
-
-        const sub = info.sub || info.user_id;
-        if (!sub) {
-          const errMsg = 'Google tokeninfo did not return a user identifier (sub/user_id)';
-          tokenCache.setInvalid(token, errMsg);
-          throw new Error(errMsg);
-        }
-
-        const identity: VerifiedIdentity = {
-          sub,
-          provider: this.provider,
-          email: info.email,
-          name: info.name,
-        };
-
-        // Cache valid token in memory (5 min)
-        tokenCache.setValid(token, identity);
-        return identity;
-      } catch (err: any) {
-        if (!cached.hit) {
-          tokenCache.setInvalid(token, err?.message || 'Invalid access token');
+        info = await fetchGoogleTokeninfo(token);
+      } catch (err: unknown) {
+        if (err instanceof AuthInvalidTokenError) {
+          tokenCache.setInvalid(token, err.message);
         }
         throw err;
       }
+
+      const audienceMatched = normalizeAndMatchAudience(info, env.GOOGLE_CLIENT_ID);
+      if (!audienceMatched) {
+        const errMsg = `Token audience mismatch: expected ${env.GOOGLE_CLIENT_ID}`;
+        tokenCache.setInvalid(token, errMsg);
+        throw new AuthInvalidTokenError(errMsg);
+      }
+
+      const sub = typeof info.sub === 'string' && info.sub.trim()
+        ? info.sub.trim()
+        : typeof info.user_id === 'string' && info.user_id.trim()
+        ? info.user_id.trim()
+        : '';
+
+      if (!sub) {
+        const errMsg = 'Google tokeninfo did not return a valid user identifier (sub/user_id)';
+        tokenCache.setInvalid(token, errMsg);
+        throw new AuthInvalidTokenError(errMsg);
+      }
+
+      const identity: VerifiedIdentity = {
+        sub,
+        provider: this.provider,
+        email: typeof info.email === 'string' ? info.email : undefined,
+        name: typeof info.name === 'string' ? info.name : undefined,
+      };
+
+      // Cap positive cache TTL strictly to token lifetime (expires_in seconds)
+      // Require finite positive lifetime (> 0).
+      let tokenExpMs: number | undefined;
+      const rawExp = info.expires_in;
+
+      if (typeof rawExp === 'number' && Number.isFinite(rawExp)) {
+        if (rawExp <= 0) {
+          const errMsg = 'Google access token has expired (expires_in <= 0)';
+          tokenCache.setInvalid(token, errMsg);
+          throw new AuthInvalidTokenError(errMsg);
+        }
+        tokenExpMs = Date.now() + rawExp * 1000;
+      } else if (typeof rawExp === 'string' && /^-?\d+$/.test(rawExp.trim())) {
+        const parsed = parseInt(rawExp.trim(), 10);
+        if (parsed <= 0) {
+          const errMsg = 'Google access token has expired (expires_in <= 0)';
+          tokenCache.setInvalid(token, errMsg);
+          throw new AuthInvalidTokenError(errMsg);
+        }
+        tokenExpMs = Date.now() + parsed * 1000;
+      }
+
+      // Only positive cache when verified positive lifetime is known
+      if (tokenExpMs !== undefined) {
+        tokenCache.setValid(token, identity, Date.now(), tokenExpMs);
+      }
+
+      return identity;
     }
 
-    // Handle OIDC ID Token (JWT)
-    const payload = await verifyGoogleIdToken(token, env.GOOGLE_CLIENT_ID);
-    const identity: VerifiedIdentity = {
-      sub: payload.sub,
-      provider: this.provider,
-      email: payload.email,
-      name: payload.name,
-    };
-    tokenCache.setValid(token, identity);
-    return identity;
+    // Path B: Standard OIDC ID Token (JWT)
+    try {
+      const payload = await verifyGoogleIdToken(token, env.GOOGLE_CLIENT_ID);
+      const identity: VerifiedIdentity = {
+        sub: payload.sub,
+        provider: this.provider,
+        email: typeof payload.email === 'string' ? payload.email : undefined,
+        name: typeof payload.name === 'string' ? payload.name : undefined,
+      };
+
+      const tokenExpMs = payload.exp ? payload.exp * 1000 : undefined;
+      if (tokenExpMs !== undefined && tokenExpMs > Date.now()) {
+        tokenCache.setValid(token, identity, Date.now(), tokenExpMs);
+      }
+      return identity;
+    } catch (err: unknown) {
+      if (err instanceof ServerConfigurationError || err instanceof AuthTransientError) {
+        throw err;
+      }
+      const errMsg = err instanceof Error ? err.message : 'Invalid or malformed ID token';
+      tokenCache.setInvalid(token, errMsg);
+      throw new AuthInvalidTokenError(errMsg);
+    }
   }
 }
 
 /**
  * Generate a privacy-preserving HMAC-SHA256 pseudonym hash for a user subject.
- * Used as the primary key in rate-limiting and quota tracking without storing PII.
  *
  * @param sub - The user identifier (typically `${provider}:${subject}`).
  * @param salt - Secret salt string from worker environment (JWT_SALT).
- * @returns A 64-character lowercase hex string representing the HMAC-SHA256 digest.
+ * @returns 64-character lowercase hex string.
+ * @throws Error if salt is missing or empty.
  */
-export async function hashUserSubject(sub: string, salt: string = 'kites-default-salt'): Promise<string> {
+export async function hashUserSubject(sub: string, salt: string): Promise<string> {
+  if (!salt || typeof salt !== 'string' || salt.trim() === '') {
+    throw new Error('JWT_SALT is required and cannot be empty');
+  }
+
   const key = await crypto.subtle.importKey(
     'raw',
     new TextEncoder().encode(salt),
@@ -307,8 +278,7 @@ export async function hashUserSubject(sub: string, salt: string = 'kites-default
     ['sign']
   );
   const signature = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(sub));
-  const hex = Array.from(new Uint8Array(signature))
+  return Array.from(new Uint8Array(signature))
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
-  return hex;
 }

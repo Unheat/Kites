@@ -1,6 +1,6 @@
 /**
  * AuthManager - Registry and Dispatcher for Authentication Strategies
- * 
+ *
  * Follows Open/Closed Principle: easily register new providers (Apple, GitHub)
  * without touching router/DO logic.
  */
@@ -26,23 +26,27 @@ export class AuthManager {
 
   /**
    * Verify an authentication token by dispatching to the first registered verifier
-   * that claims to handle it. Iterates through registered verifiers in order.
+   * that claims to handle it.
    *
    * @param token - The raw bearer token from the Authorization header.
    * @param env - Worker environment bindings for provider-specific configuration.
    * @returns The verified user identity from the matching provider.
-   * @throws Error if no registered verifier can handle the token.
+   * @throws Error if token is missing, or no registered verifier can handle the token.
    */
   async verifyToken(token: string, env: Env): Promise<VerifiedIdentity> {
-    const verifier = this.verifiers.find((v) => v.canHandle(token));
+    if (!token || typeof token !== 'string' || token.trim() === '') {
+      throw new Error('Missing or empty authentication token');
+    }
+
+    const trimmed = token.trim();
+    const verifier = this.verifiers.find((v) => v.canHandle(trimmed));
     if (!verifier) {
       throw new Error('Unsupported authentication provider or malformed token');
     }
-    return await verifier.verify(token, env);
+    return await verifier.verify(trimmed, env);
   }
 }
 
 // Pre-configured singleton instance
 export const authManager = new AuthManager()
   .register(new GoogleAuthVerifier());
-  // Future extensions: .register(new AppleAuthVerifier())

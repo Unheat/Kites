@@ -1,592 +1,250 @@
 /**
- * SharedPoolDO - Cloudflare Durable Object with SQLite Storage Backend
- * 
- * Responsibilities:
- * 1. Single authority for user rolling 24-hour quota (100 translations/day, timer starts on 1st request).
- * 2. SQLite storage optimization: exactly 1 SQL upsert per translation to stay within 100k daily write limit.
- * 3. In-memory Adaptive Cooldown & Circuit Breaker: 429/5xx triggers cooldown; avoids broken waterfalls.
- * 4. In-memory Adaptive Timeout: tracks EMA latency and bounds timeouts between 2000ms - 6000ms.
- * 5. Multi-provider waterfall: executes eligible providers in priority order.
+ * SharedPoolDO - Cloudflare Durable Object Orchestrator
+ *
+ * Thin orchestrator coordinating:
+ * 1. User rolling 24-hour quota & atomic reservations via QuotaAccountingService.
+ * 2. Pre-dispatch rate checks and circuit breaker state via CircuitBreakerService.
+ * 3. Workload-bucketed latency timeouts via LatencyHealthTracker.
+ * 4. Keyed JSON output verification, canonicalization, and terminal safety refusals via ValidationService.
  */
 
 import { DurableObject } from 'cloudflare:workers';
-import { Env, OpenAIChatRequest, OpenAIChatResponse, ProviderCircuitState, UserQuotaRecord } from '../types';
+import { Env, OpenAIChatRequest, ProviderAttemptLog, ProviderMetadata, TranslationQuotaInfo, TranslationResult } from '../types';
 import { PROVIDER_ROUTES, ProviderRouteConfig } from '../config/providers';
-import { executeOpenAICompatible } from '../adapters/openai-compatible';
+import { executeOpenAICompatible, AdapterExecutionResult } from '../adapters/openai-compatible';
 import { executeWorkersAI } from '../adapters/workers-ai';
 import { executeGemini } from '../adapters/gemini';
+import { QuotaAccountingService } from './quotaService';
+import { DurableSqlStore } from './quotaStore';
+import { CircuitBreakerService } from '../routing/circuitBreaker';
+import { LatencyHealthTracker, MIN_TIMEOUT_MS } from '../routing/latencyHealth';
+import { deriveExpectedKeys, ensureRequestResponseFormat, validateCompletion } from '../routing/validation';
+import { estimateTokenCount } from '../../../src/shared/translation/tokenEstimation';
 
-const USER_WINDOW_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours
-const MAX_USER_QUOTA = 100;
-
-const GLOBAL_DAILY_CAP = 70_000;
-const MIN_TIMEOUT_MS = 2000;
-const MAX_TIMEOUT_MS = 6000;
 const MAX_TOTAL_WATERFALL_MS = 12_500;
 
-export class SharedPoolDO extends DurableObject {
-  private env: Env;
-  
-  // In-memory cache to minimize SQLite reads
-  private userQuotaCache = new Map<string, UserQuotaRecord>();
-  
-  // In-memory circuit breakers & latency tracker (0 SQLite writes)
-  private providerCircuits = new Map<string, ProviderCircuitState>();
+function assertNever(x: never): never {
+  throw new Error(`Unhandled provider route type: ${x}`);
+}
 
-  // In-memory cache for provider speed metrics (synced from SQLite)
-  private providerMetricsCache = new Map<string, { emaMsPerToken: number; sampleCount: number }>();
+export class SharedPoolDO extends DurableObject<Env> {
+  private quotaService = new QuotaAccountingService();
+  private circuitBreaker = new CircuitBreakerService();
+  private latencyTracker = new LatencyHealthTracker();
 
-  // In-memory global daily counter
-  private globalDailyCount = 0;
-  private currentUtcDay = '';
+  private get store(): DurableSqlStore {
+    return {
+      sql: this.ctx.storage.sql,
+      transactionSync: <T>(cb: () => T): T => (this.ctx.storage as any).transactionSync(cb),
+    };
+  }
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
-    this.env = env;
-    this.initSqlite();
-    this.loadProviderMetrics();
-    this.initDayCounter();
+    this.quotaService.initSchema(this.store);
+    this.quotaService.loadPersistedState(this.store);
   }
 
-  /**
-   * Initialize SQLite schema for user quotas and persistent provider metrics.
-   */
-  private initSqlite() {
-    this.ctx.storage.sql.exec(`
-      CREATE TABLE IF NOT EXISTS user_quotas (
-        user_hash TEXT PRIMARY KEY,
-        window_start INTEGER NOT NULL,
-        used_count INTEGER NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS provider_metrics (
-        route_id TEXT PRIMARY KEY,
-        ema_ms_per_token REAL NOT NULL,
-        sample_count INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL
-      );
-    `);
+  /** Read-only user quota query. */
+  async getQuota(userHash: string): Promise<TranslationQuotaInfo> {
+    return this.quotaService.getQuota(userHash, this.store);
   }
 
-  /**
-   * Preload persisted provider EMA rates and sample counts into memory on DO startup.
-   */
-  private loadProviderMetrics() {
-    try {
-      const cursor = this.ctx.storage.sql.exec(
-        `SELECT route_id, ema_ms_per_token, sample_count FROM provider_metrics`
-      );
-      for (const row of cursor) {
-        const routeId = row.route_id as string;
-        const emaMsPerToken = Number(row.ema_ms_per_token);
-        const sampleCount = Number(row.sample_count);
-        this.providerMetricsCache.set(routeId, { emaMsPerToken, sampleCount });
-      }
-    } catch (err) {
-      console.warn('[SharedPoolDO] Failed to preload provider_metrics from SQLite:', err);
-    }
-  }
-
-  /**
-   * Initialize the in-memory UTC day tracker to current date (YYYY-MM-DD).
-   *
-   * @returns void
-   */
-  private initDayCounter() {
-    this.currentUtcDay = new Date().toISOString().slice(0, 10);
-  }
-
-  /**
-   * Check if the UTC calendar day has changed since the last request,
-   * and reset the in-memory global daily count to zero when rotating days.
-   *
-   * @returns void
-   */
-  private checkAndRotateDay() {
-    const today = new Date().toISOString().slice(0, 10);
-    if (today !== this.currentUtcDay) {
-      this.currentUtcDay = today;
-      this.globalDailyCount = 0;
-    }
-  }
-
-  /**
-   * Get or load user quota from in-memory cache or SQLite.
-   */
-  private getUserQuota(userHash: string): UserQuotaRecord | null {
-    if (this.userQuotaCache.has(userHash)) {
-      return this.userQuotaCache.get(userHash)!;
-    }
-
-    const cursor = this.ctx.storage.sql.exec(
-      `SELECT window_start, used_count FROM user_quotas WHERE user_hash = ?`,
-      userHash
-    );
-
-    for (const row of cursor) {
-      const record: UserQuotaRecord = {
-        windowStart: row.window_start as number,
-        usedCount: row.used_count as number,
-      };
-      this.userQuotaCache.set(userHash, record);
-      return record;
-    }
-
-    return null;
-  }
-
-  /**
-   * Read-only user quota query without consuming quota.
-   */
-  async getQuota(userHash: string): Promise<{ remaining: number; limit: number; resetsAt: number }> {
-    const now = Date.now();
-    const record = this.getUserQuota(userHash);
-    if (!record || now >= record.windowStart + USER_WINDOW_DURATION_MS) {
-      return {
-        remaining: MAX_USER_QUOTA,
-        limit: MAX_USER_QUOTA,
-        resetsAt: now + USER_WINDOW_DURATION_MS,
-      };
-    }
-    return {
-      remaining: Math.max(0, MAX_USER_QUOTA - record.usedCount),
-      limit: MAX_USER_QUOTA,
-      resetsAt: record.windowStart + USER_WINDOW_DURATION_MS,
-    };
-  }
-
-  /**
-   * Check and consume 1 user translation ticket.
-   * Starts rolling 24-hour window on the first request.
-   */
-  private checkAndConsumeQuota(userHash: string, now: number): { allowed: boolean; remaining: number; resetsAt: number } {
-    let record = this.getUserQuota(userHash);
-
-    if (!record || now >= record.windowStart + USER_WINDOW_DURATION_MS) {
-      // First request ever OR previous 24h window has completely passed
-      record = { windowStart: now, usedCount: 1 };
-    } else if (record.usedCount >= MAX_USER_QUOTA) {
-      return {
-        allowed: false,
-        remaining: 0,
-        resetsAt: record.windowStart + USER_WINDOW_DURATION_MS,
-      };
-    } else {
-      record.usedCount += 1;
-    }
-
-    // Update in-memory cache
-    this.userQuotaCache.set(userHash, record);
-
-    // Exactly 1 SQLite upsert write per translation
-    this.ctx.storage.sql.exec(
-      `INSERT INTO user_quotas (user_hash, window_start, used_count)
-       VALUES (?, ?, ?)
-       ON CONFLICT(user_hash) DO UPDATE SET
-         window_start = excluded.window_start,
-         used_count = excluded.used_count;`,
-      userHash,
-      record.windowStart,
-      record.usedCount
-    );
-
-    return {
-      allowed: true,
-      remaining: MAX_USER_QUOTA - record.usedCount,
-      resetsAt: record.windowStart + USER_WINDOW_DURATION_MS,
-    };
-  }
-
-  /**
-   * Get circuit state for a provider route with sliding rate window initialization.
-   */
-  private getCircuit(routeId: string, defaultTimeout: number): ProviderCircuitState {
-    if (!this.providerCircuits.has(routeId)) {
-      const now = Date.now();
-      const currentUtcDay = new Date().toISOString().slice(0, 10);
-      const metrics = this.providerMetricsCache.get(routeId);
-      this.providerCircuits.set(routeId, {
-        state: 'CLOSED',
-        cooldownUntil: 0,
-        consecutiveFailures: 0,
-        emaLatencyMs: defaultTimeout,
-        emaMsPerToken: metrics?.emaMsPerToken ?? 12,
-        sampleCount: metrics?.sampleCount ?? 0,
-        currentSecondWindow: Math.floor(now / 1000),
-        secondCount: 0,
-        currentMinuteWindow: Math.floor(now / 60000),
-        minuteCount: 0,
-        currentDayWindow: currentUtcDay,
-        dayCount: 0,
-      });
-    }
-    return this.providerCircuits.get(routeId)!;
-  }
-
-  /**
-   * Rotate sliding rate windows (second, minute, day) based on current timestamp.
-   */
-  private rotateRateWindows(circuit: ProviderCircuitState, now: number) {
-    const currentSec = Math.floor(now / 1000);
-    if (circuit.currentSecondWindow !== currentSec) {
-      circuit.currentSecondWindow = currentSec;
-      circuit.secondCount = 0;
-    }
-
-    const currentMin = Math.floor(now / 60000);
-    if (circuit.currentMinuteWindow !== currentMin) {
-      circuit.currentMinuteWindow = currentMin;
-      circuit.minuteCount = 0;
-    }
-
-    const currentDay = new Date(now).toISOString().slice(0, 10);
-    if (circuit.currentDayWindow !== currentDay) {
-      circuit.currentDayWindow = currentDay;
-      circuit.dayCount = 0;
-    }
-  }
-
-  /**
-   * Determine whether a route is eligible for dispatch.
-   * Checks both Layer 2 circuit cooldown and Layer 1 proactive rate limits.
-   */
-  private isRouteEligible(route: ProviderRouteConfig, now: number): boolean {
-    if (!route.enabled) return false;
-
-    // Verify required API key exists if needed
-    if (route.apiKeyEnvVar && !this.env[route.apiKeyEnvVar]) {
-      return false;
-    }
-
-    const circuit = this.getCircuit(route.id, route.defaultTimeoutMs ?? 3500);
-
-    // Layer 2: Circuit Breaker Cooldown Check
-    if (circuit.state === 'OPEN') {
-      if (now >= circuit.cooldownUntil) {
-        circuit.state = 'HALF-OPEN';
-      } else {
-        return false; // In cooldown -> skip without HTTP call
-      }
-    }
-
-    // Layer 1: Proactive Sliding Window Rate Limits Check
-    this.rotateRateWindows(circuit, now);
-
-    if (route.rpsLimit && circuit.secondCount >= route.rpsLimit) {
-      return false; // Reached per-second limit -> skip to next provider in waterfall
-    }
-
-    if (route.rpmLimit && circuit.minuteCount >= route.rpmLimit) {
-      return false; // Reached per-minute limit -> skip to next provider in waterfall
-    }
-
-    if (route.rpdLimit && circuit.dayCount >= route.rpdLimit) {
-      return false; // Reached daily limit -> skip to next provider in waterfall
-    }
-
-    return true;
-  }
-
-  /**
-   * Calculate adaptive timeout scaled by estimated token count.
-   * - During learning phase (<3 samples): uses route.defaultTimeoutMs.
-   * - Once trained (>=3 samples): scales by estimated tokens with base network overhead.
-   */
-  private calculateAdaptiveTimeout(
-    circuit: ProviderCircuitState,
+  /** Exhaustively dispatches request to adapter based on route protocol. */
+  private async dispatchAdapter(
     route: ProviderRouteConfig,
-    estimatedTokens: number
-  ): number {
-    // 3-sample warm-up safety guard: use conservative route default
-    if (circuit.sampleCount < 3) {
-      return route.defaultTimeoutMs ?? 3500;
+    request: OpenAIChatRequest,
+    timeoutMs: number
+  ): Promise<AdapterExecutionResult> {
+    switch (route.type) {
+      case 'openai-compatible': {
+        const apiKey = (route.apiKeyEnvVar ? this.env[route.apiKeyEnvVar] : '') || '';
+        return executeOpenAICompatible(route, request, apiKey, timeoutMs);
+      }
+      case 'workers-ai':
+        return executeWorkersAI(route, request, this.env.AI, timeoutMs);
+      case 'gemini': {
+        const apiKey = (route.apiKeyEnvVar ? this.env[route.apiKeyEnvVar] : '') || '';
+        return executeGemini(route, request, apiKey, timeoutMs);
+      }
+      default:
+        return assertNever(route.type);
     }
-
-    const baseOverheadMs = 600;
-    const expectedTime = baseOverheadMs + estimatedTokens * circuit.emaMsPerToken;
-    const dynamic = Math.round(expectedTime * 1.5);
-    return Math.round(Math.min(Math.max(dynamic, MIN_TIMEOUT_MS), MAX_TIMEOUT_MS));
   }
 
   /**
-   * Record outcome to update circuit breaker, smart cooldown, and adaptive latency.
-   */
-  private recordRouteOutcome(
-    route: ProviderRouteConfig,
-    success: boolean,
-    statusCode: number,
-    latencyMs: number,
-    errorText?: string,
-    retryAfterSeconds?: number,
-    promptChars: number = 0,
-    outputChars: number = 0
-  ) {
-    const circuit = this.getCircuit(route.id, route.defaultTimeoutMs ?? 3500);
-    const now = Date.now();
-
-    if (success) {
-      circuit.state = 'CLOSED';
-      circuit.consecutiveFailures = 0;
-      // Legacy EMA latency smoothing
-      circuit.emaLatencyMs = Math.round(circuit.emaLatencyMs * 0.7 + latencyMs * 0.3);
-
-      // Token-normalized rate smoothing
-      const promptTokens = Math.ceil(promptChars / 4);
-      const completionTokens = Math.ceil(outputChars / 4);
-      const totalTokens = Math.max(promptTokens + completionTokens, 15);
-      const rawMsPerToken = latencyMs / totalTokens;
-
-      // Outlier guard: clamp single-run speed between 2ms/token and 50ms/token
-      const currentMsPerToken = Math.min(Math.max(rawMsPerToken, 2), 50);
-
-      if (circuit.sampleCount === 0) {
-        circuit.emaMsPerToken = currentMsPerToken;
-      } else {
-        circuit.emaMsPerToken = Number(
-          (circuit.emaMsPerToken * 0.7 + currentMsPerToken * 0.3).toFixed(2)
-        );
-      }
-      circuit.sampleCount += 1;
-
-      // Sync in-memory metrics cache & persist to DO SQLite
-      this.providerMetricsCache.set(route.id, {
-        emaMsPerToken: circuit.emaMsPerToken,
-        sampleCount: circuit.sampleCount,
-      });
-
-      try {
-        this.ctx.storage.sql.exec(
-          `INSERT INTO provider_metrics (route_id, ema_ms_per_token, sample_count, updated_at)
-           VALUES (?, ?, ?, ?)
-           ON CONFLICT(route_id) DO UPDATE SET
-             ema_ms_per_token = excluded.ema_ms_per_token,
-             sample_count = excluded.sample_count,
-             updated_at = excluded.updated_at;`,
-          route.id,
-          circuit.emaMsPerToken,
-          circuit.sampleCount,
-          now
-        );
-      } catch (err) {
-        console.warn(`[SharedPoolDO] Failed to persist provider_metrics for ${route.id}:`, err);
-      }
-      return;
-    }
-
-    // Failure / Cooldown trigger: do NOT update emaMsPerToken or sampleCount
-    circuit.consecutiveFailures += 1;
-
-    let cooldownMs = 30_000; // default 30s
-    const lowerError = (errorText || '').toLowerCase();
-
-    if (statusCode === 408) {
-      // 408 Timeout: transient delay, assign measured cooldown rather than 5xx crash backoff
-      cooldownMs = circuit.consecutiveFailures === 1 ? 5_000 : 15_000;
-      // Adjust EMA latency upward to reflect slow upstream
-      circuit.emaLatencyMs = Math.round(circuit.emaLatencyMs * 0.7 + latencyMs * 0.3);
-    } else if (statusCode === 429 || statusCode === 402) {
-      // 1. Check upstream Retry-After header
-      if (retryAfterSeconds && retryAfterSeconds > 0) {
-        cooldownMs = retryAfterSeconds * 1000;
-      } else if (
-        statusCode === 402 ||
-        lowerError.includes('per day') ||
-        lowerError.includes('daily') ||
-        lowerError.includes('quota exceeded') ||
-        lowerError.includes('insufficient_quota') ||
-        lowerError.includes('exceeded your current quota') ||
-        lowerError.includes('credit')
-      ) {
-        // Daily quota exhausted -> cooldown until 00:00 UTC
-        const tomorrow = new Date(now);
-        tomorrow.setUTCHours(24, 0, 0, 0);
-        cooldownMs = Math.max(tomorrow.getTime() - now, 60_000);
-      } else if (
-        route.rpsLimit ||
-        lowerError.includes('per second') ||
-        lowerError.includes('concurrency') ||
-        lowerError.includes('rate limit exceeded')
-      ) {
-        // Per-second limit burst -> brief 2s pause
-        cooldownMs = 2_000;
-      } else {
-        // Standard per-minute rate limit
-        cooldownMs = 60_000;
-      }
-    } else {
-      // Exponential backoff for 5xx/transport: 10s, 30s, 120s, 300s max
-      const backoffSteps = [10_000, 30_000, 120_000, 300_000];
-      const stepIdx = Math.min(circuit.consecutiveFailures - 1, backoffSteps.length - 1);
-      cooldownMs = backoffSteps[Math.max(0, stepIdx)];
-    }
-
-    circuit.state = 'OPEN';
-    circuit.cooldownUntil = now + cooldownMs;
-  }
-
-  /**
-   * Main Translation Entrypoint via DO RPC or HTTP fetch
+   * Main Translation Entrypoint via DO RPC or HTTP fetch.
    */
   async handleTranslation(
     userHash: string,
-    request: OpenAIChatRequest
-  ): Promise<{ status: number; body: any; quota?: { remaining: number; limit: number; resetsAt: number } }> {
+    rawRequest: OpenAIChatRequest,
+    requestId?: string
+  ): Promise<TranslationResult> {
     const now = Date.now();
-    this.checkAndRotateDay();
+    const correlationId = requestId || crypto.randomUUID();
 
-    // 1. Global Daily Cap Check
-    if (this.globalDailyCount >= GLOBAL_DAILY_CAP) {
+    let expectedKeys: string[];
+    try {
+      expectedKeys = deriveExpectedKeys(rawRequest);
+    } catch (err) {
       return {
-        status: 429,
-        body: {
-          error: {
-            message: 'Global translation pool daily quota exhausted. Resets at 00:00 UTC.',
-            type: 'insufficient_quota',
-            code: 'global_daily_exhausted',
-          },
-        },
+        status: 400,
+        body: { error: { message: err instanceof Error ? err.message : 'Invalid request', type: 'invalid_request_error', code: 'invalid_source' } },
       };
     }
 
-    // 2. User Rolling 24-Hour Quota Check
-    const quotaResult = this.checkAndConsumeQuota(userHash, now);
-    const userQuota = {
-      remaining: quotaResult.remaining,
-      limit: MAX_USER_QUOTA,
-      resetsAt: quotaResult.resetsAt,
-    };
-
-    if (!quotaResult.allowed) {
+    const structuredRequest = ensureRequestResponseFormat(rawRequest, expectedKeys);
+    const reservation = this.quotaService.reserveQuota(userHash, this.store, now);
+    if (!reservation.allowed || !reservation.token) {
       return {
-        status: 429,
-        body: {
-          error: {
-            message: `User 24-hour quota exceeded (100/day limit). Resets at ${new Date(quotaResult.resetsAt).toISOString()}`,
-            type: 'insufficient_quota',
-            code: 'quota_exhausted',
-            resetsAt: quotaResult.resetsAt,
-          },
-        },
-        quota: userQuota,
+        status: reservation.statusCode || 429,
+        body: { error: { message: reservation.errorMessage || 'Quota exceeded', type: 'insufficient_quota', code: reservation.errorCode || 'quota_exhausted' } },
+        quota: reservation.quota,
       };
     }
 
-    // 3. Filter and Sort Eligible Providers by Priority
-    const sortedRoutes = [...PROVIDER_ROUTES]
-      .sort((a, b) => a.priority - b.priority)
-      .filter((route) => this.isRouteEligible(route, now));
+    const token = reservation.token;
+    let settled = false;
 
-    if (sortedRoutes.length === 0) {
+    try {
+      const combinedPrompt = structuredRequest.messages.map((m) => m.content || '').join(' ');
+      const promptTokens = estimateTokenCount(combinedPrompt);
+      const estimatedTokens = Math.max(promptTokens * 2, 20);
+
+      const orderedRoutes = this.latencyTracker.orderRoutes(PROVIDER_ROUTES);
+      const waterfallDeadline = now + MAX_TOTAL_WATERFALL_MS;
+      const attempts: ProviderAttemptLog[] = [];
+
+      for (let attemptIx = 0; attemptIx < orderedRoutes.length; attemptIx++) {
+        const route = orderedRoutes[attemptIx];
+        const remainingBudget = waterfallDeadline - Date.now();
+        if (remainingBudget < MIN_TIMEOUT_MS) break;
+
+        const predispatch = this.circuitBreaker.acquireRoute(route, this.env, Date.now());
+        if (!predispatch.acquired) continue;
+
+        const timeoutMs = Math.min(this.latencyTracker.calculateTimeout(route, estimatedTokens, Date.now()), remainingBudget);
+        const startTime = Date.now();
+        let result: AdapterExecutionResult;
+
+        try {
+          result = await this.dispatchAdapter(route, structuredRequest, timeoutMs);
+        } finally {
+          this.circuitBreaker.releaseRoute(route.id);
+        }
+
+        const elapsed = Date.now() - startTime;
+        console.log(JSON.stringify({
+          event: 'attempt',
+          requestId: correlationId,
+          attemptIndex: attemptIx,
+          routeId: route.id,
+          model: route.modelName,
+          status: result.statusCode,
+          latencyMs: elapsed,
+        }));
+
+        // Safety refusal: terminal, release probe without opening circuit cooldown
+        if (result.isTerminalRefusal) {
+          this.circuitBreaker.recordSafetyRefusal(route, predispatch.generation);
+          this.quotaService.releaseReservation(token);
+          settled = true;
+          attempts.push({ routeId: route.id, model: route.modelName, statusCode: result.statusCode, latencyMs: elapsed, errorType: 'safety_refusal' });
+          return {
+            status: 400,
+            body: { error: { message: result.error || 'Generation refused by safety policy', type: 'invalid_request_error', code: 'content_filter' } },
+            quota: this.quotaService.getQuota(userHash, this.store),
+            providerMetadata: { routeId: route.id, model: route.modelName, attempts, totalAttempts: attempts.length },
+          };
+        }
+
+        if (result.success && result.data) {
+          const choice = result.data.choices?.[0];
+          // Envelope finish_reason validation: only 'stop' is valid
+          if (choice?.finish_reason !== 'stop') {
+            this.circuitBreaker.recordOutcome(route, false, 502, predispatch.generation, `Truncated: ${choice?.finish_reason}`);
+            attempts.push({ routeId: route.id, model: route.modelName, statusCode: 502, latencyMs: elapsed, errorType: 'truncated_output' });
+            continue;
+          }
+
+          const content = choice?.message?.content || '';
+          const validation = validateCompletion(content, expectedKeys);
+
+          if (validation.valid && validation.parsed) {
+            // Canonicalize content to strictly formatted Keyed JSON
+            choice.message.content = JSON.stringify(validation.parsed);
+
+            const tokensUsed = result.data.usage?.total_tokens || estimatedTokens;
+            this.circuitBreaker.recordOutcome(route, true, 200, predispatch.generation);
+            this.latencyTracker.recordSuccess(route.id, elapsed, estimatedTokens, tokensUsed);
+
+            const finalQuota = this.quotaService.commitSuccess(token, this.store);
+            settled = true;
+
+            attempts.push({ routeId: route.id, model: route.modelName, statusCode: 200, latencyMs: elapsed });
+            console.log(JSON.stringify({
+              event: 'final',
+              requestId: correlationId,
+              success: true,
+              routeId: route.id,
+              actualModel: result.data.model,
+              latencyMs: Date.now() - now,
+            }));
+
+            const metadata: ProviderMetadata = {
+              routeId: route.id,
+              model: route.modelName,
+              actualModel: result.data.model,
+              attempts,
+              totalAttempts: attempts.length,
+            };
+            return { status: 200, body: result.data, quota: finalQuota, providerMetadata: metadata };
+          }
+
+          if (validation.isTerminalRefusal) {
+            this.circuitBreaker.recordSafetyRefusal(route, predispatch.generation);
+            this.quotaService.releaseReservation(token);
+            settled = true;
+            attempts.push({ routeId: route.id, model: route.modelName, statusCode: 400, latencyMs: elapsed, errorType: 'safety_refusal' });
+            return {
+              status: 400,
+              body: { error: { message: validation.error || 'Content safety refusal', type: 'invalid_request_error', code: 'content_filter' } },
+              quota: this.quotaService.getQuota(userHash, this.store),
+              providerMetadata: { routeId: route.id, model: route.modelName, attempts, totalAttempts: attempts.length },
+            };
+          }
+
+          this.circuitBreaker.recordOutcome(route, false, 502, predispatch.generation, validation.error);
+          attempts.push({ routeId: route.id, model: route.modelName, statusCode: 502, latencyMs: elapsed, errorType: 'invalid_keyed_json' });
+        } else {
+          if (result.statusCode === 408) this.latencyTracker.recordTimeout(route.id, estimatedTokens, elapsed);
+          this.circuitBreaker.recordOutcome(route, false, result.statusCode, predispatch.generation, result.error, result.retryAfterSeconds);
+          attempts.push({ routeId: route.id, model: route.modelName, statusCode: result.statusCode, latencyMs: elapsed, errorType: 'upstream_error' });
+        }
+      }
+
+      console.log(JSON.stringify({
+        event: 'final',
+        requestId: correlationId,
+        success: false,
+        attempts: attempts.length,
+        latencyMs: Date.now() - now,
+      }));
+
+      // Release reservation before computing final quota headers
+      this.quotaService.releaseReservation(token);
+      settled = true;
+
       return {
-        status: 503,
-        body: {
-          error: {
-            message: 'All translation providers are currently cooling down or unavailable. Please try again later.',
-            type: 'service_unavailable',
-            code: 'all_providers_cooling_down',
-          },
-        },
+        status: 502,
+        body: { error: { message: 'All eligible translation providers failed or are cooling down', type: 'provider_error', code: 'all_providers_cooling_down' } },
+        quota: this.quotaService.getQuota(userHash, this.store),
+        providerMetadata: { attempts, totalAttempts: attempts.length },
       };
+    } finally {
+      if (!settled) {
+        this.quotaService.releaseReservation(token);
+      }
     }
-
-    // 4. Waterfall Dispatch Loop
-    const waterfallDeadline = now + MAX_TOTAL_WATERFALL_MS;
-    // Estimate prompt tokens and translation tokens for token-scaled adaptive timeout
-    const promptChars = request.messages.reduce(
-      (sum, m) => sum + (m.content ? m.content.length : 0),
-      0
-    );
-    const promptTokens = Math.max(Math.ceil(promptChars / 4), 10);
-    const estimatedTokens = promptTokens * 2;
-
-    let lastError = 'No providers succeeded';
-    for (const route of sortedRoutes) {
-      const remainingBudget = waterfallDeadline - Date.now();
-      if (remainingBudget < MIN_TIMEOUT_MS) {
-        lastError = `Waterfall total time budget exhausted (${remainingBudget}ms remaining)`;
-        break;
-      }
-
-      const circuit = this.getCircuit(route.id, route.defaultTimeoutMs ?? 3500);
-
-      // Re-verify rate limit window right before calling in case concurrent requests occurred
-      this.rotateRateWindows(circuit, Date.now());
-      if (route.rpsLimit && circuit.secondCount >= route.rpsLimit) {
-        continue; // Layer 1: Skip to next route in waterfall
-      }
-      if (route.rpmLimit && circuit.minuteCount >= route.rpmLimit) {
-        continue; // Layer 1: Skip to next route in waterfall
-      }
-
-      // Proactively increment in-memory rate window counters
-      circuit.secondCount += 1;
-      circuit.minuteCount += 1;
-      circuit.dayCount += 1;
-
-      const adaptiveTimeout = this.calculateAdaptiveTimeout(circuit, route, estimatedTokens);
-      const timeoutMs = Math.min(adaptiveTimeout, remainingBudget);
-      const startTime = Date.now();
-
-      let result: any;
-      if (route.type === 'openai-compatible') {
-        const apiKey = (route.apiKeyEnvVar ? this.env[route.apiKeyEnvVar] : '') || '';
-        result = await executeOpenAICompatible(route, request, apiKey, timeoutMs);
-      } else if (route.type === 'workers-ai') {
-        result = await executeWorkersAI(route, request, this.env.AI, timeoutMs);
-      } else if (route.type === 'gemini') {
-        const apiKey = (route.apiKeyEnvVar ? this.env[route.apiKeyEnvVar] : '') || '';
-        result = await executeGemini(route, request, apiKey, timeoutMs);
-      }
-
-      const elapsed = Date.now() - startTime;
-
-      if (result && result.success && result.data) {
-        const outputContent = result.data?.choices?.[0]?.message?.content || '';
-        const outputChars = typeof outputContent === 'string' ? outputContent.length : 0;
-
-        this.recordRouteOutcome(
-          route,
-          true,
-          200,
-          elapsed,
-          undefined,
-          undefined,
-          promptChars,
-          outputChars
-        );
-        this.globalDailyCount += 1;
-
-        return {
-          status: 200,
-          body: result.data,
-          quota: userQuota,
-        };
-      }
-
-      // Layer 2: Record failure, activate smart cooldown, and continue waterfall to next route
-      this.recordRouteOutcome(
-        route,
-        false,
-        result?.statusCode || 500,
-        elapsed,
-        result?.error,
-        result?.retryAfterSeconds,
-        promptChars,
-        0
-      );
-      lastError = result?.error || 'Unknown error';
-    }
-
-    // All attempted providers failed
-    return {
-      status: 502,
-      body: {
-        error: {
-          message: `All eligible providers failed. Last error: ${lastError}`,
-          type: 'provider_error',
-          code: 'all_providers_cooling_down',
-        },
-      },
-      quota: userQuota,
-    };
   }
 }

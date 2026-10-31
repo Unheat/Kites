@@ -8,14 +8,32 @@
  * Extends BaseLlmTranslationEngine for unified prompting, batching, parsing, and markdown stripping.
  */
 
-import { BaseLlmTranslationEngine, type LlmChatMessage } from './BaseLlmTranslationEngine';
+import {
+  BaseLlmTranslationEngine,
+  type LlmChatMessage,
+  type LlmTranslationSegment,
+} from './BaseLlmTranslationEngine';
 import {
   CLOUDFLARE_TRANSLATE_DEFAULT_ENDPOINT,
   CLOUDFLARE_TRANSLATE_MODEL,
   STORAGE_KEYS,
 } from '../../../shared/constants';
+import {
+  createJsonSchemaResponseFormat,
+} from '../../../shared/translation/poolContract';
+import { buildSchema } from '../../../shared/translation/keyedJson';
+import type { GlossaryEntry } from '../../../shared/glossary';
+import {
+  CloudflarePayloadLimitError,
+  splitCloudflareBatch,
+} from './CloudflareBatchSplitter';
 
-export { CLOUDFLARE_TRANSLATE_DEFAULT_ENDPOINT, CLOUDFLARE_TRANSLATE_MODEL };
+export {
+  CLOUDFLARE_TRANSLATE_DEFAULT_ENDPOINT,
+  CLOUDFLARE_TRANSLATE_MODEL,
+  CloudflarePoolExhaustedError,
+  CloudflarePayloadLimitError,
+};
 
 /** Timeout for Cloudflare Worker translate completions request */
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -29,7 +47,7 @@ const DEFAULT_CLOUDFLARE_BATCH_SIZE = 15;
 /** LLM generation sampling temperature (greedy decoding) */
 const DEFAULT_TEMPERATURE = 0;
 
-export class CloudflarePoolExhaustedError extends Error {
+class CloudflarePoolExhaustedError extends Error {
   readonly code: string;
 
   constructor(message: string, code: string) {
@@ -49,6 +67,30 @@ export class CloudflareTranslateEngine extends BaseLlmTranslationEngine {
     this.endpoint = endpoint;
     this.batchSize = DEFAULT_CLOUDFLARE_BATCH_SIZE;
     this.throwOnCountMismatch = false; // Graceful fallback to original text if upstream LLM drops tags
+    this.strictKeyedParsing = true;
+  }
+
+  /**
+   * Partitions segments into bounded batches that strictly conform
+   * to Cloudflare community pool contract limits without dialogue loss.
+   */
+  override partitionIntoChunks(
+    segments: LlmTranslationSegment[],
+    _overheadTokens = 75,
+    context?: {
+      sourceLang?: string;
+      targetLang?: string;
+      glossary?: readonly GlossaryEntry[];
+      customPrompt?: string;
+    }
+  ): LlmTranslationSegment[][] {
+    return splitCloudflareBatch(
+      segments,
+      this.batchSize,
+      this.buildJsonMessages.bind(this),
+      buildSchema,
+      context
+    );
   }
 
   /**
@@ -116,32 +158,50 @@ export class CloudflareTranslateEngine extends BaseLlmTranslationEngine {
    *
    * @param prompt - The assembled batch prompt fallback string.
    * @param messages - Optional structured ChatMessage array.
+   * @param schema - Optional JSON schema for structured output.
    * @param signal - Optional AbortSignal.
+   * @param maxTokens - Optional max tokens allowed.
    * @returns Raw completion content from the LLM.
    */
-  protected async requestLlm(
+  protected override async requestLlm(
     prompt: string,
     messages?: LlmChatMessage[],
-    _schema?: Record<string, unknown>,
+    schema?: Record<string, unknown>,
     signal?: AbortSignal,
     maxTokens?: number
   ): Promise<string> {
+    if (signal?.aborted) {
+      throw new DOMException('The operation was aborted.', 'AbortError');
+    }
+
     const token = await this.getAuthToken();
     if (!token) {
       throw new Error('Please sign in with Google in Settings to use Cloudflare Translate.');
     }
+
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-
-    // If caller provided an external signal, propagate abort
+    const abortHandler = () => controller.abort();
     if (signal) {
-      signal.addEventListener('abort', () => controller.abort());
+      signal.addEventListener('abort', abortHandler);
     }
 
     const payloadMessages =
       messages && messages.length > 0
         ? messages
         : [{ role: 'user' as const, content: prompt }];
+
+    const requestPayload: Record<string, unknown> = {
+      model: CLOUDFLARE_TRANSLATE_MODEL,
+      messages: payloadMessages,
+      temperature: DEFAULT_TEMPERATURE,
+      max_tokens: maxTokens,
+      stream: false,
+    };
+
+    if (schema) {
+      requestPayload.response_format = createJsonSchemaResponseFormat(schema);
+    }
 
     try {
       const response = await fetch(this.endpoint, {
@@ -152,17 +212,9 @@ export class CloudflareTranslateEngine extends BaseLlmTranslationEngine {
           'HTTP-Referer': 'https://kites.ai',
           'X-Title': 'Kites Manga Translator',
         },
-        body: JSON.stringify({
-          model: CLOUDFLARE_TRANSLATE_MODEL,
-          messages: payloadMessages,
-          temperature: DEFAULT_TEMPERATURE,
-          max_tokens: maxTokens,
-          stream: false,
-        }),
+        body: JSON.stringify(requestPayload),
         signal: controller.signal,
       });
-
-      clearTimeout(timer);
 
       if (!response.ok) {
         if (response.status === 401) {
@@ -221,10 +273,36 @@ export class CloudflareTranslateEngine extends BaseLlmTranslationEngine {
       }
 
       const data = (await response.json()) as any;
-      return data?.choices?.[0]?.message?.content || '';
-    } catch (err: any) {
+      const choice = data?.choices?.[0];
+      const finishReason = choice?.finish_reason;
+      if (finishReason === 'length') {
+        console.warn(
+          `[CloudflareTranslateEngine] Generation reached max_tokens limit (${maxTokens}). Output may be truncated.`
+        );
+      } else if (finishReason === 'content_filter') {
+        console.warn('[CloudflareTranslateEngine] Generation flagged by upstream content filter.');
+      }
+
+      const content = choice?.message?.content;
+      if (typeof content !== 'string') {
+        throw new Error('Cloudflare translate response did not contain message content.');
+      }
+
+      // Log only model and request ID (never log raw OCR text)
+      const requestId =
+        response.headers.get('cf-ray') ||
+        response.headers.get('x-request-id') ||
+        data?.id ||
+        'unknown';
+      const modelUsed = data?.model || CLOUDFLARE_TRANSLATE_MODEL;
+      console.log(`[CloudflareTranslateEngine] Completed request id=${requestId} model=${modelUsed}`);
+
+      return content;
+    } finally {
       clearTimeout(timer);
-      throw err;
+      if (signal) {
+        signal.removeEventListener('abort', abortHandler);
+      }
     }
   }
 }

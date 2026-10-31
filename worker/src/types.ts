@@ -7,12 +7,29 @@ export interface OpenAIMessage {
   content: string;
 }
 
+export interface ResponseFormatJsonSchema {
+  type: 'json_schema';
+  json_schema: {
+    name: string;
+    strict?: boolean;
+    schema: Record<string, unknown>;
+  };
+}
+
+export interface ResponseFormatJsonObject {
+  type: 'json_object';
+}
+
+export type ResponseFormat = ResponseFormatJsonSchema | ResponseFormatJsonObject;
+
 export interface OpenAIChatRequest {
   model: string;
   messages: OpenAIMessage[];
   temperature?: number;
   max_tokens?: number;
   stream?: boolean;
+  response_format?: ResponseFormat;
+  reasoning_effort?: 'low' | 'medium' | 'high';
 }
 
 export interface OpenAIChatChoice {
@@ -48,22 +65,60 @@ export interface OpenAIErrorResponse {
 export interface UserQuotaRecord {
   windowStart: number;
   usedCount: number;
+  attemptCount: number;
 }
 
 export interface ProviderCircuitState {
   state: 'CLOSED' | 'OPEN' | 'HALF-OPEN';
   cooldownUntil: number;
   consecutiveFailures: number;
-  emaLatencyMs: number;
-  emaMsPerToken: number;
-  sampleCount: number;
-  // Layer 1 Proactive sliding window counters (in-memory)
+  generation: number;
+  halfOpenInFlight: boolean;
+  inFlightCount: number;
   currentSecondWindow: number;
   secondCount: number;
   currentMinuteWindow: number;
   minuteCount: number;
   currentDayWindow: string;
   dayCount: number;
+}
+
+export interface RouteLatencyStats {
+  emaLatencyMs: number;
+  latencyVariance: number;
+  emaMsPerToken: number;
+  sampleCount: number;
+  lastSampleAt: number;
+  consecutiveTimeouts: number;
+}
+
+export interface TranslationQuotaInfo {
+  remaining: number;
+  limit: number;
+  resetsAt: number;
+}
+
+export interface ProviderAttemptLog {
+  routeId: string;
+  model: string;
+  statusCode?: number;
+  latencyMs?: number;
+  errorType?: string;
+}
+
+export interface ProviderMetadata {
+  routeId?: string;
+  model?: string;
+  actualModel?: string;
+  attempts?: ProviderAttemptLog[];
+  totalAttempts?: number;
+}
+
+export interface TranslationResult {
+  status: number;
+  body: OpenAIChatResponse | OpenAIErrorResponse | Record<string, unknown>;
+  quota?: TranslationQuotaInfo;
+  providerMetadata?: ProviderMetadata;
 }
 
 export interface Env {

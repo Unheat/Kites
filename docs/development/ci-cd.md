@@ -19,6 +19,8 @@ All three workflows install pinned Node (`.nvmrc`, currently 22.14) with `npm ci
 
 ## 2. Main CI (`ci.yml`)
 
+Job `worker-tests` separately installs `worker/` dependencies, runs the worker unit tests, and typechecks the worker. No provider credentials or live inference are needed for this job.
+
 Job `test-and-build` runs, in order:
 
 1. **Lint** — `npm run lint` (Oxlint).
@@ -62,9 +64,14 @@ Historical note: re-pointing an existing tag makes its release a draft — repub
 
 Never deploy directly to production users (AGENTS.md §10). The promotion ladder is:
 
-1. **Isolated preview** — `npx wrangler versions upload --cwd worker` (private preview URL, no live traffic, no production DB writes).
-2. **Staging** — `npx wrangler deploy --env staging --cwd worker` (isolated staging DO SQLite database for end-to-end tests).
-3. **Production** — only after `npm --prefix worker test` passes and preview/staging checks succeed: `npm --prefix worker run deploy` (or `npx wrangler versions deploy`).
+1. **Local verification** — run `npm --prefix worker test` and the worker TypeScript check. CI runs both without live credentials.
+2. **Isolated staging** — after deployment authorization, `npx wrangler deploy --env staging --cwd worker`. The explicit staging configuration names a separate Worker and its own Durable Object binding; verify the deployed namespace is distinct before stateful tests. Configure staging secrets separately. A deploy command does not itself run end-to-end tests. Protect the staging endpoint before testing it.
+3. **Version candidate** — `npx wrangler versions upload --cwd worker` uploads a candidate without promoting live traffic. Existing encrypted secrets on the same Worker can be retained; separate staging does not inherit them. **Workers implementing Durable Objects do not receive ordinary version URLs under the current platform rules.** A version upload is not a promise of a runnable preview URL. For adapter checks using existing server secrets, a separately authorized diagnostic build can be included at 0% traffic and targeted with a version override. This changes deployment configuration and is not an isolated sandbox. Restrict it to verified developer authentication, fixed synthetic fixtures, no normal translation routes, and no production Durable Object calls. Inspect actual bindings/exposure and remove the diagnostic version after use.
+4. **Production** — only after tests and staging/preview checks pass, with explicit promotion authorization: `npm --prefix worker run deploy` (or `npx wrangler versions deploy`). Deploy the backward-compatible worker before publishing client hardening.
+
+Provider checks are opt-in: `npm --prefix worker run test:providers -- --run --route=<route-id>` sends one synthetic request using environment credentials and consumes provider allowance. Without `--run`, the script only lists the catalog. Never commit credentials, log raw responses, infer live model health from invalid local keys, or run paid probes without a budget decision.
+
+Production `workers.dev` exposure is a separate rollout check: verify the custom-domain auth/WAF path first, then disable alternate production endpoints explicitly. Staging may retain its own controlled `workers.dev` endpoint. Local configuration alone does not prove the current dashboard exposure state.
 
 Production endpoint: `api.12094852.xyz` (see `src/shared/constants.ts` for client-side endpoint constants).
 

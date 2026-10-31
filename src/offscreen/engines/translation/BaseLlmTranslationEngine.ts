@@ -2,6 +2,30 @@ import type { ITranslationEngine, TranslationOptions } from './BaseEngine';
 import { buildGlossaryPrompt, GLOSSARY_PROMPT_RULES, getEnabledGlossary, filterRelevantGlossary, type GlossaryEntry } from '../../../shared/glossary';
 import { getLanguageName } from '../../../shared/utils/LanguageRegistry';
 import { hasNativeScriptForLang } from '../../../shared/utils/textCleaning';
+import { buildSchema } from '../../../shared/translation/keyedJson';
+import {
+  isDeterministicPassthrough,
+  countCodePoints,
+  estimateTokenCount,
+  maxTokensForBatch,
+  stripMarkdownFormatting,
+  cleanTranslatedLine,
+} from '../../../shared/translation/tokenEstimation';
+
+export {
+  isDeterministicPassthrough,
+  countCodePoints,
+  estimateTokenCount,
+  maxTokensForBatch,
+  buildSchema,
+  cleanTranslatedLine,
+  stripMarkdownFormatting,
+};
+
+export interface KeyedParseResult {
+  translations: string[];
+  parsedKeys: ReadonlySet<string>;
+}
 
 export interface LlmTranslationSegment {
   originalIndex: number;
@@ -14,114 +38,6 @@ export interface LlmChatMessage {
 }
 
 /**
- * Detects whether a text string consists entirely of punctuation, ellipses, symbols, or whitespace
- * without linguistic alphanumeric characters (e.g. "...", "！？", "——", "ーー").
- * Such tokens bypass the LLM and are resolved deterministically as source passthroughs.
- *
- * @param text - The raw source text.
- * @returns True if the text contains no letters or digits.
- */
-export function isDeterministicPassthrough(text: string): boolean {
-  const trimmed = text.trim();
-  if (!trimmed) return true;
-  // Strip prolonged sound marks (ー, U+30FC), dashes, wave dashes, and dots
-  const stripped = trimmed.replace(/[ー—–\-_~〜…·・\s]/gu, '');
-  if (!stripped) return true;
-  // Unicode property escapes: check if remaining text has any Letter or Number
-  return !/[\p{L}\p{N}]/u.test(stripped);
-}
-
-/**
- * Accurately counts Unicode code points (properly handling surrogate pairs and emoji).
- *
- * @param text - The text string.
- * @returns Count of Unicode code points.
- */
-export function countCodePoints(text: string): number {
-  return [...text].length;
-}
-
-/**
- * Estimates token count for multilingual text across modern BPE / SentencePiece tokenizers.
- * Accurately models token fertility across scripts:
- * - Basic Latin ASCII [A-Za-z]: ~0.30 tokens/char (~3.3 chars per token)
- * - Vietnamese Latin Extended: ~0.35 tokens/char (~1.1-1.3 tokens per word)
- * - Cyrillic (Russian, Ukrainian): ~0.42 tokens/char
- * - Arabic / Hebrew: ~0.45 tokens/char
- * - Thai / Lao: ~0.60 tokens/char
- * - Devanagari / Indic: ~1.00 tokens/char
- * - CJK Ideographs (Hanzi / Kanji): ~0.90 tokens/char
- * - CJK Kana (Hiragana, Katakana, SFX): ~1.05 tokens/char
- * - Hangul Syllables: ~0.85 tokens/char
- * - Digits: ~0.60 tokens/char
- * - Whitespace: ~0.20 tokens/char
- * - Symbols & Punctuation: ~0.90 tokens/char
- * - Emojis & Astral planes: ~2.50 tokens/char
- *
- * Runs in a single O(N) pass with zero memory allocation.
- *
- * @param text - Input text string.
- * @returns Conservative upper-bound estimated token count.
- */
-export function estimateTokenCount(text: string): number {
-  if (!text) return 0;
-  const trimmed = text.trim();
-  if (!trimmed) return 0;
-
-  let totalTokens = 1.0; // Baseline BOS / string prefix
-  const len = trimmed.length;
-
-  for (let i = 0; i < len; i++) {
-    const cp = trimmed.codePointAt(i)!;
-    if (cp > 0xffff) i++; // Step over surrogate pair
-
-    if ((cp >= 65 && cp <= 90) || (cp >= 97 && cp <= 122)) {
-      totalTokens += 0.30; // Latin ASCII
-    } else if (cp >= 0x4e00 && cp <= 0x9fff) {
-      totalTokens += 0.90; // CJK Hanzi / Kanji
-    } else if (cp >= 0x3040 && cp <= 0x30ff) {
-      totalTokens += 1.05; // Hiragana / Katakana / SFX
-    } else if (cp >= 0xac00 && cp <= 0xd7af) {
-      totalTokens += 0.85; // Hangul
-    } else if (cp >= 0x0400 && cp <= 0x04ff) {
-      totalTokens += 0.42; // Cyrillic
-    } else if (cp >= 0x1ea0 && cp <= 0x1ef9) {
-      totalTokens += 0.35; // Vietnamese Latin
-    } else if ((cp >= 0x0600 && cp <= 0x06ff) || (cp >= 0x0590 && cp <= 0x05ff)) {
-      totalTokens += 0.45; // Arabic / Hebrew
-    } else if (cp >= 0x0e00 && cp <= 0x0e7f) {
-      totalTokens += 0.60; // Thai
-    } else if (cp >= 0x0900 && cp <= 0x097f) {
-      totalTokens += 1.00; // Devanagari
-    } else if (cp >= 48 && cp <= 57) {
-      totalTokens += 0.60; // Digits
-    } else if (cp <= 32) {
-      totalTokens += 0.20; // Whitespace
-    } else if (cp > 0xffff) {
-      totalTokens += 2.50; // Emoji / astral planes
-    } else {
-      totalTokens += 0.90; // Punctuation / brackets / symbols
-    }
-  }
-
-  return Math.ceil(totalTokens);
-}
-
-/**
- * Computes dynamic token safety bound for a batch of source strings based on
- * number of bubbles and total Unicode code points.
- * Formula: Math.min(1024, Math.max(64, 32 + 16 * N + Math.ceil(2.5 * C)))
- *
- * @param sources - Array of source texts in the batch.
- * @returns Maximum completion tokens.
- */
-export function maxTokensForBatch(sources: string[]): number {
-  const n = sources.length;
-  const c = sources.reduce((sum, s) => sum + countCodePoints(s.trim()), 0);
-  return Math.min(1024, Math.max(64, 32 + 16 * n + Math.ceil(2.5 * c)));
-}
-
-/**
  * Maximum acceptable ratio of dropped lines before failing a strict batch (15% drop = 85-90% accuracy).
  * Allows real-time translation to proceed swiftly when the vast majority of lines succeeded,
  * avoiding expensive full-page re-inference loops.
@@ -130,98 +46,6 @@ export const MAX_UNTRANSLATED_TOLERANCE_RATIO = 0.15;
 
 /** Minimum chunk size to apply drop tolerance; smaller batches (1-5) require 100% key survival */
 export const MIN_CHUNK_SIZE_FOR_DROP_TOLERANCE = 6;
-
-/** In-memory cache for compiled JSON schemas across standard batch sizes (1..15) */
-const SCHEMA_CACHE = new Map<number, Record<string, unknown>>();
-
-/**
- * Builds strict JSON schema for a fixed number of keyed slots (b0, b1, ... b{N-1}).
- * Used by XGrammar in WebLLM and structured-output endpoints to enforce exact keys.
- * Memoized via SCHEMA_CACHE to avoid object allocation and GC churn per batch.
- *
- * @param slotCount - Number of slots in the batch.
- * @returns JSON schema object with required properties and additionalProperties: false.
- */
-export function buildSchema(slotCount: number): Record<string, unknown> {
-  const cached = SCHEMA_CACHE.get(slotCount);
-  if (cached) return cached;
-
-  const properties: Record<string, { type: 'string' }> = {};
-  const required: string[] = [];
-
-  for (let i = 0; i < slotCount; i++) {
-    const key = `b${i}`;
-    properties[key] = { type: 'string' };
-    required.push(key);
-  }
-
-  const schema = {
-    type: 'object',
-    properties,
-    required,
-    additionalProperties: false,
-  };
-  SCHEMA_CACHE.set(slotCount, schema);
-  return schema;
-}
-
-/**
- * Cleans translated text by stripping markdown formatting, leaked tag debris (<|1|>, |1|>, [1], 1.),
- * leading labels (Translated:, Translation:), and wrapping quotes.
- *
- * @param text - The raw translation string.
- * @returns Sanitized plain text translation ready for typesetting.
- */
-export function cleanTranslatedLine(text: string): string {
-  if (!text) return '';
-  let out = stripMarkdownFormatting(text);
-
-  // 1. Strip leading tag debris, e.g. `<|1|>`, `|1|>`, `[1]`, `1. ` or `1: ` (require whitespace after dot/colon)
-  out = out.replace(/^(?:<\||\[|\|)?\s*\d+\s*(?:\|>|\]|[.:]\s+)\s*/, '');
-
-  // 2. Strip leading labels like `Translated:`, `Translation:`, `Answer:`
-  out = out.replace(/^(?:translated|translation|output|result|target):\s*/i, '');
-
-  // 3. Strip outer quotation marks
-  if (
-    (out.startsWith('"') && out.endsWith('"') && out.length > 1) ||
-    (out.startsWith('\'') && out.endsWith('\'') && out.length > 1) ||
-    (out.startsWith('“') && out.endsWith('”') && out.length > 1) ||
-    (out.startsWith('「') && out.endsWith('」') && out.length > 1)
-  ) {
-    out = out.slice(1, -1).trim();
-  }
-
-  // 4. Strip any lingering leading tag debris
-  out = out.replace(/^(?:<\||\[|\|)?\s*\d+\s*(?:\|>|\]|[.:]\s+)\s*/, '');
-
-  return stripMarkdownFormatting(out);
-}
-
-/**
- * Strips common LLM markdown formatting (bold, italic, backticks, fences) from a text string.
- *
- * @param text - The raw text potentially containing markdown decorators.
- * @returns Cleaned text with markdown syntax stripped.
- */
-export function stripMarkdownFormatting(text: string): string {
-  if (!text) return '';
-  let out = text
-    // Strip bold/italic asterisks: ***both***, **bold**, *italic*
-    .replace(/\*\*\*(.*?)\*\*\*/g, '$1')
-    .replace(/\*\*(.*?)\*\*/g, '$1')
-    .replace(/\*(.*?)\*/g, '$1')
-    // Strip bold/italic underscores: ___both___, __bold__, _italic_
-    .replace(/___(.*?)___/g, '$1')
-    .replace(/__(.*?)__/g, '$1')
-    .replace(/_(.*?)_/g, '$1')
-    // Strip inline backticks: `code`
-    .replace(/`([^`]+)`/g, '$1');
-
-  // Strip any lingering markdown fence or dangling asterisks/underscores
-  out = out.replace(/^[*_~`#]+\s*/, '').replace(/\s*[*_~`#]+$/, '');
-  return out.trim();
-}
 
 /**
  * Maximum segments per translation prompt. Keeps prompts small enough that lightweight
@@ -273,8 +97,17 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
   protected allowPartialMissingLines = true;
 
   /**
+   * Whether strict keyed parsing policy is enforced.
+   * When true (Cloudflare, Custom API), malformed keyed JSON will NOT fall through
+   * to loose regex or positional/newline parsing.
+   * When false (WebLLM), legacy fallbacks are retained for local models.
+   */
+  protected strictKeyedParsing = false;
+
+  /**
    * Keys provided in the most recent model completion parse.
    * Used to distinguish missing keys from intentional verbatim passthroughs.
+   * Updated per-parse for backward compatibility with subclasses and tests.
    */
   protected lastParsedKeys = new Set<string>();
 
@@ -336,8 +169,13 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
     const dynamicOverhead = estimateTokenCount(emptySystemPrompt) + estimateTokenCount(emptyUserPrompt) + CHATML_FRAMING_TOKENS;
 
     // 4. Process remaining meaningful segments in bounded batches respecting both
-    // bubble count (batchSize) and dynamic token budget
-    const chunks = this.partitionIntoChunks(toTranslate, dynamicOverhead);
+    // bubble count (batchSize), dynamic token budget, and serialized payload budget
+    const chunks = this.partitionIntoChunks(toTranslate, dynamicOverhead, {
+      sourceLang,
+      targetLang,
+      glossary: activeGlossary,
+      customPrompt,
+    });
 
     for (const chunk of chunks) {
       // Per-chunk glossary filtering for maximum token efficiency
@@ -354,11 +192,12 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
       const maxTokens = Math.min(rawMaxTokens, maxAvailableOutput);
 
       const rawOutput = await this.requestLlm(prompt, messages, schema, undefined, maxTokens);
-      const parsedChunk = this.parseKeyedOutput(rawOutput, chunk);
+      const { translations: parsedChunk, parsedKeys } = this.parseKeyedOutputWithMetadata(rawOutput, chunk);
+      this.lastParsedKeys = new Set(parsedKeys);
 
       const droppedByModel = chunk.filter((segment, idx) => {
         const key = `b${idx}`;
-        const keyWasProvided = this.lastParsedKeys.has(key);
+        const keyWasProvided = parsedKeys.has(key);
         if (!keyWasProvided) return true; // Truly omitted by model
         if (parsedChunk[idx] !== segment.text) return false;
         // Text is identical to source. If it possessed native script for a non-Latin source,
@@ -448,14 +287,22 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
   /**
    * Partitions segments into batches constrained by both maximum block count (batchSize)
    * and maximum estimated input token budget (maxInputTokens), whichever hits first.
+   * Can be overridden by subclasses (e.g. Cloudflare) to enforce cumulative message and serialized byte ceilings.
    *
    * @param segments - Meaningful segments to partition.
    * @param overheadTokens - Fixed tokens for system prompt, user prompt framing, and matched glossary.
+   * @param _context - Optional language and glossary context.
    * @returns Array of segmented chunks safe for model context limits.
    */
   partitionIntoChunks(
     segments: LlmTranslationSegment[],
-    overheadTokens = 75
+    overheadTokens = 75,
+    _context?: {
+      sourceLang?: string;
+      targetLang?: string;
+      glossary?: readonly GlossaryEntry[];
+      customPrompt?: string;
+    }
   ): LlmTranslationSegment[][] {
     if (segments.length === 0) return [];
 
@@ -584,25 +431,39 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
   }
 
   /**
-   * Parses model output formatted as a keyed JSON object ({ "b0": "...", "b1": "..." }).
-   * Includes resilient fallbacks to markdown-stripped JSON and keyed line regex (/^"?b(\d+)"?\s*[:\t]\s*"(.*)"?$/).
-   * Guarantees slot isolation: missing or unparseable slots fall back strictly to their own source text
-   * with zero cascading positional drift.
+   * Thread-safe Keyed JSON parser returning translations along with parsed slot keys.
+   * Protects against mutable lastParsedKeys race conditions across concurrent requests.
    *
    * @param rawOutput - Raw model response string.
    * @param chunk - Expected segments with slot indices.
-   * @returns Array of translated strings with length equal to chunk.length.
+   * @returns KeyedParseResult containing translations and the set of parsed keys.
    */
-  protected parseKeyedOutput(rawOutput: string, chunk: LlmTranslationSegment[]): string[] {
+  protected parseKeyedOutputWithMetadata(
+    rawOutput: string,
+    chunk: LlmTranslationSegment[]
+  ): KeyedParseResult {
     const parsedMap = new Map<string, string>();
 
-    // 0. Strip reasoning/thinking tags emitted by models like DeepSeek-R1 or QwQ
-    let cleanJson = rawOutput.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+    // 0. Strip leading reasoning/thinking tags emitted by models like DeepSeek-R1 or QwQ
+    let cleanJson = rawOutput.replace(/^\s*<think>[\s\S]*?<\/think>\s*/i, '').trim();
 
-    // 1. Direct JSON parse or markdown-fence stripped parse
+    // 1. Direct JSON parse or markdown-fence stripped parse (only bare or json fences)
     if (cleanJson.startsWith('```')) {
-      cleanJson = cleanJson.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+      const fenceMatch = cleanJson.match(/^```([a-zA-Z0-9_-]*)\s*([\s\S]*?)\s*```$/);
+      if (fenceMatch) {
+        const lang = fenceMatch[1].trim().toLowerCase();
+        if (lang === '' || lang === 'json') {
+          cleanJson = fenceMatch[2].trim();
+        }
+      }
     }
+
+    const looksLikeKeyedJson =
+      cleanJson.startsWith('{') ||
+      cleanJson.startsWith('```') ||
+      /"?b\d+"?\s*[:\t]/.test(cleanJson);
+
+    let parsedSuccessfully = false;
 
     try {
       const parsed = JSON.parse(cleanJson);
@@ -612,9 +473,10 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
             parsedMap.set(key, cleanTranslatedLine(val));
           }
         }
+        parsedSuccessfully = true;
       }
     } catch {
-      // JSON parse failed, try extracting JSON substring between outermost braces
+      // JSON parse failed, try extracting JSON substring between outermost braces if not strictly forbidden
       const firstBrace = cleanJson.indexOf('{');
       const lastBrace = cleanJson.lastIndexOf('}');
       if (firstBrace >= 0 && lastBrace > firstBrace) {
@@ -627,15 +489,29 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
                 parsedMap.set(key, cleanTranslatedLine(val));
               }
             }
+            parsedSuccessfully = true;
           }
         } catch {
-          // Fall through to keyed regex fallback
+          // Handled below
         }
       }
     }
 
-    // 2. Resilient fallback: Keyed line regex matching `b0: "translation"`, `"b0": "translation"`, or `b0\ttranslation`
-    if (parsedMap.size === 0) {
+    // Under strictKeyedParsing, malformed keyed output must NOT fall through to loose regex/position parsing!
+    if (!parsedSuccessfully && looksLikeKeyedJson && this.strictKeyedParsing) {
+      if (this.throwOnCountMismatch) {
+        throw new Error(
+          `Keyed parsing failed for chunk: malformed JSON output under strict policy. Expected ${chunk.length} keys.`
+        );
+      }
+      return {
+        translations: chunk.map((item) => item.text),
+        parsedKeys: new Set<string>(),
+      };
+    }
+
+    // 2. Resilient fallback for legacy/WebLLM: Keyed line regex matching `b0: "translation"`
+    if (parsedMap.size === 0 && !this.strictKeyedParsing) {
       const lineRe = /"?b(\d+)"?\s*[:\t]\s*"?([^"\r\n]+)"?/gi;
       let match: RegExpExecArray | null;
       while ((match = lineRe.exec(cleanJson)) !== null) {
@@ -647,12 +523,34 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
       }
     }
 
-    // 3. Resilient fallback: Delimited tags (<|1|>, [1], 1.) or newline splitting for legacy compatibility
+    // 3. Fallback: Delimited tags (<|1|>, [1], 1.) or newline splitting for legacy compatibility
     if (parsedMap.size === 0) {
-      return this.parseDelimitedOutput(rawOutput, chunk, true);
+      if (this.strictKeyedParsing && looksLikeKeyedJson) {
+        if (this.throwOnCountMismatch) {
+          throw new Error(
+            `Keyed parsing failed for chunk. Expected ${chunk.length} keys, got 0. Model hallucinated.`
+          );
+        }
+        return {
+          translations: chunk.map((item) => item.text),
+          parsedKeys: new Set<string>(),
+        };
+      }
+
+      const delimited = this.parseDelimitedOutput(rawOutput, chunk, true);
+      const parsedKeys = new Set<string>();
+      delimited.forEach((trans, idx) => {
+        if (trans && trans !== chunk[idx].text) {
+          parsedKeys.add(`b${idx}`);
+        }
+      });
+      return {
+        translations: delimited,
+        parsedKeys,
+      };
     }
 
-    this.lastParsedKeys = new Set(parsedMap.keys());
+    const parsedKeys = new Set(parsedMap.keys());
 
     if (this.throwOnCountMismatch && parsedMap.size < chunk.length) {
       throw new Error(
@@ -662,11 +560,32 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
 
     // 4. Assemble results strictly by slot key.
     // Missing or dropped slots fall back strictly to their own original text.
-    return chunk.map((item, idx) => {
+    const translations = chunk.map((item, idx) => {
       const key = `b${idx}`;
       const translated = parsedMap.get(key);
       return translated !== undefined && translated.length > 0 ? translated : item.text;
     });
+
+    return {
+      translations,
+      parsedKeys,
+    };
+  }
+
+  /**
+   * Parses model output formatted as a keyed JSON object ({ "b0": "...", "b1": "..." }).
+   * Includes resilient fallbacks to markdown-stripped JSON and keyed line regex (/^"?b(\d+)"?\s*[:\t]\s*"(.*)"?$/).
+   * Guarantees slot isolation: missing or unparseable slots fall back strictly to their own source text
+   * with zero cascading positional drift.
+   *
+   * @param rawOutput - Raw model response string.
+   * @param chunk - Expected segments with slot indices.
+   * @returns Array of translated strings with length equal to chunk.length.
+   */
+  protected parseKeyedOutput(rawOutput: string, chunk: LlmTranslationSegment[]): string[] {
+    const result = this.parseKeyedOutputWithMetadata(rawOutput, chunk);
+    this.lastParsedKeys = new Set(result.parsedKeys);
+    return result.translations;
   }
 
   /**

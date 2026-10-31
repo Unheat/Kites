@@ -17,8 +17,9 @@ Cloudflare Free includes **1 Rate Limiting Rule**.
    * **Rule name**: `Limit Translation Endpoint Bursts`
    * **When incoming requests match**:
      * Hostname equals `api.12094852.xyz`
-     * URI Path equals `/v1/chat/completions`
-     * Method equals `POST`
+     * URI Path is `/v1/chat/completions` or `/v1/quota`
+     * Method is `POST` or `GET`, respectively (exclude `OPTIONS` preflights)
+     * Include quota polling when choosing the threshold; do not block normal popup refreshes.
    * **With the same characteristics**:
      * Count by: `IP`
    * **Requests**:
@@ -30,7 +31,9 @@ Cloudflare Free includes **1 Rate Limiting Rule**.
      * Duration: `10 seconds` (or custom response: `HTTP 429 Too Many Requests`)
 4. Click **Deploy**.
 
-After the custom-domain endpoint passes an authenticated translation test, disable the production and preview `workers.dev` URLs under **Workers & Pages** $\to$ **kites-translate-pool** $\to$ **Domains**. Leaving the production `workers.dev` URL enabled allows callers to bypass this zone-level WAF rule.
+After the custom-domain endpoint passes an authenticated legacy-client translation test, verify and disable alternate production and preview `workers.dev` exposure under **Workers & Pages** $\to$ **kites-translate-pool** $\to$ **Domains**. Leaving an alternate production URL enabled permits bypass of this zone-level rule. Record the live dashboard state; source configuration alone does not establish whether that URL is enabled. Do not disable staging access accidentally: staging is a separate Worker, with separate bindings and controlled access.
+
+The threshold above is an operational starting point, not a mathematically equivalent sliding-window guarantee. Verify current Cloudflare plan features before applying dashboard settings. Worker in-memory limits are isolate-local best-effort protection, not a global per-IP counter. Authentication and Durable Object admission limits remain necessary.
 
 ---
 

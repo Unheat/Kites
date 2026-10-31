@@ -1,145 +1,74 @@
-# Cloudflare Zero-Cost Worker Backend Architecture ☁️
+# Community Shared Translation Pool
 
-The **Kites Cloudflare Worker Backend** (`worker/`) powers the shared community translation pool (`api.12094852.xyz`). It provides high-speed, zero-cost LLM translation to extension users without requiring them to purchase or manage API keys, while strictly enforcing rate limits, quota fairness, and zero-cost operational ceilings.
+The Cloudflare Worker in `worker/` serves `api.12094852.xyz`. The extension authenticates with Google and sends OpenAI-compatible chat requests using virtual model `kites-translation`; the worker selects the upstream model. Deployment state, account quotas, and live provider capabilities must be verified separately from source configuration.
 
----
+## Boundaries
 
-## 🏗️ Architectural Topology
+1. **Extension:** `CloudflareTranslateEngine` runs offscreen; background also reads `/v1/quota`. Content scripts do not directly call the pool. Generic Custom API requests use a different SDK transport and output budget, so direct-vs-pool results do not by themselves isolate a root cause.
+2. **Edge HTTP gateway:** bounded body parsing, runtime payload validation, CORS, authentication, best-effort per-isolate IP protections, request IDs, and safe errors.
+3. **Singleton Durable Object:** authoritative user/global admission, provider eligibility and concurrency reservations, sequential fallback, result validation, and safe diagnostic metadata. External awaits allow other calls to interleave; never assume an entire inference request executes atomically.
+4. **Provider adapters:** translate the canonical request into each provider protocol, preserve final-answer/finish information, and never substitute thought content for the answer.
+5. **Shared protocol:** pure helpers under `src/shared/translation/` define keyed JSON schemas, legacy SOURCE extraction, and validation without importing Chrome or DOM APIs.
 
-```mermaid
-flowchart TD
-    subgraph Client["Chrome Extension Client"]
-        ExtUI["Popup / Auto-Translate"]
-        Identity["chrome.identity<br/>(Google OAuth)"]
-        ClientTrans["CloudflareTranslateEngine.ts<br/>(Offscreen Document)"]
-    end
+## Authentication and privacy
 
-    subgraph EdgeGateway["Cloudflare Edge Gateway (api.12094852.xyz)"]
-        WAF["Cloudflare Zone WAF<br/>(DDoS & Bot Mitigation)"]
-        WorkerRouter["Worker Fetch Router<br/>(CORS & Payload Guards)"]
-        AuthVerif["Google JWKS Verification<br/>(SHA-256 User Sub Hash)"]
-    end
+Chrome's `chrome.identity.getAuthToken` supplies a Google OAuth **access token**, not necessarily an OIDC ID token. The worker supports access-token verification through Google's tokeninfo endpoint and RS256 OIDC signature verification through JWKS. Audience, subject, expiry, and applicable activation claims must be validated before admission.
 
-    subgraph DurableAuthority["Cloudflare Durable Object (SharedPoolDO)"]
-        DOState["Single-Tenant State Authority<br/>(Singleton Durable Object)"]
-        SQLiteDB[("Embedded SQLite Engine<br/>(User Quotas & Latency Metrics)")]
-        CircuitBreaker["In-Memory Circuit Breakers<br/>(429/5xx Cooldown Tracking)"]
-        EMATimeout["Adaptive EMA Latency Engine<br/>(Token-Normalized Timeouts)"]
-    end
+User keys use HMAC-SHA256 over the namespaced subject (`google:<subject>`) with deployment secret `JWT_SALT`. This is pseudonymization, not anonymous or irreversibly unidentifiable data. Do not store names/emails/OCR text in quota tables or logs. Missing private configuration must fail closed; never fall back to a public salt. Preserve the production salt across the migration to avoid resetting user identities/allowances.
 
-    subgraph ProviderPool["Multi-Provider Waterfall Pool"]
-        Groq["Groq API<br/>(Qwen / GPT-OSS)"]
-        Mistral["Mistral AI<br/>(Ministral 3B)"]
-        Gemini["Google AI Studio<br/>(Gemma 4 26B / 31B)"]
-        OpenRouter["OpenRouter Free Tier"]
-        WorkersAI["Cloudflare Workers AI<br/>(Meta Llama 3.2 1B)"]
-    end
+Token-cache keys must be collision resistant. Positive caching cannot exceed credential expiry. Invalid credentials may be cached briefly; upstream verification outages must not be treated as invalid credentials or trigger an auth-failure jail. All caches need expiry and capacity bounds.
 
-    ExtUI --> Identity
-    Identity -->|Bearer ID Token| ClientTrans
-    ClientTrans -->|POST /v1/chat/completions| WAF
-    WAF --> WorkerRouter
-    WorkerRouter --> AuthVerif
-    AuthVerif -->|Hashed User ID + Payload| DOState
-    DOState <--> SQLiteDB
-    DOState <--> CircuitBreaker
-    DOState <--> EMATimeout
-    DOState -->|Prioritized Cascade| ProviderPool
-    ProviderPool -->|Translated JSON b0...bN| DOState
-    DOState -->|JSON Response| ClientTrans
-```
+## Keyed JSON acceptance and compatibility
 
----
+All routes are expected to return the same flat string object: `{"b0":"...","b1":"..."}`. API-level support differs:
 
-## 🔒 Authentication & Privacy Preservation
+- **Prompt-only:** instruct JSON in the prompt, then validate the returned final answer.
+- **JSON object:** ask the provider for JSON syntax; still validate exact keys and types.
+- **JSON schema:** pass the exact slot schema, using strict enforcement only where the specific provider/model supports it. Still validate the response envelope and finish status.
 
-1. **Google Identity Federation:**
-   - Uses Chrome's native `chrome.identity.getAuthToken` to retrieve an OpenID Connect Google ID token.
-   - The worker verifies the token's RSA/ECDSA signature against Google's live JSON Web Key Sets (JWKS) (`https://www.googleapis.com/oauth2/v3/certs`).
-   - Tokens are cached in-memory with a 5-minute TTL to prevent redundant JWKS fetches.
-2. **Cryptographic Anonymization (Zero PII):**
-   - The user's Google subject identifier (`sub`) is hashed using SHA-256 with a salt:
-     $$\text{UserHash} = \text{SHA256}(\text{GoogleSub} + \text{Salt})$$
-   - No names, emails, avatar URLs, or personal identifiable information (PII) are ever written to database tables or logged.
+A valid schema does not establish semantic translation quality. In particular, commentary can appear inside a valid string. Model size, a generic OpenAI-compatible interface, or support on a different host does not prove a feature is exposed on the endpoint used here. Conversely, missing documentation means unknown—not proven unsupported.
 
----
+Existing apps send only `model`, `messages`, `temperature`, `max_tokens`, and `stream`. Continue accepting that shape. Derive expected keys from its existing user `SOURCE:` JSON using a string/escape-aware scanner that permits trailing glossary text. New clients may include optional format metadata; it must not become required.
 
-## ⚖️ Quota Authority & SQLite Storage Optimization
+A successful response retains `choices[0].message.content` as canonical keyed JSON text, `model`, and the existing quota headers. New diagnostic headers are additive. Reject malformed, incomplete, empty, truncated, or thought-only output before declaring success. Explicit safety refusals are controlled terminal outcomes, not routed around to evade a provider's decision.
 
-Cloudflare Workers Free Tier permits **100,000 SQLite writes per day**. To prevent quota exhaustion under heavy usage, Kites implements a strict **single-upsert contract**:
+Client hardening ships separately in a new app release. Deploy the compatible worker first, and verify released-client/new-worker plus new-client/new-worker behavior before publishing the app.
 
-### 1. Rolling 24-Hour Window (100 Translations/Day)
-- Each user receives an allowance of 100 translation requests per 24 hours.
-- The 24-hour window starts upon their **first request** of the period (not a fixed midnight UTC reset), preventing end-of-day traffic spikes.
-- In-memory cache (`userQuotaCache`) tracks quotas in memory; exactly **1 SQL upsert** is written per successful translation:
-  ```sql
-  INSERT INTO user_quotas (user_hash, window_start, used_count)
-  VALUES (?, ?, ?)
-  ON CONFLICT(user_hash) DO UPDATE SET
-    window_start = excluded.window_start,
-    used_count = excluded.used_count;
-  ```
+## Provider selection
 
-### 2. Global Safety Ceiling
-- A global daily ceiling ($70,000\text{ requests/day}$) safeguards the entire infrastructure against runaway traffic, preserving remaining operational headroom for health checks and background replication.
+The intended baseline is Groq-first, followed by independent primary providers and then lower-confidence/emergency fallbacks. The canonical route catalog in `worker/src/config/providers.ts` owns exact IDs, priorities, capabilities, and verification notes; do not copy a second model list into UI or scripts.
 
----
+The operational baseline is not an established translation-quality leaderboard. Groq strict-schema documentation confirms GPT-OSS 120B/20B and Qwen 3.8 27B support, while Gemma 4 native system instructions are documented by Google. Other exact endpoint capabilities and account availability require bounded authorized probes. Unverified routes/capabilities must be labeled honestly rather than replaced with guessed identifiers.
 
-## ⚡ Multi-Provider Waterfall & Resilience
+Before each dispatch, recheck route/account cooldown, required key/binding, RPS/RPM/RPD, concurrency, and remaining deadline. Reserve synchronously before the external await. Limit half-open recovery to one probe and reject stale circuit outcomes. Sharing a secret does not imply every model has an account-wide rate limit; only propagate cooldown to an account group when error evidence supports that scope.
 
-Different free-tier and low-cost AI providers have variable rate limits, latency spikes, and transient outages. Kites organizes providers in a declarative priority waterfall (`providers.ts`):
+## Latency and congestion
 
-```mermaid
-stateDiagram-v2
-    [*] --> Mistral: Priority 1 (High Throughput)
-    Mistral --> GroqQwen: 429 Rate Limit / Timeout
-    GroqQwen --> GeminiGemma: 429 Rate Limit / Timeout
-    GeminiGemma --> OpenRouter: 429 Rate Limit / Timeout
-    OpenRouter --> WorkersAI: Fallback to Native Cloudflare
-    WorkersAI --> Failed: All Providers Exhausted
-    Mistral --> Success: 200 OK
-    GroqQwen --> Success: 200 OK
-    GeminiGemma --> Success: 200 OK
-    OpenRouter --> Success: 200 OK
-    WorkersAI --> Success: 200 OK
-```
+Keep the provider waterfall bounded to 12.5 seconds so it fits inside older clients' request timeout. Multiple full timeouts can leave later routes unattempted; a long fallback catalog is not a guarantee every model will run.
 
-### 1. In-Memory Circuit Breakers (Zero-Cost Cooldowns)
-When a provider returns HTTP 429 (Too Many Requests) or HTTP 5xx:
-- The circuit breaker flags the route with an active cooldown:
-  - **RPM Exceeded (Requests Per Minute):** 60-second cooldown.
-  - **RPD Exceeded (Requests Per Day):** 24-hour cooldown.
-- While in cooldown, incoming requests **bypass the broken provider instantly** ($0\text{ ms}$ overhead), eliminating cascading latency.
+A normalized speed EMA is useful diagnostics, but it cannot independently describe free-tier queueing, hangs, or availability. Separate health state from latency estimation. Use reported token usage where available and named script-aware estimates otherwise. Treat timeout duration as a lower bound, reduce confidence in stale samples, and avoid tightening budgets based only on fast surviving responses.
 
-### 2. Token-Normalized EMA Adaptive Timeout (Phase 22)
-Fixed HTTP timeouts either cut off slow large batches or hang unnecessarily on dead providers. Kites calculates dynamic timeouts using an Exponential Moving Average (EMA) of token generation speeds:
+Sequential dispatch avoids burning several free allowances for one request. Adaptive reordering must remain within quality groups and pass deterministic simulations plus staging latency/quality checks; tiny models cannot outrank primary models simply because they are fast. Static baseline ordering remains the safe fallback before that evidence exists.
 
-$$\text{EstimatedTime} = \text{BatchTokens} \times \text{EMA}_{\text{ms/token}} + \text{BaseNetworkRTT}$$
+## Accounting and storage budget
 
-- Clamped between $\text{MIN\_TIMEOUT} = 2000\text{ ms}$ and $\text{MAX\_TIMEOUT} = 6000\text{ ms}$.
-- Hard overall waterfall ceiling: $\text{MAX\_TOTAL\_WATERFALL} = 12,500\text{ ms}$.
+The historical implementation intentionally charged admitted failures as anti-abuse protection (Devlog 021). The remediation separates a successful-translation allowance from attempt/concurrency admission guards. Reservations must prevent simultaneous requests from overspending the last allowance, and failed work must release exactly once. Test window rollover and restart recovery explicitly.
 
----
+Persist hard global/day accounting; memory-only counters reset on Durable Object eviction. Keep short burst protections clearly labeled best-effort where persistence is unnecessary. A client timeout or Workers AI `Promise.race` does not establish backend cancellation; retain a bounded in-flight lease when work can outlive the response.
 
-## 🚀 Pre-Deploy Verification Workflow
+Do not describe the backend as "one SQLite write per success." The old implementation wrote user quota and provider metrics separately; SQL statements and billed row writes are also different because indexes can add writes. Budget critical accounting and checkpoint diagnostics against confirmed account allowances with headroom. A 70,000/day global cap is not justified merely by a 100,000-write allowance. Avoid paid services or extra inference without authorization.
 
-To guarantee zero downtime and prevent database corruption, all worker deployments strictly follow the rules in `AGENTS.md`:
+## Diagnostics
 
-1. **Unit & Integration Testing:**
-   ```bash
-   npm --prefix worker test
-   ```
-2. **Isolated Preview Deployment (No DB impact):**
-   ```bash
-   npx wrangler versions upload --cwd worker
-   ```
-   Generates a private ephemeral preview URL for testing without affecting production users.
-3. **Staging Environment Validation:**
-   ```bash
-   npx wrangler deploy --env staging --cwd worker
-   ```
-   Executes automated end-to-end tests against an isolated staging SQLite Durable Object.
-4. **Production Promotion:**
-   ```bash
-   npm --prefix worker run deploy
-   ```
+Logs should contain request ID, route ID, actual returned model, attempt number, latency, timeout, outcome class, status/finish reason, and cooldown decisions. Never log bearer/API keys, secret URLs, prompts, OCR, raw model answers, or raw upstream errors. Generic client errors and correlation IDs are preferable to upstream response snippets. Use Workers Logs or `wrangler tail` to correlate new requests; pre-existing unlogged requests cannot be reconstructed retrospectively.
+
+## Verification and deployment
+
+- `npm --prefix worker test` runs worker tests independently from extension CRX/Vite configuration. Production services—not duplicated formulas—must be tested.
+- CI also runs worker TypeScript checks. Extension tests/build remain separate required gates.
+- Provider probes are explicit, single-route, synthetic-text operations consuming provider allowance; the default probe command must not send inference.
+- Configure/verify a separate staging Worker and DO namespace before stateful tests. Configure its secrets/access controls independently.
+- `wrangler versions upload` does not promote production traffic and can retain existing server secrets/bindings. Workers implementing Durable Objects do not get ordinary version URLs under the current platform rules. A separately authorized 0%-traffic diagnostic version plus version override can test fixed synthetic adapter requests using existing secrets, but must require developer authentication and bypass production DO calls entirely. Neither a version upload nor 0% traffic is a private database sandbox.
+- Production promotion, live endpoint exposure changes, paid probes, and release/store publication need their respective authorization.
+
+See [CI/CD deployment procedure](../development/ci-cd.md), [audit and unverified gates](../development/community-pool-audit.md), [WAF instructions](../../worker/WAF_RULES.md), and [ADR-011](../decisions/ADR-011-community-pool-validation-and-health-routing.md). These describe intended invariants; test results and deployment reports must state what has actually passed.

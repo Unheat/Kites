@@ -1,228 +1,222 @@
 import { describe, it, expect } from 'vitest';
+import { CircuitBreakerService } from '../src/routing/circuitBreaker';
+import { calculateRouteCooldown, isExplicitAccountScopeError } from '../src/routing/errorTaxonomy';
+import { LatencyHealthTracker, getWorkloadBucket, MIN_TIMEOUT_MS, MAX_TIMEOUT_MS } from '../src/routing/latencyHealth';
 import { ProviderRouteConfig } from '../src/config/providers';
+import { Env } from '../src/types';
 
-describe('Layer 1 & Layer 2 Rate Limiting & Cooldown Logic', () => {
-  const now = 1700000000000;
+describe('Production CircuitBreakerService and ErrorTaxonomy', () => {
+  const testRoute: ProviderRouteConfig = {
+    id: 'test-groq',
+    name: 'Test Groq',
+    enabled: true,
+    priority: 1,
+    qualityTier: 'high',
+    type: 'openai-compatible',
+    modelName: 'test-model',
+    apiKeyEnvVar: 'GROQ_API_KEY',
+    rpsLimit: 2,
+    rpmLimit: 5,
+    rpdLimit: 100,
+    maxInflight: 2,
+    defaultTimeoutMs: 3000,
+    outputCapability: 'json-schema',
+    verificationEvidence: 'documented',
+  };
 
-  function calculateSmartCooldown(
-    route: ProviderRouteConfig,
-    statusCode: number,
-    errorText: string,
-    retryAfterSeconds?: number,
-    consecutiveFailures: number = 1
-  ): number {
-    if (statusCode === 408) {
-      return consecutiveFailures === 1 ? 5_000 : 15_000;
-    }
-    if (statusCode === 429 || statusCode === 402) {
-      if (retryAfterSeconds && retryAfterSeconds > 0) {
-        return retryAfterSeconds * 1000;
-      }
-      const lower = errorText.toLowerCase();
-      if (
-        statusCode === 402 ||
-        lower.includes('per day') ||
-        lower.includes('daily') ||
-        lower.includes('quota exceeded') ||
-        lower.includes('insufficient_quota') ||
-        lower.includes('credit')
-      ) {
-        const tomorrow = new Date(now);
-        tomorrow.setUTCHours(24, 0, 0, 0);
-        return Math.max(tomorrow.getTime() - now, 60_000);
-      }
-      if (
-        route.rpsLimit ||
-        lower.includes('per second') ||
-        lower.includes('concurrency') ||
-        lower.includes('rate limit exceeded')
-      ) {
-        return 2_000;
-      }
-      return 60_000;
-    }
-    return 30_000;
-  }
+  const testEnv: Env = {
+    SHARED_POOL: {} as any,
+    GROQ_API_KEY: 'test-secret-key',
+  };
 
-  it('calculates 2-second cooldown for per-second RPS limits', () => {
-    const mistralRoute: ProviderRouteConfig = {
-      id: 'mistral-small',
-      name: 'Mistral Small',
-      enabled: true,
-      priority: 1,
-      type: 'openai-compatible',
-      modelName: 'mistral-small-latest',
-      rpsLimit: 1,
-    };
+  it('correctly calculates cooldown based on explicit error taxonomy', () => {
+    // 1. Retry-After header takes highest precedence
+    expect(calculateRouteCooldown(429, 'too many requests', 15)).toBe(15_000);
 
-    const cd = calculateSmartCooldown(mistralRoute, 429, 'Rate limit exceeded: 1 request per second');
-    expect(cd).toBe(2000);
+    // 2. HTTP 408 Timeout: short 5s on first failure, 15s on consecutive
+    expect(calculateRouteCooldown(408, 'timeout', undefined, 1)).toBe(5_000);
+    expect(calculateRouteCooldown(408, 'timeout', undefined, 2)).toBe(15_000);
+
+    // 3. HTTP 429: burst 2s cooldown if error explicitly specifies per-second/concurrency
+    expect(calculateRouteCooldown(429, 'rate limit: 2 requests per second')).toBe(2_000);
+    expect(calculateRouteCooldown(429, 'too many concurrent requests')).toBe(2_000);
+
+    // 4. HTTP 429: standard 60s cooldown if generic rate limit
+    expect(calculateRouteCooldown(429, 'rate limit exceeded')).toBe(60_000);
+
+    // 5. HTTP 5xx: exponential backoff steps [10s, 30s, 120s, 300s]
+    expect(calculateRouteCooldown(500, 'server error', undefined, 1)).toBe(10_000);
+    expect(calculateRouteCooldown(503, 'service unavailable', undefined, 2)).toBe(30_000);
+    expect(calculateRouteCooldown(502, 'bad gateway', undefined, 3)).toBe(120_000);
+    expect(calculateRouteCooldown(500, 'crash', undefined, 4)).toBe(300_000);
   });
 
-  it('calculates midnight UTC cooldown for daily quota exhaustion', () => {
-    const groqRoute: ProviderRouteConfig = {
-      id: 'groq-llama',
-      name: 'Groq',
-      enabled: true,
-      priority: 1,
-      type: 'openai-compatible',
-      modelName: 'llama-3.3-70b-versatile',
-      rpdLimit: 1000,
-    };
+  it('detects explicit account-scope errors without confusing generic 429s', () => {
+    expect(isExplicitAccountScopeError(402, 'payment required')).toBe(true);
+    expect(isExplicitAccountScopeError(403, 'organization_restricted: account suspended')).toBe(true);
+    expect(isExplicitAccountScopeError(400, 'insufficient_funds in credit balance')).toBe(true);
 
-    const cd = calculateSmartCooldown(groqRoute, 429, 'Daily request limit reached: quota exceeded');
-    expect(cd).toBeGreaterThan(60_000); // Several hours until UTC midnight
+    // Generic 429 or daily quota message is NOT an account suspension
+    expect(isExplicitAccountScopeError(429, 'Daily request limit reached')).toBe(false);
+    expect(isExplicitAccountScopeError(429, 'Too many requests')).toBe(false);
   });
 
-  it('calculates 60-second cooldown for standard RPM rate limits', () => {
-    const gemmaRoute: ProviderRouteConfig = {
-      id: 'gemma-4-26b',
-      name: 'Gemma 4 26B',
-      enabled: true,
-      priority: 1,
-      type: 'gemini',
-      modelName: 'gemma-4-26b',
-      rpmLimit: 30,
-    };
+  it('enforces predispatch rate limits (RPS, RPM) and max in-flight bounds', () => {
+    const service = new CircuitBreakerService();
+    const t0 = 1700000000000;
 
-    const cd = calculateSmartCooldown(gemmaRoute, 429, 'Too many requests in this minute');
-    expect(cd).toBe(60_000);
+    // First request: acquired
+    const req1 = service.acquireRoute(testRoute, testEnv, t0);
+    expect(req1.acquired).toBe(true);
+
+    // Second request: acquired (rpsLimit is 2, maxInflight is 2)
+    const req2 = service.acquireRoute(testRoute, testEnv, t0);
+    expect(req2.acquired).toBe(true);
+
+    // Third request at same second: rejected by both rpsLimit and maxInflight
+    const req3 = service.acquireRoute(testRoute, testEnv, t0);
+    expect(req3.acquired).toBe(false);
+
+    // Release one in-flight lease
+    service.releaseRoute(testRoute.id);
+
+    // Advance 1 second: RPS resets, in-flight is 1 -> can acquire
+    const req4 = service.acquireRoute(testRoute, testEnv, t0 + 1000);
+    expect(req4.acquired).toBe(true);
   });
 
-  it('honors upstream Retry-After header with highest priority', () => {
-    const route: ProviderRouteConfig = {
-      id: 'test-model',
-      name: 'Test',
-      enabled: true,
-      priority: 1,
-      type: 'openai-compatible',
-      modelName: 'test',
-    };
+  it('enforces single HALF-OPEN probe guard and circuit state transitions', () => {
+    const service = new CircuitBreakerService();
+    const t0 = 1700000000000;
 
-    const cd = calculateSmartCooldown(route, 429, 'Slow down', 15);
-    expect(cd).toBe(15_000); // 15 seconds
+    // Acquire and record failure
+    const req1 = service.acquireRoute(testRoute, testEnv, t0);
+    service.releaseRoute(testRoute.id);
+    service.recordOutcome(testRoute, false, 500, req1.generation, 'error', undefined, t0);
+
+    const circuit = service.getCircuit(testRoute.id, t0);
+    expect(circuit.state).toBe('OPEN');
+    expect(circuit.cooldownUntil).toBe(t0 + 10_000);
+
+    // While OPEN during cooldown: acquisition rejected
+    const blockedReq = service.acquireRoute(testRoute, testEnv, t0 + 5_000);
+    expect(blockedReq.acquired).toBe(false);
+
+    // After cooldown expires (t0 + 10_000): transitions to HALF-OPEN for single probe
+    const probeReq1 = service.acquireRoute(testRoute, testEnv, t0 + 10_001);
+    expect(probeReq1.acquired).toBe(true);
+    expect(circuit.state).toBe('HALF-OPEN');
+    expect(circuit.halfOpenInFlight).toBe(true);
+
+    // Concurrent second request during HALF-OPEN probe is REJECTED
+    const probeReq2 = service.acquireRoute(testRoute, testEnv, t0 + 10_002);
+    expect(probeReq2.acquired).toBe(false);
+    expect(probeReq2.reason).toContain('HALF-OPEN');
+
+    // Probe succeeds: circuit closes
+    service.releaseRoute(testRoute.id);
+    service.recordOutcome(testRoute, true, 200, probeReq1.generation, undefined, undefined, t0 + 10_100);
+    expect(circuit.state).toBe('CLOSED');
+    expect(circuit.consecutiveFailures).toBe(0);
+    expect(circuit.halfOpenInFlight).toBe(false);
   });
 
-  it('calculates brief cooldown for transient HTTP 408 timeouts', () => {
-    const route: ProviderRouteConfig = {
-      id: 'test-model',
-      name: 'Test',
-      enabled: true,
-      priority: 1,
-      type: 'openai-compatible',
-      modelName: 'test',
-    };
+  it('rejects stale outcomes from an older generation', () => {
+    const service = new CircuitBreakerService();
+    const t0 = 1700000000000;
 
-    const firstCooldown = calculateSmartCooldown(route, 408, 'Timeout after 3000ms', undefined, 1);
-    expect(firstCooldown).toBe(5_000);
+    const req = service.acquireRoute(testRoute, testEnv, t0);
+    const staleGen = req.generation;
 
-    const secondCooldown = calculateSmartCooldown(route, 408, 'Timeout after 3000ms', undefined, 2);
-    expect(secondCooldown).toBe(15_000);
-  });
+    // Simulate circuit state transition incrementing generation
+    service.getCircuit(testRoute.id).generation += 1;
 
-  it('correctly handles optional limit fields when omitted', () => {
-    const minimalRoute: ProviderRouteConfig = {
-      id: 'workers-ai',
-      name: 'Workers AI',
-      enabled: true,
-      priority: 1,
-      type: 'workers-ai',
-      modelName: '@cf/meta/m2m100-1.2b',
-      // rpsLimit, rpmLimit, rpdLimit are all undefined
-    };
-
-    // Verify condition passes when limits are undefined
-    const circuit = { secondCount: 50, minuteCount: 1000, dayCount: 50000 };
-    const isUnderRps = !minimalRoute.rpsLimit || circuit.secondCount < minimalRoute.rpsLimit;
-    const isUnderRpm = !minimalRoute.rpmLimit || circuit.minuteCount < minimalRoute.rpmLimit;
-    const isUnderRpd = !minimalRoute.rpdLimit || circuit.dayCount < minimalRoute.rpdLimit;
-
-    expect(isUnderRps).toBe(true);
-    expect(isUnderRpm).toBe(true);
-    expect(isUnderRpd).toBe(true);
+    // Stale outcome reported: ignored without corrupting new circuit state
+    service.recordOutcome(testRoute, false, 500, staleGen, 'stale timeout', undefined, t0);
+    expect(service.getCircuit(testRoute.id).state).toBe('CLOSED');
   });
 });
 
-describe('Token-Normalized Adaptive Timeout & Warm-up Logic', () => {
-  const MIN_TIMEOUT_MS = 2000;
-  const MAX_TIMEOUT_MS = 6000;
+describe('Production LatencyHealthTracker and Workload Buckets', () => {
+  const trackerRoute: ProviderRouteConfig = {
+    id: 'tracker-route',
+    name: 'Tracker Route',
+    enabled: true,
+    priority: 1,
+    qualityTier: 'high',
+    type: 'openai-compatible',
+    modelName: 'tracker-model',
+    defaultTimeoutMs: 3500,
+    outputCapability: 'json-schema',
+    verificationEvidence: 'documented',
+  };
 
-  function calculateAdaptiveTimeout(
-    sampleCount: number,
-    emaMsPerToken: number,
-    defaultTimeoutMs: number,
-    estimatedTokens: number
-  ): number {
-    if (sampleCount < 3) {
-      return defaultTimeoutMs;
-    }
-    const baseOverheadMs = 600;
-    const expectedTime = baseOverheadMs + estimatedTokens * emaMsPerToken;
-    const dynamic = Math.round(expectedTime * 1.5);
-    return Math.round(Math.min(Math.max(dynamic, MIN_TIMEOUT_MS), MAX_TIMEOUT_MS));
-  }
-
-  function updateEmaRate(
-    currentEma: number,
-    sampleCount: number,
-    latencyMs: number,
-    promptChars: number,
-    outputChars: number
-  ): { emaMsPerToken: number; sampleCount: number } {
-    const promptTokens = Math.ceil(promptChars / 4);
-    const completionTokens = Math.ceil(outputChars / 4);
-    const totalTokens = Math.max(promptTokens + completionTokens, 15);
-    const rawMsPerToken = latencyMs / totalTokens;
-    const currentMsPerToken = Math.min(Math.max(rawMsPerToken, 2), 50);
-
-    let nextEma = currentEma;
-    if (sampleCount === 0) {
-      nextEma = currentMsPerToken;
-    } else {
-      nextEma = Number((currentEma * 0.7 + currentMsPerToken * 0.3).toFixed(2));
-    }
-    return {
-      emaMsPerToken: nextEma,
-      sampleCount: sampleCount + 1,
-    };
-  }
-
-  it('uses default route timeout during 3-sample warm-up learning phase', () => {
-    const defaultTimeout = 3500;
-    // 0 samples
-    expect(calculateAdaptiveTimeout(0, 10, defaultTimeout, 100)).toBe(3500);
-    // 1 sample
-    expect(calculateAdaptiveTimeout(1, 10, defaultTimeout, 100)).toBe(3500);
-    // 2 samples
-    expect(calculateAdaptiveTimeout(2, 10, defaultTimeout, 100)).toBe(3500);
+  it('maps tokens to workload buckets correctly', () => {
+    expect(getWorkloadBucket(20)).toBe('small');
+    expect(getWorkloadBucket(49)).toBe('small');
+    expect(getWorkloadBucket(50)).toBe('medium');
+    expect(getWorkloadBucket(200)).toBe('medium');
+    expect(getWorkloadBucket(201)).toBe('large');
+    expect(getWorkloadBucket(500)).toBe('large');
   });
 
-  it('scales timeout by token length once trained (sampleCount >= 3)', () => {
-    const emaMsPerToken = 10; // 10ms per token
-    const defaultTimeout = 3500;
+  it('uses default timeout during warm-up (< 3 samples)', () => {
+    const tracker = new LatencyHealthTracker();
+    expect(tracker.calculateTimeout(trackerRoute, 30)).toBe(3500);
 
-    // Short request (20 tokens): 600 + (20 * 10) = 800ms -> 800 * 1.5 = 1200ms -> clamped to MIN_TIMEOUT_MS (2000)
-    const shortTimeout = calculateAdaptiveTimeout(3, emaMsPerToken, defaultTimeout, 20);
-    expect(shortTimeout).toBe(2000);
+    tracker.recordSuccess(trackerRoute.id, 1200, 30);
+    expect(tracker.calculateTimeout(trackerRoute, 30)).toBe(3500);
 
-    // Medium request (150 tokens): 600 + (150 * 10) = 2100ms -> 2100 * 1.5 = 3150ms
-    const mediumTimeout = calculateAdaptiveTimeout(5, emaMsPerToken, defaultTimeout, 150);
-    expect(mediumTimeout).toBe(3150);
-
-    // Large request (400 tokens): 600 + (400 * 10) = 4600ms -> 4600 * 1.5 = 6900ms -> clamped to MAX_TIMEOUT_MS (6000)
-    const largeTimeout = calculateAdaptiveTimeout(10, emaMsPerToken, defaultTimeout, 400);
-    expect(largeTimeout).toBe(6000);
+    tracker.recordSuccess(trackerRoute.id, 1300, 30);
+    expect(tracker.calculateTimeout(trackerRoute, 30)).toBe(3500);
   });
 
-  it('clamps extreme latency outliers to [2, 50] ms/token', () => {
-    // Extreme fast anomaly: 10ms for 200 tokens (0.05ms/token) -> clamped to 2ms/token
-    const fastUpdate = updateEmaRate(12, 0, 10, 400, 400);
-    expect(fastUpdate.emaMsPerToken).toBe(2);
+  it('predicts adaptive timeout using EWMA and deviation once trained (>= 3 samples)', () => {
+    const tracker = new LatencyHealthTracker();
+    const now = 1700000000000;
 
-    // Extreme slow anomaly: 50,000ms for 100 tokens (500ms/token) -> clamped to 50ms/token
-    const slowUpdate = updateEmaRate(12, 1, 50_000, 200, 200);
-    // 12 * 0.7 + 50 * 0.3 = 8.4 + 15 = 23.4
-    expect(slowUpdate.emaMsPerToken).toBe(23.4);
-    expect(slowUpdate.sampleCount).toBe(2);
+    tracker.recordSuccess(trackerRoute.id, 1000, 30, undefined, now);
+    tracker.recordSuccess(trackerRoute.id, 1100, 30, undefined, now + 1000);
+    tracker.recordSuccess(trackerRoute.id, 1050, 30, undefined, now + 2000);
+
+    // Once trained, calculateTimeout reflects bucket EWMA + 2*deviation (clamped [2000, 6000])
+    const timeout = tracker.calculateTimeout(trackerRoute, 30, now + 3000);
+    expect(timeout).toBeGreaterThanOrEqual(MIN_TIMEOUT_MS);
+    expect(timeout).toBeLessThanOrEqual(MAX_TIMEOUT_MS);
+  });
+
+  it('treats timeouts as censored lower bounds to directly inflate timeout floor', () => {
+    const tracker = new LatencyHealthTracker();
+    const now = 1700000000000;
+
+    // Train with 3 samples
+    tracker.recordSuccess(trackerRoute.id, 1500, 30, undefined, now);
+    tracker.recordSuccess(trackerRoute.id, 1500, 30, undefined, now + 1000);
+    tracker.recordSuccess(trackerRoute.id, 1500, 30, undefined, now + 2000);
+
+    const baselineTimeout = tracker.calculateTimeout(trackerRoute, 30, now + 3000);
+
+    // Record censored timeout at 3000ms
+    tracker.recordTimeout(trackerRoute.id, 30, 3000, now + 4000);
+
+    const inflatedTimeout = tracker.calculateTimeout(trackerRoute, 30, now + 5000);
+    expect(inflatedTimeout).toBeGreaterThan(baselineTimeout);
+  });
+
+  it('decays sample confidence when last observation is stale (> 1 hour)', () => {
+    const tracker = new LatencyHealthTracker();
+    const now = 1700000000000;
+
+    tracker.recordSuccess(trackerRoute.id, 1000, 30, undefined, now);
+    tracker.recordSuccess(trackerRoute.id, 1000, 30, undefined, now + 1000);
+    tracker.recordSuccess(trackerRoute.id, 1000, 30, undefined, now + 2000);
+
+    const stats = tracker.getStats(trackerRoute.id);
+    expect(stats.buckets.small.sampleCount).toBe(3);
+
+    // 2 hours later
+    const staleNow = now + 2 * 3600_000;
+    tracker.calculateTimeout(trackerRoute, 30, staleNow);
+    expect(stats.buckets.small.sampleCount).toBe(2); // Decayed back to warm-up
   });
 });

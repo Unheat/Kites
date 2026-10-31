@@ -38,5 +38,29 @@
 
   "observability": {
     "enabled": true
+  },
+
+  // Staging is a separate Worker and Durable Object namespace. Production version
+  // previews can share production bindings; never use them for destructive QA.
+  "env": {
+    "staging": {
+      "name": "kites-translate-pool-staging",
+      "workers_dev": true,
+      "routes": [],
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "SHARED_POOL",
+            "class_name": "SharedPoolDO"
+          }
+        ]
+      },
+      "ai": {
+        "binding": "AI"
+      },
+      "observability": {
+        "enabled": true
+      }
+    }
   }
 }
