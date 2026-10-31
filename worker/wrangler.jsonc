@@ -40,6 +40,8 @@
     "enabled": true
   },
 
+  "preview_urls": true,
+
   // Staging is a separate Worker and Durable Object namespace. Production version
   // previews can share production bindings; never use them for destructive QA.
   "env": {
