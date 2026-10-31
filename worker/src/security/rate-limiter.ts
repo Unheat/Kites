@@ -1,13 +1,14 @@
 /**
  * Edge IP Rate Limiter & Bad-Actor Jail
- * 
- * Runs entirely in Cloudflare Worker memory (Map).
+ *
+ * Runs entirely in Cloudflare Worker isolate memory (Map).
  * Costs $0.00 and consumes 0 SQLite writes.
- * 
+ *
  * Rules:
  * - Burst Limit: Max 5 requests / 3 seconds per IP
  * - Window Limit: Max 100 requests / minute per IP
  * - Bad-Actor Jail: 5 auth failures in 60s -> 10-minute ban
+ * - Memory Cap & Eviction: Prevents memory exhaustion via bounded Map capacity and periodic cleanup.
  */
 
 export interface IpRateState {
@@ -18,6 +19,7 @@ export interface IpRateState {
   authFailures: number;
   authFailureWindow: number;
   jailedUntil: number;
+  lastSeen: number;
 }
 
 export interface RateLimitResult {
@@ -27,18 +29,34 @@ export interface RateLimitResult {
   retryAfterSeconds?: number;
 }
 
-const BURST_LIMIT = 5;
-const BURST_WINDOW_MS = 3_000;
-const WINDOW_LIMIT_PER_MIN = 100;
-const MAX_AUTH_FAILURES = 5;
-const JAIL_DURATION_MS = 10 * 60 * 1000; // 10 minutes
+export const BURST_LIMIT = 5;
+export const BURST_WINDOW_MS = 3_000;
+export const WINDOW_LIMIT_PER_MIN = 100;
+export const MAX_AUTH_FAILURES = 5;
+export const JAIL_DURATION_MS = 10 * 60 * 1000; // 10 minutes
+export const DEFAULT_MAX_IP_STATES = 10_000;
+export const CLEANUP_INTERVAL_CALLS = 100;
 
 export class IpRateLimiter {
   private ipStates = new Map<string, IpRateState>();
+  private readonly maxStates: number;
+  private callCount = 0;
 
+  constructor(maxStates: number = DEFAULT_MAX_IP_STATES) {
+    this.maxStates = maxStates;
+  }
+
+  /**
+   * Retrieve existing IP state or initialize a fresh record.
+   *
+   * @param ip - Client IP string.
+   * @param now - Current timestamp in milliseconds.
+   * @returns Mutable state record for this IP.
+   */
   private getOrInitState(ip: string, now: number): IpRateState {
     let state = this.ipStates.get(ip);
     if (!state) {
+      this.ensureCapacity(now);
       state = {
         secondWindow: Math.floor(now / BURST_WINDOW_MS),
         secondCount: 0,
@@ -47,16 +65,28 @@ export class IpRateLimiter {
         authFailures: 0,
         authFailureWindow: Math.floor(now / 60000),
         jailedUntil: 0,
+        lastSeen: now,
       };
       this.ipStates.set(ip, state);
     }
+    state.lastSeen = now;
     return state;
   }
 
   /**
    * Check whether an incoming request from this IP is allowed.
+   * Enforces bad-actor jail check, 60s window limit, and 3s burst limit.
+   *
+   * @param ip - Client IP address (from cf-connecting-ip or fallback).
+   * @param now - Current timestamp (defaults to Date.now()).
+   * @returns RateLimitResult indicating whether request is allowed or HTTP status/reason.
    */
   checkRateLimit(ip: string, now = Date.now()): RateLimitResult {
+    this.callCount++;
+    if (this.callCount % CLEANUP_INTERVAL_CALLS === 0) {
+      this.cleanup(now);
+    }
+
     const state = this.getOrInitState(ip, now);
 
     // 1. Check if IP is currently in Jail
@@ -114,7 +144,10 @@ export class IpRateLimiter {
 
   /**
    * Record an authentication failure for this IP.
-   * Multiple failures place the IP in Jail to stop token-guessing attacks.
+   * Multiple failures within 60s place the IP in Jail to stop token-guessing attacks.
+   *
+   * @param ip - Client IP address.
+   * @param now - Current timestamp (defaults to Date.now()).
    */
   recordAuthFailure(ip: string, now = Date.now()): void {
     const state = this.getOrInitState(ip, now);
@@ -135,12 +168,45 @@ export class IpRateLimiter {
 
   /**
    * Periodic memory cleanup of inactive IPs (prevents unbounded Map growth).
+   *
+   * @param now - Current timestamp (defaults to Date.now()).
    */
   cleanup(now = Date.now()): void {
     const tenMinAgo = now - 10 * 60 * 1000;
     for (const [ip, state] of this.ipStates.entries()) {
-      if (state.jailedUntil < now && state.minuteWindow * 60000 < tenMinAgo) {
+      if (state.jailedUntil < now && state.lastSeen < tenMinAgo) {
         this.ipStates.delete(ip);
+      }
+    }
+  }
+
+  /**
+   * Return number of tracked IP states.
+   */
+  get size(): number {
+    return this.ipStates.size;
+  }
+
+  /**
+   * Enforce memory bounds by purging expired entries and evicting oldest non-jailed entries if full.
+   *
+   * @param now - Current timestamp.
+   */
+  private ensureCapacity(now: number): void {
+    if (this.ipStates.size < this.maxStates) {
+      return;
+    }
+
+    // 1. Purge inactive unjailed entries
+    this.cleanup(now);
+
+    // 2. If still at capacity, evict oldest non-jailed entries
+    if (this.ipStates.size >= this.maxStates) {
+      for (const [ip, state] of this.ipStates.entries()) {
+        if (state.jailedUntil <= now) {
+          this.ipStates.delete(ip);
+          if (this.ipStates.size < this.maxStates) break;
+        }
       }
     }
   }

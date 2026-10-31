@@ -465,4 +465,74 @@ describe('BaseLlmTranslationEngine Keyed JSON Protocol', () => {
     expect(systemMsg?.content).not.toContain('Terminology preferences:');
     expect(systemMsg?.content).not.toContain('GLOSSARY_JSON:');
   });
+
+  it('handles concurrent translate calls on same engine without lastParsedKeys race condition', async () => {
+    const engine = new MockLlmEngine(15, false);
+
+    // Mock delayed responses simulating async network inference
+    let callIndex = 0;
+    (engine as any).requestLlm = vi.fn().mockImplementation(async (_prompt, _messages, _schema) => {
+      const idx = callIndex++;
+      if (idx === 0) {
+        // First call: 3 items (b0, b1, b2)
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return JSON.stringify({ b0: 'Alpha', b1: 'Beta', b2: 'Gamma' });
+      } else {
+        // Second call: 2 items (b0, b1) - completes faster
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        return JSON.stringify({ b0: 'One', b1: 'Two' });
+      }
+    });
+
+    const promise1 = engine.translate(['あ', 'い', 'う'], 'ja', 'en');
+    const promise2 = engine.translate(['一', '二'], 'ja', 'en');
+
+    const [res1, res2] = await Promise.all([promise1, promise2]);
+
+    expect(res1).toEqual(['Alpha', 'Beta', 'Gamma']);
+    expect(res2).toEqual(['One', 'Two']);
+  });
+
+  it('translates realistic manga screenshot OCR fixtures with punctuation and names', async () => {
+    const engine = new MockLlmEngine(15, false);
+    engine.mockResponse = JSON.stringify({
+      b0: 'Kotoha, look over there!',
+      b1: 'I can’t believe it...',
+    });
+
+    const screenshotFixture = [
+      '',                     // empty OCR artifact
+      '琴叶、あそこを見て！', // dialogue with name
+      '……',                  // deterministic ellipsis passthrough
+      '「信じられない……」', // dialogue with Japanese quotes
+      '！？',                 // deterministic exclamation/question passthrough
+    ];
+
+    const result = await engine.translate(screenshotFixture, 'ja', 'en');
+
+    expect(result).toEqual([
+      '',
+      'Kotoha, look over there!',
+      '……',
+      'I can’t believe it...',
+      '！？',
+    ]);
+  });
+
+  it('does not allow malformed keyed output to fall through to loose regex or newline split in strict policy', async () => {
+    class StrictMockEngine extends MockLlmEngine {
+      constructor() {
+        super(15, true); // throwOnCountMismatch = true
+        this.strictKeyedParsing = true;
+      }
+    }
+
+    const engine = new StrictMockEngine();
+    // Model returns malformed JSON with syntax error
+    engine.mockResponse = '{"b0": "Broken JSON syntax without closing quote or brace';
+
+    await expect(engine.translate(['Hello', 'World'], 'en', 'es')).rejects.toThrow(
+      'Keyed parsing failed for chunk'
+    );
+  });
 });

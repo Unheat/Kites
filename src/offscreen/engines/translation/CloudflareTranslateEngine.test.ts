@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   CloudflareTranslateEngine,
   CloudflarePoolExhaustedError,
+  CloudflarePayloadLimitError,
 } from './CloudflareTranslateEngine';
 import { STORAGE_KEYS } from '../../../shared/constants';
 
@@ -199,5 +200,74 @@ describe('CloudflareTranslateEngine Keyed JSON Protocol', () => {
     const sixteenItems = Array.from({ length: 16 }, (_, i) => `item ${i}`);
     await engine.translate(sixteenItems);
     expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('sends response_format json_schema matching schema in request payload', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ b0: 'translated' }) } }] }), { status: 200 })
+    );
+
+    await engine.translate(['Source bubble']);
+    expect(fetchSpy).toHaveBeenCalled();
+    const body = JSON.parse(fetchSpy.mock.calls[0][1]?.body as string);
+    expect(body.response_format).toBeDefined();
+    expect(body.response_format.type).toBe('json_schema');
+    expect(body.response_format.json_schema.name).toBe('translation_response');
+    expect(body.response_format.json_schema.strict).toBe(true);
+    expect(body.response_format.json_schema.schema.properties).toHaveProperty('b0');
+  });
+
+  it('splits batch when cumulative prompt message characters exceed MAX_POOL_MESSAGE_CHARS = 2048', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ b0: 't', b1: 't' }) } }] }), { status: 200 })
+    );
+
+    // Create 3 segments each with 700 chars. 700 * 3 + overhead > 2048 chars,
+    // so it must be split across multiple batches before fetch.
+    const longSegments = [
+      'A'.repeat(700),
+      'B'.repeat(700),
+      'C'.repeat(700),
+    ];
+
+    await engine.translate(longSegments);
+    expect(fetchSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('rejects oversized single segment with CloudflarePayloadLimitError preserving full source unchanged', async () => {
+    // Single segment of 3000 chars exceeds MAX_POOL_MESSAGE_CHARS = 2048
+    const oversized = ['Z'.repeat(3000)];
+    await expect(engine.translate(oversized)).rejects.toThrow(CloudflarePayloadLimitError);
+  });
+
+  it('logs only model and request ID with zero raw OCR leakage', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          id: 'req_12345',
+          model: 'kites-prod-model',
+          choices: [{ message: { content: JSON.stringify({ b0: 'secret translation' }) } }],
+        }),
+        {
+          status: 200,
+          headers: { 'cf-ray': 'cf-ray-abcdef123' },
+        }
+      )
+    );
+
+    const sensitiveOcr = 'Confidential dialogue string';
+    await engine.translate([sensitiveOcr]);
+
+    // Check console.log calls
+    const completedLog = logSpy.mock.calls.find((call) =>
+      typeof call[0] === 'string' && call[0].includes('[CloudflareTranslateEngine] Completed request')
+    );
+    expect(completedLog).toBeDefined();
+    expect(completedLog![0]).toContain('id=cf-ray-abcdef123');
+    expect(completedLog![0]).toContain('model=kites-prod-model');
+    // Ensure raw OCR text was NOT logged
+    expect(completedLog![0]).not.toContain(sensitiveOcr);
+    expect(completedLog![0]).not.toContain('secret translation');
   });
 });

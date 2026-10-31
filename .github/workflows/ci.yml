@@ -8,6 +8,25 @@ on:
     branches: [ "main" ]
 
 jobs:
+  worker-tests:
+    name: Test and Typecheck Translation Worker
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+          cache-dependency-path: worker/package-lock.json
+      - name: Install Worker Dependencies
+        run: npm ci --prefix worker
+      - name: Run Worker Tests
+        run: npm --prefix worker test
+      - name: Typecheck Worker
+        run: npm --prefix worker exec -- tsc --project worker/tsconfig.json --noEmit
+
   test-and-build:
     name: Test and Build Extension
     runs-on: ubuntu-latest

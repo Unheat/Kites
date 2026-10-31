@@ -40,6 +40,7 @@ export class CustomApiEngine extends BaseLlmTranslationEngine {
     this.batchSize = DEFAULT_CUSTOM_API_BATCH_SIZE;
     this.maxContextWindow = 8192;
     this.throwOnCountMismatch = true; // Preserve strict delimiter verification for custom API tests
+    this.strictKeyedParsing = true;
   }
 
   /**
@@ -229,6 +230,16 @@ export class CustomApiEngine extends BaseLlmTranslationEngine {
       maxOutputTokens: effectiveMaxTokens,
       abortSignal: signal,
     });
+
+    if (result.finishReason === 'length') {
+      console.warn(
+        `[CustomApiEngine] Generation hit maxOutputTokens limit (${effectiveMaxTokens}). Output may be truncated.`
+      );
+    } else if (result.finishReason === 'content-filter') {
+      console.warn('[CustomApiEngine] Generation stopped by upstream content filter.');
+    } else if (result.finishReason === 'error') {
+      console.error('[CustomApiEngine] Generation encountered an upstream error.');
+    }
 
     const text = result.text;
     if (typeof text !== 'string') {
