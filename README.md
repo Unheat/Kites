@@ -54,6 +54,7 @@ Traditional manga translators require installing complex Python scripts, gigabyt
 
 ### Full Translation + Colorization (Chinese → English)
 > *Original grayscale Chinese page alongside the fully translated and colorized English result, with speech balloon wrapping.*
+> *Artwork: [@almondnuts117](https://x.com/almondnuts117)*
 
 <div align="center">
 <table>

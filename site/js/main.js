@@ -28,7 +28,7 @@ document.addEventListener('DOMContentLoaded', () => {
       targetLang: 'English',
       langLabel: '中文',
       lang: 'zh',
-      caption: 'Full translation + colorization (Chinese → English) — Original grayscale page and colorized result',
+      caption: 'Full translation + colorization (Chinese → English) — Artwork: @almondnuts117',
       original: 'assets/color-bubble-original.jpg',
       translated: 'assets/color-bubble-result.png',
       originalAlt: 'Original grayscale Chinese manga page',

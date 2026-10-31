@@ -54,6 +54,7 @@ Các công cụ dịch manga truyền thống thường đòi hỏi cài đặt 
 
 ### Dịch toàn trang + Tô màu (Tiếng Trung → Tiếng Anh)
 > *Trang truyện grayscale tiếng Trung gốc cùng kết quả tiếng Anh đã dịch và tô màu hoàn chỉnh, với khung bong bóng thoại bao quanh chữ.*
+> *Tác phẩm: [@almondnuts117](https://x.com/almondnuts117)*
 
 <div align="center">
 <table>

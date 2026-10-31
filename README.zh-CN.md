@@ -54,6 +54,7 @@
 
 ### 全页翻译 + 上色 (中文 → 英文)
 > *原始灰度中文页与完整翻译、上色后的英文结果对比，气泡贴合自然。*
+> *作品: [@almondnuts117](https://x.com/almondnuts117)*
 
 <div align="center">
 <table>
