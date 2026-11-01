@@ -78,6 +78,52 @@ describe('Gemini Adapter Unit Tests', () => {
     expect(capturedBody.systemInstruction.parts[0].text).toBe('Translate SOURCE.');
   });
 
+  it('configures responseMimeType and responseJsonSchema when route has json-schema capability', async () => {
+    const schemaRoute: ProviderRouteConfig = {
+      ...geminiRoute,
+      outputCapability: 'json-schema',
+    };
+    const structuredRequest: OpenAIChatRequest = {
+      ...sampleRequest,
+      response_format: {
+        type: 'json_schema',
+        json_schema: {
+          name: 'translation_response',
+          strict: true,
+          schema: { type: 'object', properties: { b0: { type: 'string' } } },
+        },
+      },
+    };
+
+    let capturedBody: any = null;
+    globalThis.fetch = vi.fn().mockImplementation(async (_url: string, init: any) => {
+      capturedBody = JSON.parse(init.body);
+      return new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              content: { parts: [{ text: '{"b0":"Hello"}' }] },
+              finishReason: 'STOP',
+            },
+          ],
+        }),
+        { status: 200 }
+      );
+    });
+
+    const res = await executeGemini(schemaRoute, structuredRequest, 'secret-api-key', 2000);
+    expect(res.success).toBe(true);
+    expect(capturedBody.generationConfig.responseMimeType).toBe('application/json');
+    expect(capturedBody.generationConfig.responseJsonSchema).toEqual({
+      type: 'object',
+      properties: { b0: { type: 'string' } },
+    });
+    expect(capturedBody.generationConfig.responseSchema).toEqual({
+      type: 'object',
+      properties: { b0: { type: 'string' } },
+    });
+  });
+
   it('detects promptFeedback safety block reason as terminal refusal', async () => {
     globalThis.fetch = vi.fn().mockImplementation(async () => {
       return new Response(

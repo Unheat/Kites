@@ -68,10 +68,15 @@ export async function executeGemini(
     maxOutputTokens: request.max_tokens ?? 1024,
   };
 
-  // Structured output support: only configure schema when route capability is json-schema
-  if (route.outputCapability === 'json-schema' && request.response_format?.type === 'json_schema') {
+  // Structured output support: configure schema when route capability is json-schema
+  if (route.outputCapability === 'json-schema') {
     generationConfig.responseMimeType = 'application/json';
-    generationConfig.responseJsonSchema = request.response_format.json_schema.schema;
+    if (request.response_format?.type === 'json_schema') {
+      generationConfig.responseSchema = request.response_format.json_schema.schema;
+      generationConfig.responseJsonSchema = request.response_format.json_schema.schema;
+    }
+  } else if (route.outputCapability === 'json-object') {
+    generationConfig.responseMimeType = 'application/json';
   }
 
   const bodyObj: Record<string, unknown> = {

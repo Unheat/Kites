@@ -149,7 +149,7 @@ export const PROVIDER_ROUTES: ProviderRouteConfig[] = [
     verificationEvidence: 'documented',
   },
 
-  // 5. Google AI Studio Gemma 4 26B (14.4k RPD guard, 30 RPM guard, Prompt-only default)
+  // 5. Google AI Studio Gemma 4 26B (14.4k RPD guard, 30 RPM guard, Structured JSON Schema)
   {
     id: 'gemma-4-26b',
     name: 'Google Gemma 4 26B',
@@ -163,11 +163,11 @@ export const PROVIDER_ROUTES: ProviderRouteConfig[] = [
     rpdLimit: 14400,
     maxInflight: 4,
     defaultTimeoutMs: 4000,
-    outputCapability: 'prompt-only',
+    outputCapability: 'json-schema',
     verificationEvidence: 'documented',
   },
 
-  // 6. Google AI Studio Gemma 4 31B (14.4k RPD guard, 30 RPM guard, Prompt-only default)
+  // 6. Google AI Studio Gemma 4 31B (14.4k RPD guard, 30 RPM guard, Structured JSON Schema)
   {
     id: 'gemma-4-31b',
     name: 'Google Gemma 4 31B',
@@ -181,7 +181,7 @@ export const PROVIDER_ROUTES: ProviderRouteConfig[] = [
     rpdLimit: 14400,
     maxInflight: 4,
     defaultTimeoutMs: 4000,
-    outputCapability: 'prompt-only',
+    outputCapability: 'json-schema',
     verificationEvidence: 'documented',
   },
 
