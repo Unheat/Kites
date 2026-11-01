@@ -238,7 +238,7 @@ export const PROVIDER_ROUTES: ProviderRouteConfig[] = [
     rpdLimit: 4500,
     maxInflight: 2,
     defaultTimeoutMs: 3000,
-    outputCapability: 'prompt-only',
+    outputCapability: 'json-schema',
     verificationEvidence: 'documented',
   },
 ];

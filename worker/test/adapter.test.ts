@@ -350,4 +350,41 @@ describe('Workers AI Adapter Concurrency and Lease Tests', () => {
     await p2;
     expect(getActiveWorkersAiInFlight()).toBe(0);
   });
+
+  it('forwards response_format and accepts object payload from Workers AI JSON Mode', async () => {
+    let capturedOptions: any = null;
+    const mockAi = {
+      run: vi.fn().mockImplementation((_model: string, options: any) => {
+        capturedOptions = options;
+        return Promise.resolve({
+          response: { b0: 'Translated Object' },
+          finish_reason: 'stop',
+        });
+      }),
+    };
+
+    const schemaRoute: ProviderRouteConfig = {
+      ...cfRoute,
+      outputCapability: 'json-schema',
+    };
+    const structuredReq: OpenAIChatRequest = {
+      ...sampleRequest,
+      response_format: {
+        type: 'json_schema',
+        json_schema: {
+          name: 'translation_response',
+          strict: true,
+          schema: { type: 'object', properties: { b0: { type: 'string' } } },
+        },
+      },
+    };
+
+    const res = await executeWorkersAI(schemaRoute, structuredReq, mockAi, 2000);
+    expect(res.success).toBe(true);
+    expect(capturedOptions.response_format).toEqual({
+      type: 'json_schema',
+      json_schema: { type: 'object', properties: { b0: { type: 'string' } } },
+    });
+    expect(res.data?.choices[0].message.content).toBe('{"b0":"Translated Object"}');
+  });
 });

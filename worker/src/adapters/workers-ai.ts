@@ -99,11 +99,26 @@ export async function executeWorkersAI(
     try {
       // Note: Historical m2m100 dedicated translation model is retired; all modern Workers AI
       // models use standard conversational messages format.
-      return await aiBinding.run(route.modelName, {
+      const runOptions: Record<string, unknown> = {
         messages: request.messages,
         max_tokens: request.max_tokens ?? 1024,
         temperature: request.temperature ?? 0.1,
-      });
+      };
+
+      if (route.outputCapability === 'json-schema') {
+        if (request.response_format?.type === 'json_schema') {
+          runOptions.response_format = {
+            type: 'json_schema',
+            json_schema: request.response_format.json_schema.schema,
+          };
+        } else {
+          runOptions.response_format = { type: 'json_object' };
+        }
+      } else if (route.outputCapability === 'json-object') {
+        runOptions.response_format = { type: 'json_object' };
+      }
+
+      return await aiBinding.run(route.modelName, runOptions);
     } finally {
       // Lease release happens when the actual worker task resolves or fails
       activeWorkersAiInFlight = Math.max(0, activeWorkersAiInFlight - 1);
@@ -116,18 +131,23 @@ export async function executeWorkersAI(
       timeoutPromise,
     ]);
 
-    // Validate response payload type
+    // Validate response payload type: accepts string or parsed JSON object from Workers AI JSON Mode
     const rawResponse = aiResult?.response;
-    if (typeof rawResponse !== 'string') {
+    let contentString: string;
+    if (typeof rawResponse === 'string') {
+      contentString = rawResponse;
+    } else if (rawResponse !== null && typeof rawResponse === 'object') {
+      contentString = JSON.stringify(rawResponse);
+    } else {
       return {
         success: false,
         statusCode: 502,
-        error: 'Workers AI returned non-string response payload',
+        error: 'Workers AI returned non-string and non-object response payload',
       };
     }
 
     const promptTokens = aiResult?.usage?.prompt_tokens ?? Math.max(1, Math.ceil(userMsg.length / 4));
-    const completionTokens = aiResult?.usage?.completion_tokens ?? Math.max(1, Math.ceil(rawResponse.length / 4));
+    const completionTokens = aiResult?.usage?.completion_tokens ?? Math.max(1, Math.ceil(contentString.length / 4));
     const finishReason = aiResult?.finish_reason || 'stop';
 
     const syntheticResponse: OpenAIChatResponse = {
@@ -140,7 +160,7 @@ export async function executeWorkersAI(
           index: 0,
           message: {
             role: 'assistant',
-            content: rawResponse,
+            content: contentString,
           },
           finish_reason: finishReason,
         },
