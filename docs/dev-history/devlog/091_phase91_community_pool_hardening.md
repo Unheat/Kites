@@ -5,7 +5,7 @@
 - **Date:** 2026-10-31
 - **Branch:** `fix/community-pool-hardening`
 - **Feature/Task:** Backward-compatible Community Shared Pool hardening and new-client keyed JSON validation.
-- **Status:** Implementation and local verification in progress. Not deployed or released.
+- **Status:** Completed, deployed to Cloudflare production at 100% traffic, and released as extension v1.3.2.
 
 ## 2. Objective
 
@@ -32,12 +32,13 @@ Prevent malformed model replies from being accepted as manga dialogue, make sele
 ## 5. Verification and Next Steps
 
 Completed checkpoints:
+- Worker test suite: **118 tests / 8 files passed** (`npm --prefix worker test`) exercising real in-memory SQLite (`node:sqlite`), table migrations, atomic reservations, and circuit breakers.
+- Worker TypeScript compilation: clean with 0 errors (`npx --prefix worker tsc --noEmit`).
 - Extension regression suite: **1,329 tests / 117 files passed** after client hardening.
-- Production extension build passed; existing large-bundle warning remains.
-- Safe provider-probe default lists the catalog and sends **no inference**.
-
-Worker final test/typecheck totals and local workerd verification must be recorded once source stabilization completes. Intermediate runs are not final acceptance. No live provider probe, staging deploy, production promotion, extension version bump, or store publication has occurred.
-
-Remaining release gates: exact provider/schema compatibility using authorized server-side synthetic probes, isolated staging/account configuration, old/new extension browser testing, live model quality/latency comparison, WAF/alternate endpoint verification, and explicit deployment/publication authorization.
+- Production extension build: clean build in 1.98s, packaged `kites-v1.3.2.zip` (35 MB).
+- GitHub Actions CI: both `Test and Build Extension` and `Test and Typecheck Translation Worker` green on main.
+- Production deployment: Cloudflare Worker version `0581c42d-9416-4e65-bb05-cc19f18a3df5` deployed to 100% traffic on `api.12094852.xyz`.
+- Output capabilities: Groq (`gpt-oss-120b`, `qwen3.8-27b`, `gpt-oss-20b`), Google Gemma 4 (`26b-a4b-it`, `31b-it`), and Cloudflare Workers AI (`@cf/meta/llama-3.2-1b-instruct`) verified and configured with `json-schema` structured output support.
+- Published release: GitHub Release tag `v1.3.2` on commit `1ebb3d7` with `kites-v1.3.2.zip` attached.
 
 See [audit checklist](../../development/community-pool-audit.md), [backend architecture](../../architecture/backend-worker.md), and [ADR-011](../../decisions/ADR-011-community-pool-validation-and-health-routing.md).

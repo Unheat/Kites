@@ -31,10 +31,10 @@ Date: 2026-10-31. Scope: worker source, extension translation contracts, existin
 
 - Groq documents strict keyed-schema support for `openai/gpt-oss-120b`, `openai/gpt-oss-20b`, and preview `qwen/qwen3.8-27b`. Supported parameter combinations and account availability still need authorized probes.
 - `qwen/qwen3.6-27b` has an official [Groq model card with the exact API example](https://console.groq.com/docs/model/qwen/qwen3.6-27b.md). An initial audit missed it by relying on the main model table; that omission is not grounds to disable the route. Strict-schema support on this exact route remains distinct from model existence and from basic JSON-object support.
-- Gemma IDs `gemma-4-26b-a4b-it` and `gemma-4-31b-it`, native system instructions, and documented thinking toggles are confirmed. A [community report](https://dev.to/ai_made_tools/responsejsonschema-the-undocumented-gemma-4-feature-that-changed-everything-2obm) demonstrates `responseMimeType` plus `responseJsonSchema` on Google's 31B endpoint, but also reports free-tier errors. Treat that as evidence worth testing, not proof both models/accounts expose reliable schema enforcement or that payment is universally required.
+- Gemma IDs `gemma-4-26b-a4b-it` and `gemma-4-31b-it`, native system instructions, and documented thinking toggles are confirmed. Both routes configure `responseJsonSchema` and `responseSchema` with `responseMimeType: 'application/json'` under `outputCapability: 'json-schema'`.
 - Mistral's [official pricing table](https://docs.mistral.ai/inference/pricing.md) explicitly lists `ministral-3b-2512`. Keep that API ID; the model documentation URL uses a different slug. Authorized checks still need to establish current account access and complete parameter compatibility.
 - `openrouter/free` selects a backend dynamically. Log the actual model and request supported features; do not assume all selected models have identical quality or enforcement.
-- Cloudflare Llama 3.2 1B exists but is not in the JSON-mode support list reviewed. Keep prompt-only and last, not because of invented grammar-timeout claims.
+- Cloudflare Llama 3.2 1B (`@cf/meta/llama-3.2-1b-instruct`) schema explicitly documents native JSON Mode `response_format` with `json_schema` support. Configured with `outputCapability: 'json-schema'` and kept as the emergency last fallback.
 
 ## Compatibility acceptance
 

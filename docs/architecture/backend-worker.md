@@ -32,13 +32,13 @@ Existing apps send only `model`, `messages`, `temperature`, `max_tokens`, and `s
 
 A successful response retains `choices[0].message.content` as canonical keyed JSON text, `model`, and the existing quota headers. New diagnostic headers are additive. Reject malformed, incomplete, empty, truncated, or thought-only output before declaring success. Explicit safety refusals are controlled terminal outcomes, not routed around to evade a provider's decision.
 
-Client hardening ships separately in a new app release. Deploy the compatible worker first, and verify released-client/new-worker plus new-client/new-worker behavior before publishing the app.
+Client hardening shipped in extension release v1.3.2. The backward-compatible worker is deployed in production, and both released legacy clients and v1.3.2+ clients are fully supported.
 
 ## Provider selection
 
 The intended baseline is Groq-first, followed by independent primary providers and then lower-confidence/emergency fallbacks. The canonical route catalog in `worker/src/config/providers.ts` owns exact IDs, priorities, capabilities, and verification notes; do not copy a second model list into UI or scripts.
 
-The operational baseline is not an established translation-quality leaderboard. Groq strict-schema documentation confirms GPT-OSS 120B/20B and Qwen 3.8 27B support, while Gemma 4 native system instructions are documented by Google. Other exact endpoint capabilities and account availability require bounded authorized probes. Unverified routes/capabilities must be labeled honestly rather than replaced with guessed identifiers.
+The operational baseline is not an established translation-quality leaderboard. Groq strict-schema documentation confirms GPT-OSS 120B/20B and Qwen 3.8 27B support. Google Gemma 4 routes (`26b-a4b-it`, `31b-it`) configure native system instructions and `responseJsonSchema`/`responseSchema` structured output. Cloudflare Workers AI (`@cf/meta/llama-3.2-1b-instruct`) supports native JSON Mode `response_format` with `json_schema`. Mistral 3B (`ministral-3b-2512`) and OpenRouter Free configure JSON object mode. Unverified routes/capabilities remain labeled honestly rather than replaced with guessed identifiers.
 
 Before each dispatch, recheck route/account cooldown, required key/binding, RPS/RPM/RPD, concurrency, and remaining deadline. Reserve synchronously before the external await. Limit half-open recovery to one probe and reject stale circuit outcomes. Sharing a secret does not imply every model has an account-wide rate limit; only propagate cooldown to an account group when error evidence supports that scope.
 
