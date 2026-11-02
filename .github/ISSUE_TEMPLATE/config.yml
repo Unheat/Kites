@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 💬 GitHub Discussions
+    url: https://github.com/Unheat/Kites/discussions
+    about: Ask questions, share ideas, or discuss models and translation results.
+  - name: 📚 Kites Documentation Hub
+    url: https://github.com/Unheat/Kites/blob/main/docs/README.md
+    about: Review system architecture, developer setup, and pipeline algorithm guides.
