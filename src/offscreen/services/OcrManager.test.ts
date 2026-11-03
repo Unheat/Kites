@@ -642,6 +642,75 @@ describe('OcrManager', () => {
       expect(result.rawPolygons![0][0].x).toBe(10);
       expect(result.rawPolygons![0][0].y).toBe(10);
     });
+
+    it('does not suppress multi-character native dialogue lines with scores >= 0.20 near dominant lines', async () => {
+      vi.mocked(PaddleOcrEngine).mockImplementationOnce(function () {
+        return {
+          preset: 'v6-small',
+          init: vi.fn().mockResolvedValue(undefined),
+          recognize: vi.fn().mockResolvedValue({
+            // Strong vertical dialogue column + adjacent vertical dialogue column with score 0.58
+            texts: ['私の名前です', '助けてください'],
+            polygons: [
+              [{ x: 100, y: 10 }, { x: 140, y: 10 }, { x: 140, y: 200 }, { x: 100, y: 200 }],
+              [{ x: 50, y: 10 }, { x: 90, y: 10 }, { x: 90, y: 200 }, { x: 50, y: 200 }],
+            ],
+            scores: [0.95, 0.58], // 0.58 is below 0.60, but is multi-char native Japanese text
+            detectionScores: [0.98, 0.96],
+            boxes: [
+              { x: 100, y: 10, w: 40, h: 190 },
+              { x: 50, y: 10, w: 40, h: 190 },
+            ]
+          }),
+          destroy: vi.fn().mockResolvedValue(undefined)
+        } as any;
+      });
+
+      const result = await ocrManager.processImage(new ArrayBuffer(16), 'v6-small', { sourceLang: 'ja' });
+      // Both columns survive and merge into the same dialogue bubble
+      expect(result.texts).toHaveLength(1);
+      expect(result.texts[0]).toContain('私の名前です');
+      expect(result.texts[0]).toContain('助けてください');
+
+      // Both column quads must be retained in rawPolygons for inpainting
+      expect(result.rawPolygons).toBeDefined();
+      expect(result.rawPolygons).toHaveLength(2);
+    });
+
+    it('retains claimed orphan punctuation quads in rawPolygons so inpainting erases them', async () => {
+      vi.mocked(PaddleOcrEngine).mockImplementationOnce(function () {
+        return {
+          preset: 'v6-small',
+          init: vi.fn().mockResolvedValue(undefined),
+          recognize: vi.fn().mockResolvedValue({
+            // Main dialogue line + terminal exclamation quad below it
+            texts: ['本当に', '！'],
+            polygons: [
+              [{ x: 50, y: 10 }, { x: 90, y: 10 }, { x: 90, y: 100 }, { x: 50, y: 100 }],
+              [{ x: 50, y: 108 }, { x: 90, y: 108 }, { x: 90, y: 130 }, { x: 50, y: 130 }],
+            ],
+            scores: [0.95, 0.90],
+            detectionScores: [0.98, 0.95],
+            boxes: [
+              { x: 50, y: 10, w: 40, h: 90 },
+              { x: 50, y: 108, w: 40, h: 22 },
+            ]
+          }),
+          destroy: vi.fn().mockResolvedValue(undefined)
+        } as any;
+      });
+
+      const result = await ocrManager.processImage(new ArrayBuffer(16), 'v6-small', { sourceLang: 'ja' });
+      // Orphan punctuation attaches to main dialogue text
+      expect(result.texts).toHaveLength(1);
+      expect(result.texts[0]).toBe('本当に！');
+
+      // Both the main line quad AND the orphan punctuation quad are retained in rawPolygons
+      expect(result.rawPolygons).toBeDefined();
+      expect(result.rawPolygons).toHaveLength(2);
+      expect(result.rawPolygons!.some(p => p[0].y === 10)).toBe(true);
+      expect(result.rawPolygons!.some(p => p[0].y === 108)).toBe(true);
+    });
   });
 });
 

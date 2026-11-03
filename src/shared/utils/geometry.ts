@@ -358,6 +358,8 @@ const dist = (x1: number, y1: number, x2: number, y2: number) => Math.hypot(x1 -
  */
 export class Quadrilateral {
   pts: Point2D[];
+  /** Satellite polygons (such as claimed orphan punctuation) belonging to this textline */
+  associatedPolygons?: Point2D[][];
   /** Reading direction from sort_pnts long-axis analysis ('v' = vertical text line). */
   direction: 'h' | 'v';
   /**
