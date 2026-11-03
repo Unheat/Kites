@@ -109,15 +109,33 @@ We follow **Conventional Commits**:
 
 ---
 
+## 🚀 Pull Request Process
+
+1. **Verify your changes locally:**
+   ```bash
+   npm test          # Run automated unit tests
+   npm run lint      # Run linter
+   npm run build     # Verify TypeScript types and production bundle
+   ```
+   *(If modifying the translation worker, also run `npm run worker:test`)*
+2. **Push your branch and open a PR** using the [Pull Request Template](.github/pull_request_template.md).
+3. **Fill out the template completely:**
+   - Include a brief summary of what changed and why.
+   - Reference the issue number (`Closes #123`).
+   - Detail the verification steps and attach screenshots/recordings for UI or layout changes.
+4. **Confirm CI is green:** All automated checks in GitHub Actions must pass before review and merge.
+
+---
+
 ## 📝 Pull Request Checklist
 
-When opening a PR, ensure:
-- [ ] Code adheres to project [Coding Standards](docs/development/coding-standards.md) (docstrings, named constants, defensive null checks).
+Before submitting for review, ensure:
+- [ ] Follows project [Coding Standards](docs/development/coding-standards.md) (docstrings, named constants, defensive null checks).
+- [ ] `npm test` passes with zero failures.
 - [ ] `npm run lint` passes with zero errors.
-- [ ] `npm test` passes all unit tests.
 - [ ] `npm run build` succeeds without TypeScript or bundling warnings.
-- [ ] Existing library workarounds (Vite 8 config, popup RPC addressing, LaMa cache reuse) are preserved.
-- [ ] PR description explains **what** changed and **why** the change was made.
+- [ ] Preserves established library workarounds (Vite 8 config, popup RPC routing, LaMa cache reuse).
+- [ ] PR description uses the [Pull Request Template](.github/pull_request_template.md).
 
 ---
 

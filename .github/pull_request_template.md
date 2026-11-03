@@ -1,29 +1,23 @@
-## Description
-Briefly explain what this PR does, why it is needed, and any architectural context.
+## Summary
+<!-- One paragraph describing what this PR does and why -->
 
-Closes #(issue number)
+## Issue
+Closes #
 
----
+## Changes
+<!-- Bullet list of the specific changes made -->
+- 
 
-## Type of Change
-- [ ] 🐛 Bug fix (non-breaking change fixing an issue)
-- [ ] ✨ New feature (non-breaking change adding functionality)
-- [ ] ⚡ Optimization (WebGPU, OCR, inpaint, typesetting, or memory)
-- [ ] 🎨 UI / UX improvement
-- [ ] 📝 Documentation or Devlogs
-- [ ] 🧹 Refactor or Chore
+## Testing
+<!-- How did you verify your changes? -->
+- [ ] Automated unit tests pass (`npm test`)
+- [ ] Production build succeeds (`npm run build`)
+- [ ] Linter passes (`npm run lint`)
+- [ ] (If touching backend worker) Worker checks pass (`npm run worker:test`)
+- [ ] Manual test in browser or Studio with sample manga panels
 
----
+## Screenshots / Demo
+<!-- If applicable, add screenshots or recording -->
 
-## Testing & Verification
-Describe the tests you ran to verify your changes:
-- [ ] Automated tests pass: `npm test`
-- [ ] Production build succeeds: `npm run build`
-- [ ] Linter passes: `npm run lint`
-- [ ] (If touching backend worker) Worker tests pass: `npm run worker:test`
-- [ ] Manual check: tested in browser / Studio with sample manga panels
-
----
-
-## Screenshots / Evidence (if applicable)
-Add before/after screenshots or terminal test output if UI or visual layout was changed.
+## Notes for Reviewers
+<!-- Anything the reviewer should pay particular attention to -->

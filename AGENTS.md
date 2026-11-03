@@ -155,3 +155,20 @@ Never deploy directly to live production users without pre-verification:
 *   **NEVER mention, cite, or name commercial reference extensions, their product names, websites, authors, or external URLs in documentation, devlogs, commit messages, README files, or inline code comments.**
 *   Naming commercial reference extensions creates copyright, DMCA, and intellectual property risks when studying public web extensions.
 *   Always use neutral, generic technical descriptors instead (e.g. "commercial web extension donor pattern", "standard web reader layout reference", "established scanlation lettering workflows").
+
+---
+
+## 12. Community Standards & Template Guidelines (CodePath Standard)
+
+Follow clean, formal engineering standards for repository community files and templates (modeled after CodePath project conventions):
+
+*   **No AI Slop**: Absolutely no emoji walls, conversational filler, patronizing disclaimers, or generic robotic checklists.
+*   **Concise HTML Comments**: Use clean HTML comment placeholders (`<!-- ... -->`) inside templates for user guidance rather than bloated markdown paragraphs.
+*   **Issue Templates**: Keep them structured and actionable:
+    - Bug reports: `Describe the Bug`, `To Reproduce`, `Expected Behavior`, `Environment`, `Relevant Files / Modules`, `Acceptance Criteria`.
+    - Feature requests: `What Should This Feature Do?`, `Why Is It Needed?`, `Relevant Files / Modules`, `Acceptance Criteria`.
+    - Documentation: `What Needs Documenting?`, `Current State`, `Relevant Files`, `Acceptance Criteria`.
+*   **Pull Request Template**: Standard `.github/PULL_REQUEST_TEMPLATE.md` with:
+    - `## Summary`, `## Issue` (`Closes #`), `## Changes`, `## Testing` (concrete runnable commands: `npm test`, `npm run build`, `npm run lint`, `npm run worker:test`), `## Screenshots / Demo`, `## Notes for Reviewers`.
+*   **Contributing Guide Linking**: `CONTRIBUTING.md` must explicitly link directly to `[.github/PULL_REQUEST_TEMPLATE.md](.github/PULL_REQUEST_TEMPLATE.md)` and list the exact verification gate.
+*   **Security Policy**: Clean, tabular supported versions and private vulnerability reporting channels without decorative filler.

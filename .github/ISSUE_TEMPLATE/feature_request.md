@@ -1,19 +1,19 @@
 ---
 name: Feature Request
-about: Suggest an idea, new engine, UI improvement, or site support
-title: "[FEATURE] "
-labels: ["enhancement"]
-assignees: ""
+about: Add new functionality or improve an existing capability
+labels: enhancement
 ---
 
-### Problem or Motivation
-A clear description of what problem this feature solves, or what limitation you encountered.
+## What Should This Feature Do?
+<!-- Clear description of the desired behavior -->
 
-### Proposed Solution
-A clear description of how you envision this feature working.
+## Why Is It Needed?
+<!-- What problem does this solve? -->
 
-### Alternatives Considered
-Any alternative designs, existing workarounds, or other tools you have considered.
+## Relevant Files / Modules
+<!-- Which files, modules, or components would be involved -->
+- 
 
-### Additional Context
-Add any sketches, mockups, reference screenshots, or links relevant to the request.
+## Acceptance Criteria
+<!-- How will we know this is complete? -->
+- [ ] 
