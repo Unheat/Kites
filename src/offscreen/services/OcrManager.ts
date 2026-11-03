@@ -434,7 +434,6 @@ export class OcrManager {
     // as noise, but vertical manga often detects a terminal `!`/`?` in its own small quad.
     const purePunctuation = /^[！!？?…~〜ー─―.]+$/;
     const claimedPunctuation = new Set<number>();
-    const claimedPunctuationQuadsByParent = new Map<number, Point2D[][]>();
     for (const punctuationIndex of universe) {
       const punctuation = rawTexts[punctuationIndex]?.trim();
       const punctuationPolygon = rawPolygons[punctuationIndex];
@@ -465,10 +464,6 @@ export class OcrManager {
           ? `${rawTexts[closestIndex]}${punctuation}`
           : `${punctuation}${rawTexts[closestIndex]}`;
         claimedPunctuation.add(punctuationIndex);
-        if (!claimedPunctuationQuadsByParent.has(closestIndex)) {
-          claimedPunctuationQuadsByParent.set(closestIndex, []);
-        }
-        claimedPunctuationQuadsByParent.get(closestIndex)!.push(punctuationPolygon);
         console.log(`[OcrManager] Attached orphan punctuation "${punctuation}" to "${rawTexts[closestIndex]}"`);
       }
     }
@@ -682,12 +677,9 @@ export class OcrManager {
       }
     }
 
-    const filteredPunctuationQuads = langPrunedIndices.map(i => claimedPunctuationQuadsByParent.get(i) || []);
-
     const texts = filteredTexts.filter((_, index) => !duplicateIndices.has(index));
     const polygons = filteredPolygons.filter((_, index) => !duplicateIndices.has(index));
     const scores = filteredScores.filter((_, index) => !duplicateIndices.has(index));
-    const punctuationQuads = filteredPunctuationQuads.filter((_, index) => !duplicateIndices.has(index));
 
     if (texts.length === 0) {
       // Nothing to translate, so nothing should be erased.
@@ -706,13 +698,7 @@ export class OcrManager {
     }
 
     // Build Cotrans Quadrilateral objects once (sorts points, derives direction/font_size)
-    const quads = polygons.map((p, k) => {
-      const q = new Quadrilateral(p);
-      if (punctuationQuads[k] && punctuationQuads[k].length > 0) {
-        q.associatedPolygons = [...punctuationQuads[k]];
-      }
-      return q;
-    });
+    const quads = polygons.map(p => new Quadrilateral(p));
 
     // Stage 1.5: assign per-line reading direction (Cotrans _generate_text_direction)
     this.assignTextDirections(quads);
@@ -927,14 +913,8 @@ export class OcrManager {
       const groupIndices = validFinalGroups[cand];
       if (!groupIndices) continue;
       for (const idx of groupIndices) {
-        const q = workingQuads[idx];
-        if (q?.pts) {
-          maskPolygons.push(q.pts);
-          if (q.associatedPolygons && q.associatedPolygons.length > 0) {
-            for (const assoc of q.associatedPolygons) {
-              maskPolygons.push(assoc);
-            }
-          }
+        if (workingQuads[idx]?.pts) {
+          maskPolygons.push(workingQuads[idx].pts);
         }
       }
     }
