@@ -24,14 +24,28 @@ dist-ssr
 *.sln
 *.sw?
 
-.agents
+# Harness manager state (machine-local). Restore with `harness heal` / `harness mcp sync`.
+# Declarative config (.mcp.json, subagent .md files) stays tracked; only derived state is ignored.
+.agents/*
+!.agents/skills/
+.agents/skills/*
 .claude/skills
 agent/
 skills-lock.json
 .codebase-memory/
 
+# Harness adapter dirs: symlinks into .agents/, recreated by `harness heal` on any machine
+.claude/
+.codex/
+.cursor/
+.dsh/
+.opencode/
+
 # Harness-generated MCP projection for pi-like harnesses (regenerate with `harness mcp sync`)
 .pi/
+
+# Project-private skills are SOURCE, not derived: when you add one with `harness skill create <name>`,
+# un-ignore it here so it ships with the repo, e.g.  !.agents/skills/my-skill/
 
 !docs/fullplan.md
 docs/dev-history/editor_port_full_plan.md

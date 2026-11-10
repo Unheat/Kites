@@ -1,0 +1,29 @@
+{
+  "mcpServers": {
+    "codebase-memory": {
+      "command": "/Users/dangtruongan/.local/bin/codebase-memory-mcp",
+      "args": [],
+      "enabled": true
+    },
+    "search2ai": {
+      "command": "/Users/dangtruongan/.local/bin/search2ai-mcp",
+      "args": [],
+      "enabled": true
+    },
+    "gitmcp": {
+      "command": "/Users/dangtruongan/.local/bin/gitmcp",
+      "args": [],
+      "enabled": true
+    },
+    "hindsight": {
+      "command": "node",
+      "args": [
+        "/Users/dangtruongan/.hindsight/coding-agents/dist/mcp-server.js"
+      ],
+      "env": {
+        "HINDSIGHT_MCP_HARNESS": "zcode"
+      },
+      "enabled": true
+    }
+  }
+}
