@@ -187,7 +187,11 @@ Studio is in between.
   indigo "Enable Global Edit Mode" button, ~470px of dead vertical space.
 - The top bar mixes breadcrumb (`‹ Projects`), four view toggles, a truncated raw
   URL, canvas dimensions, five zoom controls, and `Export` — seven information
-  types in 36px.
+  types in 36px. The left cluster's flex children were all `shrink-0` and the
+  cluster itself could not shrink, so at ~1300px and below it painted over the
+  URL ("Hide Boxes" colliding with the document title) and pushed `Export` out
+  of the bar entirely. Three of the zoom controls were unlabelled "fit" glyphs
+  that read as duplicates of each other.
 
 ## 9. What is working (keep)
 
@@ -210,7 +214,13 @@ Studio is in between.
    ambient glow and button glows reduced; 24 pink tints re-hued to the rose.
 4. New `--color-muted` text token; `--color-dust` retained for borders only.
 5. Type tokens pointed at the system stack the site already uses.
-6. Deferred (documented, not changed): the Studio's nine-hex neutral census, the
+6. Studio canvas top bar: the left cluster is now shrinkable (`min-w-0
+   overflow-hidden`) instead of painting over the document title, the project
+   name / `Hide Boxes` label / `Canvas: W × H` readout degrade at 1280px and
+   1536px before anything collides, and the three unlabelled fit-preset glyphs
+   collapsed to the single best-fit button (Fit Width and Fit Height remain,
+   labelled, in the zoom menu). Fit is now zero-overflow from 1100px up.
+7. Deferred (documented, not changed): the Studio's nine-hex neutral census, the
    popup header's five-equal-weight icons, the Studio tool-icon row, and the
    site's emoji feature icons. Each is a layout/IA decision rather than a token
    fix, and none of them is a correctness problem.

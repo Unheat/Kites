@@ -20,8 +20,6 @@ import {
   Brush,
   ScanText,
   Maximize2,
-  StretchHorizontal,
-  StretchVertical,
   Image as ImageIcon,
   RotateCcw,
   Loader,
@@ -896,7 +894,7 @@ export const Studio: React.FC<StudioProps> = ({
       <main className="flex-1 flex flex-col h-full bg-[#12141c] border border-[#262a3b] rounded-xl shadow-2xl overflow-hidden">
         {/* Canvas Top Bar */}
         <div className="w-full h-9 bg-[#141724] border-b border-[#262a3b] px-3 flex items-center justify-between text-xs text-slate-300 shrink-0 select-none z-30">
-          <div className="flex items-center gap-2 min-w-0">
+          <div className="flex items-center gap-2 min-w-0 overflow-hidden">
             {/* Breadcrumb back to Projects Dashboard */}
             {onBackToProjects && (
               <button
@@ -910,7 +908,7 @@ export const Studio: React.FC<StudioProps> = ({
               </button>
             )}
             {projectName && (
-              <span className="text-xs font-semibold text-slate-400 truncate max-w-[120px]" title={projectName}>
+              <span className="hidden xl:inline text-xs font-semibold text-slate-400 truncate max-w-[120px]" title={projectName}>
                 / {projectName}
               </span>
             )}
@@ -968,45 +966,30 @@ export const Studio: React.FC<StudioProps> = ({
               }`}
             >
               {hideBoxes ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-              <span className="hidden md:inline">{hideBoxes ? 'Show Boxes' : 'Hide Boxes'}</span>
+              <span className="hidden 2xl:inline">{hideBoxes ? 'Show Boxes' : 'Hide Boxes'}</span>
             </button>
           </div>
 
           <span className="flex-1 min-w-0 px-2 font-medium text-slate-400 truncate text-center">{jobTitle}</span>
 
           <div className="flex items-center gap-2 shrink-0">
-            <span className="font-mono text-slate-500 text-[11px] hidden lg:inline">
+            <span className="font-mono text-slate-500 text-[11px] hidden 2xl:inline">
               Canvas: {imageWidth} × {imageHeight}
             </span>
 
             <div className="flex items-center gap-1">
-              {/* Direct Stretch / Snap Quick Buttons */}
-              <div className="flex items-center p-0.5 rounded-lg bg-[#090a0f] border border-[#262a3b] gap-0.5">
-                <button
-                  type="button"
-                  onClick={() => handleZoomPreset('fitWidth')}
-                  title="Fit Width / Stretch Horizontal (Snap to 100% visible width)"
-                  className="p-1 rounded-md text-slate-400 hover:text-white hover:bg-[#1c1f2e] transition cursor-pointer"
-                >
-                  <StretchHorizontal className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleZoomPreset('fitHeight')}
-                  title="Fit Height / Stretch Vertical (Snap to 100% visible height)"
-                  className="p-1 rounded-md text-slate-400 hover:text-white hover:bg-[#1c1f2e] transition cursor-pointer"
-                >
-                  <StretchVertical className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleZoomPreset('fitWindow')}
-                  title="Auto Snap / Fit Window (Best Fit)"
-                  className="p-1 rounded-md text-slate-400 hover:text-white hover:bg-[#1c1f2e] transition cursor-pointer"
-                >
-                  <Maximize2 className="w-3.5 h-3.5" />
-                </button>
-              </div>
+              {/* One best-fit shortcut only. Fit Width and Fit Height stay in the
+                  zoom percentage menu, so three unlabelled glyphs that all read as
+                  "fit" never compete for the same space. */}
+              <button
+                type="button"
+                onClick={() => handleZoomPreset('fitWindow')}
+                title="Fit Window (best fit). Fit Width / Fit Height are in the zoom menu."
+                aria-label="Fit window"
+                className="p-1 rounded-md text-slate-400 hover:text-white hover:bg-[#1c1f2e] transition cursor-pointer"
+              >
+                <Maximize2 className="w-3.5 h-3.5" />
+              </button>
 
               <button
                 onClick={() => studioStore.setClampedZoom(zoom * 0.85)}

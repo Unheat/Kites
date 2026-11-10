@@ -54,7 +54,16 @@ surfaces stop looking like three different products.
    the Studio dashboard now change colour instead of fading to muddy pink; the
    Auto-Translate off-state copy describes the state instead of implying a missing
    prerequisite; the dashboard tile-size slider is labelled.
-10. **Restored mobile navigation.** Section links were `display: none` below
+10. **Fixed the Studio canvas top bar.** Its left cluster was unshrinkable
+    (every child `shrink-0`) and had no overflow guard, so below ~1300px it
+    painted the `Hide Boxes` label over the document URL and pushed `Export` out
+    of the 36px bar. The cluster is now `min-w-0 overflow-hidden`, the project
+    name yields at 1280px, and the `Canvas: W × H` readout plus the `Hide Boxes`
+    label yield at 1536px. The three unlabelled fit-preset glyphs (width, height,
+    window) collapsed to the single best-fit button; `Fit Width` and `Fit Height`
+    stay labelled in the zoom menu. Measured zero overflow at 1100/1200/1280/
+    1366/1400/1440/1500/1600.
+11. **Restored mobile navigation.** Section links were `display: none` below
     860px. They are now a single masked, horizontally scrollable strip, and the
     store CTA was moved out of `<nav>` so it stays visible (it had been scrolled
     off-screen by the new strip).
