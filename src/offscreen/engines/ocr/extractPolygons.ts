@@ -44,6 +44,23 @@ const MIN_BOX_SIDE = 3;
 const BOX_THRESHOLD = 0.5;
 
 /**
+ * Lower box-score gate for thin vertical text columns.
+ *
+ * DBNet's box score averages the probability map over the filled min-rect, so a column only ~40px
+ * wide spreads its ink across many thin glyphs with background between them and lands structurally
+ * below the gate that suits horizontal runs. Measured on a real page, genuine Chinese dialogue
+ * columns scored 0.400 / 0.452 / 0.493 while junk slivers scored 0.451-0.498, so the gate is
+ * relaxed only for the tall-narrow shape that identifies a column, never in general.
+ */
+const VERTICAL_COLUMN_BOX_THRESHOLD = 0.35;
+
+/** Long side in ORIGINAL pixels before a thin blob is treated as a vertical text column. */
+const VERTICAL_COLUMN_MIN_LONG_SIDE_PX = 100;
+
+/** Aspect ratio at or above which a blob is a vertical text column. */
+const VERTICAL_COLUMN_MIN_ASPECT = 1.25;
+
+/**
  * Minimum number of binarized pixels for a blob to be considered at all. Cheap early-out
  * that runs before the more expensive hull/min-rect math.
  */
@@ -294,7 +311,18 @@ export function extractPolygons(
         // smears. Score is computed over the FILLED min-rect (includes background pixels between
         // strokes), matching Paddle's cv2.fillPoly mask — see boxScoreFast.
         const score = boxScoreFast(probMap, width, minBox);
-        if (score < BOX_THRESHOLD) {
+
+        // Model space -> original space, so the column test speaks real pixels.
+        const scale = resizeRatio && resizeRatio > 0
+          ? 1 / resizeRatio
+          : originalWidth / width;
+        const edgeAB = Math.hypot(minBox[1].x - minBox[0].x, minBox[1].y - minBox[0].y);
+        const edgeBC = Math.hypot(minBox[2].x - minBox[1].x, minBox[2].y - minBox[1].y);
+        const longSide = Math.max(edgeAB, edgeBC);
+        const shortSide = Math.min(edgeAB, edgeBC);
+        const isVerticalColumn = longSide * scale >= VERTICAL_COLUMN_MIN_LONG_SIDE_PX
+          && longSide >= shortSide * VERTICAL_COLUMN_MIN_ASPECT;
+        if (score < (isVerticalColumn ? VERTICAL_COLUMN_BOX_THRESHOLD : BOX_THRESHOLD)) {
           rejectedLowScore++;
           continue;
         }
@@ -322,9 +350,7 @@ export function extractPolygons(
         // resized image. Dividing by the padded dimensions (the old behaviour) both over-scales
         // and, because the two axes are padded by different amounts, skews the box anisotropically.
         // ppu-paddle-ocr's own convertToOriginalCoordinates uses `coord / resizeRatio`; match it.
-        const scale = resizeRatio && resizeRatio > 0
-          ? 1 / resizeRatio
-          : originalWidth / width;
+        // NOTE: `scale` is computed above, next to the box-score gate.
 
         const scaledRect = minRect.map(p => ({
           x: Math.max(0, Math.min(originalWidth, Math.round(p.x * scale))),
@@ -353,7 +379,7 @@ export function extractPolygons(
 
   console.log(
     `[extractPolygons] Kept ${polygons.length} boxes. Rejected: ${rejectedSmallPre} tiny (pre-unclip), ` +
-    `${rejectedLowScore} below box_threshold ${BOX_THRESHOLD}, ${rejectedSmallPost} tiny (post-unclip).`
+    `${rejectedLowScore} below box_threshold ${BOX_THRESHOLD}/${VERTICAL_COLUMN_BOX_THRESHOLD} (column), ${rejectedSmallPost} tiny (post-unclip).`
   );
 
   return polygons;

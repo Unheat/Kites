@@ -41,6 +41,21 @@ const DETECTION_MAX_SIDE = 960;
 const VERTICAL_CROP_ASPECT = 1.5;
 
 /**
+ * Minimum number of ink bands a deskewed crop must contain before it is read band by band.
+ * Two adjacent columns of one bubble arrive here as two stacked rows; anything less is one line.
+ */
+const CROP_BAND_MIN_COUNT = 2;
+
+/** A gap of ink-free rows this tall separates two text bands inside one crop. */
+const CROP_BAND_GAP_MIN_PX = 3;
+
+/** Bands thinner than this are glyph fragments or rule lines, not separate text columns. */
+const CROP_BAND_MIN_HEIGHT_PX = 8;
+
+/** Luminance (0-255) below which a pixel counts as ink when profiling a crop. */
+const CROP_BAND_INK_MAX_LUMINANCE = 128;
+
+/**
  * Minimum determinant value below which a quadrilateral is considered degenerate.
  * Prevents division by zero or numerical instability when solving the homography linear system.
  */
@@ -425,6 +440,41 @@ export class PaddleOcrEngine implements IOcrEngine {
    * @param polygons - Array of 4-point quadrilaterals in sourceCanvas pixel coordinates.
    * @returns Object containing recognized texts array and confidence scores array.
    */
+  /**
+   * Recognizes one deskewed crop, reading it band by band when it holds several text columns.
+   *
+   * A bubble whose columns were fused into one detection box produces a crop with one ink band per
+   * column. Recognizing the whole crop as a single line interleaves those columns, so each band is
+   * read separately and concatenated in reading order (top band first after the CCW rotation).
+   *
+   * @param cropCanvas - Deskewed, rotation-normalized crop of one detected polygon.
+   * @param recognitor - Active Paddle recognizer.
+   * @param ctx - Recognizer context reused across crops.
+   * @param dictionary - Active character dictionary.
+   * @returns Concatenated text and the mean per-band confidence.
+   */
+  private async recognizeCropBands(
+    cropCanvas: any,
+    recognitor: any,
+    ctx: any,
+    dictionary: any
+  ): Promise<{ text: string; confidence: number }> {
+    const bands = findCropRowBands(cropCanvas);
+    if (bands.length < CROP_BAND_MIN_COUNT) {
+      return recognitor.recognizeTextViaContext(cropCanvas, ctx, dictionary);
+    }
+
+    let text = '';
+    let confidenceSum = 0;
+    for (const band of bands) {
+      const bandCanvas = extractCropBand(this.service.platform, cropCanvas, band);
+      const result = await recognitor.recognizeTextViaContext(bandCanvas, ctx, dictionary);
+      text += result.text;
+      confidenceSum += result.confidence;
+    }
+    return { text, confidence: confidenceSum / bands.length };
+  }
+
   async recognizeCropsFromCanvas(sourceCanvas: any, polygons: { x: number; y: number }[][]): Promise<{ texts: string[]; scores: number[] }> {
     const srcW = sourceCanvas.width;
     const srcH = sourceCanvas.height;
@@ -457,7 +507,7 @@ export class PaddleOcrEngine implements IOcrEngine {
         for (let idx = 0; idx < polygons.length; idx++) {
           try {
             const finalCropCanvas = cropAndWarp(this.service.platform, sourceCanvas, sourcePixels, srcW, srcH, polygons[idx]);
-            const { text, confidence } = await recognitor.recognizeTextViaContext(finalCropCanvas, ctx, dictionary);
+            const { text, confidence } = await this.recognizeCropBands(finalCropCanvas, recognitor, ctx, dictionary);
             results.push({ text, confidence });
           } catch (err: any) {
             console.error(`[PaddleOcrEngine] WebGPU recognition failed on crop ${idx}:`, err?.message || err, err);
@@ -474,7 +524,7 @@ export class PaddleOcrEngine implements IOcrEngine {
       const promises = polygons.map(async (poly, idx) => {
         try {
           const finalCropCanvas = cropAndWarp(this.service.platform, sourceCanvas, sourcePixels, srcW, srcH, poly);
-          return await recognitor.recognizeTextViaContext(finalCropCanvas, ctx, dictionary);
+          return await this.recognizeCropBands(finalCropCanvas, recognitor, ctx, dictionary);
         } catch (err: any) {
           console.error(`[PaddleOcrEngine] WASM recognition failed on crop ${idx}:`, err?.message || err, err);
           throw err;
@@ -564,6 +614,84 @@ export class PaddleOcrEngine implements IOcrEngine {
     }
     return this.isWebGpuActive === wantWebGpu;
   }
+}
+
+/**
+ * Finds row bands of ink inside an already deskewed crop.
+ *
+ * `cropAndWarp` rotates a vertical text column 90 degrees counter-clockwise, so two adjacent columns
+ * of one speech bubble arrive here stacked as two rows. Recognizing that crop as a single line reads
+ * across both columns and returns interleaved garbage, so the crop is split on ink-free rows first.
+ *
+ * @param cropCanvas - Deskewed, rotation-normalized crop canvas.
+ * @returns Contiguous row bands containing ink, in top-to-bottom order.
+ */
+function findCropRowBands(cropCanvas: any): { y: number; height: number }[] {
+  const width = cropCanvas.width;
+  const height = cropCanvas.height;
+  const context = cropCanvas.getContext('2d', { willReadFrequently: true });
+  if (!context || width < 4 || height < CROP_BAND_MIN_HEIGHT_PX * 2) return [{ y: 0, height }];
+  const pixels = context.getImageData(0, 0, width, height).data;
+
+  const rowHasInk: boolean[] = new Array(height).fill(false);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const offset = (y * width + x) * 4;
+      const luminance = 0.299 * pixels[offset] + 0.587 * pixels[offset + 1] + 0.114 * pixels[offset + 2];
+      if (luminance < CROP_BAND_INK_MAX_LUMINANCE) {
+        rowHasInk[y] = true;
+        break;
+      }
+    }
+  }
+
+  return groupInkRows(rowHasInk);
+}
+
+/**
+ * Groups per-row ink flags into contiguous bands.
+ *
+ * Split from the pixel scan so the banding rule can be unit tested without a canvas: a gap shorter
+ * than {@link CROP_BAND_GAP_MIN_PX} rows is treated as a gap between glyphs, not between columns.
+ *
+ * @param rowHasInk - Per-row flag, true when that row contains ink.
+ * @returns Contiguous ink bands in order, with bands thinner than the minimum dropped.
+ */
+export function groupInkRows(rowHasInk: readonly boolean[]): { y: number; height: number }[] {
+  const bands: { y: number; height: number }[] = [];
+  let start = -1;
+  let gap = 0;
+  for (let y = 0; y < rowHasInk.length; y++) {
+    if (rowHasInk[y]) {
+      if (start === -1) start = y;
+      gap = 0;
+    } else if (start !== -1) {
+      gap++;
+      if (gap >= CROP_BAND_GAP_MIN_PX) {
+        bands.push({ y: start, height: y - gap - start + 1 });
+        start = -1;
+        gap = 0;
+      }
+    }
+  }
+  if (start !== -1) bands.push({ y: start, height: rowHasInk.length - start });
+
+  return bands.filter((band) => band.height >= CROP_BAND_MIN_HEIGHT_PX);
+}
+
+/**
+ * Copies one row band of a crop into its own canvas.
+ *
+ * @param platform - Active OCR platform providing the canvas allocator.
+ * @param cropCanvas - Full deskewed crop.
+ * @param band - Row band to extract.
+ * @returns A canvas containing only that band.
+ */
+function extractCropBand(platform: any, cropCanvas: any, band: { y: number; height: number }): any {
+  const bandCanvas = platform.createCanvas(cropCanvas.width, band.height);
+  const bandContext = bandCanvas.getContext('2d');
+  bandContext.drawImage(cropCanvas, 0, band.y, cropCanvas.width, band.height, 0, 0, cropCanvas.width, band.height);
+  return bandCanvas;
 }
 
 /**

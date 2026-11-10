@@ -53,9 +53,42 @@ Comparing our port against the donor turned up a genuine port defect, not a thre
 - **Not changed: truncation policy.** A truncated batch still fails the page. Whether to retry that chunk with a larger budget or fall back to source text (as `CloudflareTranslateEngine` does with `throwOnCountMismatch = false`) is a product decision and is left open.
 - **Unconfirmed for the specific reported page.** The exemption fixes a demonstrated failure mode (real words dropped at 12–30°). Whether that exact bubble is dropped by this rule can only be confirmed from that page's OCR console log, which has not been captured yet.
 
-## 6. Verification and Next Steps
+## 6. Why the bubble survived three earlier fixes: three separate gates
 
-- `npx vitest run src/` — **1,375 tests / 118 files passing**, including echoed-vs-omitted reporting, truncation naming, six `calculateBoxTiltDegrees` unit tests (complement, clamp, jitter, corner-order invariance), and battery tests for tilted columns.
+The visible bug was attributed twice to filters, and both fixes were correct but aimed at later stages. Reproducing the page locally (same image, `OcrManager` in Node) showed the pill split across **three independent gates**, and the bubble died at the first one:
+
+| Stage | Code | Threshold | Verdict for the reported bubble |
+| --- | --- | --- | --- |
+| 1. Detection | `extractPolygons.ts` box score | 0.5 | **died here** — 0.400 / 0.452 / 0.493 |
+| 2. Tilt battery | `OcrManager` high-tilt | 12° / 0.60 (0.20 native) | never reached |
+| 3. Neighborhood suppression | `OcrManager` | 0.60 → 0.20 native | never reached |
+
+The adaptive `0.20` floor added in `527a90d` governs stage 3. A blob rejected at stage 1 has no text, so no later filter can see it. That is why the page looked identical after each fix: the dialogue columns were never recognized.
+
+### Fix 1: shape-aware detection gate
+
+`BOX_THRESHOLD = 0.5` is right for horizontal runs but too high for thin vertical columns, because DBNet's box score averages ink over the filled min-rect and a ~40px wide column spreads its ink across many thin glyphs. Junk slivers measured 0.451-0.498, so the gate is relaxed to 0.35 **only** for tall-narrow blobs (`VERTICAL_COLUMN_MIN_LONG_SIDE_PX`, `VERTICAL_COLUMN_MIN_ASPECT`), never in general.
+
+### Fix 2: read a crop in ink bands
+
+The gate alone made things worse: the recovered columns were still fused into one detection box, so the recognizer read two columns as one line and returned garbage (`的的老的排了明！…`, `レクンーょ`). Annotated crops confirmed boxes spanning two columns.
+
+Column geometry cannot be fixed downstream — the detector's blob is genuinely fused — so the split happens where the pixels are, in `recognizeCropBands`: `cropAndWarp` rotates a vertical column 90° counter-clockwise, which turns stacked columns into stacked **rows**, so the deskewed crop is profiled for ink-free rows (`findCropRowBands`, `groupInkRows`) and each band is recognized separately, then concatenated in reading order. Polygon and index alignment are untouched, so nothing downstream changes.
+
+Measured on the same page:
+
+| Box | Before | After |
+| --- | --- | --- |
+| left bubble (2 columns) | not detected | `哈哈W～这下可有的玩了w～` |
+| right bubble (2 of 3 columns) | `的的老的排了明！…` | `用你近的老师跑擁了啊！` |
+| SFX crop | `出クニー` | `ピクン` |
+| single-column boxes | correct | correct (unchanged) |
+
+Known remaining limitation: the right bubble's 3-column box still loses one column's leading characters, and SFX crops (`IM一`) remain garbage — a separate, cosmetic problem.
+
+## 7. Verification and Next Steps
+
+- `npx vitest run src/` — **1,380 tests / 118 files passing**, including echoed-vs-omitted reporting, truncation naming, six `calculateBoxTiltDegrees` unit tests (complement, clamp, jitter, corner-order invariance), and battery tests for tilted columns.
 - `npx tsc -b` — clean.
 - Live reproduction: probe against OpenRouter confirmed `keys=19/19` and classified every counted slot as an echo. The probe was disposable and is not part of the repo.
 - Next: capture the OCR battery log for the affected page to confirm the drop reason, decide the truncation policy for reasoning models, and consider surfacing per-page echo counts in Studio history so readers can see which bubbles kept their source text.
