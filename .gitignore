@@ -44,8 +44,8 @@ skills-lock.json
 # Harness-generated MCP projection for pi-like harnesses (regenerate with `harness mcp sync`)
 .pi/
 
-# Project-private skills are SOURCE, not derived: when you add one with `harness skill create <name>`,
-# un-ignore it here so it ships with the repo, e.g.  !.agents/skills/my-skill/
+# Project-private skills are SOURCE, not derived. After `harness skill create <name>`, un-ignore it:
+#   !.agents/skills/<name>/
 
 !docs/fullplan.md
 docs/dev-history/editor_port_full_plan.md
