@@ -73,7 +73,7 @@ export const LibrarySidebar: React.FC<LibrarySidebarProps> = ({
             onClick={onBackToEditor}
             className="flex items-center gap-2 py-2 px-3 rounded-lg bg-[#181a26] hover:bg-[#202436] border border-[#262a3b] text-slate-200 text-xs font-semibold transition cursor-pointer"
           >
-            <ArrowLeft className="w-3.5 h-3.5 text-[#f4446d]" />
+            <ArrowLeft className="w-3.5 h-3.5 text-[#e85c82]" />
             <span>Back to Canvas Editor</span>
           </button>
         )}
@@ -85,7 +85,7 @@ export const LibrarySidebar: React.FC<LibrarySidebarProps> = ({
             <button
               type="button"
               onClick={onCreateNewProject}
-              className="flex items-center gap-1 text-xs font-semibold text-[#f4446d] hover:text-[#ff6b8b] transition cursor-pointer"
+              className="flex items-center gap-1 text-xs font-semibold text-[#e85c82] hover:text-[#f0819e] transition cursor-pointer"
             >
               <FolderPlus className="w-3.5 h-3.5" />
               <span>New</span>
@@ -116,7 +116,7 @@ export const LibrarySidebar: React.FC<LibrarySidebarProps> = ({
               <button
                 type="button"
                 onClick={handleRequestPersistence}
-                className="text-[0.65rem] text-[#f4446d] hover:text-[#ff6b8b] underline font-semibold cursor-pointer"
+                className="text-[0.65rem] text-[#e85c82] hover:text-[#f0819e] underline font-semibold cursor-pointer"
                 title="Lock browser from auto-clearing storage"
               >
                 Protect
@@ -130,7 +130,7 @@ export const LibrarySidebar: React.FC<LibrarySidebarProps> = ({
               className={`h-full rounded-full transition-all ${
                 quota && quota.usagePercent > HIGH_STORAGE_WARNING_THRESHOLD_PERCENT
                   ? 'bg-amber-500'
-                  : 'bg-[#f4446d]'
+                  : 'bg-[#d23360]'
               }`}
               style={{ width: `${quota ? Math.max(2, quota.usagePercent) : 2}%` }}
             />
@@ -164,7 +164,7 @@ export const LibrarySidebar: React.FC<LibrarySidebarProps> = ({
             type="button"
             disabled={!isSelected}
             onClick={onOpenSelected}
-            className="flex items-center justify-center gap-1.5 py-2 px-3 text-xs font-semibold rounded-lg bg-[#f4446d] hover:bg-[#e0335c] disabled:opacity-40 disabled:pointer-events-none text-white transition shadow-md shadow-[rgba(244,68,109,0.25)] cursor-pointer"
+            className="flex items-center justify-center gap-1.5 py-2 px-3 text-xs font-semibold rounded-lg bg-[#d23360] hover:bg-[#bb2952] disabled:bg-[#1c1f2e] disabled:text-slate-500 disabled:shadow-none disabled:pointer-events-none text-white transition shadow-md shadow-[rgba(210, 51, 96,0.25)] cursor-pointer"
           >
             <FolderOpen className="w-3.5 h-3.5" />
             <span>Open</span>

@@ -28,7 +28,7 @@ export default function ApiManagerPanel({ state, updateState, onClose }: ApiMana
           {!isAdding && (
             <button 
               onClick={() => setIsAdding(true)}
-              className="p-1 text-[var(--color-dust)] hover:text-[var(--color-ink)] transition-colors cursor-pointer"
+              className="p-1 text-[var(--color-muted)] hover:text-[var(--color-ink)] transition-colors cursor-pointer"
               title="Add New API"
             >
               <Plus size={16} />
@@ -36,7 +36,7 @@ export default function ApiManagerPanel({ state, updateState, onClose }: ApiMana
           )}
           <button 
             onClick={onClose}
-            className="p-1 text-[var(--color-dust)] hover:text-[var(--color-ink)] transition-colors cursor-pointer"
+            className="p-1 text-[var(--color-muted)] hover:text-[var(--color-ink)] transition-colors cursor-pointer"
             title="Close Panel"
           >
             <X size={16} />
@@ -48,14 +48,14 @@ export default function ApiManagerPanel({ state, updateState, onClose }: ApiMana
         {state.customApis.map((api) => (
           <div key={api.id} className="flex items-center justify-between p-2 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded text-sm">
             <div className="flex flex-col">
-              <span className="font-semibold text-xs uppercase text-[var(--color-dust)]">{api.provider}</span>
+              <span className="font-semibold text-xs uppercase text-[var(--color-muted)]">{api.provider}</span>
               <span className="font-mono text-[var(--color-ink)] truncate max-w-[200px]" title={api.modelName}>
                 {api.modelName}
               </span>
             </div>
             <button 
               onClick={() => handleDeleteApi(api.id)}
-              className="text-[var(--color-dust)] hover:text-red-500 transition-colors cursor-pointer p-1"
+              className="text-[var(--color-muted)] hover:text-red-500 transition-colors cursor-pointer p-1"
               title="Delete API"
             >
               <Trash2 size={16} />
@@ -64,7 +64,7 @@ export default function ApiManagerPanel({ state, updateState, onClose }: ApiMana
         ))}
         
         {state.customApis.length === 0 && !isAdding && (
-          <div className="text-xs text-[var(--color-dust)] italic p-3 text-center border border-dashed border-[var(--color-dust)] rounded">
+          <div className="text-xs text-[var(--color-muted)] italic p-3 text-center border border-dashed border-[var(--color-dust)] rounded">
             No custom APIs configured.
           </div>
         )}

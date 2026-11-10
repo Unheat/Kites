@@ -4,13 +4,19 @@
   --bg-card: #131b2e;
   --bg-card-hover: #18233c;
   --border-card: rgba(255, 255, 255, 0.08);
-  --border-card-hover: rgba(255, 42, 109, 0.4);
-  --accent-kite: #ff2a6d;
-  --accent-kite-light: #ff6584;
-  --accent-kite-dark: #be123c;
+  --border-card-hover: rgba(232, 92, 130, 0.4);
+  /* One rose accent in two roles: --accent-kite for text/icons/borders on dark,
+     --accent-fill for filled buttons so white labels keep 4.8:1 contrast. */
+  --accent-kite: #e85c82;
+  --accent-kite-light: #f0819e;
+  --accent-kite-dark: #bb2952;
+  --accent-fill: #d23360;
+  --accent-fill-hover: #bb2952;
+  --accent-tint: rgba(232, 92, 130, 0.1);
+  --accent-tint-strong: rgba(232, 92, 130, 0.16);
   --accent-sky: #38bdf8;
   --accent-indigo: #818cf8;
-  --accent-pink: #ff2d75;
+  --accent-pink: #e85c82;
   --accent-emerald: #10b981;
   --text-primary: #f8fafc;
   --text-muted: #94a3b8;
@@ -42,8 +48,8 @@ body {
   transform: translateX(-50%);
   width: 1000px;
   height: 500px;
-  background: radial-gradient(circle, rgba(255, 42, 109, 0.14) 0%, rgba(190, 18, 60, 0.05) 40%, transparent 70%);
-  filter: blur(80px);
+  background: radial-gradient(circle, rgba(232, 92, 130, 0.09) 0%, rgba(187, 41, 82, 0.03) 45%, transparent 72%);
+  filter: blur(90px);
   pointer-events: none;
   z-index: 0;
 }
@@ -71,7 +77,13 @@ header {
 .nav-wrapper {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 24px;
+}
+
+/* Keeps the desktop layout identical (links right-aligned, CTA last) while
+   letting the store CTA stay outside the scrollable link strip on mobile. */
+.nav-links {
+  margin-left: auto;
 }
 
 .brand-link {
@@ -111,12 +123,35 @@ header {
   color: var(--text-primary);
 }
 
+/* Below 860px the section links become one horizontally scrollable strip instead
+   of disappearing: they are the only route to the demo and feature sections on a
+   phone, and the sticky header has no room for a second row. */
 @media (max-width: 860px) {
-  .nav-links .nav-link {
-    display: none;
+  .nav-wrapper {
+    gap: 12px;
   }
   .nav-links {
-    gap: 12px;
+    gap: 16px;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    /* Fades the clipped edge so the strip reads as scrollable, not broken. */
+    mask-image: linear-gradient(to right, #000 88%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to right, #000 88%, transparent 100%);
+  }
+  .nav-links::-webkit-scrollbar {
+    display: none;
+  }
+  .nav-links .nav-link {
+    flex-shrink: 0;
+    font-size: 13px;
+  }
+  .btn-nav-cta {
+    flex-shrink: 0;
+  }
+  .brand-link {
+    flex-shrink: 0;
   }
 }
 
@@ -135,14 +170,15 @@ header {
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, #e11d48 0%, #ff2a6d 55%, #ff6584 100%);
+  background: var(--accent-fill);
   color: #fff;
-  box-shadow: 0 4px 18px rgba(255, 42, 109, 0.4);
+  box-shadow: 0 2px 10px rgba(210, 51, 96, 0.28);
 }
 
 .btn-primary:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 24px rgba(255, 42, 109, 0.6);
+  background: var(--accent-fill-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(210, 51, 96, 0.34);
 }
 
 .btn-secondary {
@@ -161,8 +197,8 @@ header {
 .btn-nav-cta {
   padding: 8px 18px;
   font-size: 13px;
-  background: linear-gradient(135deg, #e11d48 0%, #ff2a6d 60%, #ff6584 100%);
-  box-shadow: 0 4px 14px rgba(255, 42, 109, 0.35);
+  background: var(--accent-fill);
+  box-shadow: 0 2px 8px rgba(210, 51, 96, 0.26);
 }
 
 .nav-chrome-svg {
@@ -177,17 +213,18 @@ header {
   padding: 8px 20px 8px 14px;
   border-radius: 9999px;
   text-decoration: none;
-  background: linear-gradient(135deg, #be123c 0%, #e11d48 40%, #ff2a6d 80%, #ff6584 100%);
+  background: var(--accent-fill);
   color: #fff;
-  box-shadow: 0 8px 24px -4px rgba(255, 42, 109, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.25) inset;
-  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 6px 20px -6px rgba(210, 51, 96, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.16) inset;
+  transition: background 0.25s ease, box-shadow 0.25s ease, transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
   cursor: pointer;
   border: none;
 }
 
 .btn-store-hero:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 12px 32px -4px rgba(255, 42, 109, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.35) inset;
+  background: var(--accent-fill-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 24px -6px rgba(210, 51, 96, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.22) inset;
   color: #fff;
 }
 
@@ -215,11 +252,11 @@ header {
 }
 
 .btn-store-sub {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.6px;
-  opacity: 0.85;
+  /* Was opacity: .85, which dropped the label to 3.8:1 on the accent fill. */
 }
 
 .btn-store-main {
@@ -233,8 +270,10 @@ header {
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  background: rgba(255, 255, 255, 0.2);
-  border: 1px solid rgba(255, 255, 255, 0.3);
+  /* Darkening the badge keeps its white label above 4.5:1 on the accent fill;
+     a white overlay lightened the fill and dropped it to 3.6:1. */
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.28);
   padding: 3px 8px;
   border-radius: 9999px;
   margin-left: 2px;
@@ -312,16 +351,16 @@ header {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  background: rgba(255, 42, 109, 0.12);
-  border: 1px solid rgba(255, 42, 109, 0.32);
-  color: #ff6584;
+  background: rgba(232, 92, 130, 0.12);
+  border: 1px solid rgba(232, 92, 130, 0.32);
+  color: #f0819e;
   padding: 6px 14px;
   border-radius: 9999px;
   font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.3px;
   margin-bottom: 20px;
-  box-shadow: 0 2px 10px rgba(255, 42, 109, 0.2);
+  box-shadow: 0 2px 10px rgba(232, 92, 130, 0.2);
 }
 
 .hero-brand-icon {
@@ -340,7 +379,7 @@ header {
 }
 
 .hero-title-accent {
-  background: linear-gradient(135deg, #ffffff 15%, #ff6584 50%, #ff2a6d 100%);
+  background: linear-gradient(120deg, #ffffff 10%, #f0819e 55%, #e85c82 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   display: inline-block;
@@ -458,7 +497,7 @@ header {
   overflow: hidden;
   background: #0f172a;
   rotate: 1.5deg;
-  box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.95), 0 0 0 5px rgba(255, 42, 109, 0.35), 0 24px 60px rgba(0, 0, 0, 0.75);
+  box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.95), 0 0 0 5px rgba(232, 92, 130, 0.35), 0 24px 60px rgba(0, 0, 0, 0.75);
   user-select: none;
   touch-action: pan-y;
   z-index: 1;
@@ -468,7 +507,7 @@ header {
 .demo-card:hover {
   rotate: 0deg;
   transform: translateY(-2px);
-  box-shadow: 0 0 0 4px rgba(255, 255, 255, 1), 0 0 0 6px rgba(255, 42, 109, 0.65), 0 28px 75px rgba(0, 0, 0, 0.9);
+  box-shadow: 0 0 0 4px rgba(255, 255, 255, 1), 0 0 0 6px rgba(232, 92, 130, 0.65), 0 28px 75px rgba(0, 0, 0, 0.9);
 }
 
 /* Manga Images (Base & Overlay) */
@@ -495,8 +534,9 @@ header {
   left: var(--split, 52%);
   width: 2px;
   margin-left: -1px;
-  background: #ff2a6d;
-  box-shadow: 0 0 10px 1px rgba(255, 42, 109, 0.85), 0 0 20px rgba(255, 42, 109, 0.45);
+  background: #e85c82;
+  /* The seam is the only element that should glow: it marks the live split. */
+  box-shadow: 0 0 8px 0 rgba(232, 92, 130, 0.5);
   pointer-events: none;
   z-index: 10;
 }
@@ -516,7 +556,7 @@ header {
   border-radius: 9999px;
   color: #0f172a;
   background: #ffffff;
-  box-shadow: 0 0 0 2px #ff2a6d, 0 8px 24px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 0 0 2px #e85c82, 0 8px 24px rgba(0, 0, 0, 0.5);
   z-index: 11;
   transition: opacity 150ms ease;
 }
@@ -574,7 +614,7 @@ header {
 .demo-gate:focus-visible {
   opacity: 1;
   transform: scale(1.1);
-  box-shadow: 0 0 18px rgba(255, 42, 109, 0.7);
+  box-shadow: 0 0 18px rgba(232, 92, 130, 0.7);
 }
 
 .demo-gate.is-inviting::after {
@@ -582,7 +622,7 @@ header {
   position: absolute;
   inset: -5px;
   border-radius: 9999px;
-  border: 2px solid #ff2a6d;
+  border: 2px solid #e85c82;
   animation: gate-invite 1.4s ease-out 2;
   opacity: 0;
   pointer-events: none;
@@ -645,8 +685,8 @@ header {
 
 .demo-thumb[aria-pressed="true"] {
   opacity: 1;
-  outline-color: #ff2a6d;
-  box-shadow: 0 0 14px rgba(255, 42, 109, 0.55);
+  outline-color: #e85c82;
+  box-shadow: 0 0 14px rgba(232, 92, 130, 0.55);
   transform: translateY(-2px);
 }
 
@@ -716,8 +756,8 @@ header {
 
 /* Section 2: UI Showcase (Hover Button on TOP) */
 .hover-spotlight {
-  background: linear-gradient(135deg, rgba(255, 45, 117, 0.08) 0%, rgba(19, 27, 46, 0.9) 100%);
-  border: 1px solid rgba(255, 45, 117, 0.25);
+  background: linear-gradient(135deg, rgba(232, 92, 130, 0.07) 0%, rgba(19, 27, 46, 0.9) 100%);
+  border: 1px solid rgba(232, 92, 130, 0.22);
   border-radius: var(--radius-xl);
   padding: 40px;
   margin-bottom: 48px;
@@ -725,7 +765,7 @@ header {
   grid-template-columns: 1fr;
   gap: 36px;
   align-items: center;
-  box-shadow: 0 20px 45px -15px rgba(255, 45, 117, 0.15);
+  box-shadow: 0 20px 45px -15px rgba(232, 92, 130, 0.15);
 }
 
 @media (min-width: 860px) {
@@ -738,7 +778,7 @@ header {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  background: rgba(255, 45, 117, 0.15);
+  background: rgba(232, 92, 130, 0.15);
   border: 1px solid var(--accent-pink);
   color: #ff759f;
   padding: 4px 14px;
@@ -796,7 +836,7 @@ header {
   border-radius: var(--radius-lg);
   overflow: hidden;
   box-shadow: 0 15px 35px rgba(0, 0, 0, 0.7);
-  border: 1px solid rgba(255, 45, 117, 0.3);
+  border: 1px solid rgba(232, 92, 130, 0.3);
 }
 
 .hover-visual-wrap img {
@@ -1017,7 +1057,7 @@ footer {
 .footer-bottom {
   text-align: center;
   font-size: 13px;
-  color: #64748b;
+  color: var(--text-muted);
   border-top: 1px solid rgba(255, 255, 255, 0.05);
   padding-top: 24px;
 }
@@ -1059,20 +1099,20 @@ footer {
 
 .install-card-featured {
   background: linear-gradient(180deg, #1f1422 0%, #0f172a 100%);
-  border: 1px solid rgba(255, 42, 109, 0.45);
-  box-shadow: 0 20px 40px -10px rgba(255, 42, 109, 0.22), 0 0 0 1px rgba(255, 42, 109, 0.15) inset;
+  border: 1px solid rgba(232, 92, 130, 0.45);
+  box-shadow: 0 20px 40px -10px rgba(232, 92, 130, 0.22), 0 0 0 1px rgba(232, 92, 130, 0.15) inset;
 }
 
 .install-card-featured:hover {
-  border-color: rgba(255, 42, 109, 0.75);
-  box-shadow: 0 24px 48px -10px rgba(255, 42, 109, 0.35), 0 0 0 1px rgba(255, 42, 109, 0.25) inset;
+  border-color: rgba(232, 92, 130, 0.75);
+  box-shadow: 0 24px 48px -10px rgba(232, 92, 130, 0.35), 0 0 0 1px rgba(232, 92, 130, 0.25) inset;
 }
 
 .install-card-ribbon {
   position: absolute;
   top: 16px;
   right: 18px;
-  background: linear-gradient(135deg, #e11d48 0%, #ff2a6d 100%);
+  background: var(--accent-fill);
   color: #fff;
   font-size: 10px;
   font-weight: 800;
@@ -1080,7 +1120,7 @@ footer {
   letter-spacing: 0.5px;
   padding: 4px 10px;
   border-radius: 9999px;
-  box-shadow: 0 2px 8px rgba(255, 42, 109, 0.4);
+  box-shadow: 0 2px 8px rgba(232, 92, 130, 0.4);
 }
 
 .install-card-header {
@@ -1101,9 +1141,9 @@ footer {
 }
 
 .chrome-gradient-icon {
-  background: rgba(255, 42, 109, 0.15);
+  background: rgba(232, 92, 130, 0.15);
   color: var(--accent-kite-light);
-  border: 1px solid rgba(255, 42, 109, 0.3);
+  border: 1px solid rgba(232, 92, 130, 0.3);
 }
 
 .zip-channel-icon {
@@ -1208,9 +1248,9 @@ footer {
 }
 
 .btn-store-primary {
-  background: linear-gradient(135deg, #be123c 0%, #e11d48 40%, #ff2a6d 80%, #ff6584 100%);
+  background: var(--accent-fill);
   color: #fff;
-  box-shadow: 0 4px 18px rgba(255, 42, 109, 0.45);
+  box-shadow: 0 3px 14px rgba(210, 51, 96, 0.3);
   padding: 12px 20px;
   font-size: 14px;
   font-weight: 700;
@@ -1218,7 +1258,7 @@ footer {
 
 .btn-store-primary:hover {
   transform: translateY(-2px);
-  box-shadow: 0 8px 24px rgba(255, 42, 109, 0.7);
+  box-shadow: 0 8px 24px rgba(232, 92, 130, 0.7);
   color: #fff;
 }
 

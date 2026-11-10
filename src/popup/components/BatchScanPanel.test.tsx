@@ -61,7 +61,7 @@ describe('BatchScanPanel UI & Controls', () => {
     expect(container.textContent).toContain('Translate 2 Selected Pages');
 
     // Click Translate button
-    const translateBtn = container.querySelector('button.bg-\\[var\\(--color-editorial\\)\\]') as HTMLButtonElement;
+    const translateBtn = container.querySelector('button.bg-\\[var\\(--color-accent-fill\\)\\]') as HTMLButtonElement;
     expect(translateBtn).not.toBeNull();
     await act(async () => {
       translateBtn.click();

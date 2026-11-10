@@ -68,7 +68,7 @@ export const ProjectsGrid: React.FC<ProjectsGridProps> = ({
       <div className="h-14 px-6 border-b border-[#262a3b] bg-[#12141c]/70 flex items-center justify-between gap-4 shrink-0">
         {/* Left: Breadcrumbs & Counter */}
         <div className="flex items-center gap-2 min-w-0">
-          <span className="px-2.5 py-1 rounded-md bg-[#f4446d]/15 text-[#f4446d] font-bold text-xs uppercase tracking-wider border border-[#f4446d]/30">
+          <span className="px-2.5 py-1 rounded-md bg-[#d23360]/15 text-[#e85c82] font-bold text-xs uppercase tracking-wider border border-[#e85c82]/30">
             Projects
           </span>
           <span className="text-xs text-slate-500 font-medium">
@@ -86,7 +86,7 @@ export const ProjectsGrid: React.FC<ProjectsGridProps> = ({
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search projects..."
-              className="w-full h-8 pl-8 pr-3 text-xs rounded-lg bg-[#161924] border border-[#262a3b] text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-[#f4446d] transition"
+              className="w-full h-8 pl-8 pr-3 text-xs rounded-lg bg-[#161924] border border-[#262a3b] text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-[#e85c82] transition"
             />
           </div>
 
@@ -96,7 +96,7 @@ export const ProjectsGrid: React.FC<ProjectsGridProps> = ({
             <select
               value={sortKey}
               onChange={(e) => setSortKey(e.target.value as ProjectSortKey)}
-              className="h-8 px-2 rounded-lg bg-[#161924] border border-[#262a3b] text-slate-300 text-xs focus:outline-none focus:border-[#f4446d] transition cursor-pointer"
+              className="h-8 px-2 rounded-lg bg-[#161924] border border-[#262a3b] text-slate-300 text-xs focus:outline-none focus:border-[#e85c82] transition cursor-pointer"
             >
               <option value="modified">Date modified</option>
               <option value="created">Date created</option>
@@ -143,7 +143,7 @@ export const ProjectsGrid: React.FC<ProjectsGridProps> = ({
         ) : (
           <div className="h-full flex flex-col items-center justify-center text-center p-8">
             <div className="w-16 h-16 rounded-3xl bg-[#12141c] border border-[#262a3b] flex items-center justify-center text-slate-600 mb-4 shadow-inner">
-              <FolderPlus className="w-8 h-8 text-[#f4446d]/60" />
+              <FolderPlus className="w-8 h-8 text-[#e85c82]/60" />
             </div>
             <h3 className="text-base font-semibold text-slate-200">No manga projects found</h3>
             <p className="text-xs text-slate-500 mt-1 max-w-sm leading-relaxed">
@@ -152,7 +152,7 @@ export const ProjectsGrid: React.FC<ProjectsGridProps> = ({
             <button
               type="button"
               onClick={onCreateProject}
-              className="mt-4 flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#f4446d] hover:bg-[#e0335c] text-white text-xs font-semibold shadow-md shadow-[rgba(244,68,109,0.25)] transition cursor-pointer"
+              className="mt-4 flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#d23360] hover:bg-[#bb2952] text-white text-xs font-semibold shadow-md shadow-[rgba(210, 51, 96,0.25)] transition cursor-pointer"
             >
               <Plus className="w-4 h-4" />
               <span>Create Project</span>
@@ -163,7 +163,8 @@ export const ProjectsGrid: React.FC<ProjectsGridProps> = ({
 
       {/* Bottom Floating Bar: Zoom Slider & New Project */}
       <div className="h-14 px-6 border-t border-[#262a3b] bg-[#12141c]/70 flex items-center justify-between shrink-0">
-        {/* Left: Tile Scale Slider */}
+        {/* Left: Tile Scale Slider. The zoom glyphs alone read as canvas zoom,
+            which is a different control, so it is labelled as thumbnail size. */}
         <div className="flex items-center gap-2">
           <ZoomOut className="w-3.5 h-3.5 text-slate-500" />
           <input
@@ -173,7 +174,9 @@ export const ProjectsGrid: React.FC<ProjectsGridProps> = ({
             step={0.5}
             value={tileSizeRem}
             onChange={(e) => setTileSizeRem(parseFloat(e.target.value))}
-            className="w-28 sm:w-44 h-1.5 bg-[#262a3b] rounded-lg appearance-none cursor-pointer accent-[#f4446d]"
+            title="Thumbnail size"
+            aria-label="Thumbnail size"
+            className="w-28 sm:w-44 h-1.5 bg-[#262a3b] rounded-lg appearance-none cursor-pointer accent-[#e85c82]"
           />
           <ZoomIn className="w-3.5 h-3.5 text-slate-500" />
         </div>
@@ -182,7 +185,7 @@ export const ProjectsGrid: React.FC<ProjectsGridProps> = ({
         <button
           type="button"
           onClick={onCreateProject}
-          className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#f4446d] hover:bg-[#e0335c] text-white text-xs font-semibold shadow-md shadow-[rgba(244,68,109,0.25)] transition cursor-pointer"
+          className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#d23360] hover:bg-[#bb2952] text-white text-xs font-semibold shadow-md shadow-[rgba(210, 51, 96,0.25)] transition cursor-pointer"
         >
           <Plus className="w-4 h-4" />
           <span>New project</span>

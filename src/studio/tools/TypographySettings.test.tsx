@@ -96,7 +96,7 @@ describe('TypographySettings editing intent and reflow', () => {
     expect(studioStore.getState().textObjects).toBe(original);
     expect(measureDefaultLayout).not.toHaveBeenCalled();
     const simple = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Caption Box');
-    expect(simple?.className).toContain('text-[#f4446d]');
+    expect(simple?.className).toContain('text-[#e85c82]');
   });
 
   it('switches mode to Bubble Contour without immediate reflow until edit', async () => {

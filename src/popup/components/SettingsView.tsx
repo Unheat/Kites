@@ -64,7 +64,7 @@ export default function SettingsView({ state, updateState }: SettingsViewProps) 
 
       {/* Section 2: Reading & Interaction */}
       <div className="flex flex-col gap-3 pt-1">
-        <h3 className="text-xs font-semibold tracking-wider uppercase text-[var(--color-dust)]">
+        <h3 className="text-xs font-semibold tracking-wider uppercase text-[var(--color-muted)]">
           Reading & Interaction
         </h3>
 
@@ -77,7 +77,7 @@ export default function SettingsView({ state, updateState }: SettingsViewProps) 
               className={`flex-1 py-1.5 text-sm font-medium rounded-sm transition-colors cursor-pointer ${
                 state.manualMode === 'hover' 
                   ? 'bg-[var(--color-paper)] text-[var(--color-ink)] shadow-sm' 
-                  : 'text-[var(--color-dust)] hover:text-[var(--color-ink)]'
+                  : 'text-[var(--color-muted)] hover:text-[var(--color-ink)]'
               }`}
             >
               Hover
@@ -87,14 +87,14 @@ export default function SettingsView({ state, updateState }: SettingsViewProps) 
               className={`flex-1 py-1.5 text-sm font-medium rounded-sm transition-colors cursor-pointer ${
                 state.manualMode === 'persistent' 
                   ? 'bg-[var(--color-paper)] text-[var(--color-ink)] shadow-sm' 
-                  : 'text-[var(--color-dust)] hover:text-[var(--color-ink)]'
+                  : 'text-[var(--color-muted)] hover:text-[var(--color-ink)]'
               }`}
             >
               Persistent
             </button>
           </div>
           {/* Dynamic Helper Text */}
-          <p className="text-xs text-[var(--color-dust)] px-0.5 leading-relaxed">
+          <p className="text-xs text-[var(--color-muted)] px-0.5 leading-relaxed">
             {state.manualMode === 'hover' 
               ? 'translate button appears when hovering over images' 
               : 'translate button is pinned to every detectable image'}
@@ -120,7 +120,7 @@ export default function SettingsView({ state, updateState }: SettingsViewProps) 
             onChange={(e) => updateState({ concurrency: parseInt(e.target.value, 10) })}
             className="w-full h-2 bg-[var(--color-vellum)] rounded-lg appearance-none cursor-pointer accent-[var(--color-editorial)]"
           />
-          <div className="flex justify-between text-xs text-[var(--color-dust)]">
+          <div className="flex justify-between text-xs text-[var(--color-muted)]">
             <span>1</span>
             <span>5</span>
           </div>
@@ -156,7 +156,7 @@ export default function SettingsView({ state, updateState }: SettingsViewProps) 
 
       {/* Section 3: Advanced & Integrations */}
       <div className="flex flex-col gap-3 pt-1">
-        <h3 className="text-xs font-semibold tracking-wider uppercase text-[var(--color-dust)]">
+        <h3 className="text-xs font-semibold tracking-wider uppercase text-[var(--color-muted)]">
           Advanced & Integrations
         </h3>
 
@@ -169,7 +169,7 @@ export default function SettingsView({ state, updateState }: SettingsViewProps) 
               className="w-full flex items-center justify-between p-2.5 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md hover:border-[var(--color-ink)] transition-colors cursor-pointer"
             >
               <div className="flex items-center gap-2">
-                <KeyRound size={16} className="text-[var(--color-dust)]" />
+                <KeyRound size={16} className="text-[var(--color-muted)]" />
                 <span className="font-medium text-sm">Manage Custom APIs</span>
               </div>
               <Pencil size={14} className="text-[var(--color-editorial)] shrink-0" aria-hidden="true" />
@@ -184,7 +184,7 @@ export default function SettingsView({ state, updateState }: SettingsViewProps) 
               className="w-full flex items-center justify-between p-2.5 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md hover:border-[var(--color-ink)] transition-colors cursor-pointer"
             >
               <div className="flex items-center gap-2">
-                <Network size={16} className="text-[var(--color-dust)]" />
+                <Network size={16} className="text-[var(--color-muted)]" />
                 <span className="font-medium text-sm">Configure Fallback Chain</span>
               </div>
               <Pencil size={14} className="text-[var(--color-editorial)] shrink-0" aria-hidden="true" />
@@ -199,7 +199,7 @@ export default function SettingsView({ state, updateState }: SettingsViewProps) 
               className="w-full flex items-center justify-between p-2.5 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md hover:border-[var(--color-ink)] transition-colors cursor-pointer"
             >
               <div className="flex items-center gap-2">
-                <BookOpen size={16} className="text-[var(--color-dust)]" />
+                <BookOpen size={16} className="text-[var(--color-muted)]" />
                 <span className="font-medium text-sm">Name Dictionary</span>
               </div>
               <Pencil size={14} className="text-[var(--color-editorial)] shrink-0" aria-hidden="true" />
@@ -219,7 +219,7 @@ export default function SettingsView({ state, updateState }: SettingsViewProps) 
               className="w-full flex items-center justify-between p-2.5 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md hover:border-[var(--color-ink)] transition-colors cursor-pointer"
             >
               <div className="flex items-center gap-2">
-                <MessageSquare size={16} className="text-[var(--color-dust)]" />
+                <MessageSquare size={16} className="text-[var(--color-muted)]" />
                 <span className="font-medium text-sm">Custom Prompt</span>
               </div>
               <Pencil size={14} className="text-[var(--color-editorial)] shrink-0" aria-hidden="true" />
@@ -238,7 +238,7 @@ export default function SettingsView({ state, updateState }: SettingsViewProps) 
               className="w-full flex items-center justify-between p-2.5 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md hover:border-[var(--color-ink)] transition-colors cursor-pointer"
             >
               <div className="flex items-center gap-2">
-                <Globe size={16} className="text-[var(--color-dust)]" />
+                <Globe size={16} className="text-[var(--color-muted)]" />
                 <span className="font-medium text-sm">Site Rules & Domains</span>
               </div>
               <Pencil size={14} className="text-[var(--color-editorial)] shrink-0" aria-hidden="true" />

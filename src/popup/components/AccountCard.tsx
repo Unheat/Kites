@@ -67,7 +67,7 @@ export const AccountCard: React.FC<AccountCardProps> = ({ userAccount, onAccount
     return (
       <div className="p-2.5 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md space-y-2">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-1.5 text-xs font-semibold tracking-wide uppercase text-[var(--color-dust)]">
+          <div className="flex items-center gap-1.5 text-xs font-semibold tracking-wide uppercase text-[var(--color-muted)]">
             <Sparkles className="w-3.5 h-3.5 text-[var(--color-editorial)]" />
             <span>Kites Cloud Pass</span>
           </div>
@@ -86,7 +86,7 @@ export const AccountCard: React.FC<AccountCardProps> = ({ userAccount, onAccount
               referrerPolicy="no-referrer"
             />
           ) : (
-            <div className="w-8 h-8 rounded-full bg-[var(--color-editorial)]/15 text-[var(--color-editorial)] font-bold text-xs flex items-center justify-center border border-[var(--color-editorial)]/30 flex-shrink-0">
+            <div className="w-8 h-8 rounded-full bg-[var(--color-accent-fill)]/15 text-[var(--color-editorial)] font-bold text-xs flex items-center justify-center border border-[var(--color-editorial)]/30 flex-shrink-0">
               {initials}
             </div>
           )}
@@ -95,21 +95,21 @@ export const AccountCard: React.FC<AccountCardProps> = ({ userAccount, onAccount
             <div className="text-xs font-semibold text-[var(--color-ink)] truncate leading-tight">
               {userAccount.name || 'Google User'}
             </div>
-            <div className="text-[11px] text-[var(--color-dust)] truncate leading-tight mt-0.5">
+            <div className="text-[11px] text-[var(--color-muted)] truncate leading-tight mt-0.5">
               {userAccount.email}
             </div>
           </div>
         </div>
 
         <div className="pt-1 border-t border-[var(--color-dust)]/20 flex items-center justify-between">
-          <span className="text-[10px] text-[var(--color-dust)] font-medium">
+          <span className="text-[10px] text-[var(--color-muted)] font-medium">
             {userAccount.quotaRemaining !== undefined ? userAccount.quotaRemaining : 100} / 100 translations left
           </span>
           <button
             type="button"
             onClick={handleSignOut}
             disabled={isLoading}
-            className="flex items-center gap-1 text-[11px] font-medium text-[var(--color-dust)] hover:text-[var(--color-editorial)] transition-colors py-0.5 px-1.5 rounded hover:bg-[var(--color-paper)]"
+            className="flex items-center gap-1 text-[11px] font-medium text-[var(--color-muted)] hover:text-[var(--color-editorial)] transition-colors py-0.5 px-1.5 rounded hover:bg-[var(--color-paper)]"
           >
             <LogOut className="w-3 h-3" />
             <span>{isLoading ? 'Signing out...' : 'Sign out'}</span>
@@ -127,12 +127,12 @@ export const AccountCard: React.FC<AccountCardProps> = ({ userAccount, onAccount
 
   return (
     <div className="p-2.5 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md space-y-2">
-      <div className="flex items-center gap-1.5 text-xs font-semibold tracking-wide uppercase text-[var(--color-dust)]">
+      <div className="flex items-center gap-1.5 text-xs font-semibold tracking-wide uppercase text-[var(--color-muted)]">
         <Sparkles className="w-3.5 h-3.5 text-[var(--color-editorial)]" />
         <span>Shared Translation Pool</span>
       </div>
 
-      <p className="text-[11px] text-[var(--color-dust)] leading-relaxed">
+      <p className="text-[11px] text-[var(--color-muted)] leading-relaxed">
         Sign in to unlock <strong className="text-[var(--color-ink)]">100 free cloud translations/day</strong> across Gemma, Mistral, and NVIDIA models.
       </p>
 

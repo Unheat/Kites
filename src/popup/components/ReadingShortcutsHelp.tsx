@@ -72,12 +72,12 @@ export default function ReadingShortcutsHelp() {
         className="w-full flex items-center justify-between p-2.5 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md hover:border-[var(--color-ink)] transition-colors cursor-pointer"
       >
         <div className="flex items-center gap-2">
-          <Keyboard size={16} className="text-[var(--color-dust)]" />
+          <Keyboard size={16} className="text-[var(--color-muted)]" />
           <span className="font-medium text-sm">Keyboard Shortcuts</span>
         </div>
         {open
-          ? <ChevronUp size={14} className="text-[var(--color-dust)]" />
-          : <ChevronDown size={14} className="text-[var(--color-dust)]" />}
+          ? <ChevronUp size={14} className="text-[var(--color-muted)]" />
+          : <ChevronDown size={14} className="text-[var(--color-muted)]" />}
       </button>
 
       <div id={panelId} hidden={!open} className={open ? 'mt-2 flex flex-col gap-2' : undefined}>
@@ -91,12 +91,12 @@ export default function ReadingShortcutsHelp() {
             </kbd>
             <div className="min-w-0">
               <span className="text-sm font-medium">{label}</span>
-              {note && <p className="text-[11px] text-[var(--color-dust)] mt-0.5">{note}</p>}
+              {note && <p className="text-[11px] text-[var(--color-muted)] mt-0.5">{note}</p>}
             </div>
           </div>
         ))}
 
-        <p className="text-[10px] text-[var(--color-dust)] px-1 leading-relaxed">
+        <p className="text-[10px] text-[var(--color-muted)] px-1 leading-relaxed">
           Action shortcuts work in-page with both Ctrl and Alt/Option. Global browser shortcuts can be customized at{' '}
           <span className="font-mono text-[var(--color-ink)]">chrome://extensions/shortcuts</span>.
           {' '}The unmodified F key is fixed.

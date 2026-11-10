@@ -99,14 +99,14 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
       onDoubleClick={onOpen}
       className={`group relative flex flex-col justify-between p-4 rounded-xl border transition-all cursor-pointer select-none ${
         isSelected
-          ? 'bg-[#18121a] border-[#f4446d] shadow-lg shadow-[rgba(244,68,109,0.18)] ring-1 ring-[#f4446d]/40'
+          ? 'bg-[#18121a] border-[#e85c82] shadow-lg shadow-[rgba(210, 51, 96,0.18)] ring-1 ring-[#e85c82]/40'
           : 'bg-[#12141c] hover:bg-[#161924] border-[#262a3b] hover:border-slate-500'
       }`}
     >
       {/* Top Header Row */}
       <div className="flex items-start justify-between gap-3 min-w-0">
         <div className="flex items-center gap-2 min-w-0 flex-1">
-          <div className="p-2 rounded-lg bg-[#f4446d]/15 text-[#f4446d] shrink-0">
+          <div className="p-2 rounded-lg bg-[#d23360]/15 text-[#e85c82] shrink-0">
             <Folder className="w-4 h-4" />
           </div>
           <div className="min-w-0 flex-1">
@@ -145,7 +145,7 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
                   setIsMenuOpen(false);
                   onOpen();
                 }}
-                className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-[#f4446d] hover:text-white transition cursor-pointer"
+                className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-[#d23360] hover:text-white transition cursor-pointer"
               >
                 <Play className="w-3.5 h-3.5" />
                 <span>Open Studio</span>

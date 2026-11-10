@@ -198,7 +198,7 @@ export const PageInfoSettings: React.FC<PageInfoSettingsProps> = ({ jobId, onBac
       {/* Header */}
       <div className="pb-2 border-b border-[#282d3f] flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <div className="p-1.5 rounded-lg bg-[#f4446d]/15 text-[#f4446d]">
+          <div className="p-1.5 rounded-lg bg-[#d23360]/15 text-[#e85c82]">
             <Info className="w-4 h-4" />
           </div>
           <div>
@@ -247,7 +247,7 @@ export const PageInfoSettings: React.FC<PageInfoSettingsProps> = ({ jobId, onBac
       {/* AI Pipeline Architecture */}
       <div className="p-3 rounded-xl bg-[#090a0f] border border-[#262a3b] space-y-2.5">
         <div className="flex items-center gap-1.5 text-slate-300 font-semibold text-xs">
-          <Cpu className="w-3.5 h-3.5 text-[#f4446d]" />
+          <Cpu className="w-3.5 h-3.5 text-[#e85c82]" />
           <span>AI Pipeline Engines</span>
         </div>
 
@@ -289,7 +289,7 @@ export const PageInfoSettings: React.FC<PageInfoSettingsProps> = ({ jobId, onBac
       {/* Typography Configuration */}
       <div className="p-3 rounded-xl bg-[#090a0f] border border-[#262a3b] space-y-2">
         <div className="flex items-center gap-1.5 text-slate-300 font-semibold text-xs">
-          <Type className="w-3.5 h-3.5 text-[#f4446d]" />
+          <Type className="w-3.5 h-3.5 text-[#e85c82]" />
           <span>Render Typography</span>
         </div>
 
@@ -302,7 +302,7 @@ export const PageInfoSettings: React.FC<PageInfoSettingsProps> = ({ jobId, onBac
             <span className="text-slate-400">Default Weight</span>
             <span className="font-semibold text-slate-200">
               {job?.renderFontBold ? (
-                <span className="text-[#f4446d]">Bold (Enabled)</span>
+                <span className="text-[#e85c82]">Bold (Enabled)</span>
               ) : (
                 <span className="text-slate-400">Regular (Unbold)</span>
               )}
@@ -314,7 +314,7 @@ export const PageInfoSettings: React.FC<PageInfoSettingsProps> = ({ jobId, onBac
       {/* Page & Content Statistics */}
       <div className="p-3 rounded-xl bg-[#090a0f] border border-[#262a3b] space-y-2">
         <div className="flex items-center gap-1.5 text-slate-300 font-semibold text-xs">
-          <Layers className="w-3.5 h-3.5 text-[#f4446d]" />
+          <Layers className="w-3.5 h-3.5 text-[#e85c82]" />
           <span>Page Content</span>
         </div>
 
@@ -339,7 +339,7 @@ export const PageInfoSettings: React.FC<PageInfoSettingsProps> = ({ jobId, onBac
             <span className="text-[10px] text-slate-400 font-medium">Source Image</span>
             <button
               onClick={handleCopyUrl}
-              className="flex items-center gap-1 text-[10px] text-[#f4446d] hover:underline"
+              className="flex items-center gap-1 text-[10px] text-[#e85c82] hover:underline"
             >
               {copiedUrl ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
               {copiedUrl ? 'Copied' : 'Copy Source'}

@@ -59,7 +59,7 @@ const ACTIVE_ROW_CLASS: Record<FontPickerDropdownProps['variant'], string> = {
 };
 
 const SECTION_LABEL_CLASS: Record<FontPickerDropdownProps['variant'], string> = {
-  popup: 'px-2 pt-1.5 pb-0.5 text-[10px] uppercase tracking-wide text-[var(--color-dust)]',
+  popup: 'px-2 pt-1.5 pb-0.5 text-[10px] uppercase tracking-wide text-[var(--color-muted)]',
   studio: 'px-2 pt-1.5 pb-0.5 text-[10px] uppercase tracking-wide text-slate-500',
 };
 
@@ -237,12 +237,12 @@ export const FontPickerDropdown: React.FC<FontPickerDropdownProps> = ({ selectio
             {item.label}
           </span>
           {item.kind === 'catalog' && item.sizeBytes !== undefined && (
-            <span className={`text-[11px] truncate ${variant === 'studio' ? 'text-slate-500' : 'text-[var(--color-dust)]'}`}>
+            <span className={`text-[11px] truncate ${variant === 'studio' ? 'text-slate-500' : 'text-[var(--color-muted)]'}`}>
               {Math.max(1, Math.round(item.sizeBytes / 1024))} KB · {item.catalog?.license}
             </span>
           )}
           {item.kind === 'installed' && item.installed?.source === 'import' && (
-            <span className={`text-[11px] truncate ${variant === 'studio' ? 'text-slate-500' : 'text-[var(--color-dust)]'}`}>
+            <span className={`text-[11px] truncate ${variant === 'studio' ? 'text-slate-500' : 'text-[var(--color-muted)]'}`}>
               Imported · renders on this machine
             </span>
           )}
@@ -256,7 +256,7 @@ export const FontPickerDropdown: React.FC<FontPickerDropdownProps> = ({ selectio
                 e.stopPropagation();
                 void handleDelete(item.installed!);
               }}
-              className={`p-1 rounded-sm hover:text-[var(--color-editorial)] ${variant === 'studio' ? 'text-slate-500 hover:text-[#f4446d]' : 'text-[var(--color-dust)]'}`}
+              className={`p-1 rounded-sm hover:text-[var(--color-editorial)] ${variant === 'studio' ? 'text-slate-500 hover:text-[#f4446d]' : 'text-[var(--color-muted)]'}`}
             >
               <Trash2 size={13} />
             </span>
@@ -279,13 +279,13 @@ export const FontPickerDropdown: React.FC<FontPickerDropdownProps> = ({ selectio
         <span className={`font-medium truncate pr-2 text-sm ${variant === 'studio' ? 'text-slate-200' : ''}`} style={{ fontFamily: triggerFamily }}>
           {triggerLabel}
         </span>
-        <ChevronDown size={16} className={`text-[var(--color-dust)] transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+        <ChevronDown size={16} className={`text-[var(--color-muted)] transition-transform ${isOpen ? 'rotate-180' : ''}`} />
       </button>
 
       {isOpen && (
         <div className={PANEL_CLASS[variant]}>
           <div className={`flex items-center gap-1.5 px-2 py-1.5 border-b ${variant === 'studio' ? 'border-[#282d3f]' : 'border-[var(--color-dust)]'}`}>
-            <Search size={13} className={variant === 'studio' ? 'text-slate-500' : 'text-[var(--color-dust)]'} />
+            <Search size={13} className={variant === 'studio' ? 'text-slate-500' : 'text-[var(--color-muted)]'} />
             <input
               autoFocus
               value={searchQuery}
@@ -321,7 +321,7 @@ export const FontPickerDropdown: React.FC<FontPickerDropdownProps> = ({ selectio
                       <span className={`truncate pr-2 text-sm ${variant === 'studio' ? 'text-slate-200' : ''}`} style={{ fontFamily: `"${item.family}", sans-serif` }}>
                         {item.label}
                       </span>
-                      <span className={`text-[11px] truncate ${variant === 'studio' ? 'text-slate-500' : 'text-[var(--color-dust)]'}`}>
+                      <span className={`text-[11px] truncate ${variant === 'studio' ? 'text-slate-500' : 'text-[var(--color-muted)]'}`}>
                         {Math.max(1, Math.round((item.sizeBytes ?? 0) / 1024))} KB · {item.catalog?.license}
                       </span>
                     </div>
@@ -332,7 +332,7 @@ export const FontPickerDropdown: React.FC<FontPickerDropdownProps> = ({ selectio
                         e.stopPropagation();
                         if (item.catalog) void handleDownload(item.catalog);
                       }}
-                      className={`p-1.5 rounded-sm ${variant === 'studio' ? 'text-slate-400 hover:text-[#f4446d]' : 'text-[var(--color-dust)] hover:text-[var(--color-editorial)]'} disabled:opacity-40`}
+                      className={`p-1.5 rounded-sm ${variant === 'studio' ? 'text-slate-400 hover:text-[#f4446d]' : 'text-[var(--color-muted)] hover:text-[var(--color-editorial)]'} disabled:opacity-40`}
                     >
                       <Download size={14} className={downloading.has(item.catalog?.id ?? '') ? 'animate-pulse' : ''} />
                     </button>
@@ -341,7 +341,7 @@ export const FontPickerDropdown: React.FC<FontPickerDropdownProps> = ({ selectio
               </>
             )}
             {filtered.length === 0 && (
-              <p className={`px-2 py-2 text-xs ${variant === 'studio' ? 'text-slate-500' : 'text-[var(--color-dust)]'}`}>No fonts match “{searchQuery}”.</p>
+              <p className={`px-2 py-2 text-xs ${variant === 'studio' ? 'text-slate-500' : 'text-[var(--color-muted)]'}`}>No fonts match “{searchQuery}”.</p>
             )}
           </div>
 
@@ -351,10 +351,10 @@ export const FontPickerDropdown: React.FC<FontPickerDropdownProps> = ({ selectio
               className={rowClass(false)}
             >
               <div className="flex items-center gap-2">
-                <Upload size={14} className={variant === 'studio' ? 'text-slate-400' : 'text-[var(--color-dust)]'} />
+                <Upload size={14} className={variant === 'studio' ? 'text-slate-400' : 'text-[var(--color-muted)]'} />
                 <span className={`text-sm ${variant === 'studio' ? 'text-slate-300' : ''}`}>Import font file…</span>
               </div>
-              <span className={`text-[11px] ${variant === 'studio' ? 'text-slate-500' : 'text-[var(--color-dust)]'}`}>.ttf .otf .woff</span>
+              <span className={`text-[11px] ${variant === 'studio' ? 'text-slate-500' : 'text-[var(--color-muted)]'}`}>.ttf .otf .woff</span>
             </button>
             <input
               ref={fileInputRef}

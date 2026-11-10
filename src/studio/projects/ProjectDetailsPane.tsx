@@ -76,7 +76,7 @@ export const ProjectDetailsPane: React.FC<ProjectDetailsPaneProps> = ({
     return (
       <aside className="w-80 bg-[#12141c] border-l border-[#262a3b] flex flex-col items-center justify-center p-6 text-center select-none shrink-0">
         <div className="w-12 h-12 rounded-2xl bg-[#161924] border border-[#262a3b] flex items-center justify-center text-slate-500 mb-3 shadow-inner">
-          <Layers className="w-6 h-6 text-[#f4446d]/40" />
+          <Layers className="w-6 h-6 text-[#e85c82]/40" />
         </div>
         <h4 className="text-sm font-semibold text-slate-300">No project selected</h4>
         <p className="text-xs text-slate-500 mt-1 max-w-[200px] leading-relaxed">
@@ -129,7 +129,7 @@ export const ProjectDetailsPane: React.FC<ProjectDetailsPaneProps> = ({
         <div className="flex flex-col gap-2 p-3 rounded-xl bg-[#161924] border border-[#262a3b]">
           <div className="flex items-center justify-between text-xs font-semibold text-slate-300">
             <span>Progress</span>
-            <span className="text-[#f4446d] tabular-nums font-bold">{progressPercent}%</span>
+            <span className="text-[#e85c82] tabular-nums font-bold">{progressPercent}%</span>
           </div>
 
           <div className="w-full h-2 bg-[#262a3b] rounded-full overflow-hidden flex">
@@ -158,7 +158,7 @@ export const ProjectDetailsPane: React.FC<ProjectDetailsPaneProps> = ({
         <div className="flex flex-col gap-2.5 text-xs text-slate-400">
           <div className="flex items-center justify-between">
             <span className="flex items-center gap-1.5">
-              <Sparkles className="w-3.5 h-3.5 text-[#f4446d]" />
+              <Sparkles className="w-3.5 h-3.5 text-[#e85c82]" />
               <span>Dialogue Bubbles</span>
             </span>
             <span className="font-semibold text-slate-200 tabular-nums">{stats?.totalTextBlocks || 0}</span>
@@ -171,7 +171,7 @@ export const ProjectDetailsPane: React.FC<ProjectDetailsPaneProps> = ({
                 {stats.languages.map((lang) => (
                   <span
                     key={lang}
-                    className="px-1.5 py-0.5 rounded text-[0.65rem] font-bold uppercase bg-[#f4446d]/15 text-[#f4446d] border border-[#f4446d]/30"
+                    className="px-1.5 py-0.5 rounded text-[0.65rem] font-bold uppercase bg-[#d23360]/15 text-[#e85c82] border border-[#e85c82]/30"
                   >
                     {lang}
                   </span>
@@ -201,7 +201,7 @@ export const ProjectDetailsPane: React.FC<ProjectDetailsPaneProps> = ({
         <button
           type="button"
           onClick={onOpenStudio}
-          className="w-full flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg bg-[#f4446d] hover:bg-[#e0335c] text-white text-xs font-semibold shadow-md shadow-[rgba(244,68,109,0.25)] transition cursor-pointer"
+          className="w-full flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg bg-[#d23360] hover:bg-[#bb2952] text-white text-xs font-semibold shadow-md shadow-[rgba(210, 51, 96,0.25)] transition cursor-pointer"
         >
           <FolderOpen className="w-4 h-4" />
           <span>Open in Studio</span>
@@ -212,7 +212,7 @@ export const ProjectDetailsPane: React.FC<ProjectDetailsPaneProps> = ({
           onClick={onAddFromLibrary}
           className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-[#161924] hover:bg-[#202436] border border-[#262a3b] text-slate-200 text-xs font-semibold transition cursor-pointer"
         >
-          <PlusCircle className="w-3.5 h-3.5 text-[#f4446d]" />
+          <PlusCircle className="w-3.5 h-3.5 text-[#e85c82]" />
           <span>Add Pages from Library</span>
         </button>
 
@@ -240,7 +240,7 @@ export const ProjectDetailsPane: React.FC<ProjectDetailsPaneProps> = ({
                 }}
                 className="w-full flex items-center gap-2 px-3 py-2 hover:bg-[#262a3b] transition text-left cursor-pointer"
               >
-                <Download className="w-3.5 h-3.5 text-[#f4446d]" />
+                <Download className="w-3.5 h-3.5 text-[#e85c82]" />
                 <div>
                   <div className="font-semibold">Standard ZIP</div>
                   <div className="text-[0.65rem] text-slate-400">Numbered image scans</div>
@@ -270,7 +270,7 @@ export const ProjectDetailsPane: React.FC<ProjectDetailsPaneProps> = ({
                 }}
                 className="w-full flex items-center gap-2 px-3 py-2 hover:bg-[#262a3b] transition text-left cursor-pointer"
               >
-                <FileCode className="w-3.5 h-3.5 text-purple-400" />
+                <FileCode className="w-3.5 h-3.5 text-[#e85c82]" />
                 <div>
                   <div className="font-semibold">Layered Photoshop PSD</div>
                   <div className="text-[0.65rem] text-slate-400">Clean art + editable text</div>

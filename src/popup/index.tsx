@@ -196,7 +196,7 @@ function PopupApp() {
         <h1 className="text-xl font-bold font-display tracking-tight text-[var(--color-editorial)] flex items-center gap-2">
           Kites
           {!state.isExtensionEnabled ? (
-            <span className="text-xs font-normal text-[var(--color-dust)] px-2 py-0.5 border border-[var(--color-dust)] rounded-full">OFF</span>
+            <span className="text-xs font-normal text-[var(--color-muted)] px-2 py-0.5 border border-[var(--color-dust)] rounded-full">OFF</span>
           ) : isCurrentDomainDisabled ? (
             <span className="text-xs font-normal text-amber-500 px-2 py-0.5 border border-amber-500/40 rounded-full">PAUSED</span>
           ) : null}
@@ -207,7 +207,7 @@ function PopupApp() {
             className={`p-1.5 rounded transition-colors hover:bg-[var(--color-vellum)] cursor-pointer`}
             title={state.isExtensionEnabled ? "Disable Kites" : "Enable Kites"}
           >
-            <Power size={18} className={state.isExtensionEnabled ? "text-[var(--color-editorial)]" : "text-[var(--color-dust)]"} />
+            <Power size={18} className={state.isExtensionEnabled ? "text-[var(--color-editorial)]" : "text-[var(--color-muted)]"} />
           </button>
           <button 
             onClick={() => updateState({ isDark: !state.isDark })}
@@ -245,7 +245,7 @@ function PopupApp() {
       {currentDomain && state.isExtensionEnabled && (
         <div className="mx-3.5 mb-2.5 px-2.5 py-1.5 rounded bg-[var(--color-vellum)] border border-[var(--color-dust)] border-opacity-30 flex items-center justify-between text-xs">
           <div className="flex items-center gap-1.5 min-w-0">
-            <Globe size={13} className={isCurrentDomainDisabled ? 'text-amber-500 shrink-0' : 'text-[var(--color-dust)] shrink-0'} />
+            <Globe size={13} className={isCurrentDomainDisabled ? 'text-amber-500 shrink-0' : 'text-[var(--color-muted)] shrink-0'} />
             <span className="font-mono text-[11px] truncate text-[var(--color-ink)]" title={currentDomain}>
               {currentDomain}
             </span>
@@ -255,7 +255,7 @@ function PopupApp() {
             className={`px-2 py-0.5 rounded text-[10px] font-semibold border transition-colors cursor-pointer shrink-0 ${
               isCurrentDomainDisabled
                 ? 'bg-amber-500/10 border-amber-500/30 text-amber-500 hover:bg-amber-500/20'
-                : 'bg-[var(--color-paper)] border-[var(--color-dust)] border-opacity-40 text-[var(--color-dust)] hover:text-red-500 hover:border-red-400'
+                : 'bg-[var(--color-paper)] border-[var(--color-dust)] border-opacity-40 text-[var(--color-muted)] hover:text-red-500 hover:border-red-400'
             }`}
             title={isCurrentDomainDisabled ? `Re-enable Kites on ${currentDomain}` : `Disable Kites on ${currentDomain}`}
           >
@@ -264,7 +264,9 @@ function PopupApp() {
         </div>
       )}
 
-      {/* Main Content Area (Dims when disabled) */}
+      {/* Main Content Area (Dims when disabled). The Studio footer stays outside
+          this wrapper: the editor is independent of the per-site content script,
+          so disabling Kites must not lock the user out of it. */}
       <div className={`flex-1 flex flex-col transition-opacity duration-300 ${(!state.isExtensionEnabled || isCurrentDomainDisabled) ? 'opacity-40 pointer-events-none grayscale' : ''}`}>
         <div className="flex-1 flex flex-col px-3.5 pb-3.5">
           {activeTab === 'home' ? (
@@ -298,19 +300,19 @@ function PopupApp() {
             <SettingsView state={state} updateState={updateState} />
           )}
         </div>
+      </div>
 
-        {/* Footer Action: ONLY Open Edit Studio lives through all panels */}
-        <div className="px-3.5 pb-3.5 flex flex-col gap-2">
-          <button 
-            onClick={() => {
-              chrome.tabs.create({ url: chrome.runtime.getURL('index.html') });
-            }}
-            className="w-full py-2.5 bg-[var(--color-ink)] text-[var(--color-paper)] font-bold rounded hover:bg-[var(--color-editorial)] transition-colors flex items-center justify-center gap-2 cursor-pointer"
-            title="Open manga editing studio in a new tab"
-          >
-            Open Edit Studio <span className="opacity-70">↗</span>
-          </button>
-        </div>
+      {/* Footer Action: ONLY Open Edit Studio lives through all panels */}
+      <div className="px-3.5 pb-3.5 flex flex-col gap-2">
+        <button
+          onClick={() => {
+            chrome.tabs.create({ url: chrome.runtime.getURL('index.html') });
+          }}
+          className="w-full py-2.5 bg-[var(--color-ink)] text-[var(--color-paper)] font-bold rounded hover:bg-[var(--color-accent-fill)] transition-colors flex items-center justify-center gap-2 cursor-pointer"
+          title="Open manga editing studio in a new tab"
+        >
+          Open Edit Studio <span className="opacity-70">↗</span>
+        </button>
       </div>
     </div>
   );

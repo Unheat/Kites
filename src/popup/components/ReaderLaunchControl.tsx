@@ -51,7 +51,7 @@ export default function ReaderLaunchControl() {
     return (
       <button
         disabled={true}
-        className="w-full py-2 bg-[var(--color-vellum)] text-[var(--color-dust)] border border-[var(--color-dust)] border-opacity-20 font-bold rounded flex items-center justify-center gap-2 text-sm opacity-60 cursor-not-allowed"
+        className="w-full py-2 bg-[var(--color-vellum)] text-[var(--color-muted)] border border-[var(--color-dust)] border-opacity-20 font-bold rounded flex items-center justify-center gap-2 text-sm opacity-60 cursor-not-allowed"
         title="No translated pages on this tab yet. Translate images to view in distraction-free reader."
       >
         <BookOpen size={16} className="opacity-50" />
@@ -73,7 +73,7 @@ export default function ReaderLaunchControl() {
   return (
     <button
       onClick={handleOpenReader}
-      className="w-full py-2 bg-[var(--color-ink)] text-[var(--color-paper)] font-bold rounded hover:bg-[var(--color-editorial)] transition-colors flex items-center justify-center gap-2 cursor-pointer text-sm shadow-md"
+      className="w-full py-2 bg-[var(--color-ink)] text-[var(--color-paper)] font-bold rounded hover:bg-[var(--color-accent-fill)] transition-colors flex items-center justify-center gap-2 cursor-pointer text-sm shadow-md"
       title="Open distraction-free fullscreen reader for this chapter"
     >
       <BookOpen size={16} className="text-[var(--color-editorial)]" />

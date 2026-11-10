@@ -78,7 +78,7 @@ export default function SiteRulesPanel({ state, updateState, onClose }: SiteRule
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <Globe size={16} className="text-[var(--color-dust)]" />
+          <Globe size={16} className="text-[var(--color-muted)]" />
           <span className="font-medium text-sm">Site Rules & Domains</span>
           <HelpTooltip
             size="sm"
@@ -101,7 +101,7 @@ export default function SiteRulesPanel({ state, updateState, onClose }: SiteRule
           className={`text-xs font-medium pb-0.5 border-b-2 transition-colors cursor-pointer ${
             activeTab === 'disabled'
               ? 'border-[var(--color-editorial)] text-[var(--color-editorial)]'
-              : 'border-transparent text-[var(--color-dust)] hover:text-[var(--color-ink)]'
+              : 'border-transparent text-[var(--color-muted)] hover:text-[var(--color-ink)]'
           }`}
         >
           Disabled Sites ({disabledDomains.length})
@@ -111,7 +111,7 @@ export default function SiteRulesPanel({ state, updateState, onClose }: SiteRule
           className={`text-xs font-medium pb-0.5 border-b-2 transition-colors cursor-pointer ${
             activeTab === 'selectors'
               ? 'border-[var(--color-editorial)] text-[var(--color-editorial)]'
-              : 'border-transparent text-[var(--color-dust)] hover:text-[var(--color-ink)]'
+              : 'border-transparent text-[var(--color-muted)] hover:text-[var(--color-ink)]'
           }`}
         >
           Custom Selectors ({siteRules.length})
@@ -121,7 +121,7 @@ export default function SiteRulesPanel({ state, updateState, onClose }: SiteRule
       {/* Tab 1: Disabled Domains */}
       {activeTab === 'disabled' && (
         <div className="flex flex-col gap-2.5">
-          <p className="text-[11px] text-[var(--color-dust)]">
+          <p className="text-[11px] text-[var(--color-muted)]">
             Kites runs everywhere by default. Sites listed below will be completely ignored.
           </p>
 
@@ -158,7 +158,7 @@ export default function SiteRulesPanel({ state, updateState, onClose }: SiteRule
                   <span className="font-mono text-[11px] truncate">{domain}</span>
                   <button
                     onClick={() => handleRemoveDisabledDomain(domain)}
-                    className="p-0.5 hover:text-red-500 text-[var(--color-dust)] transition-colors cursor-pointer"
+                    className="p-0.5 hover:text-red-500 text-[var(--color-muted)] transition-colors cursor-pointer"
                     title="Re-enable domain"
                   >
                     <Trash2 size={12} />
@@ -167,7 +167,7 @@ export default function SiteRulesPanel({ state, updateState, onClose }: SiteRule
               ))}
             </div>
           ) : (
-            <p className="text-[11px] text-[var(--color-dust)] text-center py-2 italic">
+            <p className="text-[11px] text-[var(--color-muted)] text-center py-2 italic">
               No domains disabled. Kites is active on all supported pages.
             </p>
           )}
@@ -177,7 +177,7 @@ export default function SiteRulesPanel({ state, updateState, onClose }: SiteRule
       {/* Tab 2: Custom Selectors */}
       {activeTab === 'selectors' && (
         <div className="flex flex-col gap-2.5">
-          <p className="text-[11px] text-[var(--color-dust)]">
+          <p className="text-[11px] text-[var(--color-muted)]">
             Specify CSS image selectors to accurately target chapter panels on tricky reader layouts.
           </p>
 
@@ -231,12 +231,12 @@ export default function SiteRulesPanel({ state, updateState, onClose }: SiteRule
                     />
                     <div className="flex flex-col min-w-0">
                       <span className="font-bold text-[11px] truncate">{rule.domain}</span>
-                      <span className="font-mono text-[10px] text-[var(--color-dust)] truncate">{rule.selector}</span>
+                      <span className="font-mono text-[10px] text-[var(--color-muted)] truncate">{rule.selector}</span>
                     </div>
                   </div>
                   <button
                     onClick={() => handleRemoveSiteRule(idx)}
-                    className="p-0.5 hover:text-red-500 text-[var(--color-dust)] transition-colors cursor-pointer shrink-0"
+                    className="p-0.5 hover:text-red-500 text-[var(--color-muted)] transition-colors cursor-pointer shrink-0"
                     title="Delete rule"
                   >
                     <Trash2 size={12} />
@@ -245,7 +245,7 @@ export default function SiteRulesPanel({ state, updateState, onClose }: SiteRule
               ))}
             </div>
           ) : (
-            <p className="text-[11px] text-[var(--color-dust)] text-center py-2 italic">
+            <p className="text-[11px] text-[var(--color-muted)] text-center py-2 italic">
               No custom rules. Standard auto-detection and built-in manga presets are used.
             </p>
           )}

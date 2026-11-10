@@ -23,7 +23,7 @@ export class CanvasFurniture {
   public static drawSelectionFurniture(
     ctx: CanvasRenderingContext2D,
     obj: TextObject,
-    borderColor: string = '#6366f1'
+    borderColor: string = '#e85c82'
   ): void {
     const isSkipped = !!obj.isSkipped;
     const effectiveColor = isSkipped ? '#94a3b8' : borderColor;
@@ -81,7 +81,7 @@ export class CanvasFurniture {
     ctx.stroke();
 
     // 3. Draw rotation handle nub (circle with curved rotation arrow badge)
-    this.drawHandleNub(ctx, obj.width / 2, -ROTATION_HANDLE_OFFSET, '#f4446d', true, '⟳');
+    this.drawHandleNub(ctx, obj.width / 2, -ROTATION_HANDLE_OFFSET, '#e85c82', true, '⟳');
 
     // If rotated, show small angle tag above rotation nub
     if (obj.rotation) {
@@ -100,7 +100,7 @@ export class CanvasFurniture {
       ctx.roundRect(tagX, tagY, tagW, tagH, 3);
       ctx.fill();
       ctx.stroke();
-      ctx.fillStyle = '#f4446d';
+      ctx.fillStyle = '#e85c82';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(angleText, obj.width / 2, tagY + tagH / 2);
@@ -116,7 +116,7 @@ export class CanvasFurniture {
     this.drawHandleNub(ctx, right, 0, '#38bdf8', true, 'A');
 
     // 5. Draw horizontal wrap handle (right midpoint nub with '↔' badge)
-    this.drawHandleNub(ctx, right, midY, '#a855f7', true, '↔');
+    this.drawHandleNub(ctx, right, midY, '#e85c82', true, '↔');
 
     // 6. Draw standard bounding handles
     this.drawHandleNub(ctx, 0, 0, effectiveColor);

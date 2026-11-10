@@ -81,7 +81,7 @@ export default function AddApiForm({ onSave, onCancel }: AddApiFormProps) {
   return (
     <div className="p-3 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded flex flex-col gap-3 mt-2 text-left">
       <div>
-        <label className="text-xs font-semibold text-[var(--color-dust)] uppercase mb-1 block">Provider</label>
+        <label className="text-xs font-semibold text-[var(--color-muted)] uppercase mb-1 block">Provider</label>
         <select 
           value={provider}
           onChange={(e) => {
@@ -99,7 +99,7 @@ export default function AddApiForm({ onSave, onCancel }: AddApiFormProps) {
       </div>
 
       <div>
-        <label className="text-xs font-semibold text-[var(--color-dust)] uppercase mb-1 block">Model Name</label>
+        <label className="text-xs font-semibold text-[var(--color-muted)] uppercase mb-1 block">Model Name</label>
         <input 
           autoFocus
           type="text" 
@@ -107,33 +107,33 @@ export default function AddApiForm({ onSave, onCancel }: AddApiFormProps) {
           value={newModelName}
           onChange={(e) => setNewModelName(e.target.value)}
           disabled={isValidating}
-          className="w-full p-2 text-sm bg-[var(--color-paper)] border border-[var(--color-dust)] rounded focus:outline-none focus:border-[var(--color-ink)] transition-colors placeholder:text-[var(--color-dust)]"
+          className="w-full p-2 text-sm bg-[var(--color-paper)] border border-[var(--color-dust)] rounded focus:outline-none focus:border-[var(--color-ink)] transition-colors placeholder:text-[var(--color-muted)]"
         />
       </div>
 
       {provider === 'openai-compatible' && (
         <div>
-          <label className="text-xs font-semibold text-[var(--color-dust)] uppercase mb-1 block">Base URL</label>
+          <label className="text-xs font-semibold text-[var(--color-muted)] uppercase mb-1 block">Base URL</label>
           <input 
             type="text" 
             placeholder="https://openrouter.ai/api/v1" 
             value={newBaseUrl}
             onChange={(e) => setNewBaseUrl(e.target.value)}
             disabled={isValidating}
-            className="w-full p-2 text-sm bg-[var(--color-paper)] border border-[var(--color-dust)] rounded focus:outline-none focus:border-[var(--color-ink)] transition-colors placeholder:text-[var(--color-dust)]"
+            className="w-full p-2 text-sm bg-[var(--color-paper)] border border-[var(--color-dust)] rounded focus:outline-none focus:border-[var(--color-ink)] transition-colors placeholder:text-[var(--color-muted)]"
           />
         </div>
       )}
 
       <div>
-        <label className="text-xs font-semibold text-[var(--color-dust)] uppercase mb-1 block">API Key</label>
+        <label className="text-xs font-semibold text-[var(--color-muted)] uppercase mb-1 block">API Key</label>
         <input 
           type="password" 
           placeholder="sk-..." 
           value={newApiKey}
           onChange={(e) => setNewApiKey(e.target.value)}
           disabled={isValidating}
-          className="w-full p-2 text-sm bg-[var(--color-paper)] border border-[var(--color-dust)] rounded focus:outline-none focus:border-[var(--color-ink)] transition-colors placeholder:text-[var(--color-dust)]"
+          className="w-full p-2 text-sm bg-[var(--color-paper)] border border-[var(--color-dust)] rounded focus:outline-none focus:border-[var(--color-ink)] transition-colors placeholder:text-[var(--color-muted)]"
         />
       </div>
 
@@ -154,9 +154,9 @@ export default function AddApiForm({ onSave, onCancel }: AddApiFormProps) {
               onChange={(e) => setCustomPrompt(e.target.value.slice(0, 4000))}
               disabled={isValidating}
               rows={3}
-              className="w-full p-2 text-xs bg-[var(--color-paper)] border border-[var(--color-dust)] rounded focus:outline-none focus:border-[var(--color-ink)] transition-colors placeholder:text-[var(--color-dust)] resize-none"
+              className="w-full p-2 text-xs bg-[var(--color-paper)] border border-[var(--color-dust)] rounded focus:outline-none focus:border-[var(--color-ink)] transition-colors placeholder:text-[var(--color-muted)] resize-none"
             />
-            <div className="flex justify-between items-center text-[11px] text-[var(--color-dust)]">
+            <div className="flex justify-between items-center text-[11px] text-[var(--color-muted)]">
               <span>Overrides global Custom Prompt for this API.</span>
               <span className="font-mono">{customPrompt.length}/4000</span>
             </div>
@@ -170,7 +170,7 @@ export default function AddApiForm({ onSave, onCancel }: AddApiFormProps) {
         <button 
           onClick={handleSave}
           disabled={isValidating}
-          className="flex-1 py-2 bg-[var(--color-ink)] text-[var(--color-paper)] text-sm font-bold rounded hover:bg-[var(--color-editorial)] transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          className="flex-1 py-2 bg-[var(--color-ink)] text-[var(--color-paper)] text-sm font-bold rounded hover:bg-[var(--color-accent-fill)] transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {isValidating ? 'Testing API...' : 'Save API'}
         </button>

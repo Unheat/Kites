@@ -91,11 +91,11 @@ export default function PageExportControl() {
         disabled={busy || total === 0}
         className={`w-full py-2 border font-semibold rounded flex items-center justify-center gap-2 text-sm transition-colors ${
           total === 0
-            ? 'bg-[var(--color-vellum)] text-[var(--color-dust)] border-[var(--color-dust)] border-opacity-20 opacity-60 cursor-not-allowed'
+            ? 'bg-[var(--color-vellum)] text-[var(--color-muted)] border-[var(--color-dust)] border-opacity-20 opacity-60 cursor-not-allowed'
             : done
             ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300 cursor-pointer'
             : busy
-            ? 'bg-[var(--color-vellum)] border-[var(--color-dust)] border-opacity-30 text-[var(--color-dust)] cursor-wait'
+            ? 'bg-[var(--color-vellum)] border-[var(--color-dust)] border-opacity-30 text-[var(--color-muted)] cursor-wait'
             : 'bg-[var(--color-vellum)] text-[var(--color-ink)] border-[var(--color-dust)] border-opacity-30 hover:border-[var(--color-editorial)] hover:text-[var(--color-editorial)] cursor-pointer'
         }`}
         title={
@@ -115,7 +115,7 @@ export default function PageExportControl() {
       </button>
       {status?.message && (phase !== 'idle') && (
         <p className={`text-xs px-1 leading-relaxed ${
-          phase === 'error' ? 'text-red-500 dark:text-red-400' : 'text-[var(--color-dust)]'
+          phase === 'error' ? 'text-red-500 dark:text-red-400' : 'text-[var(--color-muted)]'
         }`}>
           {status.message}
         </p>

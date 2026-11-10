@@ -10,7 +10,7 @@ export default function LanguageSelector({ state, updateState }: LanguageSelecto
   return (
     <div className="flex gap-2">
       <div className="flex-1 flex flex-col gap-1.5">
-        <label className="text-xs font-medium text-[var(--color-dust)] uppercase tracking-wider">Source</label>
+        <label className="text-xs font-medium text-[var(--color-muted)] uppercase tracking-wider">Source</label>
         <select 
           value={state.sourceLang} 
           onChange={(e) => updateState({ sourceLang: e.target.value })}
@@ -22,7 +22,7 @@ export default function LanguageSelector({ state, updateState }: LanguageSelecto
         </select>
       </div>
       <div className="flex-1 flex flex-col gap-1.5">
-        <label className="text-xs font-medium text-[var(--color-dust)] uppercase tracking-wider">Target</label>
+        <label className="text-xs font-medium text-[var(--color-muted)] uppercase tracking-wider">Target</label>
         <select 
           value={state.targetLang} 
           onChange={(e) => updateState({ targetLang: e.target.value })}

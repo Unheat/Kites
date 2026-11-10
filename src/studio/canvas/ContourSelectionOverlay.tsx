@@ -5,7 +5,7 @@ import { wordRangeAt } from './contourInlineEditing';
 /** Native-like selection tint over painted contour glyphs. */
 const SELECTION_BACKGROUND = 'rgba(59, 130, 246, 0.35)';
 /** Caret color matches the editor's signature rose. */
-const CARET_COLOR = '#f4446d';
+const CARET_COLOR = '#e85c82';
 
 export interface ContourSelectionOverlayProps {
   /** Exact per-character cells derived from the solver placements. */

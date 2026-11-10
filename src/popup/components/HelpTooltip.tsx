@@ -247,7 +247,7 @@ export default function HelpTooltip({
         }}
         onFocus={handleFocus}
         onBlur={handleBlur}
-        className={`peer rounded-full border border-[var(--color-dust)] flex items-center justify-center font-normal text-[var(--color-dust)] cursor-help hover:bg-[var(--color-dust)] hover:text-[var(--color-paper)] focus:outline-none focus:ring-1 focus:ring-[var(--color-editorial)] transition-colors flex-shrink-0 select-none bg-transparent ${triggerSizeClass}`}
+        className={`peer rounded-full border border-[var(--color-dust)] flex items-center justify-center font-normal text-[var(--color-muted)] cursor-help hover:bg-[var(--color-dust)] hover:text-[var(--color-paper)] focus:outline-none focus:ring-1 focus:ring-[var(--color-editorial)] transition-colors flex-shrink-0 select-none bg-transparent ${triggerSizeClass}`}
       >
         ?
       </span>

@@ -88,22 +88,32 @@
   --color-glass: #0B0C10;
   --color-ink: #111111;
   --color-vellum: #EFECE6;
-  --color-editorial: #D9381E;
+  /* Accent for text, icons and borders on paper. Same rose hue as dark mode. */
+  --color-editorial: #B82A52;
+  /* Accent for filled surfaces that carry a white label (4.8:1 with #fff). */
+  --color-accent-fill: #B82A52;
+  /* Borders, dividers and the switch track. Never body text. */
   --color-dust: #A19F9A;
+  /* Muted body/helper text. 4.6:1 on paper. */
+  --color-muted: #5F646F;
 
-  --font-display: 'Cabinet Grotesk', 'Space Grotesk', 'Clash Display', sans-serif;
-  --font-body: 'Satoshi', 'Inter', sans-serif;
-  --font-mono: 'JetBrains Mono', monospace;
+  /* No display/body webfonts are bundled, so name the platform stack the
+     marketing site already uses instead of falling through to bare sans-serif. */
+  --font-display: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-body: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
-/* Dark Theme overrides */
+/* Dark Theme overrides - shares the navy-black ramp with the site and Studio */
 .dark {
-  --color-paper: #121212;
-  --color-glass: #1A1A1A;
-  --color-ink: #E0E0E0;
-  --color-vellum: #1E1E1E;
-  --color-editorial: #FF2A6D;
-  --color-dust: #4A4A4A;
+  --color-paper: #0F1117;
+  --color-glass: #151822;
+  --color-ink: #E6E8EE;
+  --color-vellum: #1A1E29;
+  --color-editorial: #E85C82;
+  --color-accent-fill: #D23360;
+  --color-dust: #464C5B;
+  --color-muted: #8B90A0;
 }
 
 html.kites-extension-page, body.kites-extension-page {

@@ -64,7 +64,7 @@ export default function GpuAccelerationPanel({ state, updateState }: GpuAccelera
           } rounded-lg shadow-sm`}
         >
           <div className="flex items-center gap-2">
-            <span className={`text-[11px] px-2 py-0.5 rounded-md font-medium flex items-center justify-center ${
+            <span className={`text-[11px] px-2 py-0.5 rounded-md font-medium flex items-center justify-center whitespace-nowrap shrink-0 ${
               state.webgpuSupported === true ? 'bg-green-500/10 text-green-500 border border-green-500/30' : 
               state.webgpuSupported === false ? 'bg-red-500/10 text-red-500 border border-red-500/30' : 
               'bg-gray-500/10 text-gray-400 border border-gray-500/30'
@@ -99,7 +99,7 @@ export default function GpuAccelerationPanel({ state, updateState }: GpuAccelera
                     }
                   );
                 }}
-                className="px-2 py-0.5 border border-[var(--color-dust)] hover:border-[var(--color-ink)] text-[10px] text-[var(--color-dust)] hover:text-[var(--color-ink)] font-medium rounded transition-colors cursor-pointer"
+                className="px-2 py-0.5 border border-[var(--color-dust)] hover:border-[var(--color-ink)] text-[10px] text-[var(--color-muted)] hover:text-[var(--color-ink)] font-medium rounded transition-colors cursor-pointer"
               >
                 Re-check
               </button>
@@ -139,7 +139,7 @@ export default function GpuAccelerationPanel({ state, updateState }: GpuAccelera
             <div className="flex items-center justify-between p-2.5 rounded-md hover:bg-[var(--color-paper)] transition-colors">
               <div className="flex flex-col text-left">
                 <span className="font-medium text-sm text-[var(--color-ink)]">Translation</span>
-                <span className="text-[10px] text-[var(--color-dust)] font-medium truncate max-w-[180px]">
+                <span className="text-[10px] text-[var(--color-muted)] font-medium truncate max-w-[180px]">
                   {translationVramText}
                 </span>
               </div>
@@ -155,7 +155,7 @@ export default function GpuAccelerationPanel({ state, updateState }: GpuAccelera
             <div className="flex items-center justify-between p-2.5 rounded-md hover:bg-[var(--color-paper)] transition-colors">
               <div className="flex flex-col text-left">
                 <span className="font-medium text-sm text-[var(--color-ink)]">Image Cleaning</span>
-                <span className="text-[10px] text-[var(--color-dust)] font-medium truncate max-w-[180px]">
+                <span className="text-[10px] text-[var(--color-muted)] font-medium truncate max-w-[180px]">
                   {inpaintVramText}
                 </span>
               </div>
@@ -171,7 +171,7 @@ export default function GpuAccelerationPanel({ state, updateState }: GpuAccelera
             <div className="flex items-center justify-between p-2.5 rounded-md hover:bg-[var(--color-paper)] transition-colors">
               <div className="flex flex-col text-left">
                 <span className="font-medium text-sm text-[var(--color-ink)]">Text Detection</span>
-                <span className="text-[10px] text-[var(--color-dust)] font-medium truncate max-w-[180px]">
+                <span className="text-[10px] text-[var(--color-muted)] font-medium truncate max-w-[180px]">
                   PaddleOCR • ~30 MB
                 </span>
               </div>
@@ -187,7 +187,7 @@ export default function GpuAccelerationPanel({ state, updateState }: GpuAccelera
             <div className="flex items-center justify-between p-2.5 rounded-md hover:bg-[var(--color-paper)] transition-colors">
               <div className="flex flex-col text-left">
                 <span className="font-medium text-sm text-[var(--color-ink)]">Bubble Detection</span>
-                <span className="text-[10px] text-[var(--color-dust)] font-medium truncate max-w-[180px]">
+                <span className="text-[10px] text-[var(--color-muted)] font-medium truncate max-w-[180px]">
                   {bubbleVramText}
                 </span>
               </div>
@@ -203,7 +203,7 @@ export default function GpuAccelerationPanel({ state, updateState }: GpuAccelera
             <div className="flex items-center justify-between p-2.5 rounded-md hover:bg-[var(--color-paper)] transition-colors">
               <div className="flex flex-col text-left">
                 <span className="font-medium text-sm text-[var(--color-ink)]">Colorization</span>
-                <span className="text-[10px] text-[var(--color-dust)] font-medium truncate max-w-[180px]">
+                <span className="text-[10px] text-[var(--color-muted)] font-medium truncate max-w-[180px]">
                   {state.activeColorId === 'manga-colorization-v2' ? 'Manga Colorizer • ~150 MB' : 'Disabled • 0 MB'}
                 </span>
               </div>

@@ -65,7 +65,7 @@ export default function CustomPromptPanel({
         </div>
         <button
           onClick={onClose}
-          className="p-1 text-[var(--color-dust)] hover:text-[var(--color-ink)] transition-colors cursor-pointer"
+          className="p-1 text-[var(--color-muted)] hover:text-[var(--color-ink)] transition-colors cursor-pointer"
           title="Close Custom Prompt"
           aria-label="Close Custom Prompt"
         >
@@ -73,7 +73,7 @@ export default function CustomPromptPanel({
         </button>
       </div>
 
-      <p className="text-xs text-[var(--color-dust)] mb-2.5 leading-relaxed">
+      <p className="text-xs text-[var(--color-muted)] mb-2.5 leading-relaxed">
         Guide the character voice, phrasing, and translation rules across all models.
       </p>
 
@@ -100,17 +100,17 @@ export default function CustomPromptPanel({
           maxLength={MAX_GLOBAL_CUSTOM_PROMPT_LENGTH}
           rows={3}
           placeholder="e.g. Natural casual dialogue, keep -san/-kun honorifics, pirate slang..."
-          className="w-full p-2 text-xs bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded text-[var(--color-ink)] placeholder-[var(--color-dust)]/70 focus:outline-none focus:border-[var(--color-editorial)] transition-colors resize-none leading-relaxed"
+          className="w-full p-2 text-xs bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded text-[var(--color-ink)] placeholder-[var(--color-muted)]/70 focus:outline-none focus:border-[var(--color-editorial)] transition-colors resize-none leading-relaxed"
         />
       </div>
 
       {/* Footer Indicators & Controls */}
       <div className="flex justify-between items-center text-xs">
         <div className="flex items-center gap-1.5">
-          <span className={`font-mono ${isNearLimit ? 'text-amber-500 font-semibold' : 'text-[var(--color-dust)]'}`}>
+          <span className={`font-mono ${isNearLimit ? 'text-amber-500 font-semibold' : 'text-[var(--color-muted)]'}`}>
             {charCount}/{MAX_GLOBAL_CUSTOM_PROMPT_LENGTH}
           </span>
-          <span className="text-[var(--color-dust)]">·</span>
+          <span className="text-[var(--color-muted)]">·</span>
           <span className={isNearLimit ? 'text-amber-500 font-medium' : 'text-emerald-600 dark:text-emerald-400 font-medium'}>
             {isNearLimit ? '▲ High WebLLM usage' : '● WebLLM & Cloud compatible'}
           </span>
@@ -120,7 +120,7 @@ export default function CustomPromptPanel({
           <button
             type="button"
             onClick={handleClear}
-            className="text-[var(--color-dust)] hover:text-red-500 transition-colors cursor-pointer"
+            className="text-[var(--color-muted)] hover:text-red-500 transition-colors cursor-pointer"
           >
             Clear
           </button>
@@ -128,7 +128,7 @@ export default function CustomPromptPanel({
       </div>
 
       {/* Microcopy Callout */}
-      <div className="mt-2.5 pt-2 border-t border-[var(--color-dust)]/30 text-[11px] text-[var(--color-dust)] leading-relaxed">
+      <div className="mt-2.5 pt-2 border-t border-[var(--color-dust)]/30 text-[11px] text-[var(--color-muted)] leading-relaxed">
         ℹ️ Kept brief so local WebLLM won&apos;t exceed WebGPU memory. Need longer guidelines? Configure per API in <strong className="text-[var(--color-ink)]">Manage Custom APIs</strong>.
       </div>
     </div>

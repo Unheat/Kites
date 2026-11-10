@@ -149,7 +149,7 @@ export const ProjectsDashboard: React.FC<ProjectsDashboardProps> = ({
               autoFocus
               value={renameValue}
               onChange={(e) => setRenameValue(e.target.value)}
-              className="w-full h-9 px-3 rounded-lg bg-[#090a0f] border border-[#262a3b] text-xs text-slate-100 focus:outline-none focus:border-[#f4446d]"
+              className="w-full h-9 px-3 rounded-lg bg-[#090a0f] border border-[#262a3b] text-xs text-slate-100 focus:outline-none focus:border-[#e85c82]"
             />
             <div className="flex items-center justify-end gap-2 pt-2">
               <button
@@ -161,7 +161,7 @@ export const ProjectsDashboard: React.FC<ProjectsDashboardProps> = ({
               </button>
               <button
                 type="submit"
-                className="px-4 py-1.5 text-xs font-semibold bg-[#f4446d] hover:bg-[#e0335c] text-white rounded-lg shadow-md shadow-[rgba(244,68,109,0.25)] transition cursor-pointer"
+                className="px-4 py-1.5 text-xs font-semibold bg-[#d23360] hover:bg-[#bb2952] text-white rounded-lg shadow-md shadow-[rgba(210, 51, 96,0.25)] transition cursor-pointer"
               >
                 Save
               </button>
@@ -209,7 +209,7 @@ export const ProjectsDashboard: React.FC<ProjectsDashboardProps> = ({
       {isExporting && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-xs p-4 select-none">
           <div className="w-full max-w-xs rounded-xl bg-[#161924] border border-[#262a3b] p-6 shadow-2xl flex flex-col items-center gap-3 text-center">
-            <div className="w-8 h-8 rounded-full border-2 border-[#f4446d] border-t-transparent animate-spin" />
+            <div className="w-8 h-8 rounded-full border-2 border-[#e85c82] border-t-transparent animate-spin" />
             <h4 className="text-sm font-semibold text-slate-100">Exporting Manga Archive</h4>
             <p className="text-xs text-slate-400">{exportProgressText || 'Packaging files...'}</p>
           </div>

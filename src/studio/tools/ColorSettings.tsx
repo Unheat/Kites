@@ -23,7 +23,7 @@ export const ColorSettings: React.FC<ColorSettingsProps> = ({
       {/* Header */}
       <div className="pb-2 border-b border-[#282d3f]">
         <div className="flex items-center gap-2">
-          <Palette className="w-4 h-4 text-[#f4446d]" />
+          <Palette className="w-4 h-4 text-[#e85c82]" />
           <h3 className="font-semibold text-sm text-slate-100">Manga Page Colorization</h3>
         </div>
         <p className="text-[11px] text-slate-400 mt-1">
@@ -62,7 +62,7 @@ export const ColorSettings: React.FC<ColorSettingsProps> = ({
           type="button"
           disabled={isColorizing || !isModelReady}
           onClick={onColorize}
-          className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl font-semibold text-xs tracking-wide transition cursor-pointer bg-[#f4446d] hover:bg-[#e0335c] text-white shadow-lg shadow-[#f4446d]/25 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl font-semibold text-xs tracking-wide transition cursor-pointer bg-[#d23360] hover:bg-[#bb2952] text-white shadow-lg shadow-[#e85c82]/25 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {isColorizing ? (
             <>
@@ -84,7 +84,7 @@ export const ColorSettings: React.FC<ColorSettingsProps> = ({
       </div>
 
       {/* Architecture & Linework Guarantee */}
-      <div className="p-3 rounded-lg bg-[#f4446d]/10 border border-[#f4446d]/30 text-[11px] text-[#f4446d] leading-relaxed">
+      <div className="p-3 rounded-lg bg-[#d23360]/10 border border-[#e85c82]/30 text-[11px] text-[#e85c82] leading-relaxed">
         ⚡ <strong>Linework Preservation:</strong> Luminance fusion retains original scan sharpness and screentones while WebGPU applies neural colors locally.
       </div>
 

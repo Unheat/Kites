@@ -70,14 +70,14 @@ export default function FallbackConfigPanel({ state, updateState, onClose }: Fal
         <h3 className="text-sm font-bold text-[var(--color-editorial)]">Waterfall Fallback Chain</h3>
         <button 
           onClick={onClose}
-          className="p-1 text-[var(--color-dust)] hover:text-[var(--color-ink)] transition-colors cursor-pointer"
+          className="p-1 text-[var(--color-muted)] hover:text-[var(--color-ink)] transition-colors cursor-pointer"
           title="Close Panel"
         >
           <X size={16} />
         </button>
       </div>
 
-      <p className="text-xs text-[var(--color-dust)] mb-4">
+      <p className="text-xs text-[var(--color-muted)] mb-4">
         If the primary engine fails (e.g. rate limit, WebGPU crash), Kites will automatically try the engines below in order.
       </p>
 
@@ -88,7 +88,7 @@ export default function FallbackConfigPanel({ state, updateState, onClose }: Fal
             <span className="text-xs font-bold text-[var(--color-editorial)] flex-1 truncate">
               Primary: {allEngines.find(e => e.id === state.activeEngineId)?.name || 'Unknown'}
             </span>
-            <span className="text-[10px] text-[var(--color-dust)] uppercase tracking-wider">Set in Home</span>
+            <span className="text-[10px] text-[var(--color-muted)] uppercase tracking-wider">Set in Home</span>
           </div>
         </div>
 
@@ -122,12 +122,12 @@ export default function FallbackConfigPanel({ state, updateState, onClose }: Fal
                       </optgroup>
                     )}
                   </select>
-                  <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--color-dust)] pointer-events-none" />
+                  <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--color-muted)] pointer-events-none" />
                 </div>
                 
                 <button 
                   onClick={() => handleRemoveFallback(index)}
-                  className="p-3 text-[var(--color-dust)] hover:text-red-500 hover:bg-[var(--color-vellum)] rounded-md border border-transparent transition-colors cursor-pointer"
+                  className="p-3 text-[var(--color-muted)] hover:text-red-500 hover:bg-[var(--color-vellum)] rounded-md border border-transparent transition-colors cursor-pointer"
                   title="Remove Fallback"
                 >
                   <X size={16} />
@@ -140,7 +140,7 @@ export default function FallbackConfigPanel({ state, updateState, onClose }: Fal
         {/* Add Fallback Button */}
         <button
           onClick={handleAddFallback}
-          className="mt-2 w-full py-2 border border-dashed border-[var(--color-dust)] text-[var(--color-dust)] text-xs font-bold rounded-md hover:border-[var(--color-ink)] hover:text-[var(--color-ink)] transition-colors cursor-pointer flex justify-center items-center gap-1"
+          className="mt-2 w-full py-2 border border-dashed border-[var(--color-dust)] text-[var(--color-muted)] text-xs font-bold rounded-md hover:border-[var(--color-ink)] hover:text-[var(--color-ink)] transition-colors cursor-pointer flex justify-center items-center gap-1"
         >
           <Plus size={14} /> Add Fallback Engine
         </button>

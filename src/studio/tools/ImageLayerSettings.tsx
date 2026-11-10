@@ -131,8 +131,8 @@ export const ImageLayerSettings: React.FC<ImageLayerSettingsProps> = ({
       </div>
 
       <div>
-        <label className="flex flex-col items-center justify-center p-4 rounded-xl border-2 border-dashed border-[#282d3f] bg-[#090a0f] hover:border-[#f4446d]/60 hover:bg-[#12141c] cursor-pointer transition">
-          <Upload className="w-5 h-5 text-[#f4446d] mb-1" />
+        <label className="flex flex-col items-center justify-center p-4 rounded-xl border-2 border-dashed border-[#282d3f] bg-[#090a0f] hover:border-[#e85c82]/60 hover:bg-[#12141c] cursor-pointer transition">
+          <Upload className="w-5 h-5 text-[#e85c82] mb-1" />
           <span className="font-medium text-slate-200">Upload Sticker Image</span>
           <span className="text-[11px] text-slate-500">PNG with transparency, WebP, JPEG</span>
           <input type="file" accept={STUDIO_IMAGE_INPUT_ACCEPT} onChange={handleFileUpload} className="hidden" />
@@ -141,11 +141,11 @@ export const ImageLayerSettings: React.FC<ImageLayerSettingsProps> = ({
 
       {onUploadPage && (
         <div className="pt-3 border-t border-[#282d3f]">
-          <label className={`flex flex-col items-center justify-center p-4 rounded-xl border-2 border-dashed border-[#282d3f] bg-[#090a0f] transition ${isUploadingPage ? 'opacity-70 cursor-wait' : 'hover:border-indigo-500 hover:bg-[#12141c] cursor-pointer'}`}>
+          <label className={`flex flex-col items-center justify-center p-4 rounded-xl border-2 border-dashed border-[#282d3f] bg-[#090a0f] transition ${isUploadingPage ? 'opacity-70 cursor-wait' : 'hover:border-[#e85c82] hover:bg-[#12141c] cursor-pointer'}`}>
             {isUploadingPage ? (
-              <Loader className="w-5 h-5 text-indigo-400 mb-1 animate-spin" />
+              <Loader className="w-5 h-5 text-[#e85c82] mb-1 animate-spin" />
             ) : (
-              <Upload className="w-5 h-5 text-indigo-400 mb-1" />
+              <Upload className="w-5 h-5 text-[#e85c82] mb-1" />
             )}
             <span className="font-medium text-slate-200">
               {uploadProgress && uploadProgress.total > 1
@@ -158,7 +158,7 @@ export const ImageLayerSettings: React.FC<ImageLayerSettingsProps> = ({
               <div className="w-full mt-2 space-y-1">
                 <div className="w-full bg-[#1c1f2e] h-1.5 rounded-full overflow-hidden">
                   <div
-                    className="bg-indigo-500 h-full rounded-full transition-all duration-300 ease-out"
+                    className="bg-[#e85c82] h-full rounded-full transition-all duration-300 ease-out"
                     style={{
                       width: `${Math.round((uploadProgress.current / uploadProgress.total) * 100)}%`,
                     }}
@@ -192,7 +192,7 @@ export const ImageLayerSettings: React.FC<ImageLayerSettingsProps> = ({
             <span className="font-semibold text-slate-200">Selected Sticker</span>
             <button
               onClick={handleDelete}
-              className="p-1 rounded text-[#f4446d] hover:bg-[#f4446d]/15 transition"
+              className="p-1 rounded text-[#e85c82] hover:bg-[#d23360]/15 transition"
               title="Delete sticker"
             >
               <Trash2 className="w-4 h-4" />
@@ -211,7 +211,7 @@ export const ImageLayerSettings: React.FC<ImageLayerSettingsProps> = ({
               step="0.05"
               value={selectedLayer.opacity}
               onChange={(e) => updateSelected({ opacity: Number(e.target.value) })}
-              className="w-full accent-[#f4446d]"
+              className="w-full accent-[#e85c82]"
             />
           </div>
 
@@ -220,7 +220,7 @@ export const ImageLayerSettings: React.FC<ImageLayerSettingsProps> = ({
               onClick={() => updateSelected({ flipH: !selectedLayer.flipH })}
               className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg border transition ${
                 selectedLayer.flipH
-                  ? 'border-[#f4446d] bg-[#f4446d]/15 text-[#f4446d]'
+                  ? 'border-[#e85c82] bg-[#d23360]/15 text-[#e85c82]'
                   : 'border-[#282d3f] bg-[#090a0f] text-slate-400'
               }`}
             >
@@ -231,7 +231,7 @@ export const ImageLayerSettings: React.FC<ImageLayerSettingsProps> = ({
               onClick={() => updateSelected({ flipV: !selectedLayer.flipV })}
               className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg border transition ${
                 selectedLayer.flipV
-                  ? 'border-[#f4446d] bg-[#f4446d]/15 text-[#f4446d]'
+                  ? 'border-[#e85c82] bg-[#d23360]/15 text-[#e85c82]'
                   : 'border-[#282d3f] bg-[#090a0f] text-slate-400'
               }`}
             >

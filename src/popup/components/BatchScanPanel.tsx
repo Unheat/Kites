@@ -493,7 +493,7 @@ export default function BatchScanPanel() {
           className={`flex-1 py-1 px-1.5 rounded-md font-semibold transition-all flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap text-[11px] ${
             activeSource === 'page'
               ? 'bg-[var(--color-vellum)] text-[var(--color-ink)] shadow-sm'
-              : 'text-[var(--color-dust)] hover:text-[var(--color-ink)]'
+              : 'text-[var(--color-muted)] hover:text-[var(--color-ink)]'
           }`}
         >
           <Layers size={13} className={activeSource === 'page' ? 'text-[var(--color-editorial)]' : ''} />
@@ -509,7 +509,7 @@ export default function BatchScanPanel() {
           className={`flex-1 py-1 px-1.5 rounded-md font-semibold transition-all flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap text-[11px] ${
             activeSource === 'history'
               ? 'bg-[var(--color-vellum)] text-[var(--color-ink)] shadow-sm'
-              : 'text-[var(--color-dust)] hover:text-[var(--color-ink)]'
+              : 'text-[var(--color-muted)] hover:text-[var(--color-ink)]'
           }`}
         >
           <History size={13} className={activeSource === 'history' ? 'text-[var(--color-editorial)]' : ''} />
@@ -544,7 +544,7 @@ export default function BatchScanPanel() {
               <button
                 onClick={scanPages}
                 disabled={isScanning || isFastScanning}
-                className="p-1 rounded hover:bg-[var(--color-paper)] text-[var(--color-dust)] hover:text-[var(--color-ink)] transition-colors cursor-pointer"
+                className="p-1 rounded hover:bg-[var(--color-paper)] text-[var(--color-muted)] hover:text-[var(--color-ink)] transition-colors cursor-pointer"
                 title="Rescan current page DOM"
               >
                 <RotateCcw size={14} className={isScanning ? 'animate-spin' : ''} />
@@ -553,7 +553,7 @@ export default function BatchScanPanel() {
               <button
                 onClick={handleFastScan}
                 disabled={isFastScanning || isScanning}
-                className="px-2 py-1 rounded bg-[var(--color-paper)] hover:bg-[var(--color-editorial)] hover:text-white border border-[var(--color-dust)] border-opacity-30 font-semibold transition-all flex items-center gap-1 text-[11px] cursor-pointer shadow-sm disabled:opacity-50"
+                className="px-2 py-1 rounded bg-[var(--color-paper)] hover:bg-[var(--color-accent-fill)] hover:text-white border border-[var(--color-dust)] border-opacity-30 font-semibold transition-all flex items-center gap-1 text-[11px] cursor-pointer shadow-sm disabled:opacity-50"
                 title="Auto-scroll reader page to mount all lazy-loaded comic panels"
               >
                 {isFastScanning ? (
@@ -568,7 +568,7 @@ export default function BatchScanPanel() {
             <button
               onClick={loadHistoryItems}
               disabled={isLoadingHistory}
-              className="px-2 py-1 rounded bg-[var(--color-paper)] hover:bg-[var(--color-editorial)] hover:text-white border border-[var(--color-dust)] border-opacity-30 font-semibold transition-all flex items-center gap-1 text-[11px] cursor-pointer shadow-sm disabled:opacity-50"
+              className="px-2 py-1 rounded bg-[var(--color-paper)] hover:bg-[var(--color-accent-fill)] hover:text-white border border-[var(--color-dust)] border-opacity-30 font-semibold transition-all flex items-center gap-1 text-[11px] cursor-pointer shadow-sm disabled:opacity-50"
               title="Refresh saved translation history"
             >
               <RotateCcw size={12} className={isLoadingHistory ? 'animate-spin' : ''} />
@@ -605,8 +605,8 @@ export default function BatchScanPanel() {
 
       {/* Status Feedback Banner */}
       {statusMessage && (
-        <div className="py-1 px-2 rounded bg-[var(--color-paper)] text-[10px] text-[var(--color-dust)] border border-[var(--color-dust)] border-opacity-20 flex items-center gap-1.5 animate-fadeIn">
-          <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-editorial)] shrink-0 animate-ping" />
+        <div className="py-1 px-2 rounded bg-[var(--color-paper)] text-[10px] text-[var(--color-muted)] border border-[var(--color-dust)] border-opacity-20 flex items-center gap-1.5 animate-fadeIn">
+          <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-accent-fill)] shrink-0 animate-ping" />
           <span className="truncate">{statusMessage}</span>
         </div>
       )}
@@ -614,14 +614,14 @@ export default function BatchScanPanel() {
       {/* Scrollable Thumbnail Gallery */}
       <div className="max-h-72 overflow-y-auto pr-1">
         {isScanning || (activeSource === 'history' && isLoadingHistory && historyItems.length === 0) ? (
-          <div className="py-12 flex flex-col items-center justify-center text-[var(--color-dust)] gap-2">
+          <div className="py-12 flex flex-col items-center justify-center text-[var(--color-muted)] gap-2">
             <Loader size={20} className="animate-spin text-[var(--color-editorial)]" />
             <span className="text-[11px]">
               {activeSource === 'page' ? 'Detecting comic panels on page…' : 'Loading saved history…'}
             </span>
           </div>
         ) : currentViewItems.length === 0 ? (
-          <div className="py-8 px-4 flex flex-col items-center justify-center text-center text-[var(--color-dust)]">
+          <div className="py-8 px-4 flex flex-col items-center justify-center text-center text-[var(--color-muted)]">
             <BookOpen size={28} className="mb-2 opacity-50" />
             <p className="font-semibold text-xs text-[var(--color-ink)]">
               {activeSource === 'page' ? 'No Comic Panels Detected' : 'No Saved History Yet'}
@@ -711,7 +711,7 @@ export default function BatchScanPanel() {
                   </div>
 
                   {/* Dimension / Timestamp Footer */}
-                  <div className="px-1.5 py-1 flex items-center justify-between text-[10px] font-mono text-[var(--color-dust)] bg-[var(--color-paper)] border-t border-[var(--color-dust)] border-opacity-20">
+                  <div className="px-1.5 py-1 flex items-center justify-between text-[10px] font-mono text-[var(--color-muted)] bg-[var(--color-paper)] border-t border-[var(--color-dust)] border-opacity-20">
                     <span>
                       {item.source === 'history' && item.timestamp
                         ? new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -738,7 +738,7 @@ export default function BatchScanPanel() {
         <button
           onClick={handleQueueSelected}
           disabled={isQueueing || pendingToTranslate.length === 0 || selectedList.length === 0}
-          className="w-full py-2 bg-[var(--color-editorial)] text-white font-bold rounded hover:opacity-90 transition-opacity flex items-center justify-center gap-2 cursor-pointer shadow-md disabled:opacity-50 disabled:cursor-not-allowed text-xs"
+          className="w-full py-2 bg-[var(--color-accent-fill)] text-white font-bold rounded hover:opacity-90 transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-md disabled:bg-[var(--color-vellum)] disabled:text-[var(--color-muted)] disabled:shadow-none disabled:cursor-not-allowed text-xs"
         >
           {isQueueing ? (
             <Loader size={14} className="animate-spin" />

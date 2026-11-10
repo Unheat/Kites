@@ -12,8 +12,8 @@ export default function AutoTranslateControl({ state, updateState }: AutoTransla
       <div className="flex items-center justify-between p-3 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md">
         <div>
           <span className="font-medium block text-sm">Auto-Translate</span>
-          <span className="text-xs text-[var(--color-dust)]">
-            {state.isAuto ? 'Translates visible images automatically' : 'Requires manual activation'}
+          <span className="text-xs text-[var(--color-muted)]">
+            {state.isAuto ? 'Translates visible images automatically' : 'Off — translate images when you ask'}
           </span>
         </div>
         <button 

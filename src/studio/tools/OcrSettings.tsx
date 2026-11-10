@@ -20,7 +20,7 @@ export const OcrSettings: React.FC = () => {
     <div className="space-y-4 text-xs text-slate-200">
       <div className="pb-2 border-b border-[#282d3f]">
         <div className="flex items-center gap-2">
-          <ScanText className="w-4 h-4 text-[#f4446d]" />
+          <ScanText className="w-4 h-4 text-[#e85c82]" />
           <h3 className="font-semibold text-sm text-slate-100">Live AI Re-OCR Area</h3>
         </div>
         <p className="text-[11px] text-slate-400 mt-1">
@@ -40,7 +40,7 @@ export const OcrSettings: React.FC = () => {
             onClick={() => update({ scanSource: 'original' })}
             className={`py-1 px-1 rounded text-center text-[10px] font-medium transition cursor-pointer ${
               ocr.scanSource === 'original'
-                ? 'bg-[#f4446d] text-white shadow'
+                ? 'bg-[#d23360] text-white shadow'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
             title="Scan original raw artwork (untranslated Japanese/foreign text)"
@@ -52,7 +52,7 @@ export const OcrSettings: React.FC = () => {
             onClick={() => update({ scanSource: 'background' })}
             className={`py-1 px-1 rounded text-center text-[10px] font-medium transition cursor-pointer ${
               ocr.scanSource === 'background'
-                ? 'bg-[#f4446d] text-white shadow'
+                ? 'bg-[#d23360] text-white shadow'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
             title="Scan inpainted/cleaned background canvas"
@@ -64,7 +64,7 @@ export const OcrSettings: React.FC = () => {
             onClick={() => update({ scanSource: 'composition' })}
             className={`py-1 px-1 rounded text-center text-[10px] font-medium transition cursor-pointer ${
               ocr.scanSource === 'composition'
-                ? 'bg-[#f4446d] text-white shadow'
+                ? 'bg-[#d23360] text-white shadow'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
             title="Scan translated composite image (background + rendered text)"
@@ -87,13 +87,13 @@ export const OcrSettings: React.FC = () => {
           <span>Translate recognized text</span>
           <input type="checkbox" checked={ocr.translate}
             onChange={(event) => update({ translate: event.target.checked })}
-            className="accent-[#f4446d]" />
+            className="accent-[#e85c82]" />
         </label>
         <label className="flex items-center justify-between gap-3 cursor-pointer">
           <span>Clean background</span>
           <input type="checkbox" checked={ocr.inpaint}
             onChange={(event) => update({ inpaint: event.target.checked })}
-            className="accent-[#f4446d]" />
+            className="accent-[#e85c82]" />
         </label>
         <p className="text-[11px] text-slate-400 leading-relaxed">
           {!ocr.translate && !ocr.inpaint
@@ -110,7 +110,7 @@ export const OcrSettings: React.FC = () => {
             onClick={() => update({ shape: 'circle' })}
             className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg border transition ${
               ocr.shape === 'circle'
-                ? 'border-[#f4446d] bg-[#f4446d]/15 text-[#f4446d] font-medium'
+                ? 'border-[#e85c82] bg-[#d23360]/15 text-[#e85c82] font-medium'
                 : 'border-[#282d3f] bg-[#090a0f] text-slate-400 hover:text-slate-200'
             }`}
           >
@@ -121,7 +121,7 @@ export const OcrSettings: React.FC = () => {
             onClick={() => update({ shape: 'square' })}
             className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg border transition ${
               ocr.shape === 'square'
-                ? 'border-[#f4446d] bg-[#f4446d]/15 text-[#f4446d] font-medium'
+                ? 'border-[#e85c82] bg-[#d23360]/15 text-[#e85c82] font-medium'
                 : 'border-[#282d3f] bg-[#090a0f] text-slate-400 hover:text-slate-200'
             }`}
           >
@@ -142,11 +142,11 @@ export const OcrSettings: React.FC = () => {
           max="300"
           value={ocr.size}
           onChange={(e) => update({ size: Number(e.target.value) })}
-          className="w-full accent-[#f4446d]"
+          className="w-full accent-[#e85c82]"
         />
       </div>
 
-      <div className="p-3 rounded-lg bg-[#f4446d]/10 border border-[#f4446d]/30 text-[11px] text-[#f4446d] leading-relaxed">
+      <div className="p-3 rounded-lg bg-[#d23360]/10 border border-[#e85c82]/30 text-[11px] text-[#e85c82] leading-relaxed">
         Recognized text is added as editable boxes over its detected position. With translation off, the boxes contain the original source text.
       </div>
     </div>

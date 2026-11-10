@@ -445,7 +445,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
             className="w-full flex items-center justify-between p-3 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md hover:border-[var(--color-ink)] transition-colors cursor-pointer"
           >
             <span className="font-medium truncate pr-2">{activeEngine.name}</span>
-            <ChevronDown size={16} className={`text-[var(--color-dust)] transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+            <ChevronDown size={16} className={`text-[var(--color-muted)] transition-transform ${isOpen ? 'rotate-180' : ''}`} />
           </button>
 
           {/* Redesigned INLINE progress bar (Task 6) */}
@@ -456,7 +456,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
             return (
               <div className="mt-2 p-2 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md animate-in fade-in duration-200">
                 <div className="flex justify-between items-end mb-1.5">
-                  <span className="text-[10px] font-medium text-[var(--color-dust)] uppercase tracking-wider truncate max-w-[80%]">
+                  <span className="text-[10px] font-medium text-[var(--color-muted)] uppercase tracking-wider truncate max-w-[80%]">
                     {downloadingEngine.name}: {dl.status}
                   </span>
                   <span className="text-xs font-bold text-[var(--color-ink)]">
@@ -465,7 +465,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                 </div>
                 <div className="h-1.5 w-full bg-[var(--color-paper)] rounded-full overflow-hidden">
                   <div 
-                    className="h-full bg-[var(--color-editorial)] transition-all duration-300 ease-out" 
+                    className="h-full bg-[var(--color-accent-fill)] transition-all duration-300 ease-out" 
                     style={{ width: `${dl.progress * 100}%` }}
                   />
                 </div>
@@ -479,7 +479,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                 <>
                   <div className="p-2 border-b border-[var(--color-dust)]">
                     <div className="relative">
-                      <Search size={14} className="absolute left-2 top-1/2 -translate-y-1/2 text-[var(--color-dust)]" />
+                      <Search size={14} className="absolute left-2 top-1/2 -translate-y-1/2 text-[var(--color-muted)]" />
                       <input 
                         type="text" 
                         placeholder="Search models..." 
@@ -514,9 +514,9 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                                 : isAuthRequired
                                   ? 'opacity-40 blur-[0.4px] cursor-not-allowed select-none'
                                   : isGpuDisabledForModel
-                                    ? 'text-[var(--color-dust)] opacity-40 cursor-not-allowed'
+                                    ? 'text-[var(--color-muted)] opacity-40 cursor-not-allowed'
                                     : isUninstalledLocal
-                                      ? 'text-[var(--color-dust)] opacity-50 cursor-not-allowed'
+                                      ? 'text-[var(--color-muted)] opacity-50 cursor-not-allowed'
                                       : 'hover:bg-[var(--color-vellum)] cursor-pointer'
                             }`}
                           >
@@ -575,7 +575,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                         </div>
                       );
                     }) : (
-                      <div className="p-4 text-center text-sm text-[var(--color-dust)]">
+                      <div className="p-4 text-center text-sm text-[var(--color-muted)]">
                         No models found
                       </div>
                     )}
@@ -628,7 +628,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                 || inpaintBaseEngines.find((engine) => engine.id === 'simple')?.name
                 || 'Loading...'}
             </span>
-            <ChevronDown size={16} className={`text-[var(--color-dust)] transition-transform ${isOpenInpaint ? 'rotate-180' : ''}`} />
+            <ChevronDown size={16} className={`text-[var(--color-muted)] transition-transform ${isOpenInpaint ? 'rotate-180' : ''}`} />
           </button>
 
           {/* Redesigned INLINE progress bar for inpainting (Task 6) */}
@@ -639,7 +639,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
             return (
               <div className="mt-2 p-2 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md animate-in fade-in duration-200">
                 <div className="flex justify-between items-end mb-1.5">
-                  <span className="text-[10px] font-medium text-[var(--color-dust)] uppercase tracking-wider truncate max-w-[80%]">
+                  <span className="text-[10px] font-medium text-[var(--color-muted)] uppercase tracking-wider truncate max-w-[80%]">
                     {downloadingInpaint.name}: {dl.status}
                   </span>
                   <span className="text-xs font-bold text-[var(--color-ink)]">
@@ -648,7 +648,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                 </div>
                 <div className="h-1.5 w-full bg-[var(--color-paper)] rounded-full overflow-hidden">
                   <div 
-                    className="h-full bg-[var(--color-editorial)] transition-all duration-300 ease-out" 
+                    className="h-full bg-[var(--color-accent-fill)] transition-all duration-300 ease-out" 
                     style={{ width: `${dl.progress * 100}%` }}
                   />
                 </div>
@@ -675,7 +675,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                         isActive
                           ? 'bg-[var(--color-vellum)] text-[var(--color-editorial)] font-semibold cursor-pointer'
                           : isUninstalled
-                            ? 'text-[var(--color-dust)] opacity-50 cursor-not-allowed'
+                            ? 'text-[var(--color-muted)] opacity-50 cursor-not-allowed'
                             : 'hover:bg-[var(--color-vellum)] cursor-pointer'
                       }`}
                     >
@@ -730,7 +730,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                 || colorBaseEngines.find((engine) => engine.id === 'none')?.name
                 || 'Disabled'}
             </span>
-            <ChevronDown size={16} className={`text-[var(--color-dust)] transition-transform ${isOpenColor ? 'rotate-180' : ''}`} />
+            <ChevronDown size={16} className={`text-[var(--color-muted)] transition-transform ${isOpenColor ? 'rotate-180' : ''}`} />
           </button>
 
           {/* Inline progress bar for color model download */}
@@ -741,7 +741,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
             return (
               <div className="mt-2 p-2 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md animate-in fade-in duration-200">
                 <div className="flex justify-between items-end mb-1.5">
-                  <span className="text-[10px] font-medium text-[var(--color-dust)] uppercase tracking-wider truncate max-w-[80%]">
+                  <span className="text-[10px] font-medium text-[var(--color-muted)] uppercase tracking-wider truncate max-w-[80%]">
                     {downloadingColor.name}: {dl.status}
                   </span>
                   <span className="text-xs font-bold text-[var(--color-ink)]">
@@ -750,7 +750,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                 </div>
                 <div className="h-1.5 w-full bg-[var(--color-paper)] rounded-full overflow-hidden">
                   <div 
-                    className="h-full bg-[var(--color-editorial)] transition-all duration-300 ease-out" 
+                    className="h-full bg-[var(--color-accent-fill)] transition-all duration-300 ease-out" 
                     style={{ width: `${dl.progress * 100}%` }}
                   />
                 </div>
@@ -776,7 +776,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                         isActive
                           ? 'bg-[var(--color-vellum)] text-[var(--color-editorial)] font-semibold cursor-pointer'
                           : isUninstalled
-                            ? 'text-[var(--color-dust)] opacity-50 cursor-not-allowed'
+                            ? 'text-[var(--color-muted)] opacity-50 cursor-not-allowed'
                             : 'hover:bg-[var(--color-vellum)] cursor-pointer'
                       }`}
                     >
@@ -828,7 +828,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                 || ocrBaseEngines.find((engine) => engine.id === 'v6-small')?.name
                 || 'Loading...'}
             </span>
-            <ChevronDown size={16} className={`text-[var(--color-dust)] transition-transform ${isOpenOcr ? 'rotate-180' : ''}`} />
+            <ChevronDown size={16} className={`text-[var(--color-muted)] transition-transform ${isOpenOcr ? 'rotate-180' : ''}`} />
           </button>
 
           {/* Inline progress bar for OCR model download */}
@@ -839,7 +839,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
             return (
               <div className="mt-2 p-2 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md animate-in fade-in duration-200">
                 <div className="flex justify-between items-end mb-1.5">
-                  <span className="text-[10px] font-medium text-[var(--color-dust)] uppercase tracking-wider truncate max-w-[80%]">
+                  <span className="text-[10px] font-medium text-[var(--color-muted)] uppercase tracking-wider truncate max-w-[80%]">
                     {downloadingOcr.name}: {dl.status}
                   </span>
                   <span className="text-xs font-bold text-[var(--color-ink)]">
@@ -848,7 +848,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                 </div>
                 <div className="h-1.5 w-full bg-[var(--color-paper)] rounded-full overflow-hidden">
                   <div 
-                    className="h-full bg-[var(--color-editorial)] transition-all duration-300 ease-out" 
+                    className="h-full bg-[var(--color-accent-fill)] transition-all duration-300 ease-out" 
                     style={{ width: `${dl.progress * 100}%` }}
                   />
                 </div>
@@ -874,7 +874,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                         isActive 
                           ? 'bg-[var(--color-vellum)] text-[var(--color-editorial)] font-semibold cursor-pointer' 
                           : isUninstalled
-                            ? 'text-[var(--color-dust)] opacity-50 cursor-not-allowed'
+                            ? 'text-[var(--color-muted)] opacity-50 cursor-not-allowed'
                             : 'hover:bg-[var(--color-vellum)] cursor-pointer'
                       }`}
                     >
@@ -939,7 +939,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                       ? 'Heuristic'
                       : 'Disabled'}
                 </span>
-                <ChevronDown size={16} className={`text-[var(--color-dust)] transition-transform ${isOpenBubbleMode ? 'rotate-180' : ''}`} />
+                <ChevronDown size={16} className={`text-[var(--color-muted)] transition-transform ${isOpenBubbleMode ? 'rotate-180' : ''}`} />
               </button>
 
               {/* Inline progress bar for YOLO bubble detector download */}
@@ -949,7 +949,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                 return (
                   <div className="mt-2 p-2 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md animate-in fade-in duration-200">
                     <div className="flex justify-between items-end mb-1.5">
-                      <span className="text-[10px] font-medium text-[var(--color-dust)] uppercase tracking-wider truncate max-w-[80%]">
+                      <span className="text-[10px] font-medium text-[var(--color-muted)] uppercase tracking-wider truncate max-w-[80%]">
                         YOLO Bubble: {dl.status}
                       </span>
                       <span className="text-xs font-bold text-[var(--color-ink)]">
@@ -958,7 +958,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                     </div>
                     <div className="h-1.5 w-full bg-[var(--color-paper)] rounded-full overflow-hidden">
                       <div 
-                        className="h-full bg-[var(--color-editorial)] transition-all duration-300 ease-out" 
+                        className="h-full bg-[var(--color-accent-fill)] transition-all duration-300 ease-out" 
                         style={{ width: `${dl.progress * 100}%` }}
                       />
                     </div>
@@ -986,7 +986,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                             isActive
                               ? 'bg-[var(--color-vellum)] text-[var(--color-editorial)] font-semibold cursor-pointer'
                               : isUninstalled
-                                ? 'text-[var(--color-dust)] opacity-50 cursor-not-allowed'
+                                ? 'text-[var(--color-muted)] opacity-50 cursor-not-allowed'
                                 : 'hover:bg-[var(--color-vellum)] cursor-pointer'
                           }`}
                         >
@@ -1062,11 +1062,11 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
           <button
             type="button"
             onClick={() => setIsOpenFontOptions(!isOpenFontOptions)}
-            className="flex items-center gap-1.5 text-xs text-[var(--color-dust)] hover:text-[var(--color-ink)] transition-colors cursor-pointer py-1 self-start"
+            className="flex items-center gap-1.5 text-xs text-[var(--color-muted)] hover:text-[var(--color-ink)] transition-colors cursor-pointer py-1 self-start"
           >
             <ChevronRight
               size={13}
-              className={`transition-transform duration-200 text-[var(--color-dust)] ${isOpenFontOptions ? 'rotate-90' : ''}`}
+              className={`transition-transform duration-200 text-[var(--color-muted)] ${isOpenFontOptions ? 'rotate-90' : ''}`}
             />
             <span>Text Rendering Options</span>
             {(state.renderFontBold || state.renderFontItalic || state.renderFontStrokeDisabled || (state.renderFontAlignment && state.renderFontAlignment !== 'auto') || (state.renderFontMinSize && state.renderFontMinSize !== 6)) && (
@@ -1088,7 +1088,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                   className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer border ${
                     state.renderFontBold
                       ? 'bg-[var(--color-paper)] border-[var(--color-editorial)] text-[var(--color-editorial)] shadow-xs'
-                      : 'bg-transparent border-[var(--color-dust)] text-[var(--color-dust)] hover:border-[var(--color-ink)] hover:text-[var(--color-ink)]'
+                      : 'bg-transparent border-[var(--color-dust)] text-[var(--color-muted)] hover:border-[var(--color-ink)] hover:text-[var(--color-ink)]'
                   }`}
                 >
                   <Bold size={13} className={state.renderFontBold ? 'stroke-[2.5]' : 'stroke-[2]'} />
@@ -1103,7 +1103,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                   className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer border ${
                     state.renderFontItalic
                       ? 'bg-[var(--color-paper)] border-[var(--color-editorial)] text-[var(--color-editorial)] shadow-xs'
-                      : 'bg-transparent border-[var(--color-dust)] text-[var(--color-dust)] hover:border-[var(--color-ink)] hover:text-[var(--color-ink)]'
+                      : 'bg-transparent border-[var(--color-dust)] text-[var(--color-muted)] hover:border-[var(--color-ink)] hover:text-[var(--color-ink)]'
                   }`}
                 >
                   <Italic size={13} className={state.renderFontItalic ? 'stroke-[2.5]' : 'stroke-[2]'} />
@@ -1118,7 +1118,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                   className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer border ${
                     state.renderFontStrokeDisabled
                       ? 'bg-[var(--color-paper)] border-[var(--color-editorial)] text-[var(--color-editorial)] shadow-xs'
-                      : 'bg-transparent border-[var(--color-dust)] text-[var(--color-dust)] hover:border-[var(--color-ink)] hover:text-[var(--color-ink)]'
+                      : 'bg-transparent border-[var(--color-dust)] text-[var(--color-muted)] hover:border-[var(--color-ink)] hover:text-[var(--color-ink)]'
                   }`}
                 >
                   <span>Disable Stroke</span>
@@ -1127,7 +1127,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
 
               {/* Row 2: Text Alignment (Auto | Left | Center | Right) */}
               <div className="flex items-center justify-between">
-                <span className="text-xs text-[var(--color-dust)] font-medium">Text Alignment</span>
+                <span className="text-xs text-[var(--color-muted)] font-medium">Text Alignment</span>
                 <div className="flex items-center rounded-md border border-[var(--color-dust)] bg-[var(--color-paper)] p-0.5">
                   {(['auto', 'left', 'center', 'right'] as const).map((align) => {
                     const activeAlign = state.renderFontAlignment || 'auto';
@@ -1139,8 +1139,8 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                         onClick={() => updateState({ renderFontAlignment: align })}
                         className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors cursor-pointer ${
                           isSelected
-                            ? 'bg-[var(--color-editorial)] text-white shadow-xs'
-                            : 'text-[var(--color-dust)] hover:text-[var(--color-ink)]'
+                            ? 'bg-[var(--color-accent-fill)] text-white shadow-xs'
+                            : 'text-[var(--color-muted)] hover:text-[var(--color-ink)]'
                         }`}
                       >
                         {align === 'auto' ? 'Auto' : align === 'left' ? <AlignLeft size={12} /> : align === 'center' ? <AlignCenter size={12} /> : <AlignRight size={12} />}
@@ -1152,7 +1152,7 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
 
               {/* Row 3: Minimum Font Size */}
               <div className="flex items-center justify-between gap-3">
-                <span className="text-xs text-[var(--color-dust)] font-medium shrink-0">Min Font Size</span>
+                <span className="text-xs text-[var(--color-muted)] font-medium shrink-0">Min Font Size</span>
                 <div className="flex items-center gap-2 flex-1 max-w-[170px]">
                   <input
                     type="range"

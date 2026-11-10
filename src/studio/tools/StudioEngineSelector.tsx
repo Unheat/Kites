@@ -165,7 +165,7 @@ export const StudioEngineSelector: React.FC<StudioEngineSelectorProps> = ({ cate
           }
           className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium transition cursor-pointer ${
             syncWithGlobal
-              ? 'bg-[#f4446d]/15 text-[#f4446d] border border-[#f4446d]/40'
+              ? 'bg-[#d23360]/15 text-[#e85c82] border border-[#e85c82]/40'
               : 'bg-[#181a24] text-slate-400 border border-[#282d3f] hover:text-slate-200'
           }`}
         >
@@ -213,7 +213,7 @@ export const StudioEngineSelector: React.FC<StudioEngineSelectorProps> = ({ cate
                   }}
                   className={`p-2 rounded-lg transition flex flex-col gap-1.5 ${
                     isSelected
-                      ? 'bg-[#f4446d]/15 border border-[#f4446d]/40 text-slate-100'
+                      ? 'bg-[#d23360]/15 border border-[#e85c82]/40 text-slate-100'
                       : isDownloaded
                       ? 'hover:bg-[#1a1d29] text-slate-300 cursor-pointer'
                       : 'bg-[#0e1017] opacity-85 text-slate-400'
@@ -222,7 +222,7 @@ export const StudioEngineSelector: React.FC<StudioEngineSelectorProps> = ({ cate
                   {/* Row 1: Check icon + Model Name */}
                   <div className="flex items-center gap-2 min-w-0 w-full">
                     {isSelected ? (
-                      <Check className="w-3.5 h-3.5 text-[#f4446d] shrink-0" />
+                      <Check className="w-3.5 h-3.5 text-[#e85c82] shrink-0" />
                     ) : (
                       <div className="w-3.5 h-3.5 shrink-0" />
                     )}
@@ -245,7 +245,7 @@ export const StudioEngineSelector: React.FC<StudioEngineSelectorProps> = ({ cate
                           type="button"
                           disabled={Boolean(isDownloading)}
                           onClick={(e) => triggerDownload(e, opt.id)}
-                          className="flex items-center gap-1 px-2 py-0.5 rounded bg-[#f4446d] hover:bg-[#e0335c] text-white text-[10px] font-medium shadow transition cursor-pointer disabled:opacity-50"
+                          className="flex items-center gap-1 px-2 py-0.5 rounded bg-[#d23360] hover:bg-[#bb2952] text-white text-[10px] font-medium shadow transition cursor-pointer disabled:opacity-50"
                         >
                           <Download className="w-2.5 h-2.5" />
                           <span>{isDownloading ? 'Downloading...' : opt.sizeEstimate || 'Get'}</span>
@@ -265,7 +265,7 @@ export const StudioEngineSelector: React.FC<StudioEngineSelectorProps> = ({ cate
                       </div>
                       <div className="w-full h-1.5 rounded-full bg-[#1e2333] overflow-hidden">
                         <div
-                          className="h-full bg-gradient-to-r from-[#f4446d] to-[#ff6b8b] transition-all duration-200"
+                          className="h-full bg-gradient-to-r from-[#d23360] to-[#f0819e] transition-all duration-200"
                           style={{ width: `${Math.round(downloadInfo.progress * 100)}%` }}
                         />
                       </div>

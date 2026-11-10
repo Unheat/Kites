@@ -109,7 +109,7 @@ export const AddFromLibraryModal: React.FC<AddFromLibraryModalProps> = ({
         {/* Header */}
         <div className="h-14 px-5 border-b border-[#262a3b] bg-[#141724] flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2">
-            <Layers className="w-4 h-4 text-[#f4446d]" />
+            <Layers className="w-4 h-4 text-[#e85c82]" />
             <h3 className="text-sm font-semibold text-slate-100">Add Pages from Library</h3>
             <span className="text-xs text-slate-500 font-medium">({filtered.length} available)</span>
           </div>
@@ -131,7 +131,7 @@ export const AddFromLibraryModal: React.FC<AddFromLibraryModalProps> = ({
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search by URL, site, or job ID..."
-              className="w-full h-8 pl-8 pr-3 text-xs rounded-lg bg-[#090a0f] border border-[#262a3b] text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-[#f4446d]"
+              className="w-full h-8 pl-8 pr-3 text-xs rounded-lg bg-[#090a0f] border border-[#262a3b] text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-[#e85c82]"
             />
           </div>
 
@@ -141,7 +141,7 @@ export const AddFromLibraryModal: React.FC<AddFromLibraryModalProps> = ({
               onClick={() => setShowUnassignedOnly((v) => !v)}
               className={`px-2.5 py-1 text-xs font-medium rounded-lg border transition cursor-pointer ${
                 showUnassignedOnly
-                  ? 'bg-[#f4446d]/15 border-[#f4446d]/50 text-[#f4446d]'
+                  ? 'bg-[#d23360]/15 border-[#e85c82]/50 text-[#e85c82]'
                   : 'bg-[#090a0f] border-[#262a3b] text-slate-400 hover:text-white'
               }`}
             >
@@ -170,7 +170,7 @@ export const AddFromLibraryModal: React.FC<AddFromLibraryModalProps> = ({
                     onClick={() => job.id && toggleSelect(job.id)}
                     className={`group relative flex flex-col rounded-xl overflow-hidden border cursor-pointer transition select-none ${
                       isSelected
-                        ? 'border-[#f4446d] bg-[#f4446d]/10 ring-2 ring-[#f4446d]/30'
+                        ? 'border-[#e85c82] bg-[#d23360]/10 ring-2 ring-[#e85c82]/30'
                         : 'border-[#262a3b] bg-[#161924] hover:border-slate-500'
                     }`}
                   >
@@ -186,7 +186,7 @@ export const AddFromLibraryModal: React.FC<AddFromLibraryModalProps> = ({
                       <div
                         className={`absolute top-2 right-2 w-5 h-5 rounded-md flex items-center justify-center transition ${
                           isSelected
-                            ? 'bg-[#f4446d] text-white shadow-md'
+                            ? 'bg-[#d23360] text-white shadow-md'
                             : 'bg-black/50 text-transparent border border-white/30 group-hover:border-white'
                         }`}
                       >
@@ -230,7 +230,7 @@ export const AddFromLibraryModal: React.FC<AddFromLibraryModalProps> = ({
               type="button"
               disabled={selectedIds.size === 0 || isSubmitting}
               onClick={handleConfirmAdd}
-              className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold rounded-lg bg-[#f4446d] hover:bg-[#e0335c] disabled:opacity-40 disabled:pointer-events-none text-white shadow-md shadow-[rgba(244,68,109,0.25)] transition cursor-pointer"
+              className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold rounded-lg bg-[#d23360] hover:bg-[#bb2952] disabled:opacity-40 disabled:pointer-events-none text-white shadow-md shadow-[rgba(210, 51, 96,0.25)] transition cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Add to Project</span>

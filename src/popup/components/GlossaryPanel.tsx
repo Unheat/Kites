@@ -72,7 +72,7 @@ export default function GlossaryPanel({
       {/* Header with toggle and close */}
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
-          <BookOpen size={16} className="text-[var(--color-dust)]" />
+          <BookOpen size={16} className="text-[var(--color-muted)]" />
           <span className="font-medium text-sm">Translation Glossary</span>
           <HelpTooltip
             size="sm"
@@ -80,7 +80,7 @@ export default function GlossaryPanel({
               <>
                 Map source terms to preferred translations for WebLLM, Custom API, and Shared Pool.
                 LLMs may not always follow these preferences. Google Translate does not support glossary in Kites.
-                <span className="block mt-1 text-[var(--color-dust)]">
+                <span className="block mt-1 text-[var(--color-muted)]">
                   When using Custom API or Shared Pool, glossary terms are included in translation prompts sent to the respective cloud provider. Do not add sensitive data.
                 </span>
               </>
@@ -121,13 +121,13 @@ export default function GlossaryPanel({
               <span className="flex-1 truncate font-medium" title={entry.source}>
                 {entry.source}
               </span>
-              <span className="text-[var(--color-dust)]">&rarr;</span>
+              <span className="text-[var(--color-muted)]">&rarr;</span>
               <span className="flex-1 truncate" title={entry.target}>
                 {entry.target}
               </span>
               <button
                 onClick={() => handleRemove(index)}
-                className="p-0.5 hover:bg-red-100 dark:hover:bg-red-900 rounded cursor-pointer text-[var(--color-dust)] hover:text-red-500 transition-colors"
+                className="p-0.5 hover:bg-red-100 dark:hover:bg-red-900 rounded cursor-pointer text-[var(--color-muted)] hover:text-red-500 transition-colors"
                 title="Remove entry"
               >
                 <Trash2 size={12} />
@@ -140,7 +140,7 @@ export default function GlossaryPanel({
       {/* Add new entry row */}
       <div className="flex gap-1.5 items-end">
         <div className="flex-1">
-          <label className="text-[10px] text-[var(--color-dust)] block mb-0.5">Source</label>
+          <label className="text-[10px] text-[var(--color-muted)] block mb-0.5">Source</label>
           <input
             type="text"
             aria-label="Source"
@@ -152,7 +152,7 @@ export default function GlossaryPanel({
           />
         </div>
         <div className="flex-1">
-          <label className="text-[10px] text-[var(--color-dust)] block mb-0.5">Preferred</label>
+          <label className="text-[10px] text-[var(--color-muted)] block mb-0.5">Preferred</label>
           <input
             type="text"
             aria-label="Preferred"
@@ -166,7 +166,7 @@ export default function GlossaryPanel({
         <button
           onClick={handleAdd}
           disabled={atCapacity || !draftSource.trim() || !draftTarget.trim()}
-          className="p-1.5 bg-[var(--color-editorial)] text-white rounded hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-opacity"
+          className="p-1.5 bg-[var(--color-accent-fill)] text-white rounded hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-opacity"
           title={atCapacity ? `Maximum ${MAX_GLOSSARY_ENTRIES} entries reached` : 'Add glossary entry'}
         >
           <Plus size={14} />
@@ -175,7 +175,7 @@ export default function GlossaryPanel({
 
       {/* Capacity indicator */}
       {entries.length > 0 && (
-        <p className="text-[10px] text-[var(--color-dust)] mt-1.5 text-right">
+        <p className="text-[10px] text-[var(--color-muted)] mt-1.5 text-right">
           {entries.length}/{MAX_GLOSSARY_ENTRIES} entries
         </p>
       )}
