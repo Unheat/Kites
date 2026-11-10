@@ -155,6 +155,7 @@ graph TD
 
 ### 3. Custom API & Google Translate
 - Direct user-configured endpoints supporting OpenAI GPT-4o, Anthropic Claude 3.5 Sonnet, and Google Gemini 1.5 Pro.
+- Per-profile structured-output tier (`prompt-only`, `json-object`, `json-schema`). The tier is auto-detected from the endpoint host and can be overridden per profile; OpenAI-shaped endpoints send it as `response_format`, and an endpoint that answers 400 is downgraded to `prompt-only` once per engine instance instead of failing the page. Anthropic and Gemini are pinned to `prompt-only` because this engine does not send their provider-specific schema fields. See [devlog 093](../dev-history/devlog/093_phase93_custom_api_structured_output_tiers.md).
 - Built-in Google Translate fallback for instant, zero-configuration setup.
 
 ---
