@@ -112,6 +112,13 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
   protected lastParsedKeys = new Set<string>();
 
   /**
+   * Whether the most recent completion was cut off by the provider's token budget.
+   * Only used to explain a strict-parse failure: a truncated reply is not a hallucination.
+   * Reset before every request so a previous batch cannot mislabel a later one.
+   */
+  protected lastCompletionTruncated = false;
+
+  /**
    * Resolves the effective custom prompt for this engine request.
    * Subclasses (e.g. WebLLMEngine) can override to enforce strict token budgets.
    *
@@ -191,28 +198,43 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
       const rawMaxTokens = maxTokensForBatch(chunk.map((s) => s.text));
       const maxTokens = Math.min(rawMaxTokens, maxAvailableOutput);
 
+      this.lastCompletionTruncated = false;
+
       const rawOutput = await this.requestLlm(prompt, messages, schema, undefined, maxTokens);
       const { translations: parsedChunk, parsedKeys } = this.parseKeyedOutputWithMetadata(rawOutput, chunk);
       this.lastParsedKeys = new Set(parsedKeys);
 
-      const droppedByModel = chunk.filter((segment, idx) => {
+      // Report slot loss honestly: an omitted key is data loss, while a verbatim echo is the model
+      // copying a line it judged untranslatable (which the system prompt explicitly permits).
+      const missingKeys: string[] = [];
+      const echoedKeys: string[] = [];
+      for (let idx = 0; idx < chunk.length; idx++) {
         const key = `b${idx}`;
-        const keyWasProvided = parsedKeys.has(key);
-        if (!keyWasProvided) return true; // Truly omitted by model
-        if (parsedChunk[idx] !== segment.text) return false;
-        // Text is identical to source. If it possessed native script for a non-Latin source,
-        // it means the LLM regurgitated it without translation (verbatim echo).
-        return hasNativeScriptForLang(segment.text, sourceLangId);
-      }).length;
+        if (!parsedKeys.has(key)) {
+          missingKeys.push(key);
+          continue;
+        }
+        // Identical to source AND carrying the source script means the line was not translated.
+        // Slots that legitimately need no translation (already-target-language, symbols) fail the
+        // native-script test and are therefore never counted here.
+        if (parsedChunk[idx] === chunk[idx].text && hasNativeScriptForLang(chunk[idx].text, sourceLangId)) {
+          echoedKeys.push(key);
+        }
+      }
       for (let j = 0; j < chunk.length; j++) {
         const cleaned = cleanTranslatedLine(parsedChunk[j] || '');
         results[chunk[j].originalIndex] = cleaned;
       }
-      const dropRatio = droppedByModel / chunk.length;
-      if (droppedByModel > 0) {
+      if (missingKeys.length > 0) {
         console.warn(
-          `[BaseLlmTranslationEngine] Model dropped or echoed ${droppedByModel}/${chunk.length} lines (${(dropRatio * 100).toFixed(1)}%). ` +
-          `Yielding available model translations with original source fallback for untranslated slots.`
+          `[BaseLlmTranslationEngine] Model omitted ${missingKeys.length}/${chunk.length} slots ` +
+          `(${missingKeys.join(', ')}); those lines keep their source text.`
+        );
+      }
+      if (echoedKeys.length > 0) {
+        console.warn(
+          `[BaseLlmTranslationEngine] Model echoed ${echoedKeys.length}/${chunk.length} slots back ` +
+          `unchanged (${echoedKeys.join(', ')}); those lines keep their source text.`
         );
       }
     }
@@ -431,6 +453,24 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
   }
 
   /**
+   * Builds a strict-parse failure, naming truncation when the provider cut the reply short.
+   *
+   * A reply stopped at the token ceiling is not a hallucination: the JSON was cut mid-object, so the
+   * error must point at the completion budget instead of sending the user hunting for a bad model.
+   *
+   * @param detail - Base failure description.
+   * @returns Error ready to throw.
+   */
+  private buildStrictParseError(detail: string): Error {
+    if (!this.lastCompletionTruncated) return new Error(detail);
+    return new Error(
+      `${detail} The provider reported a truncated completion: the reply hit the completion token ` +
+      `ceiling (reasoning models spend that budget on thinking before emitting JSON), so the JSON ` +
+      `was cut off rather than malformed.`
+    );
+  }
+
+  /**
    * Thread-safe Keyed JSON parser returning translations along with parsed slot keys.
    * Protects against mutable lastParsedKeys race conditions across concurrent requests.
    *
@@ -500,7 +540,7 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
     // Under strictKeyedParsing, malformed keyed output must NOT fall through to loose regex/position parsing!
     if (!parsedSuccessfully && looksLikeKeyedJson && this.strictKeyedParsing) {
       if (this.throwOnCountMismatch) {
-        throw new Error(
+        throw this.buildStrictParseError(
           `Keyed parsing failed for chunk: malformed JSON output under strict policy. Expected ${chunk.length} keys.`
         );
       }
@@ -527,7 +567,7 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
     if (parsedMap.size === 0) {
       if (this.strictKeyedParsing && looksLikeKeyedJson) {
         if (this.throwOnCountMismatch) {
-          throw new Error(
+          throw this.buildStrictParseError(
             `Keyed parsing failed for chunk. Expected ${chunk.length} keys, got 0. Model hallucinated.`
           );
         }
@@ -553,7 +593,7 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
     const parsedKeys = new Set(parsedMap.keys());
 
     if (this.throwOnCountMismatch && parsedMap.size < chunk.length) {
-      throw new Error(
+      throw this.buildStrictParseError(
         `Keyed parsing failed for chunk. Expected ${chunk.length} keys, got ${parsedMap.size}. Model hallucinated.`
       );
     }

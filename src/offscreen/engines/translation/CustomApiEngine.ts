@@ -365,7 +365,8 @@ export class CustomApiEngine extends BaseLlmTranslationEngine {
    * @param maxTokens - Token ceiling that was requested, when one was sent.
    */
   private logFinishReason(finishReason: string, maxTokens: number | undefined): void {
-    if (finishReason === 'length') {
+    this.lastCompletionTruncated = finishReason === 'length';
+    if (this.lastCompletionTruncated) {
       console.warn(
         `[CustomApiEngine] Generation hit the completion token limit (${maxTokens ?? 'provider default'}). Output may be truncated.`
       );

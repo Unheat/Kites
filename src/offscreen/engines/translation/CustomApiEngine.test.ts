@@ -333,6 +333,40 @@ describe('CustomApiEngine', () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
+  it('reports echoed slots separately from missing ones instead of implying data loss', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({
+      choices: [{
+        index: 0,
+        // b0 is untranslatable OCR noise the prompt permits copying; b1 was translated.
+        message: { role: 'assistant', content: JSON.stringify({ b0: '棋地臥兆面提态', b1: 'monde' }) },
+        finish_reason: 'stop',
+      }],
+    }));
+    const engine = await createEngine();
+
+    await expect(engine.translate(['棋地臥兆面提态', 'world'], 'zh', 'en')).resolves.toEqual(['棋地臥兆面提态', 'monde']);
+    const logged = warn.mock.calls.map((call) => String(call[0])).join('\n');
+    expect(logged).toContain('echoed 1/2 slots back unchanged (b0)');
+    expect(logged).not.toContain('omitted');
+  });
+
+  it('names truncation, not hallucination, when the reply was cut off mid-JSON', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({
+      choices: [{
+        index: 0,
+        message: { role: 'assistant', content: '{"b0":"bonjour","b1":' },
+        finish_reason: 'length',
+      }],
+    }));
+    const engine = await createEngine();
+
+    const error = await engine.translate(['hello', 'world'], 'en', 'fr').catch((caught) => caught);
+    expect((error as Error).message).toContain('Keyed parsing failed');
+    expect((error as Error).message).toContain('truncated completion');
+  });
+
   it('does not downgrade on server errors, only on parameter rejections', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch')
       .mockImplementation(async () => jsonResponse({ error: { message: 'upstream down' } }, 503));
