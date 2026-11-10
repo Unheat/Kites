@@ -1,6 +1,22 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { CustomApiConfig } from '../../shared/types';
-import { validateCompatibleBaseUrl } from '../../shared/customApi';
+import {
+  STRUCTURED_OUTPUT_MODES,
+  detectStructuredOutputMode,
+  supportsStructuredOutputSelection,
+  validateCompatibleBaseUrl,
+  type StructuredOutputModeId,
+} from '../../shared/customApi';
+
+/**
+ * Matches upstream rejections caused by the structured-output request fields themselves, so the
+ * inline error can name the exact control the user has to change.
+ */
+const STRUCTURED_OUTPUT_REJECTION_PATTERN = /response_format|json_schema|json_object|structured output/i;
+
+/** Appended to a rejection error so the fix is actionable without reading provider docs. */
+const STRUCTURED_OUTPUT_REJECTION_HINT =
+  ' This endpoint rejected structured output; switch Output Constraints to JSON Object or Prompt Only and retry.';
 
 interface AddApiFormProps {
   onSave: (api: CustomApiConfig) => void;
@@ -16,6 +32,17 @@ export default function AddApiForm({ onSave, onCancel }: AddApiFormProps) {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [validationError, setValidationError] = useState('');
   const [isValidating, setIsValidating] = useState(false);
+  // null means "follow detection"; any id means the user pinned that tier for this form session.
+  const [outputModeOverride, setOutputModeOverride] = useState<StructuredOutputModeId | null>(null);
+
+  const showOutputModeControl = supportsStructuredOutputSelection(provider);
+  const detectedOutputMode = useMemo(
+    () => detectStructuredOutputMode(provider, newBaseUrl),
+    [provider, newBaseUrl]
+  );
+  const effectiveOutputMode = outputModeOverride ?? detectedOutputMode;
+  const effectiveOutputModeEntry = STRUCTURED_OUTPUT_MODES.find((mode) => mode.id === effectiveOutputMode)
+    ?? STRUCTURED_OUTPUT_MODES[0];
 
   /**
    * Validates the provider fields, tests the connection via offscreen, and saves on success.
@@ -44,6 +71,7 @@ export default function AddApiForm({ onSave, onCancel }: AddApiFormProps) {
       apiKey: newApiKey.trim(),
       ...(compatibleBaseUrl?.normalized ? { baseUrl: compatibleBaseUrl.normalized } : {}),
       ...(trimmedCustomPrompt ? { customPrompt: trimmedCustomPrompt } : {}),
+      ...(showOutputModeControl ? { outputMode: effectiveOutputMode } : {}),
     };
 
     setIsValidating(true);
@@ -69,7 +97,12 @@ export default function AddApiForm({ onSave, onCancel }: AddApiFormProps) {
       if (response.status === 'success') {
         onSave(newApi);
       } else {
-        setValidationError(response.error || 'Failed to connect to API with provided credentials.');
+        const message = response.error || 'Failed to connect to API with provided credentials.';
+        setValidationError(
+          STRUCTURED_OUTPUT_REJECTION_PATTERN.test(message)
+            ? `${message}${STRUCTURED_OUTPUT_REJECTION_HINT}`
+            : message
+        );
       }
     } catch (err: any) {
       setValidationError(err?.message || 'Error validating custom API.');
@@ -122,6 +155,55 @@ export default function AddApiForm({ onSave, onCancel }: AddApiFormProps) {
             disabled={isValidating}
             className="w-full p-2 text-sm bg-[var(--color-paper)] border border-[var(--color-dust)] rounded focus:outline-none focus:border-[var(--color-ink)] transition-colors placeholder:text-[var(--color-muted)]"
           />
+        </div>
+      )}
+
+      {showOutputModeControl && (
+        <div>
+          <div className="flex items-baseline justify-between mb-1 gap-2">
+            <label className="text-xs font-semibold text-[var(--color-muted)] uppercase">Output Constraints</label>
+            {outputModeOverride === null ? (
+              <span className="text-[11px] text-[var(--color-muted)] truncate">
+                Auto-detected: {effectiveOutputModeEntry.label}
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setOutputModeOverride(null)}
+                disabled={isValidating}
+                className="text-[11px] text-[var(--color-editorial)] hover:underline shrink-0 cursor-pointer disabled:opacity-50"
+              >
+                Manual · reset to auto
+              </button>
+            )}
+          </div>
+          <div role="group" aria-label="Output constraints" className="grid grid-cols-3 gap-1">
+            {STRUCTURED_OUTPUT_MODES.map((mode) => {
+              const selected = mode.id === effectiveOutputMode;
+              return (
+                <button
+                  key={mode.id}
+                  type="button"
+                  aria-pressed={selected}
+                  disabled={isValidating}
+                  onClick={() => {
+                    setOutputModeOverride(mode.id);
+                    setValidationError('');
+                  }}
+                  className={`py-1.5 text-xs font-semibold rounded border transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
+                    selected
+                      ? 'bg-[var(--color-ink)] text-[var(--color-paper)] border-[var(--color-ink)]'
+                      : 'bg-[var(--color-paper)] text-[var(--color-ink)] border-[var(--color-dust)] hover:bg-[var(--color-dust)]'
+                  }`}
+                >
+                  {mode.label}
+                </button>
+              );
+            })}
+          </div>
+          <p className="mt-1 text-[11px] text-[var(--color-muted)] leading-tight">
+            {effectiveOutputModeEntry.description}
+          </p>
         </div>
       )}
 

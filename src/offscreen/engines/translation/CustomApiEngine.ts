@@ -1,10 +1,14 @@
 import { generateText, type ModelMessage } from 'ai';
-import { createOpenAI } from '@ai-sdk/openai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import type { CustomApiConfig } from '../../../shared/types';
+import { resolveStructuredOutputMode, type StructuredOutputModeId } from '../../../shared/customApi';
 import type { TranslationOptions } from './BaseEngine';
 import { BaseLlmTranslationEngine, type LlmChatMessage } from './BaseLlmTranslationEngine';
+import {
+  requestStructuredChatCompletion,
+  StructuredOutputUnsupportedError,
+} from './structuredOutputClient';
 
 /** Network request timeout in milliseconds */
 const REQUEST_TIMEOUT_MS = 45_000;
@@ -14,6 +18,12 @@ const MAX_ATTEMPTS = 2;
 
 /** Default batch size for custom API requests (dense pages fit in 1 pass) */
 export const DEFAULT_CUSTOM_API_BATCH_SIZE = 25;
+
+/** Fixed OpenAI chat-completions root used when the profile provider is first-party OpenAI. */
+export const OPENAI_API_ROOT = 'https://api.openai.com/v1';
+
+/** OpenRouter host suffix used to attach `provider.require_parameters` for schema requests. */
+const OPENROUTER_HOST_SUFFIX = 'openrouter.ai';
 
 /** Default token floor for custom API completions ensuring large batches and reasoning models have room */
 export const CUSTOM_API_DEFAULT_MAX_TOKENS = 4096;
@@ -28,6 +38,11 @@ export const CUSTOM_API_DEFAULT_MAX_TOKENS = 4096;
 export class CustomApiEngine extends BaseLlmTranslationEngine {
   private initialized = false;
   private readonly config: CustomApiConfig;
+  /**
+   * Set once an endpoint answers 400 to a structured request. Retrying the structured tier on
+   * every later batch of the same engine instance would spend a doomed round-trip per page.
+   */
+  private structuredOutputDegraded = false;
 
   /**
    * Creates a remote translation engine from a saved custom API configuration.
@@ -121,28 +136,15 @@ export class CustomApiEngine extends BaseLlmTranslationEngine {
   }
 
   /**
-   * Resolves the appropriate Vercel AI SDK LanguageModel instance based on configured provider.
+   * Resolves the Vercel AI SDK model for the providers this engine does not call over raw HTTP.
    *
-   * @returns LanguageModelV1 instance ready for generation.
+   * Anthropic Messages and Google generateContent cannot carry `response_format`, so they are
+   * pinned to `prompt-only` and keep using the SDK transport.
+   *
+   * @returns AI SDK model instance ready for generation.
    */
   private getLanguageModel() {
     switch (this.config.provider) {
-      case 'openai': {
-        const openai = createOpenAI({ apiKey: this.config.apiKey });
-        return openai.chat(this.config.modelName);
-      }
-      case 'openai-compatible': {
-        const baseURL = this.getCompatibleApiRoot();
-        const customOpenAi = createOpenAI({
-          baseURL,
-          apiKey: this.config.apiKey,
-          headers: {
-            'HTTP-Referer': 'https://kites.ai',
-            'X-Title': 'Kites Manga Translator',
-          },
-        });
-        return customOpenAi.chat(this.config.modelName);
-      }
       case 'claude': {
         const anthropic = createAnthropic({ apiKey: this.config.apiKey });
         return anthropic(this.config.modelName);
@@ -152,8 +154,18 @@ export class CustomApiEngine extends BaseLlmTranslationEngine {
         return google(this.config.modelName);
       }
       default:
-        throw new Error(`Unsupported Custom API provider: ${this.config.provider}`);
+        throw new Error(`Unsupported Custom API SDK provider: ${this.config.provider}`);
     }
+  }
+
+  /**
+   * Resolves the structured-output tier this engine must request right now.
+   *
+   * @returns The configured tier, or `prompt-only` once the endpoint has rejected structured output.
+   */
+  private resolveOutputMode(): StructuredOutputModeId {
+    if (this.structuredOutputDegraded) return 'prompt-only';
+    return resolveStructuredOutputMode(this.config.provider, this.config.baseUrl, this.config.outputMode);
   }
 
   /**
@@ -161,7 +173,7 @@ export class CustomApiEngine extends BaseLlmTranslationEngine {
    *
    * @param prompt - The assembled batch prompt string fallback.
    * @param messages - Optional structured ChatMessage array.
-   * @param _schema - Optional strict JSON schema.
+   * @param schema - Strict keyed JSON schema for this batch's b0..bN slots.
    * @param signal - Optional AbortSignal.
    * @param maxTokens - Optional maximum tokens allowed.
    * @returns Raw response content from the remote provider.
@@ -169,7 +181,7 @@ export class CustomApiEngine extends BaseLlmTranslationEngine {
   protected async requestLlm(
     prompt: string,
     messages?: LlmChatMessage[],
-    _schema?: Record<string, unknown>,
+    schema?: Record<string, unknown>,
     signal?: AbortSignal,
     maxTokens?: number
   ): Promise<string> {
@@ -177,40 +189,146 @@ export class CustomApiEngine extends BaseLlmTranslationEngine {
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+      const abortHandler = () => controller.abort();
       if (signal) {
-        signal.addEventListener('abort', () => controller.abort());
+        signal.addEventListener('abort', abortHandler);
       }
 
       try {
-        return await this.requestProvider(prompt, messages, controller.signal, maxTokens);
+        return await this.requestProvider(prompt, messages, schema, controller.signal, maxTokens);
       } catch (error) {
         lastError = error;
         if (attempt === MAX_ATTEMPTS || !this.isTransientFailure(error)) throw error;
         console.warn(`[CustomApiEngine] Transient failure on attempt ${attempt}; retrying...`);
       } finally {
         clearTimeout(timeout);
+        // Each attempt registers its own listener; leaving it attached leaks one closure per retry
+        // and keeps aborting an already-settled request.
+        if (signal) {
+          signal.removeEventListener('abort', abortHandler);
+        }
       }
     }
     throw lastError;
   }
 
   /**
-   * Routes prompt or structured messages to the corresponding provider client using Vercel AI SDK.
-   * Enforces a safe token floor so both standard and reasoning models have ample completion headroom.
+   * Routes a batch to the transport its provider needs, enforcing the completions token floor.
    *
    * @param prompt - Prompt string.
    * @param messages - Optional structured ChatMessage array.
+   * @param schema - Strict keyed JSON schema for this batch.
    * @param signal - AbortSignal.
    * @param maxTokens - Optional maximum tokens allowed.
    * @returns Provider response text.
    */
   private async requestProvider(
     prompt: string,
-    messages?: LlmChatMessage[],
-    signal?: AbortSignal,
-    maxTokens?: number
+    messages: LlmChatMessage[] | undefined,
+    schema: Record<string, unknown> | undefined,
+    signal: AbortSignal,
+    maxTokens: number | undefined
   ): Promise<string> {
     const effectiveMaxTokens = Math.max(maxTokens ?? CUSTOM_API_DEFAULT_MAX_TOKENS, CUSTOM_API_DEFAULT_MAX_TOKENS);
+
+    switch (this.config.provider) {
+      case 'openai':
+      case 'openai-compatible':
+        return this.requestOpenAiChat(prompt, messages, schema, signal, effectiveMaxTokens);
+      case 'claude':
+      case 'gemini':
+        return this.requestViaAiSdk(prompt, messages, signal, effectiveMaxTokens);
+      default: {
+        const unreachable: never = this.config.provider;
+        throw new Error(`Unsupported Custom API provider: ${String(unreachable)}`);
+      }
+    }
+  }
+
+  /**
+   * Sends a batch to an OpenAI-shaped chat-completions endpoint with the resolved `response_format`.
+   *
+   * If the endpoint answers 400 to the structured request, the tier is downgraded once for this
+   * engine instance and the batch is re-sent as a bare prompt-only request (no `response_format`,
+   * no token ceiling) so unsupported-parameter endpoints still translate the page.
+   *
+   * @param prompt - Prompt string used when no structured messages exist.
+   * @param messages - Structured system and user turns.
+   * @param schema - Strict keyed JSON schema for this batch.
+   * @param signal - AbortSignal.
+   * @param maxTokens - Token ceiling for the structured attempt.
+   * @returns Raw completion text.
+   */
+  private async requestOpenAiChat(
+    prompt: string,
+    messages: LlmChatMessage[] | undefined,
+    schema: Record<string, unknown> | undefined,
+    signal: AbortSignal,
+    maxTokens: number
+  ): Promise<string> {
+    const root = this.config.provider === 'openai' ? OPENAI_API_ROOT : this.getCompatibleApiRoot();
+    const chatMessages = messages && messages.length > 0
+      ? messages
+      : [{ role: 'user' as const, content: prompt }];
+    const outputMode = this.resolveOutputMode();
+
+    if (outputMode !== 'prompt-only') {
+      try {
+        const reply = await requestStructuredChatCompletion({
+          root,
+          apiKey: this.config.apiKey,
+          model: this.config.modelName,
+          messages: chatMessages,
+          mode: outputMode,
+          schema: schema ?? this.buildEmptySchema(),
+          maxTokens,
+          requireSchemaParameters: this.isOpenRouter(root),
+          signal,
+        });
+        this.logFinishReason(reply.finishReason, maxTokens);
+        return reply.text;
+      } catch (error) {
+        if (!(error instanceof StructuredOutputUnsupportedError)) throw error;
+        this.structuredOutputDegraded = true;
+        console.warn(
+          `[CustomApiEngine] ${this.config.modelName} rejected ${outputMode} output (${error.message}); ` +
+          `degrading to prompt-only for this engine instance.`
+        );
+      }
+    }
+
+    const reply = await requestStructuredChatCompletion({
+      root,
+      apiKey: this.config.apiKey,
+      model: this.config.modelName,
+      messages: chatMessages,
+      mode: 'prompt-only',
+      schema: schema ?? this.buildEmptySchema(),
+      // The rejection may have been caused by the token ceiling parameter itself (reasoning
+      // models reject `max_tokens`), so the degraded request omits it entirely.
+      maxTokens: undefined,
+      requireSchemaParameters: false,
+      signal,
+    });
+    this.logFinishReason(reply.finishReason, undefined);
+    return reply.text;
+  }
+
+  /**
+   * Sends a batch through the Vercel AI SDK for providers without a `response_format` field.
+   *
+   * @param prompt - Prompt string used when no structured messages exist.
+   * @param messages - Structured system and user turns.
+   * @param signal - AbortSignal.
+   * @param maxTokens - Token ceiling for this batch.
+   * @returns Raw completion text.
+   */
+  private async requestViaAiSdk(
+    prompt: string,
+    messages: LlmChatMessage[] | undefined,
+    signal: AbortSignal,
+    maxTokens: number
+  ): Promise<string> {
     const model = this.getLanguageModel();
 
     const systemMsg = messages?.find((m) => m.role === 'system');
@@ -227,25 +345,59 @@ export class CustomApiEngine extends BaseLlmTranslationEngine {
       model,
       system: systemMsg?.content,
       messages: formattedMessages,
-      maxOutputTokens: effectiveMaxTokens,
+      maxOutputTokens: maxTokens,
       abortSignal: signal,
     });
 
-    if (result.finishReason === 'length') {
-      console.warn(
-        `[CustomApiEngine] Generation hit maxOutputTokens limit (${effectiveMaxTokens}). Output may be truncated.`
-      );
-    } else if (result.finishReason === 'content-filter') {
-      console.warn('[CustomApiEngine] Generation stopped by upstream content filter.');
-    } else if (result.finishReason === 'error') {
-      console.error('[CustomApiEngine] Generation encountered an upstream error.');
-    }
+    this.logFinishReason(result.finishReason, maxTokens);
 
     const text = result.text;
     if (typeof text !== 'string') {
       throw new Error(`Provider response did not contain text content.`);
     }
     return text;
+  }
+
+  /**
+   * Logs the completion stop reason so truncated batches and filtered replies are visible.
+   *
+   * @param finishReason - Provider stop reason.
+   * @param maxTokens - Token ceiling that was requested, when one was sent.
+   */
+  private logFinishReason(finishReason: string, maxTokens: number | undefined): void {
+    if (finishReason === 'length') {
+      console.warn(
+        `[CustomApiEngine] Generation hit the completion token limit (${maxTokens ?? 'provider default'}). Output may be truncated.`
+      );
+    } else if (finishReason === 'content_filter' || finishReason === 'content-filter') {
+      console.warn('[CustomApiEngine] Generation stopped by upstream content filter.');
+    } else if (finishReason === 'error') {
+      console.error('[CustomApiEngine] Generation encountered an upstream error.');
+    }
+  }
+
+  /**
+   * Checks whether a resolved API root belongs to OpenRouter.
+   *
+   * @param root - Normalized API root without a trailing slash.
+   * @returns True when the host is OpenRouter or one of its subdomains.
+   */
+  private isOpenRouter(root: string): boolean {
+    try {
+      const host = new URL(root).hostname.toLowerCase();
+      return host === OPENROUTER_HOST_SUFFIX || host.endsWith(`.${OPENROUTER_HOST_SUFFIX}`);
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Provides a valid schema placeholder when the base engine has no batch slots to describe.
+   *
+   * @returns Schema accepting an empty keyed object.
+   */
+  private buildEmptySchema(): Record<string, unknown> {
+    return { type: 'object', properties: {}, required: [], additionalProperties: false };
   }
 
   /**

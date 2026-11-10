@@ -83,8 +83,17 @@ describe('CustomApiEngine', () => {
     const result = await engine.translate(['hello', 'world'], 'en', 'fr');
     expect(result).toEqual(['bonjour', 'monde']);
     expect(fetchMock).toHaveBeenCalledWith('https://api.openai.com/v1/chat/completions', expect.objectContaining({
-      headers: expect.objectContaining({ authorization: 'Bearer secret' })
+      headers: expect.objectContaining({ Authorization: 'Bearer secret' })
     }));
+    // OpenAI is a native strict-schema host, so the batch must carry the keyed grammar.
+    const body = JSON.parse(fetchMock.mock.calls[0][1]?.body as string);
+    expect(body.response_format).toEqual({
+      type: 'json_schema',
+      json_schema: expect.objectContaining({
+        strict: true,
+        schema: expect.objectContaining({ required: ['b0', 'b1'], additionalProperties: false }),
+      }),
+    });
   });
 
   it.each([
@@ -250,5 +259,89 @@ describe('CustomApiEngine', () => {
     const body = JSON.parse(fetchMock.mock.calls[0][1]?.body as string);
     const systemMsg = body.messages.find((m: any) => m.role === 'system');
     expect(systemMsg.content).toContain('Global pirate slang.');
+  });
+
+  it('requests json_object from a host that rejects strict schemas', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse(validOpenAiReply));
+    const engine = await createEngine({
+      ...openAiConfig, provider: 'openai-compatible', baseUrl: 'https://api.deepseek.com/v1',
+    });
+
+    await engine.translate(['hello'], 'en', 'fr');
+    const body = JSON.parse(fetchMock.mock.calls[0][1]?.body as string);
+    expect(body.response_format).toEqual({ type: 'json_object' });
+  });
+
+  it('sends no response_format to an unknown or local endpoint', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse(validOpenAiReply));
+    const engine = await createEngine({
+      ...openAiConfig, provider: 'openai-compatible', baseUrl: 'http://localhost:11434/v1',
+    });
+
+    await engine.translate(['hello'], 'en', 'fr');
+    const body = JSON.parse(fetchMock.mock.calls[0][1]?.body as string);
+    expect(body).not.toHaveProperty('response_format');
+  });
+
+  it('honors an explicit tier over host detection', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse(validOpenAiReply));
+    const engine = await createEngine({
+      ...openAiConfig,
+      provider: 'openai-compatible',
+      baseUrl: 'https://api.deepseek.com/v1',
+      outputMode: 'json-schema',
+    });
+
+    await engine.translate(['hello'], 'en', 'fr');
+    const body = JSON.parse(fetchMock.mock.calls[0][1]?.body as string);
+    expect(body.response_format.type).toBe('json_schema');
+  });
+
+  it('asks OpenRouter to require schema-capable downstream providers', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse(validOpenAiReply));
+    const engine = await createEngine({
+      ...openAiConfig, provider: 'openai-compatible', baseUrl: 'https://openrouter.ai/api/v1',
+    });
+
+    await engine.translate(['hello'], 'en', 'fr');
+    const body = JSON.parse(fetchMock.mock.calls[0][1]?.body as string);
+    expect(body.provider).toEqual({ require_parameters: true });
+  });
+
+  it('degrades to prompt-only once when an endpoint rejects structured output', async () => {
+    // A Response body can only be read once, so every call needs its own instance.
+    let call = 0;
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      call += 1;
+      return call === 1
+        ? jsonResponse({ error: { message: 'This response_format type is unavailable now' } }, 400)
+        : jsonResponse(validOpenAiReply);
+    });
+    const engine = await createEngine({
+      ...openAiConfig, provider: 'openai-compatible', baseUrl: 'https://api.groq.com/openai/v1',
+    });
+
+    await expect(engine.translate(['hello'], 'en', 'fr')).resolves.toEqual(['bonjour']);
+    const degradedBody = JSON.parse(fetchMock.mock.calls[1][1]?.body as string);
+    expect(degradedBody).not.toHaveProperty('response_format');
+    // The rejection may have been caused by the token parameter itself (reasoning models), so the
+    // degraded request must not re-send it.
+    expect(degradedBody).not.toHaveProperty('max_tokens');
+
+    // The downgrade is memoized on the engine instance: later batches skip the doomed attempt.
+    await expect(engine.translate(['world'], 'en', 'fr')).resolves.toEqual(['bonjour']);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('does not downgrade on server errors, only on parameter rejections', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockImplementation(async () => jsonResponse({ error: { message: 'upstream down' } }, 503));
+    const engine = await createEngine();
+
+    await expect(engine.translate(['hello'], 'en', 'fr')).rejects.toThrow('503');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    for (const call of fetchMock.mock.calls) {
+      expect(JSON.parse(call[1]?.body as string).response_format.type).toBe('json_schema');
+    }
   });
 });

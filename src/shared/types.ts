@@ -185,6 +185,12 @@ export interface CustomApiConfig {
   apiKey: string;
   baseUrl?: string; // Optional for openAI-compatible
   customPrompt?: string; // Optional per-API system prompt override (max 4,000 chars)
+  /**
+   * Requested structured-output tier. Absent means "detect from the provider host"
+   * (`detectStructuredOutputMode`), so configurations saved before this field existed
+   * keep working without a migration.
+   */
+  outputMode?: StructuredOutputModeId;
 }
 
 export interface UserAccountInfo {
@@ -198,6 +204,7 @@ export interface UserAccountInfo {
   quotaResetsAt?: number;
 }
 
+import type { StructuredOutputModeId } from './customApi';
 import type { RenderFontPresetId } from './renderFontPresets';
 import type { GlossaryEntry } from './glossary';
 import type { ColorTierId } from './colorTiers';
