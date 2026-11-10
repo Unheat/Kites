@@ -1,4 +1,4 @@
-# Devlog 094: Dropped-line diagnosis — honest slot reporting and the OCR high-tilt exemption
+# Devlog 094: Dropped-line diagnosis — slot reporting, and the tilt-angle port defect
 
 ## 1. Metadata
 
@@ -23,7 +23,28 @@ A live run against OpenRouter logged `Model dropped or echoed 3/19`, `3/13`, and
 8. **Made one rule, two call sites.** Extracted `isNativeDialogueLine(text, lang)` into `src/shared/utils/textCleaning.ts` (≥2 characters, non-Latin source, native script present) and used it for both the high-tilt and the neighborhood-suppression floors. The three score floors became named constants instead of inline literals.
 9. **Wrote regression tests that can actually fail.** Two battery tests assert that a 15°-tilted Chinese column at 0.45 survives while a 15°-tilted Latin line at 0.45 is still dropped.
 
-## 4. Roadblocks and Decisions
+## 4. Root cause of the leftover bubble: the tilt was measured wrong
+
+Comparing our port against the donor turned up a genuine port defect, not a threshold to tune.
+
+- **Two different functions.** The donor measures line tilt with `calculate_box_angle` (`xianscan-rust/src/ml/geometry.rs:157`), which labels corners from the x-sorted pairs, computes mean width/height, then branches: vertical boxes are measured against the **vertical** axis, and the result is damped for jitter and finally clamped so any tilt past 45 degrees reports as level. Our port used `calculateRotationAngle`, a raw `atan2` of the first two polygon points with no branch and no clamp.
+- **The consequence is over-filtering of vertical columns.** `orderRectCorners` labels the leftmost corner `tl`, which for a rotated column is its physical *bottom-left*, so the leading edge is the long edge and the reported angle is the complement of the real tilt. A 15 degree column reads ~75 degrees, which is over the 12 degree gate.
+- **It also mis-flags artwork.** Because nothing was clamped, 46-70 degree strokes were reported as tilted *lines* and could drop nearby text.
+- **Measured, not assumed:**
+
+| Fixture | old `calculateRotationAngle` | donor-faithful |
+| --- | --- | --- |
+| upright vertical column | 0° | 0° |
+| vertical column, 15° tilt | ~75° | 0° |
+| horizontal row, 10° tilt | 10° | 10° |
+| diagonal artwork, 60° | 60° | 0° |
+
+- **Fix:** ported the donor function as `calculateBoxTiltDegrees` in `src/shared/utils/geometry.ts` and switched the OCR pre-filter battery to it. `calculateRotationAngle` is untouched because the renderer and Studio use it for glyph rotation, where its existing semantics are correct.
+- **A column is never "high-tilt" in the donor's model**, so the tilt rules stop deleting vertical dialogue by construction. That is why an exemption list was the wrong idea.
+- **Rejected: keeping garbled columns.** An earlier iteration exempted portrait boxes from every score floor. That lets a column whose recognition failed (`"Wn"`, score 0.38) flow downstream, where it is baked over erased art as gibberish — worse than leaving the source visible. The exemptions for the slanted-non-native and short-Latin rules were reverted; only the native-dialogue score floor remains, because that one requires actual native characters as evidence.
+- **Added `[OcrAudit]`.** One consolidated log per page: every detected line with score, box size, tilt, text, and the stage that dropped it. Two rounds of this investigation were spent guessing which filter fired; this table ends that.
+
+## 5. Roadblocks and Decisions
 
 - **The first draft of the tests passed vacuously.** The pre-filter battery short-circuits with `if (rawTexts.length <= 1)`, so single-line fixtures never entered it and both the positive and negative cases "passed". The negative control unexpectedly keeping the Latin line exposed it; every battery fixture now carries a second neutral line and asserts it survives as proof the battery ran.
 - **Red-green check, not a claim.** Collapsing the exemption back to the flat 0.60 floor makes the new positive test fail; restoring it makes it pass.
@@ -32,9 +53,9 @@ A live run against OpenRouter logged `Model dropped or echoed 3/19`, `3/13`, and
 - **Not changed: truncation policy.** A truncated batch still fails the page. Whether to retry that chunk with a larger budget or fall back to source text (as `CloudflareTranslateEngine` does with `throwOnCountMismatch = false`) is a product decision and is left open.
 - **Unconfirmed for the specific reported page.** The exemption fixes a demonstrated failure mode (real words dropped at 12–30°). Whether that exact bubble is dropped by this rule can only be confirmed from that page's OCR console log, which has not been captured yet.
 
-## 5. Verification and Next Steps
+## 6. Verification and Next Steps
 
-- `npx vitest run src/` — **1,366 tests / 118 files passing**, including four new tests (echoed-vs-omitted reporting, truncation naming, OCR skew exemption, OCR Latin negative control).
+- `npx vitest run src/` — **1,375 tests / 118 files passing**, including echoed-vs-omitted reporting, truncation naming, six `calculateBoxTiltDegrees` unit tests (complement, clamp, jitter, corner-order invariance), and battery tests for tilted columns.
 - `npx tsc -b` — clean.
 - Live reproduction: probe against OpenRouter confirmed `keys=19/19` and classified every counted slot as an echo. The probe was disposable and is not part of the repo.
 - Next: capture the OCR battery log for the affected page to confirm the drop reason, decide the truncation policy for reasoning models, and consider surfacing per-page echo counts in Studio history so readers can see which bubbles kept their source text.

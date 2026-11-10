@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { Point2D } from './geometry';
-import { calculateBoundingBox, calculateRotationAngle, splitTextRegion, Quadrilateral, polygonDistance } from './geometry';
+import { calculateBoundingBox, calculateBoxTiltDegrees, calculateRotationAngle, splitTextRegion, Quadrilateral, polygonDistance } from './geometry';
 
 describe('Geometry Utilities', () => {
   describe('calculateBoundingBox', () => {
@@ -33,6 +33,56 @@ describe('Geometry Utilities', () => {
       expect(box.height).toBeCloseTo(70.71, 1);
       expect(box.centerX).toBe(50);
       expect(box.centerY).toBe(50);
+    });
+  });
+
+  describe('calculateBoxTiltDegrees (XianScan calculate_box_angle port)', () => {
+    const uprightColumn: Point2D[] = [
+      { x: 100, y: 100 }, { x: 140, y: 100 }, { x: 140, y: 400 }, { x: 100, y: 400 },
+    ];
+
+    it('reports an upright column as level', () => {
+      expect(calculateBoxTiltDegrees(uprightColumn)).toBe(0);
+    });
+
+    it('reports a tilted vertical column as level, never as its complement', () => {
+      // Exactly what the detector emits for a 15 degree column: `orderRectCorners` labels the
+      // leftmost corner TL, which for a rotated column is its physical bottom-left, so the leading
+      // edge is the long edge and a raw atan2 returns the ~75 degree complement.
+      const tilted: Point2D[] = [
+        { x: 22.4, y: 389.8 }, { x: 100, y: 100 }, { x: 138.6, y: 110.4 }, { x: 61.0, y: 400.2 },
+      ];
+      expect(Math.abs(calculateRotationAngle(tilted) * 180 / Math.PI)).toBeGreaterThan(45);
+      expect(calculateBoxTiltDegrees(tilted)).toBe(0);
+    });
+
+    it('reports a tilted horizontal row as its real tilt', () => {
+      const tiltedRow: Point2D[] = [
+        { x: 100, y: 100 }, { x: 296.9, y: 134.7 }, { x: 289.9, y: 174.5 }, { x: 93.0, y: 139.8 },
+      ];
+      expect(Math.abs(calculateBoxTiltDegrees(tiltedRow))).toBeCloseTo(10, 0);
+    });
+
+    it('reports diagonal artwork as level so it cannot trigger the tilt filters', () => {
+      const diagonal: Point2D[] = [
+        { x: 100, y: 100 }, { x: 140, y: 106 }, { x: -50, y: 390 }, { x: -90, y: 384 },
+      ];
+      expect(calculateBoxTiltDegrees(diagonal)).toBe(0);
+    });
+
+    it('is independent of the corner the polygon starts at', () => {
+      const row: Point2D[] = [
+        { x: 100, y: 100 }, { x: 296.9, y: 134.7 }, { x: 289.9, y: 174.5 }, { x: 93.0, y: 139.8 },
+      ];
+      const rotatedStart = [row[2], row[3], row[0], row[1]];
+      expect(calculateBoxTiltDegrees(rotatedStart)).toBeCloseTo(calculateBoxTiltDegrees(row), 6);
+    });
+
+    it('ignores baseline jitter below the measurement floor', () => {
+      const almostLevel: Point2D[] = [
+        { x: 0, y: 0 }, { x: 200, y: 1 }, { x: 200, y: 41 }, { x: 0, y: 40 },
+      ];
+      expect(calculateBoxTiltDegrees(almostLevel)).toBe(0);
     });
   });
 

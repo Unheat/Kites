@@ -2,7 +2,7 @@ import type { IOcrEngine, OcrResult } from '../engines/ocr/BaseOcrEngine';
 import { PaddleOcrEngine } from '../engines/ocr/PaddleOcrEngine';
 import { resolveOcrTier } from '../engines/ocr/ocrRegistry';
 import type { Point2D } from '../../shared/utils/geometry';
-import { Quadrilateral, Graph, calculateBoundingBox, computeMinAreaRect, polygonArea, quadrilateralCanMergeRegion, splitTextRegion, calculateRotationAngle } from '../../shared/utils/geometry';
+import { Quadrilateral, Graph, calculateBoundingBox, computeMinAreaRect, polygonArea, quadrilateralCanMergeRegion, splitTextRegion, calculateBoxTiltDegrees } from '../../shared/utils/geometry';
 import { clusterLinesIntoUtterances } from '../utils/utteranceSplitter';
 import {
   isScanlatorWatermark,
@@ -34,6 +34,28 @@ const NEIGHBORHOOD_SUPPRESSION_SCORE_FLOOR = 0.60;
  * recognizer is unsure. Only scores this low are indistinguishable from screentone or fold texture.
  */
 const NATIVE_DIALOGUE_SCORE_FLOOR = 0.20;
+
+/** Minimum height for a box to count as a vertical text column rather than a stray stroke. */
+const VERTICAL_COLUMN_MIN_HEIGHT_PX = 100;
+
+/** Aspect ratio floor separating a vertical column from a squat or landscape box. */
+const VERTICAL_COLUMN_MIN_ASPECT = 1.25;
+
+/**
+ * Whether a text box has the shape of a vertical text column (manga CJK reading order).
+ *
+ * Vertical columns are tall and narrow, and their recognition confidence is low by nature — a
+ * skewed column can decode to unrecognizable debris such as "Wn". When the recognizer itself
+ * fails, shape is the only evidence left that the crop holds text and not artwork, so the noise
+ * floors consult this instead of the recognized characters.
+ *
+ * @param box - Axis-aligned bounding box of the recognized line.
+ * @returns True when the box is tall enough and narrow enough to be a vertical column.
+ */
+function isVerticalTextColumn(box: { width: number; height: number }): boolean {
+  return box.height >= VERTICAL_COLUMN_MIN_HEIGHT_PX
+    && box.height > box.width * VERTICAL_COLUMN_MIN_ASPECT;
+}
 
 /**
  * 1:1 Cotrans is_valuable_char check (generic2.py).
@@ -381,6 +403,9 @@ export class OcrManager {
       .map((_, i) => i)
       .filter(i => rawTexts[i].trim() && rawPolygons[i] && rawPolygons[i].length >= 3);
     let universe = allLineIndices;
+    // Per-line decision trail, printed once per page so a bubble that stays in the source language
+    // can be attributed to a stage from a normal console capture instead of another instrumented build.
+    const auditDrops = new Map<number, string>();
     if (pageWidth && pageHeight) {
       const survivors: number[] = [];
       for (const i of allLineIndices) {
@@ -388,25 +413,34 @@ export class OcrManager {
         const box = calculateBoundingBox(poly);
         const score = rawScores[i] || 0;
         const t = rawTexts[i].trim();
-        const angleDeg = (Math.abs(calculateRotationAngle(poly)) * 180) / Math.PI;
-
+        // Donor-faithful tilt (XianScan `calculate_box_angle`). A raw atan2 of two polygon corners
+        // reads a 15deg vertical column as ~75deg and never damps artwork, which is what pushed
+        // genuine bubble columns into this drop.
+        const angleDeg = Math.abs(calculateBoxTiltDegrees(poly));
+        const isVerticalColumn = isVerticalTextColumn(box);
         // 1. Giant artwork hallucination
         if (box.width >= pageWidth * 0.60 && box.height >= 120 && score < 0.75) {
           console.log(`[OcrManager] Battery: dropped giant hallucination "${t}" (${Math.round(box.width)}x${Math.round(box.height)}, score=${score.toFixed(2)})`);
+          auditDrops.set(i, 'giant-artwork');
           continue;
         }
         // 2. High-tilt non-dialogue with low confidence. Multi-character native dialogue is real
-        // reading text even when the column is skewed (scanned pages are rarely level), so it only
+        // reading text even when the scan is skewed (scanned pages are rarely level), so it only
         // falls at the noise floor. The donor applies this rule to regions where bubble membership
         // is already known (`if !is_bubble` in region_builder/filter.rs); a line-level port cannot
         // use that guard, so native-script evidence is the substitute.
         if (angleDeg >= HIGH_TILT_ANGLE_DEG && score < (isNativeDialogueLine(t, sourceLang) ? NATIVE_DIALOGUE_SCORE_FLOOR : HIGH_TILT_SCORE_FLOOR)) {
-          console.log(`[OcrManager] Battery: dropped high-tilt line "${t}" (${angleDeg.toFixed(1)}deg, score=${score.toFixed(2)})`);
+          console.log(`[OcrManager] Battery: dropped high-tilt line "${t}" (${angleDeg.toFixed(1)}deg, ${Math.round(box.width)}x${Math.round(box.height)}, score=${score.toFixed(2)})`);
+          auditDrops.set(i, 'high-tilt');
           continue;
         }
-        // 3b. Non-Latin source + slanted + no native script
+        // 3b. Non-Latin source + slanted + no native script. Deliberately not exempted by column
+        // shape: this rule only fires when the recognizer produced no native characters, and a
+        // column whose recognition failed must be fixed at recognition, not passed downstream as
+        // Latin debris that would erase the art and print gibberish over it.
         if (sourceLang && isNonLatinSource(sourceLang) && angleDeg >= 10.0 && !hasNativeScriptForLang(t, sourceLang)) {
-          console.log(`[OcrManager] Battery: dropped slanted non-native line "${t}" (${angleDeg.toFixed(1)}deg)`);
+          console.log(`[OcrManager] Battery: dropped slanted non-native line "${t}" (${angleDeg.toFixed(1)}deg, ${Math.round(box.width)}x${Math.round(box.height)})`);
+          auditDrops.set(i, 'slanted-non-native');
           continue;
         }
         // 4. Margin-flush architectural / border texture noise. Legitimate speech bubbles
@@ -417,8 +451,9 @@ export class OcrManager {
         const isMarginFlush = box.x <= 5 || box.x + box.width >= pageWidth - 5;
         if (isMarginFlush && score < 0.75
           && !hasNativeScriptForLang(t, sourceLang)
-          && !(box.height >= 100 && box.height > box.width * 1.25)) {
+          && !isVerticalColumn) {
           console.log(`[OcrManager] Battery: dropped margin-flush line "${t}" (score=${score.toFixed(2)})`);
+          auditDrops.set(i, 'margin-flush');
           continue;
         }
         survivors.push(i);
@@ -446,6 +481,7 @@ export class OcrManager {
         });
         if (isSliver) {
           console.log(`[OcrManager] Battery: dropped thin sliver "${rawTexts[i].trim()}" (h=${Math.round(b.height)})`);
+          auditDrops.set(i, 'thin-sliver');
         }
         return !isSliver;
       });
@@ -656,6 +692,25 @@ export class OcrManager {
     const filteredTexts = langPrunedIndices.map(i => rawTexts[i]);
     const filteredPolygons = langPrunedIndices.map(i => rawPolygons[i]);
     const filteredScores = langPrunedIndices.map(i => rawScores[i]);
+
+    // One decision table per page. A bubble that stays untranslated on the reader means its line was
+    // dropped somewhere in this pass, and this table names the stage for every detected line.
+    const keptIndices = new Set(langPrunedIndices);
+    const survivedGeometry = new Set(universe);
+    const auditRows = allLineIndices.map((i) => {
+      const box = calculateBoundingBox(rawPolygons[i]);
+      const angle = Math.abs(calculateBoxTiltDegrees(rawPolygons[i]));
+      const decision = keptIndices.has(i)
+        ? 'kept'
+        : auditDrops.get(i) ?? (survivedGeometry.has(i) ? 'noise-or-language-filter' : 'geometry');
+      const text = rawTexts[i].slice(0, 24).replace(/\s+/g, ' ');
+      return `  #${String(i).padStart(2, '0')} score=${(rawScores[i] || 0).toFixed(2)} ` +
+        `${Math.round(box.width)}x${Math.round(box.height)} ${angle.toFixed(1)}deg "${text}" -> ${decision}`;
+    });
+    console.log(
+      `[OcrAudit] ${allLineIndices.length} lines -> ${universe.length} after geometry -> ` +
+      `${langPrunedIndices.length} after noise/language filters\n${auditRows.join('\n')}`
+    );
 
     // PaddleOCR can report a complete line plus a nested substring slice, or two identical
     // quads for one physical glyph run. Drop the weaker duplicate before Cotrans MST.

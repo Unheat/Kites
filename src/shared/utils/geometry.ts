@@ -107,6 +107,86 @@ export function calculateRotationAngle(polygon: Point2D[]): number {
   return Math.atan2(tr.y - tl.y, tr.x - tl.x);
 }
 
+/** Aspect ratio at or above which a quad is measured as a vertical text column. */
+const VERTICAL_LINE_MIN_ASPECT = 1.25;
+
+/** Column jitter below this many degrees on a moderately tall box is baseline wobble, not tilt. */
+const VERTICAL_JITTER_MAX_DEG = 10;
+
+/** A column taller than this multiple of its width is too elongated to dismiss tilt as wobble. */
+const VERTICAL_JITTER_MAX_ASPECT = 3.5;
+
+/** Row jitter below this many degrees on a compact box is baseline wobble, not tilt. */
+const HORIZONTAL_JITTER_MAX_DEG = 8;
+
+/** A row wider than this multiple of its height is too elongated to dismiss tilt as wobble. */
+const HORIZONTAL_JITTER_MAX_ASPECT = 2.2;
+
+/** Tilts smaller than this are measurement noise and are reported as level. */
+const MIN_MEASURABLE_TILT_DEG = 1.5;
+
+/**
+ * Tilts beyond this are not line tilt at all (diagonal artwork), so they are reported as level.
+ * The OCR noise filters rely on this: an artwork stroke must not look like a tilted text line.
+ */
+const MAX_MEASURABLE_TILT_DEG = 45;
+
+/**
+ * Measures how far a text quad is rotated from its own reading axis, in degrees.
+ *
+ * Ported from XianScan `calculate_box_angle` (`xianscan-rust/src/ml/geometry.rs:157`). Three
+ * details matter and a naive `atan2` of two polygon points gets all three wrong:
+ *
+ * 1. Corners are labelled from the x-sorted pairs, so `tl`/`tr` are the left pair's top corners.
+ *    For a rotated vertical column the raw `tl -> tr` edge is the long edge, so its angle is the
+ *    complement of the real tilt (a 15 degree column reads ~75 degrees). The donor therefore
+ *    measures vertical columns against the vertical axis instead.
+ * 2. Minor baseline wobble is damped on compact boxes rather than reported as tilt.
+ * 3. Tilts past {@link MAX_MEASURABLE_TILT_DEG} are artwork, not text, and report as level.
+ *    Without this clamp every diagonal hair strand or speed line enters the high-tilt filters as
+ *    a "tilted line" and can drop genuine dialogue near it.
+ *
+ * @param polygon - Quad corners in any consistent order (4 points).
+ * @returns Signed tilt in degrees, 0 when the quad counts as level, never beyond 45 degrees.
+ */
+export function calculateBoxTiltDegrees(polygon: Point2D[]): number {
+  if (!polygon || polygon.length !== 4) return 0;
+
+  const byX = [...polygon].sort((a, b) => (a.x - b.x) || (a.y - b.y));
+  const [tl, bl] = byX[0].y < byX[1].y ? [byX[0], byX[1]] : [byX[1], byX[0]];
+  const [tr, br] = byX[2].y < byX[3].y ? [byX[2], byX[3]] : [byX[3], byX[2]];
+
+  const distance = (a: Point2D, b: Point2D): number => Math.hypot(a.x - b.x, a.y - b.y);
+  const meanWidth = (distance(tr, tl) + distance(br, bl)) / 2;
+  const meanHeight = (distance(bl, tl) + distance(br, tr)) / 2;
+
+  let tiltDeg: number;
+  if (meanHeight >= VERTICAL_LINE_MIN_ASPECT * meanWidth) {
+    const dxVertical = ((bl.x - tl.x) + (br.x - tr.x)) / 2;
+    const dyVertical = ((bl.y - tl.y) + (br.y - tr.y)) / 2;
+    if (Math.abs(dyVertical) < 1e-4) return 0;
+    const verticalDeg = (Math.atan2(-dxVertical, dyVertical) * 180) / Math.PI;
+    tiltDeg = Math.abs(verticalDeg) < VERTICAL_JITTER_MAX_DEG && meanHeight <= VERTICAL_JITTER_MAX_ASPECT * meanWidth
+      ? 0
+      : verticalDeg;
+  } else {
+    const dxHorizontal = ((tr.x - tl.x) + (br.x - bl.x)) / 2;
+    const dyHorizontal = ((tr.y - tl.y) + (br.y - bl.y)) / 2;
+    if (dxHorizontal === 0 && dyHorizontal === 0) return 0;
+    let horizontalDeg = (Math.atan2(dyHorizontal, dxHorizontal) * 180) / Math.PI;
+    while (horizontalDeg > 90) horizontalDeg -= 180;
+    while (horizontalDeg < -90) horizontalDeg += 180;
+    const boxWidth = ((tr.x - tl.x) + (br.x - bl.x)) / 2;
+    const boxHeight = ((bl.y - tl.y) + (br.y - tr.y)) / 2;
+    tiltDeg = boxWidth <= HORIZONTAL_JITTER_MAX_ASPECT * Math.max(1, boxHeight) && Math.abs(horizontalDeg) < HORIZONTAL_JITTER_MAX_DEG
+      ? 0
+      : horizontalDeg;
+  }
+
+  if (Math.abs(tiltDeg) < MIN_MEASURABLE_TILT_DEG || Math.abs(tiltDeg) > MAX_MEASURABLE_TILT_DEG) return 0;
+  return tiltDeg;
+}
+
 /**
  * Computes the convex hull of a set of 2D points using the Monotone Chain algorithm.
  */

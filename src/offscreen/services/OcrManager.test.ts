@@ -356,6 +356,21 @@ describe('OcrManager', () => {
       expect(result.texts.some((text) => text.includes('老信我'))).toBe(true);
     });
 
+    it('keeps a vertical CJK column at any tilt, because a column has no measurable line tilt', async () => {
+      // Reported bug: the bubble column was deleted by the high-tilt rule. It is a portrait box, and
+      // the donor angle function reports portrait boxes as level, so the rule must never see tilt.
+      mockBatteryEngine({
+        texts: ['这下可有的玩了w～', '今日はいい天気'],
+        polygons: [
+          [{ x: 100, y: 100 }, { x: 138.6, y: 110.4 }, { x: 61.0, y: 400.2 }, { x: 22.4, y: 389.8 }],
+          [{ x: 400, y: 100 }, { x: 600, y: 100 }, { x: 600, y: 140 }, { x: 400, y: 140 }]
+        ],
+        scores: [0.35, 0.95]
+      });
+      const result = await ocrManager.processImage(new ArrayBuffer(16), 'v6-small', { sourceLang: 'zh', pageWidth: 1280, pageHeight: 1808 });
+      expect(result.texts.some((text) => text.includes('这下可有的玩了'))).toBe(true);
+    });
+
     it('keeps a skewed native dialogue column that a level-reading filter would drop', async () => {
       // Reported regression: a vertical Chinese bubble column carries ~15deg tilt because the scan
       // is not level, and the recognizer is unsure (0.45). It is still dialogue and must reach
@@ -374,20 +389,58 @@ describe('OcrManager', () => {
       expect(result.texts.some((text) => text.includes('今日はいい天気'))).toBe(true);
     });
 
-    it('still drops a skewed low-confidence latin line on a native page', async () => {
-      // Same tilt and score as above, but Latin debris is artwork, not dialogue.
+    it('drops a column whose recognition decoded to debris, and names the stage that dropped it', async () => {
+      // The reported bubble: a tilted Chinese column decodes to "Wn" (score 0.38), so it carries no
+      // native script and is dropped as non-native debris. Keeping it would erase the art and print
+      // "Wn" over it, so the honest fix is a recognition retry, not a looser filter. This test pins
+      // the current decision and proves the audit table attributes it.
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {});
       mockBatteryEngine({
-        texts: ['mwmw mwmw', '今日はいい天気'],
+        texts: ['Wn', '今日はいい天気'],
         polygons: [
           [{ x: 100, y: 100 }, { x: 138.6, y: 110.4 }, { x: 61.0, y: 400.2 }, { x: 22.4, y: 389.8 }],
           [{ x: 400, y: 100 }, { x: 600, y: 100 }, { x: 600, y: 140 }, { x: 400, y: 140 }]
         ],
-        scores: [0.45, 0.95]
+        scores: [0.38, 0.95]
       });
       const result = await ocrManager.processImage(new ArrayBuffer(16), 'v6-small', { sourceLang: 'zh', pageWidth: 1280, pageHeight: 1808 });
-      expect(result.texts.some((text) => text.includes('mwmw'))).toBe(false);
-      // Proves the battery actually ran rather than short-circuiting on a single line.
+      expect(result.texts.some((text) => text.includes('Wn'))).toBe(false);
+
+      const logged = log.mock.calls.map((call) => String(call[0])).join('\n');
+      expect(logged).toContain('[OcrAudit]');
+      // The donor reports a vertical column's tilt as level, so the debris line survives the tilt
+      // rules and is only removed by the page-level Latin prune on a native page.
+      expect(logged).toMatch(/40x300 0\.0deg "Wn" -> (slanted-non-native|noise-or-language-filter)/);
+      expect(logged).toMatch(/"今日はいい天気" -> kept/);
+    });
+
+    it('still drops a tilted wide line whose recognition decoded to debris', async () => {
+      // "2-141" from the same report: landscape shape, so the column exemption must not apply.
+      mockBatteryEngine({
+        texts: ['2-141', '今日はいい天気'],
+        polygons: [
+          [{ x: 100, y: 100 }, { x: 293.2, y: 148.3 }, { x: 273.4, y: 241.7 }, { x: 80.2, y: 193.4 }],
+          [{ x: 400, y: 500 }, { x: 600, y: 500 }, { x: 600, y: 540 }, { x: 400, y: 540 }]
+        ],
+        scores: [0.50, 0.95]
+      });
+      const result = await ocrManager.processImage(new ArrayBuffer(16), 'v6-small', { sourceLang: 'zh', pageWidth: 1280, pageHeight: 1808 });
+      expect(result.texts.some((text) => text.includes('2-141'))).toBe(false);
       expect(result.texts.some((text) => text.includes('今日はいい天気'))).toBe(true);
+    });
+
+    it('still drops a portrait sliver past the exemption angle', async () => {
+      // "あ包" from the report: 69.5deg is artwork, so the column exemption is capped.
+      mockBatteryEngine({
+        texts: ['あ包', '今日はいい天気'],
+        polygons: [
+          [{ x: 100, y: 100 }, { x: 114.3, y: 138.2 }, { x: -166.2, y: 243.6 }, { x: -180.5, y: 205.4 }],
+          [{ x: 400, y: 500 }, { x: 600, y: 500 }, { x: 600, y: 540 }, { x: 400, y: 540 }]
+        ],
+        scores: [0.15, 0.95]
+      });
+      const result = await ocrManager.processImage(new ArrayBuffer(16), 'v6-small', { sourceLang: 'ja', pageWidth: 1280, pageHeight: 1808 });
+      expect(result.texts.some((text) => text.includes('あ包'))).toBe(false);
     });
 
     it('still drops margin-flush landscape latin noise with low score', async () => {
