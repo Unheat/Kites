@@ -13,9 +13,27 @@ import {
   isOnomatopoeiaOrShout,
   isNonLatinSource,
   hasNativeScriptForLang,
+  isNativeDialogueLine,
   stripTrailingWatermarkDebris,
   isStandaloneNoiseStroke,
 } from '../../shared/utils/textCleaning';
+
+/** Rotation angle at which a recognized line stops looking like reading text and starts looking like artwork. */
+const HIGH_TILT_ANGLE_DEG = 12.0;
+
+/** Confidence floor for a generic high-tilt line before it is treated as an artifact. */
+const HIGH_TILT_SCORE_FLOOR = 0.60;
+
+/** Confidence floor for low-confidence noise that sits near a dominant, high-confidence line. */
+const NEIGHBORHOOD_SUPPRESSION_SCORE_FLOOR = 0.60;
+
+/**
+ * Confidence floor for a line that carries multi-character native dialogue.
+ *
+ * Well below the artifact floors: real dialogue stays dialogue even when the scan is skewed or the
+ * recognizer is unsure. Only scores this low are indistinguishable from screentone or fold texture.
+ */
+const NATIVE_DIALOGUE_SCORE_FLOOR = 0.20;
 
 /**
  * 1:1 Cotrans is_valuable_char check (generic2.py).
@@ -377,8 +395,12 @@ export class OcrManager {
           console.log(`[OcrManager] Battery: dropped giant hallucination "${t}" (${Math.round(box.width)}x${Math.round(box.height)}, score=${score.toFixed(2)})`);
           continue;
         }
-        // 3. High-tilt non-dialogue with low confidence
-        if (angleDeg >= 12.0 && score < 0.60) {
+        // 2. High-tilt non-dialogue with low confidence. Multi-character native dialogue is real
+        // reading text even when the column is skewed (scanned pages are rarely level), so it only
+        // falls at the noise floor. The donor applies this rule to regions where bubble membership
+        // is already known (`if !is_bubble` in region_builder/filter.rs); a line-level port cannot
+        // use that guard, so native-script evidence is the substitute.
+        if (angleDeg >= HIGH_TILT_ANGLE_DEG && score < (isNativeDialogueLine(t, sourceLang) ? NATIVE_DIALOGUE_SCORE_FLOOR : HIGH_TILT_SCORE_FLOOR)) {
           console.log(`[OcrManager] Battery: dropped high-tilt line "${t}" (${angleDeg.toFixed(1)}deg, score=${score.toFixed(2)})`);
           continue;
         }
@@ -717,11 +739,10 @@ export class OcrManager {
       for (let i = 0; i < texts.length; i++) {
         const scoreI = scores[i] || 0;
         // Multi-character dialogue containing native script (>= 2 chars) is genuine text,
-        // not single-char screentone/clothing fold noise. Only suppress if below noise floor (0.20).
-        const isNativeDialogue = sourceLang
-          && hasNativeScriptForLang(texts[i], sourceLang)
-          && texts[i].trim().length >= 2;
-        const suppressionThreshold = isNativeDialogue ? 0.20 : 0.60;
+        // not single-char screentone/clothing fold noise. Only suppress if below the noise floor.
+        const suppressionThreshold = isNativeDialogueLine(texts[i], sourceLang)
+          ? NATIVE_DIALOGUE_SCORE_FLOOR
+          : NEIGHBORHOOD_SUPPRESSION_SCORE_FLOOR;
         if (scoreI >= suppressionThreshold || scoreI >= pageMaxScore * 0.85) continue;
         for (let j = 0; j < texts.length; j++) {
           if (i === j || (scores[j] || 0) < 0.70) continue;

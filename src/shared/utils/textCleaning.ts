@@ -164,6 +164,29 @@ export function hasNativeScriptForLang(text: string, lang?: string): boolean {
   return true;
 }
 
+/** Minimum character count before a line can claim to be dialogue rather than artwork lettering. */
+export const MIN_NATIVE_DIALOGUE_CHARS = 2;
+
+/**
+ * Whether a recognized line is multi-character dialogue written in the page's own script.
+ *
+ * Noise filters exist to kill screentone, clothing folds, and border texture. Those produce
+ * single glyphs or Latin debris, never a run of native characters, so this predicate is the
+ * evidence a filter needs before it may drop a line a reader expects to be translated.
+ * Latin-source pages return false: there is no script evidence separating dialogue from
+ * stylized lettering, so those pages keep their stricter score floors.
+ *
+ * @param text - Recognized line text.
+ * @param lang - Source language id, if known.
+ * @returns True when the line carries at least two native-script characters for a non-Latin source.
+ */
+export function isNativeDialogueLine(text: string, lang?: string): boolean {
+  const trimmed = text.trim();
+  if (Array.from(trimmed).length < MIN_NATIVE_DIALOGUE_CHARS) return false;
+  if (!isNonLatinSource(lang)) return false;
+  return hasNativeScriptForLang(trimmed, lang);
+}
+
 // --- Onomatopoeia / shout detection (XianScan text_clean.rs:148 port) ---
 
 const CJK_ACTION_SFX_CHARS = new Set('哒嗒接啪轰噗砰咚嘶嗖刷咔呼嗤铛啐哈啧哼呃呀切嘟滋嗡哔滴嘭哐唰吼碌骨咕簌沙哗');

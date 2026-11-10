@@ -356,6 +356,40 @@ describe('OcrManager', () => {
       expect(result.texts.some((text) => text.includes('老信我'))).toBe(true);
     });
 
+    it('keeps a skewed native dialogue column that a level-reading filter would drop', async () => {
+      // Reported regression: a vertical Chinese bubble column carries ~15deg tilt because the scan
+      // is not level, and the recognizer is unsure (0.45). It is still dialogue and must reach
+      // translation; the old filter dropped every line past 12deg under 0.60.
+      // A second line is required because the battery only runs on multi-line pages.
+      mockBatteryEngine({
+        texts: ['这下可有的玩了w～', '今日はいい天気'],
+        polygons: [
+          [{ x: 100, y: 100 }, { x: 138.6, y: 110.4 }, { x: 61.0, y: 400.2 }, { x: 22.4, y: 389.8 }],
+          [{ x: 400, y: 100 }, { x: 600, y: 100 }, { x: 600, y: 140 }, { x: 400, y: 140 }]
+        ],
+        scores: [0.45, 0.95]
+      });
+      const result = await ocrManager.processImage(new ArrayBuffer(16), 'v6-small', { sourceLang: 'zh', pageWidth: 1280, pageHeight: 1808 });
+      expect(result.texts.some((text) => text.includes('这下可有的玩了'))).toBe(true);
+      expect(result.texts.some((text) => text.includes('今日はいい天気'))).toBe(true);
+    });
+
+    it('still drops a skewed low-confidence latin line on a native page', async () => {
+      // Same tilt and score as above, but Latin debris is artwork, not dialogue.
+      mockBatteryEngine({
+        texts: ['mwmw mwmw', '今日はいい天気'],
+        polygons: [
+          [{ x: 100, y: 100 }, { x: 138.6, y: 110.4 }, { x: 61.0, y: 400.2 }, { x: 22.4, y: 389.8 }],
+          [{ x: 400, y: 100 }, { x: 600, y: 100 }, { x: 600, y: 140 }, { x: 400, y: 140 }]
+        ],
+        scores: [0.45, 0.95]
+      });
+      const result = await ocrManager.processImage(new ArrayBuffer(16), 'v6-small', { sourceLang: 'zh', pageWidth: 1280, pageHeight: 1808 });
+      expect(result.texts.some((text) => text.includes('mwmw'))).toBe(false);
+      // Proves the battery actually ran rather than short-circuiting on a single line.
+      expect(result.texts.some((text) => text.includes('今日はいい天気'))).toBe(true);
+    });
+
     it('still drops margin-flush landscape latin noise with low score', async () => {
       mockBatteryEngine({
         texts: ['今日はいい天気', 'mwmw mwmw'],
