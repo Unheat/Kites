@@ -1,3 +1,5 @@
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   buildStructuredChatBody,
@@ -54,6 +56,41 @@ const successReply = {
   id: 'chatcmpl-1',
   choices: [{ index: 0, message: { role: 'assistant', content: '{"b0":"bonjour"}' }, finish_reason: 'stop' }],
 };
+
+/**
+ * Starts a throwaway chat-completions endpoint on an ephemeral localhost port, so the transport
+ * is exercised through real sockets instead of a mocked `fetch`.
+ *
+ * @param status - HTTP status the endpoint answers with.
+ * @param reply - Body the endpoint answers with.
+ * @returns The API root, every request body it received, and a closer.
+ */
+async function startLocalEndpoint(
+  status: number,
+  reply: unknown
+): Promise<{ root: string; received: Record<string, unknown>[]; close: () => Promise<void> }> {
+  const received: Record<string, unknown>[] = [];
+  const server = createServer((request: IncomingMessage, response: ServerResponse) => {
+    let raw = '';
+    request.on('data', (chunk) => { raw += chunk; });
+    request.on('end', () => {
+      received.push(raw ? JSON.parse(raw) as Record<string, unknown> : {});
+      response.writeHead(status, { 'content-type': 'application/json' });
+      response.end(JSON.stringify(reply));
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address() as AddressInfo;
+  return {
+    root: `http://localhost:${port}/v1`,
+    received,
+    close: () => new Promise((resolve) => {
+      // undici keeps sockets alive, so drop them before waiting for the handle to release.
+      server.closeAllConnections();
+      server.close(() => resolve());
+    }),
+  };
+}
 
 describe('structuredOutputClient', () => {
   beforeEach(() => vi.restoreAllMocks());
@@ -138,6 +175,39 @@ describe('structuredOutputClient', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('<html>gateway</html>', { status: 200 }));
 
     await expect(requestStructuredChatCompletion(createRequest())).rejects.toThrow(/not valid JSON/);
+  });
+
+  it('carries the strict schema to a real endpoint and parses its reply', async () => {
+    const endpoint = await startLocalEndpoint(200, successReply);
+    try {
+      const reply = await requestStructuredChatCompletion(createRequest({ root: endpoint.root }));
+
+      expect(reply).toEqual({ text: '{"b0":"bonjour"}', finishReason: 'stop' });
+      expect(endpoint.received).toHaveLength(1);
+      expect(endpoint.received[0]).toMatchObject({
+        model: 'llama-test',
+        max_tokens: 4096,
+        stream: false,
+        response_format: {
+          type: 'json_schema',
+          json_schema: { strict: true, schema: keyedSchema },
+        },
+      });
+    } finally {
+      await endpoint.close();
+    }
+  });
+
+  it('classifies a real HTTP 400 rejection from a live endpoint', async () => {
+    const endpoint = await startLocalEndpoint(400, { error: { message: 'This response_format type is unavailable now' } });
+    try {
+      const error = await requestStructuredChatCompletion(createRequest({ root: endpoint.root })).catch((caught) => caught);
+
+      expect(error).toBeInstanceOf(StructuredOutputUnsupportedError);
+      expect((error as Error).message).toContain('response_format type is unavailable');
+    } finally {
+      await endpoint.close();
+    }
   });
 
   it('validates reply shape strictly', () => {
