@@ -80,3 +80,6 @@ __pycache__/
 public/ort-wasm/
 
 .zcode
+
+# Local junk/scratch archives from skill and harness experiments
+.junk-*
