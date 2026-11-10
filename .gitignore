@@ -30,6 +30,9 @@ agent/
 skills-lock.json
 .codebase-memory/
 
+# Harness-generated MCP projection for pi-like harnesses (regenerate with `harness mcp sync`)
+.pi/
+
 !docs/fullplan.md
 docs/dev-history/editor_port_full_plan.md
 .zcodeignore
