@@ -6,6 +6,7 @@
  * - GET /health : Basic health probe
  * - GET /v1/quota : Read-only user quota check
  * - POST /v1/chat/completions : Translation request routing
+ * - GET /internal/provider-health : Live credential verdicts (opt-in via secret)
  *
  * Security:
  * - Always generates a server-side cryptographic UUID for internal tracing and headers
@@ -17,6 +18,7 @@ import { Env } from '../types';
 import { sanitizeClientError } from '../security/errors';
 import { buildCorsHeaders, handleCorsPreflight } from './cors';
 import { handleCompletions, handleHealth, handleQuota } from './handlers';
+import { handleProviderHealth } from './provider-health';
 import { errorResponse, jsonResponse } from './response';
 
 /**
@@ -60,7 +62,12 @@ export async function handleHttpRequest(
       return await handleCompletions(request, env, cors, serverRequestId, clientIp);
     }
 
-    // 5. 404 Fallback: Do not reflect raw pathname in error text
+    // 5. Internal credential health probe (inert unless PROVIDER_HEALTH_TOKEN is set)
+    if (url.pathname === '/internal/provider-health' && request.method === 'GET') {
+      return await handleProviderHealth(request, env, serverRequestId, cors);
+    }
+
+    // 6. 404 Fallback: Do not reflect raw pathname in error text
     return errorResponse(
       'Resource not found',
       404,

@@ -106,3 +106,16 @@ cp .dev.vars.example .dev.vars
 npm run dev
 ```
 For production deployment notes, see [`worker/WAF_RULES.md`](../../worker/WAF_RULES.md).
+
+### Checking provider keys that only exist in Cloudflare
+
+Production keys are write-only secrets and cannot be read locally. Verify them from the edge:
+
+```bash
+curl -s https://api.12094852.xyz/internal/provider-health \
+  -H "x-provider-health-token: $PROVIDER_HEALTH_TOKEN" | jq .summary
+```
+
+`broken > 0` means a credential was rejected and must be rotated. `configIssue > 0` means the key
+worked but the configured model or request shape was rejected. CI runs the same probe weekly via
+`.github/workflows/worker-key-health.yml`.

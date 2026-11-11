@@ -1,0 +1,71 @@
+# Verifies that every upstream provider credential in the production Worker still works.
+#
+# Why this runs remotely: Cloudflare Worker Secrets are write-only. No local tool, CLI or API
+# can read a stored key back, so the only way to prove a key is alive is to let the Worker use
+# it. `GET /internal/provider-health` does exactly that and returns verdicts only — never key
+# material — and it answers 404 unless PROVIDER_HEALTH_TOKEN is configured.
+#
+# This job consumes one small request per catalog route (16 output tokens) per run.
+
+name: Worker Provider Key Health
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Weekly, Monday 03:00 UTC. Free-tier quotas are key-health signals over weeks, not hours.
+    - cron: '0 3 * * 1'
+  push:
+    branches: ['main']
+    paths:
+      - 'worker/src/config/providers.ts'
+      - 'worker/src/http/provider-health.ts'
+      - '.github/workflows/worker-key-health.yml'
+
+jobs:
+  key-health:
+    name: Probe live provider credentials
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch credential health report
+        env:
+          PROVIDER_HEALTH_TOKEN: ${{ secrets.PROVIDER_HEALTH_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${PROVIDER_HEALTH_TOKEN}" ]; then
+            echo "::error::Missing repository secret PROVIDER_HEALTH_TOKEN"
+            exit 1
+          fi
+          curl -sS --fail-with-body --max-time 90 \
+            -H "x-provider-health-token: ${PROVIDER_HEALTH_TOKEN}" \
+            "https://api.12094852.xyz/internal/provider-health" \
+            -o report.json
+
+      - name: Print report
+        run: |
+          set -euo pipefail
+          jq -r '"total=\(.summary.total) healthy=\(.summary.healthy) broken=\(.summary.broken) config=\(.summary.configIssue) unknown=\(.summary.unknown)"' report.json
+          jq -r '.results[] | "\(.verdict)\t\(.id)\tstatus=\(.statusCode)\t\(.latencyMs)ms"' report.json
+          {
+            echo "### Provider key health"
+            echo
+            echo "| verdict | route | status | latency |"
+            echo "|---|---|---|---|"
+            jq -r '.results[] | "| \(.verdict) | \(.id) | \(.statusCode) | \(.latencyMs) ms |"' report.json
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Gate on credential failures
+        run: |
+          set -euo pipefail
+          broken=$(jq '.summary.broken' report.json)
+          config=$(jq '.summary.configIssue' report.json)
+          unknown=$(jq '.summary.unknown' report.json)
+          if [ "${broken}" -gt 0 ]; then
+            echo "::error::${broken} provider credential(s) rejected. Obtain a new key and run 'npx wrangler secret put <NAME>' in worker/."
+            exit 1
+          fi
+          if [ "${config}" -gt 0 ]; then
+            echo "::warning::${config} route(s) rejected the request shape or model name. Fix worker/src/config/providers.ts."
+          fi
+          if [ "${unknown}" -gt 0 ]; then
+            echo "::warning::${unknown} route(s) returned an unexpected upstream error (timeout, 5xx, or quota)."
+          fi

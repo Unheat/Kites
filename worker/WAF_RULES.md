@@ -77,7 +77,26 @@ npx wrangler secret put NVIDIA_API_KEY
 npx wrangler secret put OPENROUTER_API_KEY
 npx wrangler secret put GEMINI_API_KEY
 npx wrangler secret put GROQ_API_KEY
+npx wrangler secret put MISTRAL_API_KEY
+
+# Enables the live credential health probe (route answers 404 while unset)
+npx wrangler secret put PROVIDER_HEALTH_TOKEN
 ```
+
+### Why keys cannot be read back
+
+Cloudflare Worker Secrets are write-only. Neither the dashboard, the CLI, nor the REST API
+returns a stored value, and production secrets are never exposed to local `wrangler dev`. If a
+key needs to be verified or moved, the only options are:
+
+1. Let the Worker use it — `GET /internal/provider-health` probes every catalog route through
+the real adapters and reports verdicts only (`ok`, `rate_limited`, `invalid_key`,
+`request_rejected`, `missing_secret`, `upstream_error`). It never returns key material.
+2. Rotate it — create a new key at the provider, `npx wrangler secret put <NAME>`, then re-run
+the probe.
+
+The probe is wired into CI as `.github/workflows/worker-key-health.yml` (weekly plus manual
+dispatch), gated on the repository secret `PROVIDER_HEALTH_TOKEN`.
 
 ---
 

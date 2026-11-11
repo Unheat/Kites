@@ -131,5 +131,7 @@ export interface Env {
   GEMINI_API_KEY?: string;
   GROQ_API_KEY?: string;
   MISTRAL_API_KEY?: string;
+  /** Enables GET /internal/provider-health. Unset means the route answers 404. */
+  PROVIDER_HEALTH_TOKEN?: string;
   [key: string]: any;
 }
