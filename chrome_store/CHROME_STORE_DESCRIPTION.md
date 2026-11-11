@@ -1,73 +1,64 @@
-# Kites Chrome Web Store Listing Description
+# Kites Chrome Web Store Listing
 
-Read raw manga, comics, and webtoons in your language directly on the page. 100% free, unlimited, and private.
+## Short description (132-character limit)
 
-No subscriptions. No token caps. No wait time.
+Translate manga, webtoons, and comics in place. Free, unlimited on-device AI. No sign-up, no ads, no blur boxes.
 
-Kites is a local-first manga translator built specifically for comic readers. Powered directly by your computer’s graphics card (WebGPU), Kites detects speech balloons, cleanly erases foreign text without blurring the artwork, and typesets beautiful translations right inside the comic panels — matched to each bubble’s original color.
+## Detailed description
 
-Whether you are reading raw chapters on a manga site, scrolling long webtoons, or browsing artwork feeds, Kites translates everything seamlessly in place.
+Read raw manga, comics, and webtoons in your language, right on the page. 100% free, unlimited, and private.
 
+No subscriptions. No daily caps. No waiting.
 
-★ Why Kites Is Different
+Kites is a manga translator powered by your own graphics card (WebGPU). It finds each speech bubble, erases the original text without damaging the artwork, and sets the translation back inside the same bubble — matched to that bubble's color and reflowed to fit its shape.
 
-Most translator extensions treat manga like standard text: they slap clunky popups over the art, blur the drawings, lock you behind $10/month paywalls, or enforce daily page quotas.
+Works on manga sites, long-strip webtoons, and artwork feeds. No copy-paste, no side-by-side popups, no broken page layouts.
 
-Kites runs cutting-edge AI directly inside your browser:
+★ Why Kites is different
 
-• 100 Free Community Translations/Day: Sign in with Google to get 100 free high-speed cloud translations daily from our shared AI pool—zero setup, no API key required.
-• Unlimited Free Translations: Run on-device WebLLM locally on your GPU or use unlimited Google Translate with no subscriptions, no paywalls, and no wait times.
-• 100% Private On-Device AI: Your images never touch a third-party server. All OCR detection and background cleaning happen locally on your GPU.
-• Seamless In-Panel Lettering: No floating white boxes. Text replaces the original dialogue naturally with authentic comic fonts, hyphenation-aware contour fitting, and colors matched to the original bubble.
+• Free forever: on-device WebLLM on your GPU, or unlimited Google Translate. No paywall, no page quota.
+• 100 free cloud translations a day: optional Google sign-in unlocks a shared high-speed pool. No API key needed.
+• Private by default: images never leave your machine unless you sign in for the cloud pool. No tracking scripts, no ads.
+• Real lettering, not a white box: authentic comic fonts, hyphenation-aware fitting, colors matched to the original bubble.
+• Whole chapters, not one panel at a time: fast-scan finds lazy-loaded pages, then batch translate or export.
 
+★ Reading
 
-★ Frictionless Reading Experience
+• Hover or persistent translate button on any panel, plus Auto-Translate while you scroll.
+• Distraction-free chapter reader: continuous webtoon, single page, or double-page spread.
+• Chapter ZIP export: ordered, numbered pages for offline reading.
+• Extreme webtoon support: pages taller than 14,000 px are tiled at full resolution.
 
-• Distraction-Free Chapter Reader: Read entire manga or webtoon chapters in one full-screen view. Seamlessly switch between continuous vertical webtoon strips, single-page, and double-page spread layouts.
-• Auto Fast-Scan: No more scrolling manually to trigger lazy-loaded images. Kites auto-scans down the chapter, discovering and queueing all panels in seconds.
-• In-Page Hover & Auto-Translate: Translate panels effortlessly as you read. Use the unobtrusive floating hover badge, keep persistent controls visible, or turn on Auto-Translate to translate new panels as you scroll. The hover badge follows the page under your cursor on layered readers, including full-screen manga viewers.
-• Extreme Webtoon Strip Support: Translates stitched long-strip manhwa taller than 14,000 pixels with automatic in-memory tiling at full resolution.
-• 1-Click Chapter ZIP Export: Download complete translated chapters as clean, ordered, numbered image archives. Take your favorite manga anywhere for offline reading on your phone, tablet, or ereader.
+★ Text and artwork quality
 
+• Contour typesetting: text fits the actual bubble outline, so vertical Japanese fills the chamber instead of shrinking to an unreadable size.
+• Color preservation: detects white, black, pastel, or neon bubble text and applies it to the translation.
+• Clean inpainting: Telea diffusion by default, neural LaMa for hard pages. Screentones, hatching, and line art stay intact.
+• Sound effects stay drawn: onomatopoeia and hand lettering are recognized as artwork instead of being mistranslated and erased. Prefer them translated? Switch to "Translate plainly" in Settings.
+• Engines your way: on-device WebLLM (Qwen 3.5, Gemma 3, Llama 3.2), Google Translate, the free daily cloud pool, or your own OpenAI, Claude, Gemini, or DeepSeek key.
+• Custom glossary: lock character names, attacks, and honorifics so they stay consistent across a series.
 
-★ AI Quality & Artwork Preservation
+★ Built-in Studio editor
 
-• Contour Bubble Typesetting: Vertical Japanese and Chinese text creates narrow columns that ruin English font size in ordinary tools. Kites fits text into the actual bubble outline with scanline measurement and dynamic line breaking, filling the whole chamber instead of leaving tiny, unreadable fonts — and long words hyphenate intelligently so dialogue stays big.
-• Original Color Preservation: Detects each bubble’s text color — white, black, pastel, or neon — and applies it to the translation, on grayscale pages and full-color work alike.
-• Artwork Preservation Inpainting: Cleanly removes foreign text along the actual character strokes with Telea diffusion by default, or neural LaMa inpainting for tough pages. Screentones, hatching, complex line art, and colored backgrounds remain intact without ugly blur boxes.
-• Sound-Effect Preservation: Onomatopoeia and hand-lettered sound effects are recognised as artwork instead of dialogue, so ピクン or ぐらぐら stay drawn instead of being mistranslated and erased. Choose "Leave as artwork" (the default) or "Translate plainly" under Settings → Reading & Interaction.
-• Next-Gen Translation AI: Enjoy unlimited on-device WebLLM (Qwen 3.5, Gemma 3, Llama 3.2), unlimited Google Translate, 100 free daily cloud translations from our community pool, or connect private API keys (OpenAI, Claude, Gemini, DeepSeek).
-• Custom Translation Glossary: Lock character names, attack moves, and honorifics so your translations stay consistent across whole series.
+• Double-click any bubble to edit dialogue in place, with live reflow.
+• Searchable comic font catalog, plus your own fonts.
+• AI inpaint brush for artwork cleanup.
+• Layered PSD export and 1:1 resolution export.
 
+★ Languages
 
-★ Built-in Studio Editor
+• Source detection: Japanese, Chinese (Simplified and Traditional), Korean, English, and more.
+• 50+ target languages, including English, Vietnamese, Spanish, French, German, Indonesian, Portuguese, Italian, Russian, Arabic, Thai, Filipino, Polish, Turkish, Hindi, and Ukrainian.
 
-• Direct Inline Editing: Double-click any speech bubble to edit dialogue directly on the canvas, with selection and caret following the exact typeset layout and live font reflow.
-• Searchable Font Catalog: Pick from bundled comic fonts or your own loaded fonts in a searchable picker, in both the popup and the Studio.
-• Localized AI Inpaint Brush: Cleanly erase artwork defects, character strokes, or untranslated sound effects with brush-level precision.
-• Layered PSD Export: Download any edited page as a layered Photoshop file for professional cleanup and typesetting workflows.
-• High-Resolution Export: Download clean, edited pages at original 1:1 image resolution.
+★ How to use
 
+1. Add Kites to Chrome.
+2. Open any manga, webtoon, or comic page.
+3. Hover a panel, or turn on Auto-Translate.
+4. Read it in your language.
 
-★ Supported Languages
+★ Privacy first
 
-• Automatic Source Detection: Detects and translates Japanese, Chinese (Simplified & Traditional), Korean, English, and dozens more.
-• 50+ Target Languages: English, Vietnamese, Spanish, French, German, Indonesian, Portuguese, Italian, Russian, Arabic, Japanese, Korean, Chinese, Thai, Tagalog/Filipino, Polish, Turkish, Hindi, Dutch, Swedish, Czech, Romanian, Ukrainian, and many more.
+No account needed for local AI. Optional Google sign-in is only for the daily cloud pool. Your images and reading history stay on your own machine.
 
-
-★ How to Use
-
-1. Click "Add to Chrome" above.
-2. Open any comic, manga, or art page.
-3. Click the Kites button on any panel or turn on Auto-Translate.
-4. Enjoy reading raw manga instantly in your native language.
-
-
-★ Privacy First
-
-• No account required to read locally.
-• Optional Google sign-in only to claim your 100 daily community pool translations.
-• Zero telemetry, zero tracking scripts, zero ads.
-• Your reading history and images stay safely on your local machine.
-
-Open source under GPLv3. Install Kites today and start reading without language barriers!
+Open source under GPLv3. Install Kites and read without language barriers.
