@@ -21,7 +21,7 @@ flowchart TD
     end
 
     subgraph InPageUI["In-Page User Controls"]
-        AnchorBtn["CSS Anchor Translation Button<br/>(Hover / Persistent Mode)"]
+        AnchorBtn["Measured-Rect Translation Button<br/>(Hover / Persistent Mode)"]
         HaloManager["Pointer Boundary & Halo Guard<br/>(Phase 20 Speed-Race Fix)"]
         ScreenCropper["Screen Crop Overlay (captureArea.ts)<br/>(8-Handle Xnip Viewport Snip)"]
     end
@@ -114,19 +114,27 @@ sequenceDiagram
 
 ## 🎯 Button Overlays & Hover Race Mitigation
 
-### 1. Modern CSS Anchor Positioning
-Kites uses native CSS Anchor Positioning where supported:
-```css
-.kites-translate-button {
-  position: absolute;
-  position-anchor: --kites-target-panel;
-  top: anchor(top 12px);
-  left: anchor(left 12px);
-}
+### 1. Measured-Rect Placement (`overlayPlacement.ts`)
+Each mounted control subscribes to its image's viewport rectangle through one shared `requestAnimationFrame` tracker, which only notifies when the rect actually changes:
+```ts
+// overlayPlacement.ts — one loop serves every control (hover and persistent mode)
+trackerFrameId = window.requestAnimationFrame(runAnchorTracker);
 ```
-This guarantees the button stays pinned to the comic panel during layout shifts, infinite scrolling, or window resizing, without requiring continuous JS scroll listeners.
+The control is then moved with a composited transform, so repeated placement never invalidates layout:
+```ts
+control.style.transform = `translate3d(${x}px, ${y}px, 0)`;
+```
+Why not CSS Anchor Positioning (`position-anchor` + `anchor(top)`)? It was the original approach, but two Chromium behaviors break layered readers such as Pixiv's page viewer, which renders every page in a fixed overlay above the artwork page's own `<img>`:
+1. `anchor()` offsets do not update when an intermediate scroll container scrolls, so a control pinned to page 3 stayed at page 1's offset after the reader scrolled internally.
+2. When the anchor lives inside a fixed overlay, `anchor(left)` can resolve against the wrong coordinate space: the declaration computed to `0px` while `getBoundingClientRect()` reported `604.6px` (Chromium 148, verified on a live reader page).
+Measured rects also survive host layout shifts, transform animations, and shadow DOM without any CSS anchor bookkeeping on host elements.
 
-### 2. Pointer Halo Guard (Phase 20 Race Fix)
+The tall-strip clamp lives in the same math (`computeControlPosition`): when an image's top edge scrolls above the viewport, the control rides the image's **visible** top edge, stays inside the image bounds, and never sits under browser chrome.
+
+### 2. Topmost Target Wins (Paint Order, Not Area)
+Hover resolution returns the first usable media target in `elementsFromPoint` paint order instead of ranking candidates by rendered area. A covered page image that rounding makes a fraction of a pixel wider than the visible one must never win: doing so anchored the control to the hidden page and queued it for translation instead of the page under the cursor. Area ranking is only used by the descendant fallback search, where paint order is unavailable.
+
+### 3. Pointer Halo Guard (Phase 20 Race Fix)
 When users move their cursor rapidly across panel boundaries, mouseleave events can fire prematurely before mouseenter registers on the button, causing annoying button flicker.
 - Kites attaches a **3px pointer tolerance halo** around the surface bounds.
 - If the cursor remains within the halo or on button descendants, dismissal timers are cancelled, producing smooth, reliable hover transitions.

@@ -111,6 +111,25 @@ describe('point-based media target resolution', () => {
     vi.mocked(document.elementsFromPoint).mockReturnValue([]);
     expect(resolveMediaTargetAtPoint(200, 150)).toBeNull();
   });
+
+  it('resolves the topmost stacked page, not a covered page image 0.1px larger', () => {
+    // Manga viewer overlay pattern: the visible page sits in a fixed reader above the artwork
+    // page's own <img>, whose aspect-ratio rounding makes it a fraction of a pixel wider.
+    const coveredPage = document.createElement('img');
+    coveredPage.src = '/artwork-page-1.jpg';
+    setRect(coveredPage, { ...LARGE_RECT, right: 400.1, width: 400.1 });
+
+    const viewer = document.createElement('div');
+    const visiblePage = document.createElement('img');
+    visiblePage.src = '/viewer-page-2.jpg';
+    setRect(visiblePage, LARGE_RECT);
+    viewer.append(visiblePage);
+    document.body.append(coveredPage, viewer);
+
+    vi.mocked(document.elementsFromPoint).mockReturnValue([visiblePage, viewer, coveredPage, document.body]);
+
+    expect(resolveMediaTargetAtPoint(200, 150)?.imgElement).toBe(visiblePage);
+  });
 });
 
 describe('CSS background source resolution', () => {
@@ -255,6 +274,31 @@ describe('hover media resolution', () => {
 
     expect(resolveHoverMediaTarget(createHoverEvent(wrapper, [wrapper, document.body, document])))
       .toMatchObject({ imgElement: large, surfaceElement: large });
+  });
+
+  it('resolves the topmost stacked page, not a covered page image 0.1px larger', () => {
+    // Manga viewer overlay pattern (Pixiv reader): the visible page sits in a fixed reader above
+    // the artwork page's own <img>, whose aspect-ratio rounding makes it a fraction of a pixel
+    // wider. Ranking candidates by area anchored the button to the covered page and queued it for
+    // translation instead of the page under the cursor.
+    const coveredPage = document.createElement('img');
+    coveredPage.src = '/artwork-page-1.jpg';
+    setRect(coveredPage, { ...LARGE_RECT, right: 400.1, width: 400.1 });
+
+    const viewer = document.createElement('div');
+    const visiblePage = document.createElement('img');
+    visiblePage.src = '/viewer-page-2.jpg';
+    setRect(visiblePage, LARGE_RECT);
+    viewer.append(visiblePage);
+    document.body.append(coveredPage, viewer);
+
+    Object.defineProperty(document, 'elementsFromPoint', {
+      configurable: true,
+      value: vi.fn(() => [visiblePage, viewer, coveredPage, document.body]),
+    });
+
+    const event = createHoverEvent(visiblePage, [visiblePage, viewer, coveredPage, document.body, document]);
+    expect(resolveHoverMediaTarget(event)?.surfaceElement).toBe(visiblePage);
   });
 
   it('filters hover targets using custom selector when provided', () => {

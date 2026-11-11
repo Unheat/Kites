@@ -90,7 +90,7 @@ graph TB
   - Invisible backing `<img>` layers beneath pointer overlays (Twitter/X, Pixiv).
   - SVG placeholder handling: Detects and skips inline data-URL SVG placeholders without wedging queues.
   - CSS `background-image` extraction on div-based readers.
-- **CSS Anchor Positioning & Hover Halo:** Floats translation action buttons directly over comic panels using modern CSS Anchor Positioning with a 3px boundary halo to prevent pointer flicker.
+- **Measured-Rect Button Placement & Hover Halo:** Floats translation action buttons directly over comic panels using a shared `requestAnimationFrame` rect tracker (composited `translate3d` placement, no CSS Anchor Positioning) with a 3px boundary halo to prevent pointer flicker.
 - **Single-Page Application (SPA) Reversion Shield:** Modern reactive SPAs (React Native for Web, Vue) re-render and wipe mutated `src` attributes. Kites mounts a targeted `MutationObserver` (`attachReversionShield`):
   - Clears `srcset` attributes to prevent responsive image resets.
   - Converts large Base64 strings to same-origin Blob URLs (`URL.createObjectURL(blob)`) to avoid DOM bloat and CSP rejections.

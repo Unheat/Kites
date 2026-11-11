@@ -25,6 +25,7 @@ import {
   loadLastCropSelection,
   type CropDragHandle,
 } from './captureArea';
+import { observeAnchorRect, placeControl } from './overlayPlacement';
 import {
   collectQueryRoots,
   createMediaTarget,
@@ -296,22 +297,28 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 });
 
 type OverlayImage = MediaTarget & {
-  anchorName: string;
+  overlayId: string;
 };
 
+// Stable identity per overlay surface: React keys in persistent mode and hover state comparisons
+// must not churn when the same image is re-discovered. Kept in a WeakMap instead of an inline
+// `anchor-name` style so Kites never mutates host CSS anchor bookkeeping (the control is placed
+// from measured rects — see overlayPlacement.ts).
+const overlayIds = new WeakMap<HTMLElement, string>();
+
 /**
- * Gets or assigns the CSS anchor used to place an image's translation button.
+ * Gets the stable overlay identity for an image surface.
  *
- * @param img - Image element receiving an anchor.
- * @returns The image's CSS anchor name.
+ * @param element - Image element hosting the translate control.
+ * @returns Stable per-element overlay id.
  */
-function getAnchorName(element: HTMLElement): string {
-  let anchorName = element.style.getPropertyValue('anchor-name');
-  if (!anchorName) {
-    anchorName = `--kites-img-${Math.random().toString(36).substring(2, 11)}`;
-    element.style.setProperty('anchor-name', anchorName);
+function getOverlayId(element: HTMLElement): string {
+  let overlayId = overlayIds.get(element);
+  if (!overlayId) {
+    overlayId = `kites-img-${Math.random().toString(36).substring(2, 11)}`;
+    overlayIds.set(element, overlayId);
   }
-  return anchorName;
+  return overlayId;
 }
 
 /**
@@ -319,7 +326,6 @@ function getAnchorName(element: HTMLElement): string {
  *
  * @param props - Button state and callbacks.
  * @param props.srcUrl - Image URL to translate.
- * @param props.anchorName - CSS anchor assigned to target image.
  * @param props.anchorElement - The anchor element whose viewport rect drives the scroll clamp.
  * @param props.isTranslating - Whether this image has a pending translation job.
  * @param props.onTranslate - Queues translation for this image.
@@ -327,13 +333,11 @@ function getAnchorName(element: HTMLElement): string {
  */
 function TranslateButton({
   srcUrl,
-  anchorName,
   anchorElement,
   isTranslating,
   onTranslate,
 }: {
   srcUrl: string;
-  anchorName: string;
   anchorElement: HTMLElement;
   isTranslating: boolean;
   onTranslate: (srcUrl: string) => void;
@@ -541,61 +545,20 @@ function TranslateButton({
     }
   }, [jobId, srcUrl]);
 
-  useEffect(() => {
-    if (buttonRef.current) {
-      buttonRef.current.style.setProperty('position-anchor', anchorName);
-      buttonRef.current.style.setProperty('top', 'anchor(top)');
-      buttonRef.current.style.setProperty('left', 'anchor(left)');
-    }
-  }, [anchorName]);
-
-  // WORKAROUND: [Tall strip anchor scroll-off] -> CSS anchor(top) glues the button to the
-  // image's top edge. On tall strips (pages taller than the viewport, e.g. 14,000px
-  // manhwa) that edge scrolls far above the screen, dragging the button out of reach —
-  // and Chromium 153 ignores max(anchor(top), Npx) clamping (verified empirically). A
-  // passive scroll listener clamps the button to the image's VISIBLE top edge instead: it
-  // rides the image while scrolling, stays inside the image bounds (never floating over
-  // page chrome), and hands back to pure CSS anchor positioning once the real top edge is
-  // on-screen again. Fully visible images keep the exact previous behavior.
-  //
-  // The un-clamp path must RE-SET 'top: anchor(top)' rather than removeProperty — the
-  // positioning effect owns that inline declaration, and removing it drops CSS anchoring
-  // entirely, throwing the button into document flow at the bottom of the page.
+  // WORKAROUND: [Overlay shells beat CSS anchor positioning] -> anchor() offsets go stale inside
+  // an intermediate scroll container and can resolve against the wrong coordinate space when the
+  // anchor sits in a fixed viewer overlay, which put the button at the viewport origin on layered
+  // manga readers. The control is placed from measured rects instead, through one shared animation
+  // frame tracker, so it follows nested scrollers, host layout shifts, and viewer transitions.
+  // Tall-strip clamping (the image's top edge scrolled above the viewport) lives in
+  // computeControlPosition so both modes share the same placement math.
   useEffect(() => {
     const button = buttonRef.current;
     if (!button || !anchorElement) return;
 
-    const BUTTON_INSET_PX = 16;
-    const BUTTON_SLOT_PX = 48; // 32px button + 8px margins + breathing room
-    let clamped = false;
-
-    const updateClamp = (): void => {
-      const rect = anchorElement.getBoundingClientRect();
-      const shouldClamp = rect.top < BUTTON_INSET_PX && rect.bottom > BUTTON_INSET_PX;
-      if (shouldClamp) {
-        clamped = true;
-        // Ride the image's visible top edge: never above the viewport inset, never below
-        // the image's bottom edge, never past the viewport bottom.
-        const clampedTop = Math.min(
-          Math.max(rect.top, BUTTON_INSET_PX),
-          Math.max(rect.bottom - BUTTON_SLOT_PX, BUTTON_INSET_PX),
-          window.innerHeight - BUTTON_SLOT_PX
-        );
-        button.style.setProperty('top', `${clampedTop}px`);
-      } else if (clamped) {
-        clamped = false;
-        button.style.setProperty('top', 'anchor(top)');
-      }
-    };
-
-    updateClamp();
-    window.addEventListener('scroll', updateClamp, { passive: true, capture: true });
-    window.addEventListener('resize', updateClamp, { passive: true });
-    return () => {
-      window.removeEventListener('scroll', updateClamp, { capture: true } as any);
-      window.removeEventListener('resize', updateClamp);
-      button.style.setProperty('top', 'anchor(top)');
-    };
+    const updatePosition = (): void => placeControl(button, anchorElement.getBoundingClientRect());
+    updatePosition();
+    return observeAnchorRect(anchorElement, updatePosition);
   }, [anchorElement]);
 
   useEffect(() => {
@@ -703,8 +666,8 @@ function TranslateButton({
         display: 'flex',
         alignItems: 'center',
         gap: '8px',
-        marginTop: '8px',
-        marginLeft: '8px',
+        left: 0,
+        top: 0,
         pointerEvents: 'auto',
       }}
     >
@@ -1627,7 +1590,7 @@ function GlobalOverlay() {
       },
       translate: (target) => requestTranslation(target.srcUrl, {
         ...target,
-        anchorName: getAnchorName(target.surfaceElement),
+        overlayId: getOverlayId(target.surfaceElement),
       }),
       startAreaSelection: () => setIsSnipping(true),
       repeatLastScreenCrop,
@@ -1999,7 +1962,7 @@ function GlobalOverlay() {
     let timeoutId: number | null = null;
     const updateImages = () => {
       setConsistentImages(discoverMediaTargets(document, getActiveCustomSelector())
-        .map((target) => ({ ...target, anchorName: getAnchorName(target.anchorElement) })));
+        .map((target) => ({ ...target, overlayId: getOverlayId(target.surfaceElement) })));
       for (const root of collectQueryRoots(document)) {
         if (root === document || observedMutationRoots.has(root)) continue;
         observedMutationRoots.add(root);
@@ -2129,7 +2092,7 @@ function GlobalOverlay() {
         }
         cancelHide();
         registerMediaTarget(mediaTarget);
-        setActiveImg({ ...mediaTarget, anchorName: getAnchorName(mediaTarget.surfaceElement) });
+        setActiveImg({ ...mediaTarget, overlayId: getOverlayId(mediaTarget.surfaceElement) });
       });
     };
     const handleMouseOut = (event: MouseEvent) => {
@@ -2172,7 +2135,7 @@ function GlobalOverlay() {
         cancelHide();
         if (!activeImgRef.current || activeImgRef.current.surfaceElement !== mediaTarget.surfaceElement) {
           registerMediaTarget(mediaTarget);
-          setActiveImg({ ...mediaTarget, anchorName: getAnchorName(mediaTarget.surfaceElement) });
+          setActiveImg({ ...mediaTarget, overlayId: getOverlayId(mediaTarget.surfaceElement) });
         }
       } else if (activeImgRef.current) {
         scheduleHide();
@@ -2234,10 +2197,9 @@ function GlobalOverlay() {
 
       {mode === 'persistent' && consistentImages.map((image) => (
         <TranslateButton
-          key={image.anchorName}
+          key={image.overlayId}
           srcUrl={image.srcUrl}
-          anchorName={image.anchorName}
-          anchorElement={image.anchorElement}
+          anchorElement={image.surfaceElement}
           isTranslating={translatingUrls.has(image.srcUrl)}
           onTranslate={(srcUrl) => requestTranslation(srcUrl, image)}
         />
@@ -2246,7 +2208,6 @@ function GlobalOverlay() {
       {mode === 'hover' && activeImg && (
         <TranslateButton
           srcUrl={activeImg.srcUrl}
-          anchorName={activeImg.anchorName}
           anchorElement={activeImg.surfaceElement}
           isTranslating={translatingUrls.has(activeImg.srcUrl)}
           onTranslate={(srcUrl) => requestTranslation(srcUrl, activeImg)}

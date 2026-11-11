@@ -600,6 +600,25 @@ function isValidHoverTarget(
 }
 
 /**
+ * Selects the first validated candidate, i.e. the one the browser paints topmost at the pointer.
+ *
+ * WORKAROUND: [Sub-pixel area wins beat paint order] -> Candidates used to be ranked by rendered
+ * area, so a visually covered image only ~0.1px wider than the visible one won hover resolution.
+ * Manga viewers (e.g. Pixiv's reader, which stacks every page inside a fixed scroll container over
+ * the artwork page's own <img>) then anchored the button to the hidden page behind the viewer and
+ * queued that page for translation no matter which page the cursor was over. elementsFromPoint
+ * already returns paint order in native hit-test order, so the first usable candidate is the image
+ * the user is actually pointing at. Area ranking is only meaningful inside the descendant fallback
+ * search, where paint order is not available (`selectLargestTarget`).
+ *
+ * @param targets - Validated media target candidates in paint order.
+ * @returns Topmost media target, or null when no candidate exists.
+ */
+function selectTopmostTarget(targets: MediaTarget[]): MediaTarget | null {
+  return targets[0] || null;
+}
+
+/**
  * Deduplicates candidate media targets by surface and selects the largest by rendered area.
  *
  * @param targets - Validated media target candidates.
@@ -631,7 +650,7 @@ function selectLargestTarget(targets: MediaTarget[]): MediaTarget | null {
  *
  * @param event - Mouse event used for target and pointer information.
  * @param customSelector - Optional custom CSS selector override.
- * @returns Largest matching media target, or null.
+ * @returns Topmost matching media target, or null.
  */
 export function resolveHoverMediaTarget(event: MouseEvent, customSelector?: string): MediaTarget | null {
   const clientX = event.clientX;
@@ -668,7 +687,7 @@ export function resolveHoverMediaTarget(event: MouseEvent, customSelector?: stri
     }
   }
 
-  const directHit = selectLargestTarget(directTargets);
+  const directHit = selectTopmostTarget(directTargets);
   if (directHit) return directHit;
 
   // Phase 2 (Fallback): Shallow descendant search on the hovered element and its immediate ancestors.
@@ -737,7 +756,7 @@ export function resolveMediaTargetAtPoint(clientX: number, clientY: number, cust
     }
   }
 
-  const directHit = selectLargestTarget(directTargets);
+  const directHit = selectTopmostTarget(directTargets);
   if (directHit) return directHit;
 
   // Phase 2 (Fallback): Shallow descendant search on the top hit element

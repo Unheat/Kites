@@ -103,7 +103,7 @@ For a high-density, interactive inspection of the entire translation algorithm:
 4. **[Content Script & Media Subsystems](architecture/content-script-and-media.md)**
    - Universal Media Discovery: `MediaTarget` abstraction and hidden backing surface resolution (Twitter/X, Pixiv)
    - SVG placeholder filtering (Issue #2 Roliascan queue wedge fix)
-   - CSS Anchor Positioning for in-page translation buttons with 3px hover race halo guards
+   - Measured-rect in-page translation buttons (shared rAF rect tracker, composited transform placement) with 3px hover race halo guards
    - SPA image replacement & `MutationObserver` reversion shield with `isSelfMutating` recursion guard
    - Screen Crop translation tool: Xnip-style viewport capture and retina display normalization
 5. **[Studio Editor & Typesetting Architecture](architecture/studio-and-typesetting.md)**

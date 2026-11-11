@@ -76,7 +76,7 @@ describe('Frontend UI & Button CSS Contract', () => {
     const wrapperStyle = window.getComputedStyle(wrapper);
     const buttonStyle = window.getComputedStyle(button);
 
-    // Position MUST be fixed so CSS Anchor Positioning (top: anchor(top), left: anchor(left)) functions
+    // Position MUST be fixed so the measured translate() placement stays in viewport coordinates
     expect(wrapperStyle.position).toBe('fixed');
     expect(wrapperStyle.zIndex).toBe('999999');
 
