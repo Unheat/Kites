@@ -53,18 +53,18 @@ The developer of this project is a beginner learning full-stack, web extension, 
 1. **No Inheritance for Code Reuse (Composition Over Inheritance):**
    - Class inheritance (`extends`) is strictly prohibited across distinct ML models or domain entities. Never use inheritance for code reuse between different ML models.
    - Extract shared algorithms (e.g. 64px patch bucketing, tensor normalization math) into standalone helper functions or composed utility runners.
-   - `AotInpaintEngine` must NOT inherit from `LamaBaseInpaintEngine`. Composed runners (`OnnxSessionRunner`) and pure functions preserve clean boundaries and eliminate fragile-base-class bugs.
+   -Example:  `AotInpaintEngine` must NOT inherit from `LamaBaseInpaintEngine`. Composed runners (`OnnxSessionRunner`) and pure functions preserve clean boundaries and eliminate fragile-base-class bugs.
 
 2. **No Downcasting / Instanceof Leaks (LSP):**
    - Service managers must never check `instanceof ConcreteEngine` to call unexposed methods.
    - If a manager needs provider state or cache validation, declare that method directly on the engine interface or a capability interface.
 
 3. **Decouple Engines from UI State (Interface Segregation):**
-   - Core engines (`ITranslationEngine`, `IInpaintEngine`, `IBubbleEngine`) must NEVER import or receive `PopupState`.
+   - Example: Core engines (`ITranslationEngine`, `IInpaintEngine`, `IBubbleEngine`) must NEVER import or receive `PopupState`.
    - Pass only the specific primitive settings or dedicated config objects required for inference.
 
 4. **Decompose God Files (> 300 Lines):**
-   - No new logic may be appended directly into `src/content/index.tsx` or `src/background/index.ts`.
+   - Example: No new logic may be appended directly into `src/content/index.tsx` or `src/background/index.ts`.
    - When touching these files, extract distinct features (e.g., hover listeners, image replacement, message routing) into dedicated modules under 250 lines.
 
 5. **Parse at the Boundary, Don't Mask with Optional Chaining:**
@@ -174,3 +174,31 @@ Follow clean, formal engineering standards for repository community files and te
     - `## Summary`, `## Issue` (`Closes #`), `## Changes`, `## Testing` (concrete runnable commands: `npm test`, `npm run build`, `npm run lint`, `npm run worker:test`), `## Screenshots / Demo`, `## Notes for Reviewers`.
 *   **Contributing Guide Linking**: `CONTRIBUTING.md` must explicitly link directly to `[.github/PULL_REQUEST_TEMPLATE.md](.github/PULL_REQUEST_TEMPLATE.md)` and list the exact verification gate.
 *   **Security Policy**: Clean, tabular supported versions and private vulnerability reporting channels without decorative filler.
+
+---
+
+## 13. Memory Write-Back (task completion only)
+
+Where Hindsight is available only as MCP tools (no installed hook or plugin), memory is written by the model,
+so it needs a rule. Write **once per completed task**, never per message and never mid-task.
+
+If the harness already captures sessions ambiently (ZCode hooks, or a Hindsight plugin), do not duplicate it:
+check `hindsight_sync_status` first and write only the findings ambient capture cannot see — decisions and
+verified invariants that are not obvious from the transcript.
+
+**Trigger** — all must hold:
+- the task is done *and verified* (tests/build run, or behaviour observed), and
+- it produced knowledge worth re-reading later (a root cause, an architectural decision, a donor-porting
+  mapping, a verified workaround), and
+- the outcome is already in git or in `docs/`, so memory is a pointer, not the only record.
+
+Skip: typo fixes, renames, single-file tweaks, exploratory questions, and anything not yet verified.
+
+**Tool** — `hindsight_ingest_document` with:
+- `title`: `<Area>: <what changed>` — specific enough to be searchable later.
+- `content`: what was true before, what is true now, and the evidence (command output, file path, commit SHA).
+  State the rule or invariant, not a narrative of the session.
+
+Use `hindsight_capture_initiative` only when *starting* an initiative or when its plan materially changes —
+never for task completion. Do not call `hindsight_ingest_document` twice for the same finding, and do not record
+anything that contradicts the code: verify first, then write.
