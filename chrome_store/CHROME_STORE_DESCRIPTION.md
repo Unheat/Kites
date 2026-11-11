@@ -25,7 +25,7 @@ Kites runs cutting-edge AI directly inside your browser:
 
 • Distraction-Free Chapter Reader: Read entire manga or webtoon chapters in one full-screen view. Seamlessly switch between continuous vertical webtoon strips, single-page, and double-page spread layouts.
 • Auto Fast-Scan: No more scrolling manually to trigger lazy-loaded images. Kites auto-scans down the chapter, discovering and queueing all panels in seconds.
-• In-Page Hover & Auto-Translate: Translate panels effortlessly as you read. Use the unobtrusive floating hover badge, keep persistent controls visible, or turn on Auto-Translate to translate new panels as you scroll.
+• In-Page Hover & Auto-Translate: Translate panels effortlessly as you read. Use the unobtrusive floating hover badge, keep persistent controls visible, or turn on Auto-Translate to translate new panels as you scroll. The hover badge follows the page under your cursor on layered readers, including full-screen manga viewers.
 • Extreme Webtoon Strip Support: Translates stitched long-strip manhwa taller than 14,000 pixels with automatic in-memory tiling at full resolution.
 • 1-Click Chapter ZIP Export: Download complete translated chapters as clean, ordered, numbered image archives. Take your favorite manga anywhere for offline reading on your phone, tablet, or ereader.
 
@@ -35,6 +35,7 @@ Kites runs cutting-edge AI directly inside your browser:
 • Contour Bubble Typesetting: Vertical Japanese and Chinese text creates narrow columns that ruin English font size in ordinary tools. Kites fits text into the actual bubble outline with scanline measurement and dynamic line breaking, filling the whole chamber instead of leaving tiny, unreadable fonts — and long words hyphenate intelligently so dialogue stays big.
 • Original Color Preservation: Detects each bubble’s text color — white, black, pastel, or neon — and applies it to the translation, on grayscale pages and full-color work alike.
 • Artwork Preservation Inpainting: Cleanly removes foreign text along the actual character strokes with Telea diffusion by default, or neural LaMa inpainting for tough pages. Screentones, hatching, complex line art, and colored backgrounds remain intact without ugly blur boxes.
+• Sound-Effect Preservation: Onomatopoeia and hand-lettered sound effects are recognised as artwork instead of dialogue, so ピクン or ぐらぐら stay drawn instead of being mistranslated and erased. Choose "Leave as artwork" (the default) or "Translate plainly" under Settings → Reading & Interaction.
 • Next-Gen Translation AI: Enjoy unlimited on-device WebLLM (Qwen 3.5, Gemma 3, Llama 3.2), unlimited Google Translate, 100 free daily cloud translations from our community pool, or connect private API keys (OpenAI, Claude, Gemini, DeepSeek).
 • Custom Translation Glossary: Lock character names, attack moves, and honorifics so your translations stay consistent across whole series.
 
@@ -57,7 +58,7 @@ Kites runs cutting-edge AI directly inside your browser:
 ★ How to Use
 
 1. Click "Add to Chrome" above.
-2. Open any comic, manga, or art page (Twitter/X, Pixiv, MangaDex, Reddit, raw reader sites).
+2. Open any comic, manga, or art page.
 3. Click the Kites button on any panel or turn on Auto-Translate.
 4. Enjoy reading raw manga instantly in your native language.
 
