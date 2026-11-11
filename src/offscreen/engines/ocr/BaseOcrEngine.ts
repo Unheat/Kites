@@ -38,7 +38,8 @@ export interface OcrResult {
    * SFX lettering is artwork: it is not translated and must not be inpainted, because erasing brush
    * strokes is irreversible while leaving them untouched merely keeps the original page intact.
    */
-  sfxIndices?: number[];
+  /** Blocks that are artwork rather than language, with the reason each was classified. */
+  artwork?: { index: number; kind: 'sound-effect' | 'display-lettering' | 'fragment' }[];
 
   /** Optional raw DBNet probability heat map canvas (Cotrans mask_raw). */
   maskRawCanvas?: any;

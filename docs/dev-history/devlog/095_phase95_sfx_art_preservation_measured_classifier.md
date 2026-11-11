@@ -56,6 +56,22 @@ Recall is 4 of 10 SFX-ish blocks on the reported page: the misses (`IM一`, `之
 
 Verified against the reported page: 4 blocks marked (`ピクン`, `くうっ`, `おぽっフ`, `ぐちゃ`), their four raw quads (`14, 18, 19, 20`) excluded from the erase set, and all 13 dialogue/caption blocks still translated with their 17 quads inpainted.
 
+## 5b. Follow-up: brush strokes read as text (artwork roles)
+
+A second reported page exposed the limit of the lexicon alone. OCR read a 716x349 region of brush lettering as `こブンャっー`; the lexicon had no entry, so the block was translated and inpainted, erasing 249,884 px² — 10.8% of the page from a single box, 21.2% of the page in total. The same page carried single-glyph readings (`糸`, `名0`, `房`, `市上`) that were translated literally into `SILK`, `NAME`, `FATE`, `MARKET`, `GUN`.
+
+`sfxIndices` became an artwork role list with three kinds:
+
+| Kind | Rule | Policy |
+|---|---|---|
+| `sound-effect` | kana lexicon hit, or a CJK/Hangul shout | user policy |
+| `display-lettering` | glyph size ≥ 2.0× the page's body baseline | user policy |
+| `fragment` | ≤ 2 glyphs, at least one CJK, no sentence punctuation | always preserved |
+
+The 2.0 ratio is measured, not chosen: on that page the brush block scored 5.63× and a 138px glyph scored 2.23×, while the largest genuine line scored 1.52×. The fragment rule excludes any block carrying punctuation, which is what keeps `可恶…`, `老师ー`, `莲实！`, `唔…`, `お？` translatable. The limit stayed at two glyphs deliberately: three-glyph real speech exists (`ごめん`, `だめだ`), so three would start deleting dialogue.
+
+Measured effect on the reported page: erased area 21.2% → **7.6%** under the default policy (12 fragments plus the 716x349 block preserved), 17.9% under `translate-plainly` (fragments are still never erased). On the earlier page, 7 blocks are now preserved instead of 4 — `之`, `ブナ`, `茶` joined the four kana sound effects.
+
 ## 6. What is deliberately not done
 
 - **No SFX rendering.** `translate-plainly` erases and prints in the normal display font, which is visibly unlike hand lettering. A matching SFX style, and a lexicon with Chinese coverage, are prerequisites for a proper replacement.

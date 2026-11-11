@@ -1,24 +1,29 @@
 import { describe, expect, it } from 'vitest';
 import {
   CjkShoutSoundEffectClassifier,
-  CompositeSoundEffectClassifier,
   LexiconSoundEffectClassifier,
-  defaultSoundEffectClassifier,
+  defaultArtworkClassifier,
 } from './SoundEffectClassifier';
+import {
+  BareFragmentArtworkClassifier,
+  CompositeArtworkClassifier,
+  DisplayLetteringArtworkClassifier,
+} from './ArtworkClassifier';
 
 /**
- * Cases below are measured OCR output from real pages: the reported manga page plus the pipeline
- * fixture set. The negative cases are the ones that matter — every one of them is text a reader
- * needs translated, so a regression here silently deletes dialogue.
+ * Cases are measured OCR output from real pages: the reported manga pages plus the pipeline
+ * fixture set. The negative cases matter most — each is text a reader needs translated, so a
+ * regression here silently deletes dialogue.
  */
 describe('LexiconSoundEffectClassifier', () => {
   const classifier = new LexiconSoundEffectClassifier();
+  const classify = (text: string) => classifier.classify({ text });
 
   it('recognizes kana onomatopoeia blocks as artwork', () => {
     for (const text of ['ピクン', 'くうっ', 'おぽっフ', 'ぐちゃ']) {
-      const match = classifier.classify(text);
-      expect(match.isSoundEffect, text).toBe(true);
-      expect(match.entry?.en.length, text).toBeGreaterThan(0);
+      const match = classify(text);
+      expect(match.isArtwork, text).toBe(true);
+      expect(match.kind, text).toBe('sound-effect');
     }
   });
 
@@ -31,34 +36,28 @@ describe('LexiconSoundEffectClassifier', () => {
       '莲实！',
       '30度回転するし！',
       'ちょっときゅう休けい。',
-      'ないざとなれば食べられるよーん',
+      '对小穴同时进攻！',
     ];
     for (const text of dialogue) {
-      expect(classifier.classify(text).isSoundEffect, text).toBe(false);
+      expect(classify(text).isArtwork, text).toBe(false);
     }
   });
 
   it('ignores blocks that are too short or too long to be lettering', () => {
-    expect(classifier.classify('茶').isSoundEffect).toBe(false);
-    expect(classifier.classify('之').isSoundEffect).toBe(false);
-    expect(classifier.classify('').isSoundEffect).toBe(false);
-    expect(classifier.classify('ここで待っていてください').isSoundEffect).toBe(false);
-  });
-
-  it('reports how a match was found', () => {
-    expect(classifier.classify('ピクン').kind).toBe('exact');
-    expect(classifier.classify('おぽっフ').kind).toBe('embedded');
+    for (const text of ['茶', '之', '', 'ここで待っていてください']) {
+      expect(classify(text).isArtwork, text).toBe(false);
+    }
   });
 
   it('folds katakana to hiragana and ignores long marks, small tsu, and punctuation', () => {
     expect(LexiconSoundEffectClassifier.normalize('ピクーンッ！')).toBe('ぴくん');
     expect(LexiconSoundEffectClassifier.normalize('ぐちゃ、')).toBe('ぐちゃ');
-    expect(classifier.classify('ピクーンッ！').isSoundEffect).toBe(true);
+    expect(classify('ピクーンッ！').isArtwork).toBe(true);
   });
 
   it('never matches ordinary words that are also dictionary entries', () => {
     for (const word of ['する', 'そう', 'こと', 'ちょっと']) {
-      expect(classifier.classify(word).isSoundEffect, word).toBe(false);
+      expect(classify(word).isArtwork, word).toBe(false);
     }
   });
 
@@ -66,35 +65,94 @@ describe('LexiconSoundEffectClassifier', () => {
     const custom = new LexiconSoundEffectClassifier([
       { id: 'test', forms: ['ずんどこ'], en: ['thump'] },
     ]);
-    expect(custom.classify('ずんどこ').isSoundEffect).toBe(true);
-    expect(custom.classify('ピクン').isSoundEffect).toBe(false);
-  });
-
-  it('exposes a shared default instance covering kana lettering', () => {
-    expect(defaultSoundEffectClassifier.classify('くうっ').isSoundEffect).toBe(true);
+    expect(custom.classify({ text: 'ずんどこ' }).isArtwork).toBe(true);
+    expect(custom.classify({ text: 'ピクン' }).isArtwork).toBe(false);
   });
 });
 
-describe('CompositeSoundEffectClassifier', () => {
-  it('returns the first positive match and otherwise reports a miss', () => {
-    const composite = new CompositeSoundEffectClassifier([
-      { classify: () => ({ isSoundEffect: false }) },
-      { classify: () => ({ isSoundEffect: true, kind: 'exact' as const }) },
-    ]);
-    expect(composite.classify('anything').kind).toBe('exact');
-    expect(new CompositeSoundEffectClassifier([]).classify('anything').isSoundEffect).toBe(false);
+describe('BareFragmentArtworkClassifier', () => {
+  const classifier = new BareFragmentArtworkClassifier();
+  const classify = (text: string) => classifier.classify({ text });
+
+  it('treats a lone glyph or two from the drawing as a fragment', () => {
+    const fragments = ['糸', '茶', '之', '名0', '又千', '市上', '共', '房'];
+    for (const text of fragments) {
+      const match = classify(text);
+      expect(match.isArtwork, text).toBe(true);
+      expect(match.kind, text).toBe('fragment');
+    }
   });
+
+  it('keeps short real dialogue because it carries punctuation', () => {
+    for (const text of ['可恶…', '老师ー', '莲实！', '唔…', 'お？', '「ち、']) {
+      expect(classify(text).isArtwork, text).toBe(false);
+    }
+  });
+
+  it('ignores longer text and Latin blocks', () => {
+    for (const text of ['这等屈辱', 'S16A', '']) {
+      expect(classify(text).isArtwork, text).toBe(false);
+    }
+  });
+});
+
+describe('DisplayLetteringArtworkClassifier', () => {
+  const classifier = new DisplayLetteringArtworkClassifier();
+
+  it('flags blocks far larger than body text', () => {
+    // Measured: the 716x349 brush block on the reported page scored 5.63x body size.
+    expect(classifier.classify({ text: 'こブンャっー', glyphRatio: 5.63 }).kind).toBe('display-lettering');
+    expect(classifier.classify({ text: '房', glyphRatio: 2.23 }).kind).toBe('display-lettering');
+  });
+
+  it('leaves the largest genuine line alone (measured 1.52x)', () => {
+    expect(classifier.classify({ text: '对小穴同时进攻！', glyphRatio: 1.52 }).isArtwork).toBe(false);
+  });
+
+  it('does nothing without a baseline', () => {
+    expect(classifier.classify({ text: 'こブンャっー' }).isArtwork).toBe(false);
+  });
+});
+
+describe('defaultArtworkClassifier', () => {
+  it('catches each failure mode with the right kind', () => {
+    expect(defaultArtworkClassifier.classify({ text: 'ピクン' }).kind).toBe('sound-effect');
+    expect(defaultArtworkClassifier.classify({ text: '轰' }).kind).toBe('sound-effect');
+    // Repeated-kana lettering the dictionary lacks is still caught by the shout rule.
+    expect(defaultArtworkClassifier.classify({ text: 'カイカイ' }).kind).toBe('sound-effect');
+    expect(defaultArtworkClassifier.classify({ text: '糸' }).kind).toBe('fragment');
+    expect(defaultArtworkClassifier.classify({ text: 'こブンャっー', glyphRatio: 5.63 }).kind).toBe('display-lettering');
+  });
+
+  it('passes real dialogue through untouched', () => {
+    for (const text of ['对小穴同时进攻！', '他们已经放松警惕了定会有露出破绽的时候', '莲实！', '哈哈W～这下可有的玩了w～']) {
+      expect(defaultArtworkClassifier.classify({ text, glyphRatio: 1.1 }).isArtwork, text).toBe(false);
+    }
+  });
+
+  it('prefers the more specific rule when several match', () => {
+    // 'ぐちゃ' is dictionary lettering and also short; the lexicon answer must win.
+    expect(defaultArtworkClassifier.classify({ text: 'ぐちゃ' }).kind).toBe('sound-effect');
+  });
+});
+
+describe('CjkShoutSoundEffectClassifier', () => {
+  const classifier = new CjkShoutSoundEffectClassifier();
 
   it('covers CJK shouts that the kana lexicon cannot match', () => {
-    const shout = new CjkShoutSoundEffectClassifier();
-    expect(shout.classify('轰').isSoundEffect).toBe(true);
-    // Two-character CJK action shouts count as lettering too, by the shared text-cleaning rule.
-    expect(shout.classify('轰隆').isSoundEffect).toBe(true);
-    expect(shout.classify('明明只是个学生竟然生得一副这么招摇的身体！').isSoundEffect).toBe(false);
-    expect(shout.classify('用你近的老师跑擁了啊！').isSoundEffect).toBe(false);
+    expect(classifier.classify({ text: '轰' }).isArtwork).toBe(true);
+    expect(classifier.classify({ text: '轰隆' }).isArtwork).toBe(true);
+    expect(classifier.classify({ text: '明明只是个学生竟然生得一副这么招摇的身体！' }).isArtwork).toBe(false);
   });
+});
 
-  it('ships the shout adapter inside the default classifier', () => {
-    expect(defaultSoundEffectClassifier.classify('啪').isSoundEffect).toBe(true);
+describe('CompositeArtworkClassifier', () => {
+  it('returns the first positive match and otherwise reports a miss', () => {
+    const composite = new CompositeArtworkClassifier([
+      { classify: () => ({ isArtwork: false }) },
+      { classify: () => ({ isArtwork: true, kind: 'fragment' as const }) },
+    ]);
+    expect(composite.classify({ text: 'anything' }).kind).toBe('fragment');
+    expect(new CompositeArtworkClassifier([]).classify({ text: 'anything' }).isArtwork).toBe(false);
   });
 });

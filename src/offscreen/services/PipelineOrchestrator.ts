@@ -465,13 +465,19 @@ export class PipelineOrchestrator {
       const textBlockItems: TextBlockItem[] = [];
       const itemOcrIndices: number[] = [];
       // 'preserve' keeps sound effects as artwork; 'translate-plainly' erases and renders them.
-      const sfxStrategy = resolveSfxPolicyStrategy(popupState?.sfxPolicy ?? DEFAULT_SFX_POLICY);
-      const sfxIndices = new Set(sfxStrategy.preservesArtwork ? (ocrResult.sfxIndices ?? []) : []);
+      // Fragments are never language, so they are always left alone; sound effects and display
+      // lettering follow the user's policy.
+      const artworkStrategy = resolveSfxPolicyStrategy(popupState?.sfxPolicy ?? DEFAULT_SFX_POLICY);
+      const preservedArtwork = new Set(
+        (ocrResult.artwork ?? [])
+          .filter((item) => item.kind === 'fragment' || artworkStrategy.preservesArtwork)
+          .map((item) => item.index),
+      );
       for (let i = 0; i < translatedTexts.length; i++) {
         // Sound effects stay as drawn under the default 'preserve' policy: no inpaint (OcrManager
         // already dropped their masks) and no overlay, because erasing brush lettering is
         // irreversible and a plain-font translation of it is worse than the original art.
-        if (sfxIndices.has(i)) continue;
+        if (preservedArtwork.has(i)) continue;
         const text = translatedTexts[i];
         const poly = ocrResult.polygons ? ocrResult.polygons[i] : null;
         const dir = (ocrResult.directions && ocrResult.directions[i]) ? ocrResult.directions[i] : 'h';

@@ -4,7 +4,8 @@ import { resolveOcrTier } from '../engines/ocr/ocrRegistry';
 import type { Point2D } from '../../shared/utils/geometry';
 import { Quadrilateral, Graph, calculateBoundingBox, computeMinAreaRect, polygonArea, quadrilateralCanMergeRegion, splitTextRegion, calculateBoxTiltDegrees } from '../../shared/utils/geometry';
 import { clusterLinesIntoUtterances } from '../utils/utteranceSplitter';
-import { defaultSoundEffectClassifier, type ISoundEffectClassifier } from '../../shared/sfx/SoundEffectClassifier';
+import { defaultArtworkClassifier } from '../../shared/sfx/SoundEffectClassifier';
+import type { ArtworkKind, IArtworkClassifier, OcrBlockDescriptor } from '../../shared/sfx/ArtworkClassifier';
 import { DEFAULT_SFX_POLICY, resolveSfxPolicyStrategy, type SfxPolicyId } from '../../shared/sfx/sfxPolicy';
 import {
   isScanlatorWatermark,
@@ -19,6 +20,9 @@ import {
   stripTrailingWatermarkDebris,
   isStandaloneNoiseStroke,
 } from '../../shared/utils/textCleaning';
+
+/** Fewer blocks than this cannot establish a body-text baseline, so size rules stay disabled. */
+const MIN_BLOCKS_FOR_BASELINE = 3;
 
 /** Rotation angle at which a recognized line stops looking like reading text and starts looking like artwork. */
 const HIGH_TILT_ANGLE_DEG = 12.0;
@@ -156,14 +160,14 @@ export type InitializationLifecycleCallback = (
 ) => void;
 
 export class OcrManager {
-  /** Text-only sound-effect classifier; injected so a model-backed one can replace it. */
-  private readonly sfxClassifier: ISoundEffectClassifier;
+  /** Artwork classifier; injected so a model-backed classifier can replace the rule set. */
+  private readonly artworkClassifier: IArtworkClassifier;
 
   /**
-   * @param sfxClassifier - Classifier deciding whether an OCR block is sound-effect artwork.
+   * @param artworkClassifier - Classifier deciding whether an OCR block is drawing, not language.
    */
-  constructor(sfxClassifier: ISoundEffectClassifier = defaultSoundEffectClassifier) {
-    this.sfxClassifier = sfxClassifier;
+  constructor(artworkClassifier: IArtworkClassifier = defaultArtworkClassifier) {
+    this.artworkClassifier = artworkClassifier;
   }
 
   private activeTier: string | null = null;
@@ -388,6 +392,37 @@ export class OcrManager {
    * Uses convex hull to generate accurate bounding polygons for merged blocks,
    * and concatenates text right-to-left.
    */
+  /**
+   * Computes each block's glyph size relative to the page's body-text baseline.
+   *
+   * The baseline is the character-weighted median of `min(w,h)` — one glyph for both a vertical
+   * column (its width) and a horizontal row (its height). Weighting by character count keeps body
+   * dialogue dominant so oversized lettering cannot inflate its own reference.
+   *
+   * @param boxes - Final merged boxes, in output order.
+   * @param texts - Final merged texts, parallel to `boxes`.
+   * @returns Per-block size ratio, or all `undefined` when the page is too small to measure.
+   */
+  private static computeGlyphRatios(
+    boxes: { w: number; h: number }[],
+    texts: string[],
+  ): (number | undefined)[] {
+    if (boxes.length < MIN_BLOCKS_FOR_BASELINE) return boxes.map(() => undefined);
+    const sizes = boxes.map((box) => Math.min(box.w, box.h));
+    const pairs = sizes
+      .map((size, index) => ({ size, weight: Math.max(Array.from(texts[index] ?? '').length, 1) }))
+      .sort((a, b) => a.size - b.size);
+    const totalWeight = pairs.reduce((sum, pair) => sum + pair.weight, 0);
+    let accumulated = 0;
+    let baseline = pairs[pairs.length - 1].size;
+    for (const pair of pairs) {
+      accumulated += pair.weight;
+      if (accumulated >= totalWeight / 2) { baseline = pair.size; break; }
+    }
+    if (!(baseline > 0)) return boxes.map(() => undefined);
+    return sizes.map((size) => size / baseline);
+  }
+
   private mergeTextBlocks(
     result: OcrResult,
     context?: { sourceLang?: string; pageWidth?: number; pageHeight?: number; sfxPolicy?: SfxPolicyId }
@@ -1000,17 +1035,21 @@ export class OcrManager {
     // filter is otherwise assumed to be dialogue, so it gets translated and its art erased.
     const finalTexts = pick(mergedTexts);
 
-    // Classification is text-only, so it works in every bubble tier including the default 'off'.
-    // Geometry was measured and rejected (see devlog 095): glyph size and ink density overlap
-    // completely between SFX and dialogue, while a dictionary hit is unambiguous.
-    const sfxIndices: number[] = [];
+    // Classification runs on text plus one size ratio, so it works in every bubble tier including
+    // the default 'off'. A dictionary hit catches lettering; the size ratio catches brush strokes
+    // read as text; a bare glyph or two is never language.
+    const finalBoxes = pick(mergedBoxes);
+    const glyphRatio = OcrManager.computeGlyphRatios(finalBoxes, finalTexts);
+    const artwork: { index: number; kind: ArtworkKind }[] = [];
     finalTexts.forEach((text, index) => {
-      if (this.sfxClassifier.classify(text).isSoundEffect) sfxIndices.push(index);
+      const block: OcrBlockDescriptor = { text, glyphRatio: glyphRatio[index] };
+      const match = this.artworkClassifier.classify(block);
+      if (match.isArtwork && match.kind) artwork.push({ index, kind: match.kind });
     });
-    if (sfxIndices.length > 0) {
+    if (artwork.length > 0) {
       console.log(
-        `[OcrManager] Marked ${sfxIndices.length} sound-effect block(s) to leave untouched: ` +
-        sfxIndices.map((i) => `#${i} "${finalTexts[i]}"`).join(', ')
+        `[OcrManager] Marked ${artwork.length} artwork block(s): ` +
+        artwork.map((a) => `#${a.index} ${a.kind} "${finalTexts[a.index]}"`).join(', ')
       );
     }
 
@@ -1022,8 +1061,11 @@ export class OcrManager {
     // `rows` is the final text order, so a position in `sfxIndices` maps back to a merged group.
     // Under the 'translate-plainly' policy the caller wants the lettering erased and replaced, so
     // the preserve-only exclusion does not apply.
-    const preserveSfx = resolveSfxPolicyStrategy(sfxPolicy).preservesArtwork;
-    const sfxGroups = new Set(preserveSfx ? sfxIndices.map((position) => rows[position]) : []);
+    // Fragments and drawing are never erased: nothing would be rendered in their place. Sound
+    // effects and display lettering follow the policy.
+    const preserveArtwork = resolveSfxPolicyStrategy(sfxPolicy).preservesArtwork;
+    const preserved = artwork.filter((a) => a.kind === 'fragment' || preserveArtwork);
+    const sfxGroups = new Set(preserved.map((a) => rows[a.index]));
     for (const cand of rows) {
       if (sfxGroups.has(cand)) continue; // SFX lettering is art: never erased.
       const groupIndices = validFinalGroups[cand];
@@ -1037,7 +1079,7 @@ export class OcrManager {
 
     return {
       texts: pick(mergedTexts),
-      sfxIndices,
+      artwork,
       polygons: pick(mergedPolygons),
       scores: pick(mergedScores),
       boxes: pick(mergedBoxes),

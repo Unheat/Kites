@@ -1,34 +1,20 @@
 /**
- * Sound-effect classification contract and its lexicon-backed implementation.
+ * Sound-effect classification rules and the default artwork classifier composition.
  *
- * The contract exists so the classifier can be swapped without touching the OCR service — a future
- * model-backed classifier (as the Koharu donor uses) implements the same interface, and the pipeline
- * never learns which one ran. Classification is text-only by design, so it works in every bubble
- * tier, including the default `BubbleDetectionMode = 'off'`.
+ * Classification is text-first so it works in every bubble tier. The lexicon covers kana
+ * onomatopoeia; the adapter covers CJK/Hangul action shouts; the composition adds the fragment and
+ * display-lettering rules that catch brush strokes read as text.
  */
 import { ONOMATOPOEIA_LEXICON, type OnomatopoeiaEntry } from './onomatopoeiaLexicon';
 import { isOnomatopoeiaOrShout } from '../utils/textCleaning';
-
-/** Outcome of a sound-effect classification. */
-export interface SoundEffectMatch {
-  /** True when the block is dictionary onomatopoeia and should be preserved as artwork. */
-  readonly isSoundEffect: boolean;
-  /** Matched dictionary entry, when one was found. */
-  readonly entry?: OnomatopoeiaEntry;
-  /** How the block matched: full key, truncated key, or key embedded in OCR noise. */
-  readonly kind?: 'exact' | 'fragment' | 'embedded';
-}
-
-/** Classifies one OCR text block as sound-effect lettering or ordinary text. */
-export interface ISoundEffectClassifier {
-  /**
-   * Classifies a block of OCR text.
-   *
-   * @param text - Raw OCR text for one block.
-   * @returns Match result; `isSoundEffect` is false for speech, captions, and unreadable noise.
-   */
-  classify(text: string): SoundEffectMatch;
-}
+import {
+  BareFragmentArtworkClassifier,
+  CompositeArtworkClassifier,
+  DisplayLetteringArtworkClassifier,
+  type ArtworkMatch,
+  type IArtworkClassifier,
+  type OcrBlockDescriptor,
+} from './ArtworkClassifier';
 
 /** Longest normalized block length that may still be sound-effect lettering; sentences exceed it. */
 const MAX_NORMALIZED_LENGTH = 6;
@@ -49,11 +35,11 @@ const ORDINARY_WORD_BLOCKLIST: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Lexicon-backed classifier: a block is sound-effect lettering when it *is* a dictionary word, or
- * one glyph away from one. Deliberately conservative, because destroying artwork is irreversible
- * while leaving a drawing untranslated is not.
+ * Lexicon-backed rule: a block is sound-effect lettering when it *is* a dictionary word, or one
+ * glyph away from one. Deliberately conservative, because erasing artwork is irreversible while
+ * leaving a drawing untranslated is not.
  */
-export class LexiconSoundEffectClassifier implements ISoundEffectClassifier {
+export class LexiconSoundEffectClassifier implements IArtworkClassifier {
   /** Normalized kana form to dictionary entry, built once per instance. */
   private readonly index: ReadonlyMap<string, OnomatopoeiaEntry>;
 
@@ -88,77 +74,53 @@ export class LexiconSoundEffectClassifier implements ISoundEffectClassifier {
   }
 
   /**
-   * Classifies a block of OCR text against the indexed lexicon.
-   *
-   * @param text - Raw OCR text for one block.
-   * @returns Match result; `isSoundEffect` is false for speech, captions, and unreadable noise.
+   * @param block - Text plus optional size evidence.
+   * @returns Sound-effect match when the block is a dictionary onomatopoeia.
    */
-  classify(text: string): SoundEffectMatch {
-    const key = LexiconSoundEffectClassifier.normalize(text);
-    if (key.length < MIN_KEY_LENGTH || key.length > MAX_NORMALIZED_LENGTH) {
-      return { isSoundEffect: false };
-    }
-    if (ORDINARY_WORD_BLOCKLIST.has(key)) return { isSoundEffect: false };
+  classify(block: OcrBlockDescriptor): ArtworkMatch {
+    const key = LexiconSoundEffectClassifier.normalize(block.text);
+    if (key.length < MIN_KEY_LENGTH || key.length > MAX_NORMALIZED_LENGTH) return { isArtwork: false };
+    if (ORDINARY_WORD_BLOCKLIST.has(key)) return { isArtwork: false };
 
     const exact = this.index.get(key);
-    if (exact) return { isSoundEffect: true, entry: exact, kind: 'exact' };
+    if (exact) return { isArtwork: true, kind: 'sound-effect', entryEn: exact.en };
 
     for (const [form, entry] of this.index) {
       // OCR truncated the word: the block is a near-complete prefix or suffix of a kana form.
       const truncated = (form.startsWith(key) || form.endsWith(key))
         && form.length - key.length <= MAX_STRAY_GLYPHS;
-      if (truncated) return { isSoundEffect: true, entry, kind: 'fragment' };
+      if (truncated) return { isArtwork: true, kind: 'sound-effect', entryEn: entry.en };
       // OCR added stray glyphs around the word: the form sits inside a short block.
       const embedded = key.includes(form) && key.length - form.length <= MAX_STRAY_GLYPHS;
-      if (embedded) return { isSoundEffect: true, entry, kind: 'embedded' };
+      if (embedded) return { isArtwork: true, kind: 'sound-effect', entryEn: entry.en };
     }
-    return { isSoundEffect: false };
+    return { isArtwork: false };
   }
 }
 
 /**
  * Adapter for the CJK action-shout rule (single-character lettering such as 轰, 啪, 쿵).
  *
- * The lexicon covers kana onomatopoeia only, so this covers the logographic and Hangul cases that
- * the shared text-cleaning heuristics already recognize.
+ * The lexicon covers kana only, so this covers the logographic and Hangul cases the shared
+ * text-cleaning heuristics already recognize.
  */
-export class CjkShoutSoundEffectClassifier implements ISoundEffectClassifier {
+export class CjkShoutSoundEffectClassifier implements IArtworkClassifier {
   /**
-   * @param text - Raw OCR text for one block.
-   * @returns Positive match when the block is a CJK sound-effect shout.
+   * @param block - Text plus optional size evidence.
+   * @returns Sound-effect match when the block is a CJK/Hangul sound-effect shout.
    */
-  classify(text: string): SoundEffectMatch {
-    return isOnomatopoeiaOrShout(text) ? { isSoundEffect: true } : { isSoundEffect: false };
+  classify(block: OcrBlockDescriptor): ArtworkMatch {
+    return isOnomatopoeiaOrShout(block.text) ? { isArtwork: true, kind: 'sound-effect' } : { isArtwork: false };
   }
 }
 
-/** Combines classifiers under one contract; the first positive match wins. */
-export class CompositeSoundEffectClassifier implements ISoundEffectClassifier {
-  /** Classifiers consulted in order. */
-  private readonly classifiers: readonly ISoundEffectClassifier[];
-
-  /**
-   * @param classifiers - Classifiers to consult; order is irrelevant beyond the returned evidence.
-   */
-  constructor(classifiers: readonly ISoundEffectClassifier[]) {
-    this.classifiers = classifiers;
-  }
-
-  /**
-   * @param text - Raw OCR text for one block.
-   * @returns The first positive match, or a negative result when none fires.
-   */
-  classify(text: string): SoundEffectMatch {
-    for (const classifier of this.classifiers) {
-      const match = classifier.classify(text);
-      if (match.isSoundEffect) return match;
-    }
-    return { isSoundEffect: false };
-  }
-}
-
-/** Shared classifier instance: every member holds immutable state and is safe to reuse. */
-export const defaultSoundEffectClassifier: ISoundEffectClassifier = new CompositeSoundEffectClassifier([
+/**
+ * Default composition, most specific rule first: dictionary lettering, then CJK shouts, then the
+ * two rules that catch drawing read as text (bare fragments, oversized display lettering).
+ */
+export const defaultArtworkClassifier: IArtworkClassifier = new CompositeArtworkClassifier([
   new LexiconSoundEffectClassifier(),
   new CjkShoutSoundEffectClassifier(),
+  new BareFragmentArtworkClassifier(),
+  new DisplayLetteringArtworkClassifier(),
 ]);
