@@ -32,6 +32,14 @@ export interface OcrResult {
   /** Optional raw unmerged line quadrilaterals for inpainting engines. */
   rawPolygons?: {x: number, y: number}[][];
 
+  /**
+   * Indices of blocks that are sound effects rather than dialogue.
+   *
+   * SFX lettering is artwork: it is not translated and must not be inpainted, because erasing brush
+   * strokes is irreversible while leaving them untouched merely keeps the original page intact.
+   */
+  sfxIndices?: number[];
+
   /** Optional raw DBNet probability heat map canvas (Cotrans mask_raw). */
   maskRawCanvas?: any;
 

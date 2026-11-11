@@ -35,6 +35,7 @@ const NEIGHBORHOOD_SUPPRESSION_SCORE_FLOOR = 0.60;
  */
 const NATIVE_DIALOGUE_SCORE_FLOOR = 0.20;
 
+
 /** Minimum height for a box to count as a vertical text column rather than a stray stroke. */
 const VERTICAL_COLUMN_MIN_HEIGHT_PX = 100;
 
@@ -758,6 +759,7 @@ export class OcrManager {
     const polygons = filteredPolygons.filter((_, index) => !duplicateIndices.has(index));
     const scores = filteredScores.filter((_, index) => !duplicateIndices.has(index));
 
+
     if (texts.length === 0) {
       // Nothing to translate, so nothing should be erased.
       return {
@@ -980,12 +982,35 @@ export class OcrManager {
 
     const pick = <T>(arr: T[]): T[] => rows.map(i => arr[i]);
 
+    // Sound effects are artwork. They survive the noise filters by design (real SFX must not be
+    // pruned as junk), which is exactly why they need their own state: a box that passed every
+    // filter is otherwise assumed to be dialogue, so it gets translated and its art erased.
+    const finalTexts = pick(mergedTexts);
+
+    // Sound effects are artwork: they survive the noise filters by design (real SFX must not be
+    // pruned as junk), which is exactly why they need their own state. Only the SFX-character
+    // detector is trustworthy here; glyph size and ink density were measured and do not separate
+    // SFX from dialogue (see devlog 095), so display lettering needs the bubble mask instead.
+    const sfxIndices: number[] = [];
+    finalTexts.forEach((text, index) => {
+      if (isOnomatopoeiaOrShout(text)) sfxIndices.push(index);
+    });
+    if (sfxIndices.length > 0) {
+      console.log(
+        `[OcrManager] Marked ${sfxIndices.length} sound-effect block(s) to leave untouched: ` +
+        sfxIndices.map((i) => `#${i} "${finalTexts[i]}"`).join(', ')
+      );
+    }
+
     // INVARIANT: Only inpaint regions where replacement text will actually be rendered!
     // If a line was suppressed (low confidence), filtered out as noise, or dropped from
     // the final text groups, no translated text will be drawn over it — so inpainting
     // must NEVER erase it (preventing empty, blanked-out speech bubbles).
     const maskPolygons: Point2D[][] = [];
+    // `rows` is the final text order, so a position in `sfxIndices` maps back to a merged group.
+    const sfxGroups = new Set(sfxIndices.map((position) => rows[position]));
     for (const cand of rows) {
+      if (sfxGroups.has(cand)) continue; // SFX lettering is art: never erased.
       const groupIndices = validFinalGroups[cand];
       if (!groupIndices) continue;
       for (const idx of groupIndices) {
@@ -997,6 +1022,7 @@ export class OcrManager {
 
     return {
       texts: pick(mergedTexts),
+      sfxIndices,
       polygons: pick(mergedPolygons),
       scores: pick(mergedScores),
       boxes: pick(mergedBoxes),

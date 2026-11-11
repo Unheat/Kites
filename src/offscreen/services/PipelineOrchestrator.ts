@@ -462,7 +462,12 @@ export class PipelineOrchestrator {
       // original OCR index of every item so render results can be mapped back for DB persistence.
       const textBlockItems: TextBlockItem[] = [];
       const itemOcrIndices: number[] = [];
+      const sfxIndices = new Set(ocrResult.sfxIndices ?? []);
       for (let i = 0; i < translatedTexts.length; i++) {
+        // Sound effects stay as drawn: no inpaint (OcrManager already dropped their masks) and no
+        // overlay, because erasing brush lettering is irreversible and a half-styled translation of
+        // it is worse than the original art.
+        if (sfxIndices.has(i)) continue;
         const text = translatedTexts[i];
         const poly = ocrResult.polygons ? ocrResult.polygons[i] : null;
         const dir = (ocrResult.directions && ocrResult.directions[i]) ? ocrResult.directions[i] : 'h';
