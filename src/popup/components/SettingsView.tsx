@@ -102,31 +102,6 @@ export default function SettingsView({ state, updateState }: SettingsViewProps) 
           </p>
         </div>
 
-        {/* Max Queue Capacity Slider */}
-        <div className="flex flex-col gap-1.5">
-          <div className="flex justify-between items-center">
-            <div className="flex items-center gap-1.5">
-              <span className="font-medium text-sm">Max Queue Capacity</span>
-              <FieldHint>
-                Maximum images allowed in translation queue. Processed sequentially for GPU stability.
-              </FieldHint>
-            </div>
-            <span className="text-sm font-bold text-[var(--color-editorial)]">{state.concurrency}</span>
-          </div>
-          <input
-            type="range"
-            min="1"
-            max="5"
-            value={concurrency}
-            onChange={(e) => updateState({ concurrency: parseInt(e.target.value, 10) })}
-            className="w-full h-2 bg-[var(--color-vellum)] rounded-lg appearance-none cursor-pointer accent-[var(--color-editorial)]"
-          />
-          <div className="flex justify-between text-xs text-[var(--color-muted)]">
-            <span>1</span>
-            <span>5</span>
-          </div>
-        </div>
-
         {/* History Retention / Auto-Delete */}
         <div className="flex justify-between items-center py-0.5">
           <div className="flex items-center gap-1.5">
@@ -272,6 +247,31 @@ export default function SettingsView({ state, updateState }: SettingsViewProps) 
               onClose={() => setShowSiteRules(false)}
             />
           )}
+
+          {/* Max Queue Capacity Slider */}
+          <div className="flex flex-col gap-1.5">
+            <div className="flex justify-between items-center">
+              <div className="flex items-center gap-1.5">
+                <span className="font-medium text-sm">Max Queue Capacity</span>
+                <FieldHint>
+                  Maximum images allowed in translation queue. Processed sequentially for GPU stability.
+                </FieldHint>
+              </div>
+              <span className="text-sm font-bold text-[var(--color-editorial)]">{state.concurrency}</span>
+            </div>
+            <input
+              type="range"
+              min="1"
+              max="5"
+              value={concurrency}
+              onChange={(e) => updateState({ concurrency: parseInt(e.target.value, 10) })}
+              className="w-full h-2 bg-[var(--color-vellum)] rounded-lg appearance-none cursor-pointer accent-[var(--color-editorial)]"
+            />
+            <div className="flex justify-between text-xs text-[var(--color-muted)]">
+              <span>1</span>
+              <span>5</span>
+            </div>
+          </div>
         </div>
       </div>
     </div>
