@@ -4,6 +4,7 @@ import { resolveOcrTier } from '../engines/ocr/ocrRegistry';
 import type { Point2D } from '../../shared/utils/geometry';
 import { Quadrilateral, Graph, calculateBoundingBox, computeMinAreaRect, polygonArea, quadrilateralCanMergeRegion, splitTextRegion, calculateBoxTiltDegrees } from '../../shared/utils/geometry';
 import { clusterLinesIntoUtterances } from '../utils/utteranceSplitter';
+import { findBogusContainerIndices } from '../../shared/utils/regionOwnership';
 import { defaultArtworkClassifier } from '../../shared/sfx/SoundEffectClassifier';
 import type { ArtworkKind, IArtworkClassifier, OcrBlockDescriptor } from '../../shared/sfx/ArtworkClassifier';
 import { DEFAULT_SFX_POLICY, resolveSfxPolicyStrategy, type SfxPolicyId } from '../../shared/sfx/sfxPolicy';
@@ -801,6 +802,19 @@ export class OcrManager {
           duplicateIndices.add(scoreA >= scoreB ? j : i);
         }
       }
+    }
+
+    // A box that swallows several unrelated readings gets translated alongside them, so one
+    // balloon renders two or three times. The donor dedup requires shared text and never fires
+    // here; regionOwnership.ts covers the case with a containment + text-disagreement rule.
+    const containerCandidates = filteredTexts
+      .map((text, index) => ({ text, box: calculateBoundingBox(filteredPolygons[index]) }))
+      .filter((_, index) => !duplicateIndices.has(index));
+    const keptPositions = filteredTexts
+      .map((_, index) => index)
+      .filter((index) => !duplicateIndices.has(index));
+    for (const position of findBogusContainerIndices(containerCandidates)) {
+      duplicateIndices.add(keptPositions[position]);
     }
 
     const texts = filteredTexts.filter((_, index) => !duplicateIndices.has(index));
