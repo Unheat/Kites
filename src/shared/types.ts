@@ -1,6 +1,7 @@
 /**
  * Shared message types between Content, Background, and Offscreen contexts.
  */
+import { DEFAULT_SFX_POLICY, type SfxPolicyId } from './sfx/sfxPolicy';
 export type MessageType = 
   | 'TRANSLATE_IMAGE'    // Content -> Background
   | 'PROCESS_JOB'        // Background -> Offscreen (job queue dispatch)
@@ -238,6 +239,8 @@ export interface PopupState {
   renderFontAlignment?: 'auto' | 'left' | 'center' | 'right';
   renderFontMinSize?: number;
   bubbleMode: BubbleDetectionMode;
+  /** How sound-effect lettering is handled; see `SFX_POLICIES`. */
+  sfxPolicy: SfxPolicyId;
   historyRetention: HistoryRetentionPeriod;
   customPrompt?: string; // Optional global prompt for translation tone (max 250 chars)
   glossaryEnabled: boolean;
@@ -277,6 +280,7 @@ export const DEFAULT_POPUP_STATE: PopupState = {
   renderFontAlignment: 'auto',
   renderFontMinSize: 6,
   bubbleMode: 'off',
+  sfxPolicy: DEFAULT_SFX_POLICY,
   historyRetention: '1week',
   customPrompt: '',
   glossaryEnabled: false,

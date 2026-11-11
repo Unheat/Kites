@@ -1,5 +1,6 @@
 import { db } from '../../db';
 import type { TypesetMode } from '../../shared/constants';
+import { DEFAULT_SFX_POLICY, resolveSfxPolicyStrategy } from '../../shared/sfx/sfxPolicy';
 import type { PopupState, ModelInitializationStage } from '../../shared/types';
 import { OcrManager, type InitializationLifecycleCallback, type OcrTier } from './OcrManager';
 import { TranslationManager, translationManager as defaultTranslationManager } from './TranslationManager';
@@ -215,7 +216,8 @@ export class PipelineOrchestrator {
       const ocrResult = await this.services.ocrManager.processImage(imageBuffer, ocrTier, {
         sourceLang: sourceLang !== 'auto' ? sourceLang : undefined,
         pageWidth,
-        pageHeight
+        pageHeight,
+        sfxPolicy: popupState?.sfxPolicy,
       }, makeLifecycle('ocr', ocrTier));
       if (import.meta.env.DEV) {
         const ocrDuration = (performance.now() - ocrStart).toFixed(2);
@@ -462,11 +464,13 @@ export class PipelineOrchestrator {
       // original OCR index of every item so render results can be mapped back for DB persistence.
       const textBlockItems: TextBlockItem[] = [];
       const itemOcrIndices: number[] = [];
-      const sfxIndices = new Set(ocrResult.sfxIndices ?? []);
+      // 'preserve' keeps sound effects as artwork; 'translate-plainly' erases and renders them.
+      const sfxStrategy = resolveSfxPolicyStrategy(popupState?.sfxPolicy ?? DEFAULT_SFX_POLICY);
+      const sfxIndices = new Set(sfxStrategy.preservesArtwork ? (ocrResult.sfxIndices ?? []) : []);
       for (let i = 0; i < translatedTexts.length; i++) {
-        // Sound effects stay as drawn: no inpaint (OcrManager already dropped their masks) and no
-        // overlay, because erasing brush lettering is irreversible and a half-styled translation of
-        // it is worse than the original art.
+        // Sound effects stay as drawn under the default 'preserve' policy: no inpaint (OcrManager
+        // already dropped their masks) and no overlay, because erasing brush lettering is
+        // irreversible and a plain-font translation of it is worse than the original art.
         if (sfxIndices.has(i)) continue;
         const text = translatedTexts[i];
         const poly = ocrResult.polygons ? ocrResult.polygons[i] : null;

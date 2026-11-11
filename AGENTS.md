@@ -73,6 +73,10 @@ The developer of this project is a beginner learning full-stack, web extension, 
 
 ---
 
+### 3.2 Pure Code, Measured Thresholds, Optional Tiers
+
+Pure-code reproductions of donor ML must hold the same invariant, thresholds must be derived from measurements, and no feature may depend on an opt-in tier (`BubbleDetectionMode: 'off'` is the default). Full rationale, evidence, and rejected alternatives: [ADR-012](docs/decisions/ADR-012-pure-code-invariants-and-optional-tier-independence.md).
+
 ## 4. Defensive Coding & Error Boundaries
 
 *   **Impact Analysis / Ripple Effect Check**: After modifying any code, signature, data schema, or state flow, inspect all referencing sites and dependent modules across the codebase to ensure changes do not break other places.

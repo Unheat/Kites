@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { PopupState, HistoryRetentionPeriod } from '../../shared/types';
 import { DEFAULT_POPUP_STATE } from '../../shared/types';
+import { DEFAULT_SFX_POLICY, SFX_POLICIES, type SfxPolicyId } from '../../shared/sfx/sfxPolicy';
 import { KeyRound, Network, BookOpen, Globe, MessageSquare, Pencil } from 'lucide-react';
 import GlossaryPanel from './GlossaryPanel';
 import CustomPromptPanel from './CustomPromptPanel';
@@ -147,6 +148,27 @@ export default function SettingsView({ state, updateState }: SettingsViewProps) 
             <option value="1week">1 week (Default)</option>
             <option value="1month">1 month</option>
             <option value="never">Never</option>
+          </select>
+        </div>
+
+        {/* Sound-Effect Handling */}
+        <div className="flex justify-between items-center py-0.5">
+          <div className="flex items-center gap-1.5">
+            <label htmlFor="sfx-policy" className="font-medium text-sm">Sound Effects</label>
+            <FieldHint id="sfx-policy-description">
+              {SFX_POLICIES.find((policy) => policy.id === (state.sfxPolicy ?? DEFAULT_SFX_POLICY))?.description}
+            </FieldHint>
+          </div>
+          <select
+            id="sfx-policy"
+            aria-describedby="sfx-policy-description"
+            value={state.sfxPolicy ?? DEFAULT_SFX_POLICY}
+            onChange={(e) => updateState({ sfxPolicy: e.target.value as SfxPolicyId })}
+            className="px-2.5 py-1 text-xs bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded font-medium text-[var(--color-ink)] cursor-pointer focus:outline-none focus:border-[var(--color-editorial)]"
+          >
+            {SFX_POLICIES.map((policy) => (
+              <option key={policy.id} value={policy.id}>{policy.label}</option>
+            ))}
           </select>
         </div>
 

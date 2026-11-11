@@ -10,6 +10,7 @@ import { SUPPORTED_COLOR_IDS } from '../shared/colorTiers';
 import { resolveOcrTier } from '../offscreen/engines/ocr/ocrRegistry';
 import { normalizeRenderFontPresetId } from '../shared/renderFontPresets';
 import { normalizeGlossaryEntries } from '../shared/glossary';
+import { DEFAULT_SFX_POLICY, isSfxPolicyId, type SfxPolicyId } from '../shared/sfx/sfxPolicy';
 import { normalizeDisabledDomains, normalizeSiteRules, isDomainDisabled } from '../shared/siteRules';
 import { oAuthManager } from './auth/OAuthManager';
 import { registerReadingCommands } from './readingCommands';
@@ -115,6 +116,9 @@ export function normalizePopupState(popupState: Partial<PopupState> | undefined)
         (completedState.bubbleMode as string) === 'neural-mask'
         ? 'neural'
         : 'off';
+  const sfxPolicy: SfxPolicyId = isSfxPolicyId(completedState.sfxPolicy)
+    ? completedState.sfxPolicy
+    : DEFAULT_SFX_POLICY;
   const historyRetention: HistoryRetentionPeriod =
     completedState.historyRetention === '1day' ||
     completedState.historyRetention === '1month' ||
@@ -144,6 +148,7 @@ export function normalizePopupState(popupState: Partial<PopupState> | undefined)
         ? completedState.renderFontMinSize
         : 6,
     bubbleMode,
+    sfxPolicy,
     historyRetention,
     customPrompt: typeof completedState.customPrompt === 'string'
       ? completedState.customPrompt.slice(0, 250)

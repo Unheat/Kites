@@ -4,6 +4,8 @@ import { resolveOcrTier } from '../engines/ocr/ocrRegistry';
 import type { Point2D } from '../../shared/utils/geometry';
 import { Quadrilateral, Graph, calculateBoundingBox, computeMinAreaRect, polygonArea, quadrilateralCanMergeRegion, splitTextRegion, calculateBoxTiltDegrees } from '../../shared/utils/geometry';
 import { clusterLinesIntoUtterances } from '../utils/utteranceSplitter';
+import { defaultSoundEffectClassifier, type ISoundEffectClassifier } from '../../shared/sfx/SoundEffectClassifier';
+import { DEFAULT_SFX_POLICY, resolveSfxPolicyStrategy, type SfxPolicyId } from '../../shared/sfx/sfxPolicy';
 import {
   isScanlatorWatermark,
   isThoughtBubbleTailOrnament,
@@ -154,6 +156,16 @@ export type InitializationLifecycleCallback = (
 ) => void;
 
 export class OcrManager {
+  /** Text-only sound-effect classifier; injected so a model-backed one can replace it. */
+  private readonly sfxClassifier: ISoundEffectClassifier;
+
+  /**
+   * @param sfxClassifier - Classifier deciding whether an OCR block is sound-effect artwork.
+   */
+  constructor(sfxClassifier: ISoundEffectClassifier = defaultSoundEffectClassifier) {
+    this.sfxClassifier = sfxClassifier;
+  }
+
   private activeTier: string | null = null;
   private activeEngine: IOcrEngine | null = null;
   private activeUsers = 0;
@@ -378,8 +390,9 @@ export class OcrManager {
    */
   private mergeTextBlocks(
     result: OcrResult,
-    context?: { sourceLang?: string; pageWidth?: number; pageHeight?: number }
+    context?: { sourceLang?: string; pageWidth?: number; pageHeight?: number; sfxPolicy?: SfxPolicyId }
   ): OcrResult {
+    const sfxPolicy = context?.sfxPolicy ?? DEFAULT_SFX_POLICY;
     // Merge algorithm entry point
     const rawTexts = [...result.texts];
     const rawPolygons = [...(result.polygons || [])];
@@ -987,13 +1000,12 @@ export class OcrManager {
     // filter is otherwise assumed to be dialogue, so it gets translated and its art erased.
     const finalTexts = pick(mergedTexts);
 
-    // Sound effects are artwork: they survive the noise filters by design (real SFX must not be
-    // pruned as junk), which is exactly why they need their own state. Only the SFX-character
-    // detector is trustworthy here; glyph size and ink density were measured and do not separate
-    // SFX from dialogue (see devlog 095), so display lettering needs the bubble mask instead.
+    // Classification is text-only, so it works in every bubble tier including the default 'off'.
+    // Geometry was measured and rejected (see devlog 095): glyph size and ink density overlap
+    // completely between SFX and dialogue, while a dictionary hit is unambiguous.
     const sfxIndices: number[] = [];
     finalTexts.forEach((text, index) => {
-      if (isOnomatopoeiaOrShout(text)) sfxIndices.push(index);
+      if (this.sfxClassifier.classify(text).isSoundEffect || isOnomatopoeiaOrShout(text)) sfxIndices.push(index);
     });
     if (sfxIndices.length > 0) {
       console.log(
@@ -1008,7 +1020,10 @@ export class OcrManager {
     // must NEVER erase it (preventing empty, blanked-out speech bubbles).
     const maskPolygons: Point2D[][] = [];
     // `rows` is the final text order, so a position in `sfxIndices` maps back to a merged group.
-    const sfxGroups = new Set(sfxIndices.map((position) => rows[position]));
+    // Under the 'translate-plainly' policy the caller wants the lettering erased and replaced, so
+    // the preserve-only exclusion does not apply.
+    const preserveSfx = resolveSfxPolicyStrategy(sfxPolicy).preservesArtwork;
+    const sfxGroups = new Set(preserveSfx ? sfxIndices.map((position) => rows[position]) : []);
     for (const cand of rows) {
       if (sfxGroups.has(cand)) continue; // SFX lettering is art: never erased.
       const groupIndices = validFinalGroups[cand];
@@ -1050,7 +1065,7 @@ export class OcrManager {
   async processImage(
     imageBuffer: ArrayBuffer,
     tier: OcrTier = 'v6-small',
-    context?: { sourceLang?: string; pageWidth?: number; pageHeight?: number },
+    context?: { sourceLang?: string; pageWidth?: number; pageHeight?: number; sfxPolicy?: SfxPolicyId },
     onInitialization?: InitializationLifecycleCallback,
   ): Promise<OcrResult> {
     const { engine, release } = await this.acquireEngine(tier, onInitialization);
