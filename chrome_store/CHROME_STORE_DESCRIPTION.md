@@ -6,7 +6,7 @@ No subscriptions. No token caps. No wait time.
 
 Kites is a local-first manga translator built specifically for comic readers. Powered directly by your computer’s graphics card (WebGPU), Kites detects speech balloons, cleanly erases foreign text without blurring the artwork, and typesets beautiful translations right inside the comic panels — matched to each bubble’s original color.
 
-Whether you are reading raw chapters on manga sites, scrolling long webtoons, or browsing artists on X (Twitter) and Pixiv, Kites translates everything seamlessly in place.
+Whether you are reading raw chapters on a manga site, scrolling long webtoons, or browsing artwork feeds, Kites translates everything seamlessly in place.
 
 
 ★ Why Kites Is Different
