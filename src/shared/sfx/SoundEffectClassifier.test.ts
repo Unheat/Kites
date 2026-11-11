@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { LexiconSoundEffectClassifier, defaultSoundEffectClassifier } from './SoundEffectClassifier';
+import {
+  CjkShoutSoundEffectClassifier,
+  CompositeSoundEffectClassifier,
+  LexiconSoundEffectClassifier,
+  defaultSoundEffectClassifier,
+} from './SoundEffectClassifier';
 
 /**
  * Cases below are measured OCR output from real pages: the reported manga page plus the pipeline
@@ -65,7 +70,31 @@ describe('LexiconSoundEffectClassifier', () => {
     expect(custom.classify('ピクン').isSoundEffect).toBe(false);
   });
 
-  it('exposes a shared default instance', () => {
+  it('exposes a shared default instance covering kana lettering', () => {
     expect(defaultSoundEffectClassifier.classify('くうっ').isSoundEffect).toBe(true);
+  });
+});
+
+describe('CompositeSoundEffectClassifier', () => {
+  it('returns the first positive match and otherwise reports a miss', () => {
+    const composite = new CompositeSoundEffectClassifier([
+      { classify: () => ({ isSoundEffect: false }) },
+      { classify: () => ({ isSoundEffect: true, kind: 'exact' as const }) },
+    ]);
+    expect(composite.classify('anything').kind).toBe('exact');
+    expect(new CompositeSoundEffectClassifier([]).classify('anything').isSoundEffect).toBe(false);
+  });
+
+  it('covers CJK shouts that the kana lexicon cannot match', () => {
+    const shout = new CjkShoutSoundEffectClassifier();
+    expect(shout.classify('轰').isSoundEffect).toBe(true);
+    // Two-character CJK action shouts count as lettering too, by the shared text-cleaning rule.
+    expect(shout.classify('轰隆').isSoundEffect).toBe(true);
+    expect(shout.classify('明明只是个学生竟然生得一副这么招摇的身体！').isSoundEffect).toBe(false);
+    expect(shout.classify('用你近的老师跑擁了啊！').isSoundEffect).toBe(false);
+  });
+
+  it('ships the shout adapter inside the default classifier', () => {
+    expect(defaultSoundEffectClassifier.classify('啪').isSoundEffect).toBe(true);
   });
 });

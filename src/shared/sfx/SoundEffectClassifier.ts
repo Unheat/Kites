@@ -7,6 +7,7 @@
  * tier, including the default `BubbleDetectionMode = 'off'`.
  */
 import { ONOMATOPOEIA_LEXICON, type OnomatopoeiaEntry } from './onomatopoeiaLexicon';
+import { isOnomatopoeiaOrShout } from '../utils/textCleaning';
 
 /** Outcome of a sound-effect classification. */
 export interface SoundEffectMatch {
@@ -115,5 +116,49 @@ export class LexiconSoundEffectClassifier implements ISoundEffectClassifier {
   }
 }
 
-/** Shared classifier instance: the lexicon index is immutable and safe to reuse. */
-export const defaultSoundEffectClassifier: ISoundEffectClassifier = new LexiconSoundEffectClassifier();
+/**
+ * Adapter for the CJK action-shout rule (single-character lettering such as 轰, 啪, 쿵).
+ *
+ * The lexicon covers kana onomatopoeia only, so this covers the logographic and Hangul cases that
+ * the shared text-cleaning heuristics already recognize.
+ */
+export class CjkShoutSoundEffectClassifier implements ISoundEffectClassifier {
+  /**
+   * @param text - Raw OCR text for one block.
+   * @returns Positive match when the block is a CJK sound-effect shout.
+   */
+  classify(text: string): SoundEffectMatch {
+    return isOnomatopoeiaOrShout(text) ? { isSoundEffect: true } : { isSoundEffect: false };
+  }
+}
+
+/** Combines classifiers under one contract; the first positive match wins. */
+export class CompositeSoundEffectClassifier implements ISoundEffectClassifier {
+  /** Classifiers consulted in order. */
+  private readonly classifiers: readonly ISoundEffectClassifier[];
+
+  /**
+   * @param classifiers - Classifiers to consult; order is irrelevant beyond the returned evidence.
+   */
+  constructor(classifiers: readonly ISoundEffectClassifier[]) {
+    this.classifiers = classifiers;
+  }
+
+  /**
+   * @param text - Raw OCR text for one block.
+   * @returns The first positive match, or a negative result when none fires.
+   */
+  classify(text: string): SoundEffectMatch {
+    for (const classifier of this.classifiers) {
+      const match = classifier.classify(text);
+      if (match.isSoundEffect) return match;
+    }
+    return { isSoundEffect: false };
+  }
+}
+
+/** Shared classifier instance: every member holds immutable state and is safe to reuse. */
+export const defaultSoundEffectClassifier: ISoundEffectClassifier = new CompositeSoundEffectClassifier([
+  new LexiconSoundEffectClassifier(),
+  new CjkShoutSoundEffectClassifier(),
+]);

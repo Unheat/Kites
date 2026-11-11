@@ -1005,7 +1005,7 @@ export class OcrManager {
     // completely between SFX and dialogue, while a dictionary hit is unambiguous.
     const sfxIndices: number[] = [];
     finalTexts.forEach((text, index) => {
-      if (this.sfxClassifier.classify(text).isSoundEffect || isOnomatopoeiaOrShout(text)) sfxIndices.push(index);
+      if (this.sfxClassifier.classify(text).isSoundEffect) sfxIndices.push(index);
     });
     if (sfxIndices.length > 0) {
       console.log(
