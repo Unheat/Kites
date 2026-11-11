@@ -26,6 +26,13 @@ const MIN_KEY_LENGTH = 2;
 const MAX_STRAY_GLYPHS = 1;
 
 /**
+ * Scripts whose lettering can be a sound effect we must preserve. Pure-Latin blocks are excluded:
+ * they are either the target language already or OCR noise, so preserving them as art is never
+ * correct (measured: "HUH?" on an English page was classified as a sound effect).
+ */
+const CJK_OR_HANGUL = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uff66-\uff9f\uac00-\ud7af]/;
+
+/**
  * Everyday words that are also dictionary entries but are ordinary speech, never SFX artwork.
  * Matching these would suppress dialogue, which is the failure mode this classifier must avoid.
  */
@@ -110,6 +117,7 @@ export class CjkShoutSoundEffectClassifier implements IArtworkClassifier {
    * @returns Sound-effect match when the block is a CJK/Hangul sound-effect shout.
    */
   classify(block: OcrBlockDescriptor): ArtworkMatch {
+    if (!CJK_OR_HANGUL.test(block.text)) return { isArtwork: false };
     return isOnomatopoeiaOrShout(block.text) ? { isArtwork: true, kind: 'sound-effect' } : { isArtwork: false };
   }
 }

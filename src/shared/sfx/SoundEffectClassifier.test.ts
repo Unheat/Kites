@@ -144,6 +144,14 @@ describe('CjkShoutSoundEffectClassifier', () => {
     expect(classifier.classify({ text: '轰隆' }).isArtwork).toBe(true);
     expect(classifier.classify({ text: '明明只是个学生竟然生得一副这么招摇的身体！' }).isArtwork).toBe(false);
   });
+
+  it('never treats Latin text as artwork, even when it reads like a shout', () => {
+    // Measured: an English fixture page had "HUH?" classified as a sound effect and left
+    // untranslated. Latin blocks are the target language or OCR noise, never preserved lettering.
+    for (const text of ['HUH?', 'WAAAH!', 'OK!']) {
+      expect(classifier.classify({ text }).isArtwork, text).toBe(false);
+    }
+  });
 });
 
 describe('CompositeArtworkClassifier', () => {
