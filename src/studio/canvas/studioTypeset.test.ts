@@ -365,42 +365,46 @@ describe('Studio Algorithmic Typeset & Line Reflow', () => {
   });
 });
 
-describe('live gesture layout sampling', () => {
-  /** @returns Rounded rectangle contour used as a fixed chamber outline. */
-  function chamber(): Array<{ x: number; y: number }> {
+describe('live resize contour refit', () => {
+  /** @returns Rectangular chamber outline used as the detected bubble polygon. */
+  function chamber(scale = 1): Array<{ x: number; y: number }> {
     return [
-      { x: 10, y: 10 }, { x: 190, y: 10 }, { x: 190, y: 140 }, { x: 10, y: 140 },
+      { x: Math.round(10 * scale), y: Math.round(10 * scale) },
+      { x: Math.round(190 * scale), y: Math.round(10 * scale) },
+      { x: Math.round(190 * scale), y: Math.round(140 * scale) },
+      { x: Math.round(10 * scale), y: Math.round(140 * scale) },
     ];
   }
 
   const text = 'The fresh armpits of a high school girl are so delicious.';
 
-  it('reuses one fit while the pointer stays inside a sampling step', () => {
+  it('reuses one solve for an identical request', () => {
     resetContourFitMemo();
     const style = { contourPoints: chamber() };
-    const first = recalculateBlockTypeset(text, 'sans-serif', 200, 150, 16, 'contour', style, undefined, true);
-    // 1px smaller stays on the same quantized frame, so the memo answers instead of re-solving.
-    const second = recalculateBlockTypeset(text, 'sans-serif', 201, 151, 16, 'contour', style, undefined, true);
+    const first = recalculateBlockTypeset(text, 'sans-serif', 200, 150, 16, 'contour', style);
+    const second = recalculateBlockTypeset(text, 'sans-serif', 200, 150, 16, 'contour', style);
+    // The memo answers instead of paying a second binary search + DP pass.
     expect(second).toBe(first);
   });
 
-  it('solves again once the frame crosses a sampling step', () => {
+  it('re-fits when the box and its contour scale together, as a resize drag produces', () => {
     resetContourFitMemo();
-    const style = { contourPoints: chamber() };
-    const first = recalculateBlockTypeset(text, 'sans-serif', 200, 150, 16, 'contour', style, undefined, true);
-    // A narrower frame crosses the sampling step and shrinks the usable chords.
-    const stepped = recalculateBlockTypeset(text, 'sans-serif', 60, 150, 16, 'contour', style, undefined, true);
-    expect(stepped).not.toBe(first);
-    expect(stepped.fontSize).toBeLessThan(first.fontSize);
+    const base = recalculateBlockTypeset(text, 'sans-serif', 200, 150, 16, 'contour', { contourPoints: chamber(1) });
+    // Studio scales contourPoints with the box on every resize frame.
+    const scaled = recalculateBlockTypeset(text, 'sans-serif', 300, 225, 16, 'contour', { contourPoints: chamber(1.5) });
+    expect(scaled).not.toBe(base);
+    expect(scaled.fontSize).toBeGreaterThan(base.fontSize);
+    // Text keeps filling the outline instead of only the frame: same number of lines, bigger glyphs.
+    expect(scaled.lines.length).toBe(base.lines.length);
   });
 
-  it('fits the exact frame for committed edits after a sampled gesture', () => {
+  it('re-fits after a frame change so the committed layout is not a stale solve', () => {
     resetContourFitMemo();
     const style = { contourPoints: chamber() };
-    const live = recalculateBlockTypeset(text, 'sans-serif', 202, 151, 16, 'contour', style, undefined, true);
-    const exact = recalculateBlockTypeset(text, 'sans-serif', 202, 151, 16, 'contour', style, undefined, false);
-    // Sampled keys never satisfy an exact request: the committed layout is measured, not reused.
-    expect(exact).not.toBe(live);
+    const first = recalculateBlockTypeset(text, 'sans-serif', 200, 150, 16, 'contour', style);
+    const narrower = recalculateBlockTypeset(text, 'sans-serif', 60, 150, 16, 'contour', style);
+    expect(narrower).not.toBe(first);
+    expect(narrower.fontSize).toBeLessThan(first.fontSize);
   });
 
   it('moves never re-run typeset', () => {

@@ -53,6 +53,16 @@ import type {
 } from '../types';
 
 /**
+ * Minimum interval between contour re-fits during a live resize gesture, in milliseconds.
+ * The contour solver runs a binary search over font sizes with a contour DP pass per candidate,
+ * so solving on every animation frame (60-240 Hz) stutters on long dialogue. Sampling at ~16 Hz
+ * keeps the text visibly growing with the drag while the pointer itself still updates per frame;
+ * pointer release always fits the exact final frame. Measure before changing: this is a UX/perf
+ * trade-off, not a correctness knob.
+ */
+export const LIVE_REFIT_INTERVAL_MS = 60;
+
+/**
  * Coherent gesture record tracking an active text box transform or stationary click.
  */
 interface ActiveTextGesture {
@@ -107,6 +117,10 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
   const lastClickRef = useRef<{ time: number; id: string | null }>({ time: 0, id: null });
   const activeGestureRef = useRef<ActiveTextGesture | null>(null);
   const rafIdRef = useRef<number | null>(null);
+  /** Timestamp of the last live resize refit; throttles solver runs to LIVE_REFIT_INTERVAL_MS. */
+  const lastLiveRefitAtRef = useRef<number>(0);
+  /** Layout produced by the last live refit, carried over between sampling ticks. */
+  const lastLiveLayoutRef = useRef<TextObject | null>(null);
   const warpScratchCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const [copiedOrigPill, setCopiedOrigPill] = useState(false);
@@ -676,8 +690,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
    *               committed frame on pointer release (exact refit).
    * @returns Updated geometry, reflowed only when measured inputs changed.
    */
-  const computeUpdatedTextObject = (gesture: ActiveTextGesture, live: boolean = false): TextObject => {
-    const { initialTransform, handle, latestDeltaX, latestDeltaY, latestShiftKey } = gesture;
+  const computeUpdatedTextObject = (gesture: ActiveTextGesture, live: boolean = false): TextObject => {    const { initialTransform, handle, latestDeltaX, latestDeltaY, latestShiftKey } = gesture;
     const updated = { ...initialTransform };
 
     if (handle === 'rot') {
@@ -716,17 +729,53 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       updated.width = newBounds.width;
       updated.height = newBounds.height;
 
-      // The chamber contour is anchored to the artwork, not to the drag handles: it is the
-      // balloon that was detected in the page pixels. Resizing moves the text frame inside that
-      // fixed outline so the contour solver re-wraps and re-fits (wider frame, longer chords),
-      // which is what makes a resize actually re-typeset. Scaling the contour with the box turned
-      // the solver input into a similarity transform, so every resize returned the same layout at
-      // a proportionally scaled font; the editor looked like it only zoomed the glyphs and left
-      // the dashed outline drifting off the bubble art. `originalContourPoints` /`detectedWidth`
-      // /`detectedHeight` stay seeded so `Reset to Bubble Frame` still restores the detected box.
+      // Koharu 2D contour affine transform (crates/koharu-desktop/src/lib.rs:283-297):
+      // The polygon contour scales with the bounding box, so the dashed outline stays locked to
+      // the drag handles and the contour solver's chords grow/shrink with the new box. The text is
+      // then re-fitted inside that new contour every sampling tick (see LIVE_REFIT_INTERVAL_MS),
+      // which is what makes the glyphs grow into the enlarged balloon. Scaling is recomputed from
+      // the gesture-start baseline each frame, so it never ratchets across a drag.
+      const baseContour = initialTransform.originalContourPoints ?? initialTransform.contourPoints;
+      const baseW = initialTransform.detectedWidth ?? initialTransform.width;
+      const baseH = initialTransform.detectedHeight ?? initialTransform.height;
+      if (baseContour && baseContour.length >= 3 && baseW > 0 && baseH > 0) {
+        const scaleX = newBounds.width / baseW;
+        const scaleY = newBounds.height / baseH;
+        updated.contourPoints = baseContour.map((p) => ({
+          x: Math.round(p.x * scaleX),
+          y: Math.round(p.y * scaleY),
+        }));
+        updated.originalContourPoints = baseContour;
+        updated.detectedWidth = baseW;
+        updated.detectedHeight = baseH;
+      }
     }
 
-    return applyTextObjectUpdates(initialTransform, updated, studioStore.getState().globalTypesetMode, undefined, live);
+    // Live gestures re-fit at a fixed sample rate instead of once per animation frame. The
+    // solver is a binary search over font sizes with a contour DP pass per candidate, so 60
+    // solves/second stutters on long dialogue. Between samples the frame and contour keep
+    // following the pointer while the previous measured layout is carried over; release always
+    // fits the exact final frame.
+    const isResizeHandle = handle !== 'move' && handle !== 'rot' && handle !== 'font-size';
+    const sampled = live && isResizeHandle && lastLiveLayoutRef.current !== null
+      && performance.now() - lastLiveRefitAtRef.current < LIVE_REFIT_INTERVAL_MS;
+    if (sampled) {
+      const carried = lastLiveLayoutRef.current!;
+      return {
+        ...updated,
+        lines: carried.lines,
+        fontSize: carried.fontSize,
+        positionedLines: carried.positionedLines,
+        roundFit: carried.roundFit,
+      };
+    }
+    if (live) lastLiveRefitAtRef.current = performance.now();
+
+    const result = applyTextObjectUpdates(
+      initialTransform, updated, studioStore.getState().globalTypesetMode
+    );
+    if (live) lastLiveLayoutRef.current = result;
+    return result;
   };
 
   /**
@@ -834,6 +883,8 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
         if (handle) {
           // A new drag owns its own layout sampling; never serve a previous gesture memo.
           resetContourFitMemo();
+          lastLiveLayoutRef.current = null;
+          lastLiveRefitAtRef.current = 0;
           activeGestureRef.current = {
             pointerId: e.pointerId,
             targetId: selectedObj.id,
@@ -1239,9 +1290,10 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
     const gesture = activeGestureRef.current;
     if ((activeTool === 'select' || activeTool === 'text') && gesture) {
       if (gesture.hasMoved) {
-        // Synchronously commit the exact final frame (no sampling grid, no memo).
+        // Synchronously commit the exact final frame (no sampling window, no memo).
         const finalUpdated = computeUpdatedTextObject(gesture, false);
         resetContourFitMemo();
+        lastLiveLayoutRef.current = null;
         const currentList = studioStore.getState().textObjects;
         const nextList = currentList.map((t) => (t.id === finalUpdated.id ? finalUpdated : t));
         studioStore.setState({ textObjects: nextList });
@@ -1316,6 +1368,10 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       }));
     }
     activeGestureRef.current = null;
+    // The cancelled gesture's carried layout must not leak into the next interaction.
+    resetContourFitMemo();
+    lastLiveLayoutRef.current = null;
+    lastLiveRefitAtRef.current = 0;
     setIsPointerDown(false);
     setActiveHandle(null);
   };
