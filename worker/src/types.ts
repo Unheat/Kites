@@ -125,6 +125,12 @@ export interface Env {
   SHARED_POOL: DurableObjectNamespace;
   AI?: any; // Cloudflare Workers AI binding
   GOOGLE_CLIENT_ID?: string;
+  /**
+   * Optional Chrome Extension OAuth client ID. Tokens minted by silent
+   * `chrome.identity.getAuthToken` refreshes carry this client as their
+   * audience, so accepting it here keeps long sessions authenticated.
+   */
+  GOOGLE_EXTENSION_CLIENT_ID?: string;
   JWT_SALT?: string;
   NVIDIA_API_KEY?: string;
   OPENROUTER_API_KEY?: string;

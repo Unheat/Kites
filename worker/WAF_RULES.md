@@ -66,8 +66,12 @@ Once your Worker is created in Cloudflare, set your secrets from the terminal:
 ```bash
 cd worker
 
-# Google Auth Client ID (Audience)
+# Google Auth Client ID (Audience): Web Application client used by launchWebAuthFlow
 npx wrangler secret put GOOGLE_CLIENT_ID
+
+# Chrome Extension client from manifest.json's oauth2.client_id (silent getAuthToken refresh).
+# Must be set, or every token minted after the first hourly refresh is rejected as 401.
+npx wrangler secret put GOOGLE_EXTENSION_CLIENT_ID
 
 # HMAC Salt for anonymous user quota tracking
 npx wrangler secret put JWT_SALT

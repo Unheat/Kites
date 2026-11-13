@@ -16,6 +16,31 @@ export const TOKENINFO_TIMEOUT_MS = 5000; // 5s
 export const MAX_TOKENINFO_BYTES = 16 * 1024; // 16 KB
 
 /**
+ * Normalizes accepted audience candidates into a trimmed, de-duplicated list.
+ *
+ * Kites owns two Google OAuth clients in the same Cloud project: the Web
+ * Application client (interactive sign-in) and the Chrome Extension client
+ * (silent refresh via chrome.identity.getAuthToken). Both mint access tokens
+ * for the same Google user, so the gateway must accept either one.
+ *
+ * @param expected - A single client ID or a list of accepted client IDs.
+ * @returns Non-empty trimmed client IDs, order preserved, duplicates removed.
+ */
+export function normalizeAcceptedClientIds(expected: string | readonly string[]): string[] {
+  const candidates = typeof expected === 'string' ? [expected] : expected;
+  const accepted: string[] = [];
+
+  for (const candidate of candidates) {
+    if (typeof candidate !== 'string') continue;
+    const trimmed = candidate.trim();
+    if (trimmed === '' || accepted.includes(trimmed)) continue;
+    accepted.push(trimmed);
+  }
+
+  return accepted;
+}
+
+/**
  * Normalizes audience claims from Google tokeninfo across `aud`, `audience`,
  * `issued_to`, and `azp`.
  *
@@ -23,14 +48,18 @@ export const MAX_TOKENINFO_BYTES = 16 * 1024; // 16 KB
  * - At least one documented audience claim must be present.
  * - Any present claim must be a non-empty string or a non-empty array of strings.
  * - Malformed types (numbers, booleans, objects, empty strings, empty arrays) fail closed immediately.
- * - Every present claim must strictly match expectedClientId (conflicting audiences fail closed).
+ * - Every present claim must match one of the accepted client IDs (conflicting audiences fail closed).
  *
  * @param info - Parsed Google tokeninfo JSON response.
- * @param expectedClientId - Configured GOOGLE_CLIENT_ID.
- * @returns True if audience fields are valid and consistently match expectedClientId.
+ * @param expected - Configured GOOGLE_CLIENT_ID, or the list of accepted client IDs.
+ * @returns True if audience fields are valid and consistently match an accepted client ID.
  */
-export function normalizeAndMatchAudience(info: Record<string, unknown>, expectedClientId: string): boolean {
-  if (!expectedClientId || typeof expectedClientId !== 'string' || expectedClientId.trim() === '') {
+export function normalizeAndMatchAudience(
+  info: Record<string, unknown>,
+  expected: string | readonly string[]
+): boolean {
+  const acceptedClientIds = normalizeAcceptedClientIds(expected);
+  if (acceptedClientIds.length === 0) {
     return false;
   }
 
@@ -44,8 +73,8 @@ export function normalizeAndMatchAudience(info: Record<string, unknown>, expecte
 
     if (typeof val === 'string') {
       const trimmed = val.trim();
-      if (trimmed.length === 0 || trimmed !== expectedClientId) {
-        return false; // Malformed empty string or mismatched audience
+      if (trimmed.length === 0 || !acceptedClientIds.includes(trimmed)) {
+        return false; // Malformed empty string or unaccepted audience
       }
       foundAtLeastOne = true;
     } else if (Array.isArray(val)) {
@@ -53,8 +82,8 @@ export function normalizeAndMatchAudience(info: Record<string, unknown>, expecte
         return false; // Malformed empty array
       }
       for (const item of val) {
-        if (typeof item !== 'string' || item.trim() !== expectedClientId) {
-          return false; // Non-string item or mismatched audience
+        if (typeof item !== 'string' || !acceptedClientIds.includes(item.trim())) {
+          return false; // Non-string item or unaccepted audience
         }
       }
       foundAtLeastOne = true;

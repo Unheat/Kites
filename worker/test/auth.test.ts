@@ -114,6 +114,39 @@ describe('Worker Google Auth & Cryptographic Boundaries', () => {
     it('fails closed when no audience fields are present in tokeninfo', () => {
       expect(normalizeAndMatchAudience({ email: 'user@example.com' }, expectedClientId)).toBe(false);
     });
+
+    it('accepts the extension client ID when it is part of the accepted list', () => {
+      const extensionClientId = '67890-chrome-extension-client.apps.googleusercontent.com';
+      const accepted = [expectedClientId, extensionClientId];
+
+      // Silent getAuthToken refreshes return the extension client as the audience.
+      expect(normalizeAndMatchAudience({ aud: extensionClientId, issued_to: extensionClientId }, accepted)).toBe(true);
+      expect(normalizeAndMatchAudience({ aud: expectedClientId }, accepted)).toBe(true);
+    });
+
+    it('fails closed for a client ID outside the accepted list', () => {
+      const accepted = [expectedClientId];
+      expect(
+        normalizeAndMatchAudience(
+          { aud: 'unrelated-client-id.apps.googleusercontent.com' },
+          accepted
+        )
+      ).toBe(false);
+      // Mixed audiences across accepted and unaccepted clients still fail closed.
+      expect(
+        normalizeAndMatchAudience(
+          { aud: expectedClientId, azp: 'unrelated-client-id.apps.googleusercontent.com' },
+          accepted
+        )
+      ).toBe(false);
+    });
+
+    it('ignores blank candidates in the accepted list', () => {
+      const accepted = ['', '   ', expectedClientId];
+      expect(normalizeAndMatchAudience({ aud: expectedClientId }, accepted)).toBe(true);
+      expect(normalizeAndMatchAudience({ aud: '   ' }, accepted)).toBe(false);
+      expect(normalizeAndMatchAudience({ aud: expectedClientId }, [])).toBe(false);
+    });
   });
 
   describe('GoogleAuthVerifier Strategy', () => {

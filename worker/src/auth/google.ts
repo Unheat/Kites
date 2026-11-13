@@ -13,15 +13,36 @@ import { IAuthProviderVerifier, VerifiedIdentity, GoogleTokenPayload } from './t
 import { tokenCache } from './token-cache';
 import { AuthInvalidTokenError, AuthTransientError, ServerConfigurationError } from '../security/errors';
 import { findGoogleKeyByKid, importRsaKey } from './jwks';
-import { fetchGoogleTokeninfo, normalizeAndMatchAudience } from './tokeninfo';
+import { fetchGoogleTokeninfo, normalizeAcceptedClientIds, normalizeAndMatchAudience } from './tokeninfo';
 import { base64UrlToUint8Array, safeParseBase64UrlJson, decodeJwtPayloadUnsafe } from './jwt-utils';
 
 // Preserve existing exports for consumers and test suites
 export { getGoogleJwks, _resetJwksStateForTesting } from './jwks';
-export { normalizeAndMatchAudience } from './tokeninfo';
+export { normalizeAndMatchAudience, normalizeAcceptedClientIds } from './tokeninfo';
 export { decodeJwtPayloadUnsafe } from './jwt-utils';
 
 const CLOCK_SKEW_SEC = 60; // 60 seconds tolerance
+
+/**
+ * Resolves the set of Google OAuth client IDs this gateway accepts tokens for.
+ *
+ * Kites issues tokens from two clients in the same Google Cloud project:
+ * - GOOGLE_CLIENT_ID: the Web Application client used by the interactive
+ *   `chrome.identity.launchWebAuthFlow` sign-in (primary).
+ * - GOOGLE_EXTENSION_CLIENT_ID (optional): the Chrome Extension client used by
+ *   the silent `chrome.identity.getAuthToken` refresh after the primary token
+ *   expires. Tokens minted there carry the extension client as their audience,
+ *   so omitting this binding makes every post-expiry refresh fail as 401.
+ *
+ * @param env - Worker environment bindings.
+ * @returns Accepted client IDs in priority order (primary first), empty when unconfigured.
+ */
+export function getAcceptedClientIds(env: Env): string[] {
+  return normalizeAcceptedClientIds([
+    typeof env.GOOGLE_CLIENT_ID === 'string' ? env.GOOGLE_CLIENT_ID : '',
+    typeof env.GOOGLE_EXTENSION_CLIENT_ID === 'string' ? env.GOOGLE_EXTENSION_CLIENT_ID : '',
+  ]);
+}
 
 /**
  * Cryptographically verify a Google OIDC ID token using Google's public JWKS.
@@ -29,15 +50,16 @@ const CLOCK_SKEW_SEC = 60; // 60 seconds tolerance
  * Follows OIDC Core specification for multiple audiences requiring azp verification.
  *
  * @param token - The raw JWT ID token string from the Authorization header.
- * @param expectedAudience - Required Google OAuth Client ID to assert against aud/azp.
+ * @param expectedAudience - Required Google OAuth Client ID (or accepted client IDs) to assert against aud/azp.
  * @returns The parsed and verified token payload.
  * @throws AuthInvalidTokenError or AuthTransientError if verification fails.
  */
 export async function verifyGoogleIdToken(
   token: string,
-  expectedAudience: string
+  expectedAudience: string | readonly string[]
 ): Promise<GoogleTokenPayload> {
-  if (!expectedAudience || typeof expectedAudience !== 'string' || expectedAudience.trim() === '') {
+  const acceptedClientIds = normalizeAcceptedClientIds(expectedAudience);
+  if (acceptedClientIds.length === 0) {
     throw new ServerConfigurationError('Server authentication configuration missing: GOOGLE_CLIENT_ID is required');
   }
 
@@ -74,26 +96,26 @@ export async function verifyGoogleIdToken(
   }
 
   // 3. Validate audience (aud) & authorized party (azp) per OIDC Core spec:
-  // - If aud is an array, it must include expectedAudience.
-  // - If multiple audiences are present in aud, azp is strictly required and must match expectedAudience.
-  // - If aud is a string, it must match expectedAudience.
-  // - If azp is present, it must match expectedAudience.
+  // - If aud is an array, it must include an accepted client ID.
+  // - If multiple audiences are present in aud, azp is strictly required and must match an accepted client ID.
+  // - If aud is a string, it must match an accepted client ID.
+  // - If azp is present, it must match an accepted client ID.
   if (Array.isArray(payload.aud)) {
-    if (!payload.aud.includes(expectedAudience)) {
-      throw new AuthInvalidTokenError(`Audience mismatch: expected ${expectedAudience}`);
+    if (!payload.aud.some((audience) => acceptedClientIds.includes(audience))) {
+      throw new AuthInvalidTokenError(`Audience mismatch: expected ${acceptedClientIds.join(' or ')}`);
     }
     if (payload.aud.length > 1) {
-      if (typeof payload.azp !== 'string' || payload.azp.trim() !== expectedAudience) {
-        throw new AuthInvalidTokenError(`Authorized party (azp) mismatch for multi-audience token: expected ${expectedAudience}`);
+      if (typeof payload.azp !== 'string' || !acceptedClientIds.includes(payload.azp.trim())) {
+        throw new AuthInvalidTokenError(`Authorized party (azp) mismatch for multi-audience token: expected ${acceptedClientIds.join(' or ')}`);
       }
     }
-  } else if (payload.aud !== expectedAudience) {
-    throw new AuthInvalidTokenError(`Audience mismatch: expected ${expectedAudience}`);
+  } else if (typeof payload.aud !== 'string' || !acceptedClientIds.includes(payload.aud.trim())) {
+    throw new AuthInvalidTokenError(`Audience mismatch: expected ${acceptedClientIds.join(' or ')}`);
   }
 
   if (payload.azp !== undefined && payload.azp !== null) {
-    if (typeof payload.azp !== 'string' || payload.azp.trim() !== expectedAudience) {
-      throw new AuthInvalidTokenError(`Authorized party (azp) mismatch: expected ${expectedAudience}`);
+    if (typeof payload.azp !== 'string' || !acceptedClientIds.includes(payload.azp.trim())) {
+      throw new AuthInvalidTokenError(`Authorized party (azp) mismatch: expected ${acceptedClientIds.join(' or ')}`);
     }
   }
 
@@ -153,7 +175,8 @@ export class GoogleAuthVerifier implements IAuthProviderVerifier {
   }
 
   async verify(token: string, env: Env): Promise<VerifiedIdentity> {
-    if (!env.GOOGLE_CLIENT_ID || typeof env.GOOGLE_CLIENT_ID !== 'string' || env.GOOGLE_CLIENT_ID.trim() === '') {
+    const acceptedClientIds = getAcceptedClientIds(env);
+    if (acceptedClientIds.length === 0) {
       throw new ServerConfigurationError('Server authentication configuration missing: GOOGLE_CLIENT_ID is required');
     }
 
@@ -175,9 +198,9 @@ export class GoogleAuthVerifier implements IAuthProviderVerifier {
         throw err;
       }
 
-      const audienceMatched = normalizeAndMatchAudience(info, env.GOOGLE_CLIENT_ID);
+      const audienceMatched = normalizeAndMatchAudience(info, acceptedClientIds);
       if (!audienceMatched) {
-        const errMsg = `Token audience mismatch: expected ${env.GOOGLE_CLIENT_ID}`;
+        const errMsg = `Token audience mismatch: expected ${acceptedClientIds.join(' or ')}`;
         tokenCache.setInvalid(token, errMsg);
         throw new AuthInvalidTokenError(errMsg);
       }
@@ -233,7 +256,7 @@ export class GoogleAuthVerifier implements IAuthProviderVerifier {
 
     // Path B: Standard OIDC ID Token (JWT)
     try {
-      const payload = await verifyGoogleIdToken(token, env.GOOGLE_CLIENT_ID);
+      const payload = await verifyGoogleIdToken(token, acceptedClientIds);
       const identity: VerifiedIdentity = {
         sub: payload.sub,
         provider: this.provider,

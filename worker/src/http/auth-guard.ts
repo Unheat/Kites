@@ -70,8 +70,7 @@ export async function authenticateProtectedRequest(
     !env.JWT_SALT ||
     typeof env.JWT_SALT !== 'string' ||
     env.JWT_SALT.trim() === ''
-  ) {
-    return {
+  ) {    return {
       response: errorResponse(
         'Server authentication configuration missing',
         500,
@@ -159,6 +158,13 @@ export async function authenticateProtectedRequest(
 
     // Genuine client authentication failure: strike bad-actor count and return sanitized 401
     ipRateLimiter.recordAuthFailure(clientIp);
+    // Server-side reason is logged (never the token itself) so a 401 wave is diagnosable
+    // from Worker logs without asking users to reproduce with devtools open.
+    console.error(JSON.stringify({
+      event: 'auth_rejected',
+      requestId,
+      reason: err instanceof Error ? err.message : 'Unknown authentication failure',
+    }));
     return {
       response: errorResponse(
         'Authentication failed: Invalid or expired token',
