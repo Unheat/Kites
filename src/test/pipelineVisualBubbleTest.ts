@@ -11,6 +11,7 @@ import { NeuralBubbleDetector } from '../offscreen/engines/bubble/NeuralBubbleDe
 import { HeuristicBubbleExtractor } from '../offscreen/engines/bubble/HeuristicBubbleExtractor';
 import { resolveBubbleLayoutsDetailed, type BubbleGeometry } from '../offscreen/services/BubbleLayoutService';
 import { createHeuristicOwnership, createPrecomputedNeuralOwnership } from './ownershipHarness';
+import { NeuralBubbleEngine } from '../offscreen/engines/bubble/NeuralBubbleEngine';
 import { DEFAULT_RENDER_FONT_FAMILY } from '../offscreen/utils/canvasTypesetting';
 import { HyphenationService } from '../offscreen/utils/hyphenation/HyphenationService';
 import * as ort from 'onnxruntime-node';
@@ -331,10 +332,21 @@ async function runPipelineVisualBubbleTest() {
         }
       }
 
-      const neuralGeometry = createPrecomputedNeuralOwnership(
+      // Re-run OCR with the neural ownership policy so this pass is gated the same way the extension
+      // gates it (per prepared line). The shapes above were computed for the heuristic pass's merged
+      // boxes, so they are rebuilt for whatever regions this pass produces.
+      const neuralOwnership = createPrecomputedNeuralOwnership(
         { canvas: null, image: rawImageData, pageWidth, pageHeight },
+        { bubbles: detectedBubbles, shapes: [] },
+      );
+      const neuralOcr = await ocrManager.processImage(
+        arrayBuffer, 'v6-small', { sourceLang: 'ja', pageWidth, pageHeight },
+        undefined, { partitionLines: (lines) => neuralOwnership.partition(lines) },
+      );
+      const neuralGeometry = await NeuralBubbleEngine.buildGeometry(
+        null, rawImageData, neuralOcr.boxes, undefined,
         { bubbles: detectedBubbles, shapes: neuralShapes },
-      ).geometryForRegions(ocrResult.groupLineIndices ?? []);
+      );
       if (!neuralGeometry) throw new Error('Neural bubble geometry build failed');
       const canvas = createCanvas(pageWidth, pageHeight);
       const ctx = canvas.getContext('2d');
