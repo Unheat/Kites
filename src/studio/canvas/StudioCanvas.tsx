@@ -36,7 +36,7 @@ import { StudioSourceSampler } from './StudioSourceSampler';
 import { ToolViewModePolicy } from './tools/ToolViewModePolicy';
 import { requestStudioInpaint, requestStudioOcr } from '../bridge/offscreenStudioBridge';
 import { computeRotatedBounds, getHandleCursor } from './transformMath';
-import { applyTextObjectUpdates, prepareInitialTextObject, CJK_CHARACTER_REGEX, FONT_SIZE_SLIDER_MAX, getTypesetMeasureContext } from './studioTypeset';
+import { applyTextObjectUpdates, prepareInitialTextObject, CJK_CHARACTER_REGEX, FONT_SIZE_SLIDER_MAX, getTypesetMeasureContext, resetContourFitMemo } from './studioTypeset';
 import { unwrapWrappedText } from '../../offscreen/utils/typography';
 import {
   canUseContourEditorGeometry, charIndexFromPoint, computeContourEditorGeometry,
@@ -672,9 +672,11 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
   /**
    * Computes the updated TextObject geometry and typeset reflow for an active gesture.
    * @param gesture - Initial object, transform handle, and current pointer deltas.
+   * @param live - True for intermediate animation frames (sampled contour refit), false for the
+   *               committed frame on pointer release (exact refit).
    * @returns Updated geometry, reflowed only when measured inputs changed.
    */
-  const computeUpdatedTextObject = (gesture: ActiveTextGesture): TextObject => {
+  const computeUpdatedTextObject = (gesture: ActiveTextGesture, live: boolean = false): TextObject => {
     const { initialTransform, handle, latestDeltaX, latestDeltaY, latestShiftKey } = gesture;
     const updated = { ...initialTransform };
 
@@ -714,27 +716,17 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       updated.width = newBounds.width;
       updated.height = newBounds.height;
 
-      // Koharu 2D contour affine transform (crates/koharu-desktop/src/lib.rs:283-297):
-      // When the user resizes a speech bubble in Studio, scale its polygon contour
-      // proportionally with the bounding box so text reflows live into the wider space
-      // and the dashed outline stays locked to the editing handles.
-      const baseContour = initialTransform.originalContourPoints ?? initialTransform.contourPoints;
-      const baseW = initialTransform.detectedWidth ?? initialTransform.width;
-      const baseH = initialTransform.detectedHeight ?? initialTransform.height;
-      if (baseContour && baseContour.length >= 3 && baseW > 0 && baseH > 0) {
-        const scaleX = newBounds.width / baseW;
-        const scaleY = newBounds.height / baseH;
-        updated.contourPoints = baseContour.map((p) => ({
-          x: Math.round(p.x * scaleX),
-          y: Math.round(p.y * scaleY),
-        }));
-        updated.originalContourPoints = baseContour;
-        updated.detectedWidth = baseW;
-        updated.detectedHeight = baseH;
-      }
+      // The chamber contour is anchored to the artwork, not to the drag handles: it is the
+      // balloon that was detected in the page pixels. Resizing moves the text frame inside that
+      // fixed outline so the contour solver re-wraps and re-fits (wider frame, longer chords),
+      // which is what makes a resize actually re-typeset. Scaling the contour with the box turned
+      // the solver input into a similarity transform, so every resize returned the same layout at
+      // a proportionally scaled font; the editor looked like it only zoomed the glyphs and left
+      // the dashed outline drifting off the bubble art. `originalContourPoints` /`detectedWidth`
+      // /`detectedHeight` stay seeded so `Reset to Bubble Frame` still restores the detected box.
     }
 
-    return applyTextObjectUpdates(initialTransform, updated, studioStore.getState().globalTypesetMode);
+    return applyTextObjectUpdates(initialTransform, updated, studioStore.getState().globalTypesetMode, undefined, live);
   };
 
   /**
@@ -743,7 +735,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
   const applyTransformFrame = useCallback(() => {
     const gesture = activeGestureRef.current;
     if (!gesture || !gesture.hasMoved) return;
-    const updated = computeUpdatedTextObject(gesture);
+    const updated = computeUpdatedTextObject(gesture, true);
     studioStore.setState((state) => ({
       textObjects: state.textObjects.map((t) => (t.id === updated.id ? updated : t)),
     }));
@@ -840,6 +832,8 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
       if (selectedObj && !hideBoxes && !selectedObj.isLocked) {
         const handle = CanvasFurniture.hitTestHandles(pt, selectedObj);
         if (handle) {
+          // A new drag owns its own layout sampling; never serve a previous gesture memo.
+          resetContourFitMemo();
           activeGestureRef.current = {
             pointerId: e.pointerId,
             targetId: selectedObj.id,
@@ -1245,8 +1239,9 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
     const gesture = activeGestureRef.current;
     if ((activeTool === 'select' || activeTool === 'text') && gesture) {
       if (gesture.hasMoved) {
-        // Synchronously commit final frame position
-        const finalUpdated = computeUpdatedTextObject(gesture);
+        // Synchronously commit the exact final frame (no sampling grid, no memo).
+        const finalUpdated = computeUpdatedTextObject(gesture, false);
+        resetContourFitMemo();
         const currentList = studioStore.getState().textObjects;
         const nextList = currentList.map((t) => (t.id === finalUpdated.id ? finalUpdated : t));
         studioStore.setState({ textObjects: nextList });

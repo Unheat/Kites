@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { applyTextObjectUpdates, getTypesetDisplayText, getTypesetMeasureContext, prepareInitialTextObject, recalculateBlockTypeset } from './studioTypeset';
+import { applyTextObjectUpdates, getTypesetDisplayText, getTypesetMeasureContext, prepareInitialTextObject, recalculateBlockTypeset, resetContourFitMemo } from './studioTypeset';
 import type { TextObject } from '../types';
 
 const object: TextObject = {
@@ -357,5 +357,50 @@ describe('Studio Algorithmic Typeset & Line Reflow', () => {
       expect(updated.lines).toBeDefined();
       expect(updated.lines!.length).toBeGreaterThanOrEqual(1);
     });
+  });
+});
+
+describe('live gesture layout sampling', () => {
+  /** @returns Rounded rectangle contour used as a fixed chamber outline. */
+  function chamber(): Array<{ x: number; y: number }> {
+    return [
+      { x: 10, y: 10 }, { x: 190, y: 10 }, { x: 190, y: 140 }, { x: 10, y: 140 },
+    ];
+  }
+
+  const text = 'The fresh armpits of a high school girl are so delicious.';
+
+  it('reuses one fit while the pointer stays inside a sampling step', () => {
+    resetContourFitMemo();
+    const style = { contourPoints: chamber() };
+    const first = recalculateBlockTypeset(text, 'sans-serif', 200, 150, 16, 'contour', style, undefined, true);
+    // 1px smaller stays on the same quantized frame, so the memo answers instead of re-solving.
+    const second = recalculateBlockTypeset(text, 'sans-serif', 201, 151, 16, 'contour', style, undefined, true);
+    expect(second).toBe(first);
+  });
+
+  it('solves again once the frame crosses a sampling step', () => {
+    resetContourFitMemo();
+    const style = { contourPoints: chamber() };
+    const first = recalculateBlockTypeset(text, 'sans-serif', 200, 150, 16, 'contour', style, undefined, true);
+    // A narrower frame crosses the sampling step and shrinks the usable chords.
+    const stepped = recalculateBlockTypeset(text, 'sans-serif', 60, 150, 16, 'contour', style, undefined, true);
+    expect(stepped).not.toBe(first);
+    expect(stepped.fontSize).toBeLessThan(first.fontSize);
+  });
+
+  it('fits the exact frame for committed edits after a sampled gesture', () => {
+    resetContourFitMemo();
+    const style = { contourPoints: chamber() };
+    const live = recalculateBlockTypeset(text, 'sans-serif', 202, 151, 16, 'contour', style, undefined, true);
+    const exact = recalculateBlockTypeset(text, 'sans-serif', 202, 151, 16, 'contour', style, undefined, false);
+    // Sampled keys never satisfy an exact request: the committed layout is measured, not reused.
+    expect(exact).not.toBe(live);
+  });
+
+  it('moves never re-run typeset', () => {
+    const moved = applyTextObjectUpdates({ ...object, typesetMode: 'contour', contourPoints: chamber() }, { x: 40, y: 30 });
+    expect(moved.lines).toBe(object.lines);
+    expect(moved.fontSize).toBe(object.fontSize);
   });
 });

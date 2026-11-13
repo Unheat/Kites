@@ -176,13 +176,15 @@ flowchart TD
     Restore --> Baseline["Seed transient originalContourPoints and detected dimensions from saved values"]
     Restore --> Paint["TextRenderer Canvas: eligible placements or regular layout"]
     Restore --> Outline["CanvasFurniture: draw stored contour regardless of mode"]
-    Baseline --> Resize["Resize scales baseline contour by new width/height ratios"]
-    Resize --> Reflow["Layout fields changed: invalidate placements and reflow"]
+    Baseline --> Resize["Resize changes the frame only; contour stays anchored to the artwork"]
+    Resize --> Reflow["Layout fields changed: sampled live refit, exact refit on pointer release"]
     Reflow --> Save
     Baseline --> Reset["Reset dimensions + contour only; position/rotation unchanged"]
 ```
 
 **Persisted layout is not the full detection history.** `TextBlock` stores `contourPoints`, `positionedLines`, current geometry, lines, font, mode, curvature and skipped status. `originalContourPoints`, `detectedWidth` and `detectedHeight` are transient Studio fields, not persisted columns/payload fields. On reload they are reseeded from the current saved contour and dimensions, so reset is relative to that restored frame, not necessarily the original detector frame. `Reset to Bubble Frame` does not restore position or rotation.
+
+**Resize re-typesets against a fixed contour.** The chamber contour is anchored to the artwork; dragging a handle changes only the text frame, so the contour solver re-wraps against the detected chords instead of receiving a similarity transform of its previous input. Scaling the contour with the box made every resize return the same line breaks at a proportionally scaled font ("it only zooms the glyphs") and detached the dashed outline from the balloon art. During a drag the frame is sampled (`LIVE_REFIT_STEP_PX = 4`) with a one-entry memo, and the exact frame is fitted once on pointer release; moves never refit because `x`/`y` are not layout fields.
 
 **Known integration limitation:** `PipelineOrchestrator` prefers detailed accepted contours but falls back to raw acquisition contours while saving. It can also classify the saved mode from proposal/carrier evidence after the live layout was rejected. A later Studio contour reflow can therefore differ from the free-region bake. `CanvasFurniture` draws any stored non-skipped contour with at least three points regardless of `typesetMode`; its dashed white halo/accent outline proves storage only, not acceptance or solver use.
 

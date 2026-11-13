@@ -44,6 +44,67 @@ export const CJK_CHARACTER_REGEX = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf9
 /** Canonical minimum font size for contour layout (9px); Auto Balloon stays unchanged. */
 export { MINIMUM_READABLE_FONT_SIZE };
 
+/**
+ * Quantization step (image px) applied to the layout frame during a live resize gesture.
+ * Every animation frame lands on the same quantized frame until the pointer crosses a step,
+ * so the solver runs a few times per drag instead of 60 times per second. The exact frame is
+ * fitted once when the gesture ends, so the committed layout is never quantized.
+ */
+export const LIVE_REFIT_STEP_PX = 4;
+
+/** Single-entry memo of the last live contour fit; only identical consecutive requests hit it. */
+let lastContourFitKey = '';
+let lastContourFit: BlockTypesetResult | null = null;
+
+/**
+ * Drops the memoized live contour fit. Call at gesture start/end so a stale entry can never
+ * outlive the drag it was computed for (font loads, text edits, mode switches).
+ */
+export function resetContourFitMemo(): void {
+  lastContourFitKey = '';
+  lastContourFit = null;
+}
+
+/**
+ * Snaps a frame dimension to the live-gesture sampling grid.
+ * @param value - Frame width or height in image pixels.
+ * @returns Value rounded to the nearest {@link LIVE_REFIT_STEP_PX} step.
+ */
+function quantizeRefitFrame(value: number): number {
+  return Math.round(value / LIVE_REFIT_STEP_PX) * LIVE_REFIT_STEP_PX;
+}
+
+/**
+ * Builds the memo key for one contour fit request. Any input that changes the measured layout
+ * must be part of it; geometry is included as a cheap checksum so a scaled contour misses.
+ * @param sourceText - Display text being fitted.
+ * @param fontFamily - Resolved family stack.
+ * @param style - Object typography and contour.
+ * @param frameWidth - Frame width used for the fit.
+ * @param frameHeight - Frame height used for the fit.
+ * @param targetLang - Language driving wrapping rules.
+ * @returns Cache key string.
+ */
+function contourFitKey(
+  sourceText: string,
+  fontFamily: string,
+  style: TypesetStyle,
+  frameWidth: number,
+  frameHeight: number,
+  targetLang: string
+): string {
+  let checksum = 0;
+  for (const point of style.contourPoints ?? []) {
+    checksum = (checksum * 31 + Math.round(point.x) * 7 + Math.round(point.y)) | 0;
+  }
+  return [
+    sourceText, fontFamily, style.bold ? 'b' : '', style.italic ? 'i' : '',
+    style.letterSpacing ?? 0, style.lineSpacing ?? 0, style.borderRadius ?? 0,
+    targetLang, Math.round(frameWidth), Math.round(frameHeight),
+    style.contourPoints?.length ?? 0, checksum,
+  ].join('\u0000');
+}
+
 /** Fields whose actual changes invalidate measured lines; paint/selection changes do not. */
 const LAYOUT_FIELDS = [
   'text', 'fontFamily', 'fontSize', 'bold', 'italic', 'uppercase', 'lowercase',
@@ -89,13 +150,16 @@ export function prepareInitialTextObject(object: TextObject): TextObject {
  * @param updates - Partial text, geometry, typography, or paint edit.
  * @param globalMode - Editing fallback when object has no engine preference.
  * @param chosenMode - Optional mode explicitly selected for this edit.
+ * @param liveLayout - True for intermediate drag/resize frames where the layout may be sampled
+ *                     (see {@link LIVE_REFIT_STEP_PX}); false for committed edits and exact fits.
  * @returns Updated object, retaining layout for mode-only and paint-only edits.
  */
 export function applyTextObjectUpdates(
   object: TextObject,
   updates: Partial<TextObject>,
   globalMode: StudioTypesetMode = 'balloon',
-  chosenMode?: StudioTypesetMode
+  chosenMode?: StudioTypesetMode,
+  liveLayout: boolean = false
 ): TextObject {
   if ((Object.keys(updates) as (keyof TextObject)[]).every((key) => object[key] === updates[key])) {
     return object;
@@ -119,7 +183,7 @@ export function applyTextObjectUpdates(
   const pinnedFontSize = updates.fontSize !== undefined && updates.fontSize !== object.fontSize
     ? updates.fontSize
     : undefined;
-  return reflowTextObject(updated, chosenMode ?? updated.typesetMode ?? globalMode, pinnedFontSize);
+  return reflowTextObject(updated, chosenMode ?? updated.typesetMode ?? globalMode, pinnedFontSize, liveLayout);
 }
 
 export interface BlockTypesetResult {
@@ -139,9 +203,15 @@ export interface BlockTypesetResult {
  * @param mode - Engine to use for this layout operation.
  * @param pinnedFontSize - Manual sizing constraint from an explicit fontSize edit; contour
  *                         reflow pins the solver to this size instead of auto-fitting.
+ * @param liveLayout - True for intermediate gesture frames; contour fits are sampled and memoized.
  * @returns Object copy containing newly measured lines and font size.
  */
-export function reflowTextObject(object: TextObject, mode: StudioTypesetMode, pinnedFontSize?: number): TextObject {
+export function reflowTextObject(
+  object: TextObject,
+  mode: StudioTypesetMode,
+  pinnedFontSize?: number,
+  liveLayout: boolean = false
+): TextObject {
   let width = object.width;
   let fontSize = object.fontSize;
   const startWidth = width;
@@ -163,7 +233,8 @@ export function reflowTextObject(object: TextObject, mode: StudioTypesetMode, pi
     fontSize,
     mode,
     object,
-    pinnedFontSize
+    pinnedFontSize,
+    liveLayout
   );
 
   const updated: TextObject = { ...object, width, fontSize: layout.fontSize, lines: layout.lines, positionedLines: layout.positionedLines };
@@ -387,6 +458,10 @@ export function wrapVerticalTypeset(
  * @param fallbackSize - Baseline starting font size.
  * @param mode - 'balloon' for full comic diamond typesetting or 'simple' for greedy wrap.
  * @param style - Optional object-level weight, slant, tracking, and baseline spacing.
+ * @param pinnedFontSize - Opt-in solver size floor/ceiling pin from a manual font-size edit.
+ * @param liveLayout - True for intermediate gesture frames: the frame is snapped to
+ *                     {@link LIVE_REFIT_STEP_PX} and a repeated identical request is served from
+ *                     a one-entry memo. Committed edits always fit the exact frame.
  * @returns Fitted font size and dynamically wrapped lines.
  */
 export function recalculateBlockTypeset(
@@ -397,7 +472,8 @@ export function recalculateBlockTypeset(
   fallbackSize: number = 16,
   mode: StudioTypesetMode = 'balloon',
   style: TypesetStyle = {},
-  pinnedFontSize?: number
+  pinnedFontSize?: number,
+  liveLayout: boolean = false
 ): BlockTypesetResult {
   const ctx = getTypesetMeasureContext();
   if (!ctx || !text || !text.trim() || width <= MIN_LAYOUT_DIMENSION || height <= MIN_LAYOUT_DIMENSION) {
@@ -457,6 +533,13 @@ export function recalculateBlockTypeset(
       const pinned = pinnedFontSize !== undefined
         ? Math.max(MINIMUM_READABLE_FONT_SIZE, pinnedFontSize)
         : undefined;
+      // Live gestures re-fit on a sampling grid: consecutive frames reuse one memo entry instead
+      // of paying a full binary search + DP per animation frame. Committed edits fit exactly.
+      const frameWidth = liveLayout ? quantizeRefitFrame(width) : width;
+      const frameHeight = liveLayout ? quantizeRefitFrame(height) : height;
+      const fitKey = contourFitKey(sourceText, fontFamily, style, frameWidth, frameHeight, targetLang);
+      const memoKey = liveLayout ? `L${fitKey}` : `E${fitKey}`;
+      if (memoKey === lastContourFitKey && lastContourFit) return lastContourFit;
       const result = wrapTextContour(
         sourceText,
         contour,
@@ -467,7 +550,7 @@ export function recalculateBlockTypeset(
           maxFontSize: pinned,
           // Explicit frame: the contour polygon may extend outside the author's box,
           // so layout bounds must come from the box, not the contour bounding box.
-          frame: { width, height },
+          frame: { width: frameWidth, height: frameHeight },
           targetLang,
           isBold: style.bold,
           isItalic: style.italic,
@@ -477,12 +560,17 @@ export function recalculateBlockTypeset(
         }
       );
       if (!result) return { fontSize: fallbackSize, lines: [sourceText] };
-      return {
+      const layout: BlockTypesetResult = {
         fontSize: result.fontSize,
         lines: result.lines && result.lines.length > 0 ? result.lines : [sourceText],
         height: result.height,
         positionedLines: result.positionedLines,
       };
+      if (liveLayout) {
+        lastContourFitKey = memoKey;
+        lastContourFit = layout;
+      }
+      return layout;
     }
 
     // Auto Balloon Mode: full pipeline diamond envelopes, hyphenation, and auto font fitting
