@@ -310,7 +310,9 @@ export class PipelineOrchestrator {
                 rawCanvas,
                 rawCtx.getImageData(0, 0, rawWidth, rawHeight),
                 ocrResult.boxes,
-                bubbleOptions
+                bubbleOptions,
+                undefined,
+                ocrResult.mergedGroupLineBoxes,
               ) ?? undefined;
             }
           } finally {

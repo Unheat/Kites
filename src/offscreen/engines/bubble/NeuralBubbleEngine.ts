@@ -7,6 +7,7 @@ import type {
   PrecomputedBubbleDetection,
 } from './BaseBubbleEngine';
 import { finalizeBubbleGeometry } from './bubbleGeometry';
+import { resolveGroupBubbleIndex } from './bubbleAssociation';
 import { NeuralBubbleDetector } from './NeuralBubbleDetector';
 import { HeuristicBubbleExtractor, type BubbleShapeEvidence, type ImagePatchData } from './HeuristicBubbleExtractor';
 
@@ -173,6 +174,8 @@ export class NeuralBubbleEngine implements IBubbleEngine {
    * @param textBoxes - OCR text boxes to align geometry against.
    * @param options - Runtime detection options (preferGpu).
    * @param precomputed - Pre-decoded detection output from visual harnesses.
+   * @param groupLineBoxes - Raw OCR lines merged into each text box, parallel to `textBoxes`.
+   *          Used only when the merged rectangle fails the coverage test.
    * @returns Neural-tier geometry, or null when inference fails and nothing was precomputed.
    */
   static async buildGeometry(
@@ -180,7 +183,8 @@ export class NeuralBubbleEngine implements IBubbleEngine {
     _image: ImagePatchData,
     textBoxes: BoxRect[],
     options?: BubbleEngineOptions,
-    precomputed?: PrecomputedBubbleDetection
+    precomputed?: PrecomputedBubbleDetection,
+    groupLineBoxes?: readonly (readonly BoxRect[])[],
   ): Promise<BubbleGeometry | null> {
     let bubbles: BoxRect[];
     let detectionShapes: (BubbleShapeEvidence | undefined)[] | undefined;
@@ -201,10 +205,29 @@ export class NeuralBubbleEngine implements IBubbleEngine {
     const shapes: (BubbleShapeEvidence | undefined)[] = [];
 
     textBoxes.forEach((box, index) => {
-      const proposal = NeuralBubbleDetector.matchBubble(box, bubbles, BUBBLE_MATCH_COVERAGE);
+      let proposal = NeuralBubbleDetector.matchBubble(box, bubbles, BUBBLE_MATCH_COVERAGE);
+      let recovered = false;
+      if (!proposal) {
+        // Merge may have welded a line that sits outside the balloon, inflating the rectangle past
+        // the coverage floor. Re-ask with the region's own child lines before declaring free text.
+        const lineBoxes = groupLineBoxes?.[index];
+        if (lineBoxes && lineBoxes.length > 1) {
+          const recoveredIndex = resolveGroupBubbleIndex(box, lineBoxes, bubbles, BUBBLE_MATCH_COVERAGE);
+          if (recoveredIndex >= 0) {
+            proposal = bubbles[recoveredIndex];
+            recovered = true;
+          }
+        }
+      }
       proposals[index] = proposal;
       if (proposal) {
-        shapes[index] = detectionShapes?.[index];
+        // A recovered region was never decoded for this index; borrow the contour of a sibling that
+        // already matched the same balloon instance so the real balloon shape survives.
+        const siblingShapeIndex = recovered
+          ? textBoxes.findIndex((_, other) => other < index && proposals[other] === proposal)
+          : -1;
+        shapes[index] = detectionShapes?.[index]
+          ?? (siblingShapeIndex >= 0 ? detectionShapes?.[siblingShapeIndex] : undefined);
         carriers[index] = shapes[index]?.carrierBox ?? proposal;
       } else {
         // Free Text: Not inside any neural bubble proposal. Lock to original OCR bounding box.
@@ -234,6 +257,7 @@ export class NeuralBubbleEngine implements IBubbleEngine {
    * @param textBoxes - OCR text boxes to align geometry against.
    * @param options - Runtime detection options (preferGpu).
    * @param precomputed - Pre-decoded detection output from visual harnesses.
+   * @param groupLineBoxes - Raw OCR lines merged into each text box, parallel to `textBoxes`.
    * @returns Neural-tier geometry, or null when inference fails and nothing was precomputed.
    */
   async acquireGeometry(
@@ -241,9 +265,10 @@ export class NeuralBubbleEngine implements IBubbleEngine {
     image: ImagePatchData,
     textBoxes: BoxRect[],
     options?: BubbleEngineOptions,
-    precomputed?: PrecomputedBubbleDetection
+    precomputed?: PrecomputedBubbleDetection,
+    groupLineBoxes?: readonly (readonly BoxRect[])[],
   ): Promise<BubbleGeometry | null> {
-    return NeuralBubbleEngine.buildGeometry(canvas, image, textBoxes, options, precomputed);
+    return NeuralBubbleEngine.buildGeometry(canvas, image, textBoxes, options, precomputed, groupLineBoxes);
   }
 
   /**

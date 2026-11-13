@@ -112,6 +112,29 @@ describe('DisplayLetteringArtworkClassifier', () => {
   it('does nothing without a baseline', () => {
     expect(classifier.classify({ text: 'こブンャっー' }).isArtwork).toBe(false);
   });
+
+  it('vetoes a merged sentence that a glued box inflated (measured regression)', () => {
+    // Measured page: OCR split one balloon line into two misread columns, merge welded them into
+    // "居个铜时啊w送影", and the 200x288 union scored ~3.4x body size on its box short side.
+    expect(
+      classifier.classify({ text: '居个铜时啊w送影', glyphRatio: 3.4, lineCount: 2 }).isArtwork,
+    ).toBe(false);
+  });
+
+  it('vetoes prose punctuation, which drawn lettering never carries', () => {
+    expect(
+      classifier.classify({ text: '居然两个穴同时用，真亏你们做得出', glyphRatio: 3.0, lineCount: 1 }).isArtwork,
+    ).toBe(false);
+  });
+
+  it('keeps short stacked lettering eligible', () => {
+    expect(classifier.classify({ text: 'ドン', glyphRatio: 3.0, lineCount: 2 }).kind).toBe('display-lettering');
+    expect(classifier.classify({ text: 'バキッ', glyphRatio: 2.6, lineCount: 2 }).kind).toBe('display-lettering');
+  });
+
+  it('keeps one long single-line sound effect eligible', () => {
+    expect(classifier.classify({ text: 'ドドドドドドド', glyphRatio: 2.8, lineCount: 1 }).kind).toBe('display-lettering');
+  });
 });
 
 describe('defaultArtworkClassifier', () => {

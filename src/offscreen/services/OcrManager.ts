@@ -400,17 +400,28 @@ export class OcrManager {
    * column (its width) and a horizontal row (its height). Weighting by character count keeps body
    * dialogue dominant so oversized lettering cannot inflate its own reference.
    *
+   * A block's own size uses the Cotrans block font size (real glyph height, `min(line font sizes)`)
+   * rather than the box short side. Merge runs before this point, so a box short side measures the
+   * glued rectangle, not the letters: a welded multi-line region would otherwise read as oversized
+   * display lettering. The raw short side is reported separately for the fragment size sanity check.
+   *
    * @param boxes - Final merged boxes, in output order.
    * @param texts - Final merged texts, parallel to `boxes`.
-   * @returns Per-block size ratio, or all `undefined` when the page is too small to measure.
+   * @param fontSizes - Cotrans block font size per block (source pixels).
+   * @param lineCounts - Number of source OCR lines merged into each block.
+   * @returns Per-block glyph ratio and box short-side ratio, or `undefined` when unmeasurable.
    */
   private static computeGlyphRatios(
     boxes: { w: number; h: number }[],
     texts: string[],
-  ): (number | undefined)[] {
-    if (boxes.length < MIN_BLOCKS_FOR_BASELINE) return boxes.map(() => undefined);
-    const sizes = boxes.map((box) => Math.min(box.w, box.h));
-    const pairs = sizes
+    fontSizes: number[],
+    lineCounts: number[],
+  ): { glyphRatios: (number | undefined)[]; boxShortSideRatios: (number | undefined)[] } {
+    if (boxes.length < MIN_BLOCKS_FOR_BASELINE) {
+      return { glyphRatios: boxes.map(() => undefined), boxShortSideRatios: boxes.map(() => undefined) };
+    }
+    const shortSides = boxes.map((box) => Math.min(box.w, box.h));
+    const pairs = shortSides
       .map((size, index) => ({ size, weight: Math.max(Array.from(texts[index] ?? '').length, 1) }))
       .sort((a, b) => a.size - b.size);
     const totalWeight = pairs.reduce((sum, pair) => sum + pair.weight, 0);
@@ -420,8 +431,20 @@ export class OcrManager {
       accumulated += pair.weight;
       if (accumulated >= totalWeight / 2) { baseline = pair.size; break; }
     }
-    if (!(baseline > 0)) return boxes.map(() => undefined);
-    return sizes.map((size) => size / baseline);
+    if (!(baseline > 0)) {
+      return { glyphRatios: boxes.map(() => undefined), boxShortSideRatios: boxes.map(() => undefined) };
+    }
+    // Real glyph height when the merge produced one; a multi-line block whose line font size is
+    // unavailable cannot claim a size, so its glyph ratio stays undefined instead of guessing.
+    const glyphSizes = boxes.map((box, index) => {
+      const fontSize = fontSizes[index];
+      if (fontSize && fontSize > 0) return fontSize;
+      return (lineCounts[index] ?? 1) <= 1 ? Math.min(box.w, box.h) : 0;
+    });
+    return {
+      glyphRatios: glyphSizes.map((size) => (size > 0 ? size / baseline : undefined)),
+      boxShortSideRatios: shortSides.map((size) => size / baseline),
+    };
   }
 
   private mergeTextBlocks(
@@ -888,6 +911,7 @@ export class OcrManager {
     const mergedFontSizes: number[] = [];
     const mergedAngles: number[] = [];
     const mergedLineCounts: number[] = [];
+    const mergedGroupLineBoxes: { x: number, y: number, w: number, h: number }[][] = [];
 
     // Step 1: divide into text region candidates (textline_merge/__init__.py merge graph).
     // Cotrans call: quadrilateral_can_merge_region(ubox, vbox, aspect_ratio_tol=1.3,
@@ -1004,6 +1028,12 @@ export class OcrManager {
       mergedAngles.push(angleDeg);
       // Cotrans used_rows: number of source OCR lines merged into this region.
       mergedLineCounts.push(groupIndices.length);
+      // Child line boxes: bubble engines re-ask balloon membership per line when the merged
+      // rectangle itself does not fit any detected balloon.
+      mergedGroupLineBoxes.push(groupIndices.map((idx) => {
+        const lineBox = calculateBoundingBox(workingQuads[idx].pts);
+        return { x: lineBox.x, y: lineBox.y, w: lineBox.width, h: lineBox.height };
+      }));
     }
 
     // Cotrans sort_regions (textblock.py:423): order blocks top-to-bottom, right-to-left for manga
@@ -1053,10 +1083,20 @@ export class OcrManager {
     // the default 'off'. A dictionary hit catches lettering; the size ratio catches brush strokes
     // read as text; a bare glyph or two is never language.
     const finalBoxes = pick(mergedBoxes);
-    const glyphRatio = OcrManager.computeGlyphRatios(finalBoxes, finalTexts);
+    const finalFontSizes = pick(mergedFontSizes);
+    const finalLineCounts = pick(mergedLineCounts);
+    const finalGroupLineBoxes = pick(mergedGroupLineBoxes);
+    const { glyphRatios, boxShortSideRatios } = OcrManager.computeGlyphRatios(
+      finalBoxes, finalTexts, finalFontSizes, finalLineCounts,
+    );
     const artwork: { index: number; kind: ArtworkKind }[] = [];
     finalTexts.forEach((text, index) => {
-      const block: OcrBlockDescriptor = { text, glyphRatio: glyphRatio[index] };
+      const block: OcrBlockDescriptor = {
+        text,
+        glyphRatio: glyphRatios[index],
+        boxShortSideRatio: boxShortSideRatios[index],
+        lineCount: finalLineCounts[index],
+      };
       const match = this.artworkClassifier.classify(block);
       if (match.isArtwork && match.kind) artwork.push({ index, kind: match.kind });
     });
@@ -1101,6 +1141,7 @@ export class OcrManager {
       fontSizes: pick(mergedFontSizes),
       angles: pick(mergedAngles),
       lineCounts: pick(mergedLineCounts),
+      mergedGroupLineBoxes: finalGroupLineBoxes,
       detectionScores: result.detectionScores,
       rawPolygons: maskPolygons,
       maskRawCanvas: result.maskRawCanvas

@@ -26,8 +26,18 @@ export interface OcrBlockDescriptor {
   /**
    * Glyph size relative to the page's body-text baseline, or undefined when the page provides no
    * reliable baseline. Undefined disables every size-based rule rather than guessing.
+   *
+   * This is real glyph height (Cotrans block font size), not the merged box short side: merge runs
+   * before classification, so a welded multi-line box would otherwise look like oversized lettering.
    */
   readonly glyphRatio?: number;
+  /**
+   * Merged box short side relative to the page baseline. Measures the region's rectangle, not its
+   * letters, so it is only meaningful for shapes (fragments), never for glyph size.
+   */
+  readonly boxShortSideRatio?: number;
+  /** Number of raw OCR lines merged into this block; undefined when the page provided none. */
+  readonly lineCount?: number;
 }
 
 /** Outcome of classifying one block. */
@@ -68,6 +78,16 @@ const MAX_FRAGMENT_GLYPHS = 2;
 /** Characters that mark real language: sentence punctuation, ellipses, or a leading quote. */
 const LANGUAGE_PUNCTUATION = /[！？!?…ー～~・、。，"'"'（）()「」『』]/;
 
+/**
+ * Punctuation that only appear in prose, never inside drawn lettering.
+ *
+ * Deliberately excludes `！？…ー～` — sound effects use those constantly.
+ */
+const SENTENCE_PUNCTUATION = /[、。，,]/;
+
+/** Longest multi-line block, in glyphs, that can still be drawn lettering split over lines. */
+const MAX_MULTILINE_DISPLAY_GLYPHS = 6;
+
 /** CJK ideographs, kana, and halfwidth katakana — the scripts a fragment can be built from. */
 const CJK_GLYPH = /[\u3005\u3400-\u4dbf\u4e00-\u9fff\u3040-\u30ff\uff66-\uff9f]/;
 
@@ -99,6 +119,12 @@ export class BareFragmentArtworkClassifier implements IArtworkClassifier {
 /**
  * Display-lettering rule: a block whose glyphs are more than twice the page's body size is drawn
  * lettering (a large sound effect or title), never a dialogue line.
+ *
+ * Two corroboration vetoes protect the rule from merge damage, because it is the only rule whose
+ * evidence is a page-relative size rather than the text itself:
+ * - prose punctuation (`、。，,`) never appears inside drawn lettering;
+ * - a multi-line block with more than a word's worth of glyphs is a sentence, not stacked lettering
+ *   (short multi-line lettering such as stacked kana stays eligible).
  */
 export class DisplayLetteringArtworkClassifier implements IArtworkClassifier {
   /**
@@ -107,9 +133,11 @@ export class DisplayLetteringArtworkClassifier implements IArtworkClassifier {
    */
   classify(block: OcrBlockDescriptor): ArtworkMatch {
     if (block.glyphRatio === undefined) return NO_MATCH;
-    return block.glyphRatio >= DISPLAY_LETTERING_RATIO
-      ? { isArtwork: true, kind: 'display-lettering' }
-      : NO_MATCH;
+    if (block.glyphRatio < DISPLAY_LETTERING_RATIO) return NO_MATCH;
+    if (SENTENCE_PUNCTUATION.test(block.text)) return NO_MATCH;
+    const glyphs = Array.from(block.text.replace(/\s/g, '')).length;
+    if ((block.lineCount ?? 1) >= 2 && glyphs > MAX_MULTILINE_DISPLAY_GLYPHS) return NO_MATCH;
+    return { isArtwork: true, kind: 'display-lettering' };
   }
 }
 

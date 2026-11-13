@@ -232,7 +232,10 @@ export async function runStudioOcr(
                 // buffer, not the 2D context — passing the ctx made heuristic carrier
                 // extraction throw on the missing .data buffer and silently skip layout.
                 safeCanvas.ctx.getImageData(0, 0, payload.width, payload.height),
-                result.boxes
+                result.boxes,
+                undefined,
+                undefined,
+                result.mergedGroupLineBoxes,
               ) ?? undefined;
             }
           } finally {
