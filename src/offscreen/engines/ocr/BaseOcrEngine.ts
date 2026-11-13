@@ -8,6 +8,28 @@ export interface OcrBox {
 }
 
 /**
+ * One OCR text line after the page-level cleaning and filter battery, before any merging.
+ *
+ * This is the unit balloon ownership is decided on: merge runs afterwards and is restricted to
+ * lines that share a balloon, so a welded region (a misread stroke column glued onto dialogue)
+ * cannot be produced in the first place.
+ */
+export interface PreparedPageLine {
+  /** Axis-aligned bounding box of the cleaned line. */
+  box: OcrBox;
+  /** Rotated quadrilateral of the line, as detected. */
+  polygon: Point2D[];
+  /** Cleaned recognized text. */
+  text: string;
+  /** Recognition confidence. */
+  score: number;
+  /** Cotrans glyph size for the line. */
+  fontSize: number;
+  /** Reading direction of the line. */
+  direction: 'h' | 'v';
+}
+
+/**
  * Standardized output format for OCR engines.
  * 
  * Note: All arrays are perfectly aligned by index.
@@ -43,6 +65,14 @@ export interface OcrResult {
 
   /** Optional raw DBNet probability heat map canvas (Cotrans mask_raw). */
   maskRawCanvas?: any;
+
+  /**
+   * Prepared-line indices merged into each renderable region, in output order.
+   *
+   * Lets ownership resolved per line (before merge) be projected back onto the merged regions
+   * without re-deriving it from the merged rectangle.
+   */
+  groupLineIndices?: number[][];
 
   /** Optional detected primary reading direction for each text region ('h' = horizontal, 'v' = vertical). */
   directions?: ('h' | 'v')[];

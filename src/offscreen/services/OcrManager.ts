@@ -1,4 +1,4 @@
-import type { IOcrEngine, OcrResult } from '../engines/ocr/BaseOcrEngine';
+import type { IOcrEngine, OcrResult, PreparedPageLine } from '../engines/ocr/BaseOcrEngine';
 import { PaddleOcrEngine } from '../engines/ocr/PaddleOcrEngine';
 import { resolveOcrTier } from '../engines/ocr/ocrRegistry';
 import type { Point2D } from '../../shared/utils/geometry';
@@ -394,6 +394,44 @@ export class OcrManager {
    * and concatenates text right-to-left.
    */
   /**
+   * Resolves the page's line ownership before merging.
+   *
+   * The partitioner receives the cleaned, filtered lines and returns one bucket id per line. Lines
+   * sharing a bucket may be merged; different buckets never merge. Ownership therefore exists
+   * before any region does, which is what keeps balloon text and neighbouring artwork apart.
+   *
+   * @param quads - Prepared textline quadrilaterals, in merge input order.
+   * @param texts - Prepared line texts, parallel to `quads`.
+   * @param scores - Recognition scores, parallel to `quads`.
+   * @param partition - Caller-supplied ownership policy.
+   * @returns One bucket id per line.
+   */
+  private async resolveLineBuckets(
+    quads: Quadrilateral[],
+    texts: string[],
+    scores: number[],
+    partition: (lines: PreparedPageLine[]) => Promise<number[]>,
+  ): Promise<number[]> {
+    const lines: PreparedPageLine[] = quads.map((quad, index) => {
+      const aabb = quad.aabb;
+      return {
+        box: { x: aabb.x, y: aabb.y, w: aabb.width, h: aabb.height },
+        polygon: quad.pts,
+        text: texts[index] ?? '',
+        score: scores[index] ?? 0,
+        fontSize: quad.font_size,
+        direction: quad.direction,
+      };
+    });
+    const buckets = await partition(lines);
+    // Internal contract: ownership must be defined for every line, exactly once.
+    if (buckets.length !== lines.length) {
+      throw new Error(`partitionLines returned ${buckets.length} buckets for ${lines.length} lines`);
+    }
+    return buckets;
+  }
+
+  /**
    * Computes each block's glyph size relative to the page's body-text baseline.
    *
    * The baseline is the character-weighted median of `min(w,h)` — one glyph for both a vertical
@@ -447,10 +485,11 @@ export class OcrManager {
     };
   }
 
-  private mergeTextBlocks(
+  private async mergeTextBlocks(
     result: OcrResult,
-    context?: { sourceLang?: string; pageWidth?: number; pageHeight?: number; sfxPolicy?: SfxPolicyId }
-  ): OcrResult {
+    context?: { sourceLang?: string; pageWidth?: number; pageHeight?: number; sfxPolicy?: SfxPolicyId },
+    options?: { partitionLines?: (lines: PreparedPageLine[]) => Promise<number[]> },
+  ): Promise<OcrResult> {
     const sfxPolicy = context?.sfxPolicy ?? DEFAULT_SFX_POLICY;
     // Merge algorithm entry point
     const rawTexts = [...result.texts];
@@ -912,6 +951,15 @@ export class OcrManager {
     const mergedAngles: number[] = [];
     const mergedLineCounts: number[] = [];
     const mergedGroupLineBoxes: { x: number, y: number, w: number, h: number }[][] = [];
+    const mergedGroupLineIndices: number[][] = [];
+
+    // Step 0: page ownership, resolved per raw line BEFORE the merge graph runs.
+    // The merge graph may only connect lines that share an owner, so a line sitting outside a
+    // balloon can never be welded onto a balloon's dialogue. Undefined = one bucket (disabled
+    // tier and every caller that does not supply a partitioner).
+    const buckets = options?.partitionLines
+      ? await this.resolveLineBuckets(workingQuads, workingTexts, workingScores, options.partitionLines)
+      : undefined;
 
     // Step 1: divide into text region candidates (textline_merge/__init__.py merge graph).
     // Cotrans call: quadrilateral_can_merge_region(ubox, vbox, aspect_ratio_tol=1.3,
@@ -920,11 +968,14 @@ export class OcrManager {
     for (let i = 0; i < workingQuads.length; i++) mergeGraph.addNode(i);
     for (let i = 0; i < workingQuads.length; i++) {
       for (let j = i + 1; j < workingQuads.length; j++) {
+        // Ownership gate: never connect lines with different owners.
+        if (buckets && buckets[i] !== buckets[j]) continue;
         if (quadrilateralCanMergeRegion(workingQuads[i], workingQuads[j], 1.9, 2, 1, 3, 2, 1.3)) {
           mergeGraph.addEdge(i, j);
         }
       }
     }
+
 
     // Step 2: postprocess - further split each region using Cotrans Kruskal MST statistics
     const finalGroups: number[][] = [];
@@ -1028,6 +1079,8 @@ export class OcrManager {
       mergedAngles.push(angleDeg);
       // Cotrans used_rows: number of source OCR lines merged into this region.
       mergedLineCounts.push(groupIndices.length);
+      // Prepared-line indices of this region, so pre-merge ownership can be projected onto it.
+      mergedGroupLineIndices.push([...groupIndices]);
       // Child line boxes: bubble engines re-ask balloon membership per line when the merged
       // rectangle itself does not fit any detected balloon.
       mergedGroupLineBoxes.push(groupIndices.map((idx) => {
@@ -1141,6 +1194,7 @@ export class OcrManager {
       fontSizes: pick(mergedFontSizes),
       angles: pick(mergedAngles),
       lineCounts: pick(mergedLineCounts),
+      groupLineIndices: pick(mergedGroupLineIndices),
       mergedGroupLineBoxes: finalGroupLineBoxes,
       detectionScores: result.detectionScores,
       rawPolygons: maskPolygons,
@@ -1164,11 +1218,12 @@ export class OcrManager {
     tier: OcrTier = 'v6-small',
     context?: { sourceLang?: string; pageWidth?: number; pageHeight?: number; sfxPolicy?: SfxPolicyId },
     onInitialization?: InitializationLifecycleCallback,
+    options?: { partitionLines?: (lines: PreparedPageLine[]) => Promise<number[]> },
   ): Promise<OcrResult> {
     const { engine, release } = await this.acquireEngine(tier, onInitialization);
     try {
       const rawResult = await engine.recognize(imageBuffer);
-      return this.mergeTextBlocks(rawResult, context);
+      return await this.mergeTextBlocks(rawResult, context, options);
     } finally {
       release();
     }

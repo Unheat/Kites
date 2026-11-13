@@ -7,6 +7,45 @@ import { resolveRenderFontFamily } from '../../shared/renderFontPresets';
 import * as canvasTypesetting from '../utils/canvasTypesetting';
 import * as textColorDetection from '../utils/textColorDetection';
 
+
+/**
+ * Routes a mocked OCR result through the ownership contract the pipeline now expects.
+ *
+ * Balloon ownership is resolved inside the OCR stage, per prepared line, so a mocked
+ * `processImage` must invoke `partitionLines` (one prepared line per mocked box) and return the
+ * prepared-line indices of each region. Without this, no balloon geometry would reach layout.
+ *
+ * @param result - Mocked OcrResult body.
+ * @returns The same result, with `groupLineIndices` naming one region per box.
+ */
+const withOwnership = (result: any) => {
+  processImageMock.mockImplementation(async (
+    _buffer: ArrayBuffer,
+    _tier: string,
+    _context: unknown,
+    _onInitialization: unknown,
+    options?: { partitionLines?: (lines: any[]) => Promise<number[]> },
+  ) => {
+    const lines = (result.boxes ?? []).map((box: any, index: number) => ({
+      box,
+      polygon: result.polygons?.[index] ?? [
+        { x: box.x, y: box.y }, { x: box.x + box.w, y: box.y },
+        { x: box.x + box.w, y: box.y + box.h }, { x: box.x, y: box.y + box.h },
+      ],
+      text: result.texts?.[index] ?? '',
+      score: 1,
+      fontSize: result.fontSizes?.[index] ?? 0,
+      direction: result.directions?.[index] ?? 'h',
+    }));
+    if (options?.partitionLines) await options.partitionLines(lines);
+    return {
+      ...result,
+      groupLineIndices: (result.boxes ?? []).map((_: unknown, index: number) => [index]),
+    };
+  });
+  return result;
+};
+
 // vi.hoisted lifts the mock above the module imports. PipelineOrchestrator.ts constructs an
 // OcrManager at module scope (`export const pipelineOrchestrator = ...`), so the mock class
 // body runs during import — before a plain `const` here would have been initialized.
@@ -106,7 +145,7 @@ describe('PipelineOrchestrator', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(global.createImageBitmap).mockImplementation(() => Promise.resolve(createCanvas(100, 100)) as any);
-    processImageMock.mockResolvedValue({
+    withOwnership({
       texts: ['こんにちは', '世界'],
       boxes: [{ x: 10, y: 10, w: 100, h: 50 }, { x: 10, y: 70, w: 100, h: 50 }],
       polygons: [
@@ -182,6 +221,7 @@ describe('PipelineOrchestrator', () => {
       'v6-medium',
       expect.any(Object),
       expect.any(Function),
+      expect.objectContaining({ partitionLines: expect.any(Function) }),
     );
     blobSpy.mockRestore();
   });
@@ -282,7 +322,7 @@ describe('PipelineOrchestrator', () => {
     context.fillStyle = '#222'; context.fillRect(0, 0, 200, 200);
     context.fillStyle = '#fff'; context.fillRect(50, 50, 100, 100);
     const bitmapSpy = vi.spyOn(global, 'createImageBitmap').mockResolvedValue(source as any);
-    processImageMock.mockResolvedValue({ texts: ['テスト'], boxes: [{ x: 90, y: 80, w: 20, h: 40 }],
+    withOwnership({ texts: ['テスト'], boxes: [{ x: 90, y: 80, w: 20, h: 40 }],
       directions: ['v'], fontSizes: [18], angles: [0],
       polygons: [[{ x: 90, y: 80 }, { x: 110, y: 80 }, { x: 110, y: 120 }, { x: 90, y: 120 }]] });
     const blobSpy = vi.spyOn(pipelineOrchestrator as any, 'blobToArrayBuffer').mockResolvedValue(new ArrayBuffer(8));
@@ -316,7 +356,7 @@ describe('PipelineOrchestrator', () => {
     context.fillStyle = '#fff'; context.fillRect(40, 40, 120, 260);
     const bitmapSpy = vi.spyOn(global, 'createImageBitmap').mockResolvedValue(source as any);
     // Two stacked utterance regions inside one shared rectangular chamber.
-    processImageMock.mockResolvedValue({ texts: ['テスト', 'だよ'], boxes: [
+    withOwnership({ texts: ['テスト', 'だよ'], boxes: [
         { x: 70, y: 60, w: 60, h: 60 }, { x: 70, y: 210, w: 60, h: 60 },
       ], directions: ['v', 'v'], fontSizes: [18, 18], angles: [0, 0],
       polygons: [
@@ -358,7 +398,7 @@ describe('PipelineOrchestrator', () => {
     context.fillStyle = '#fff';
     context.beginPath(); context.arc(100, 100, 45, 0, Math.PI * 2); context.fill();
     const bitmapSpy = vi.spyOn(global, 'createImageBitmap').mockResolvedValue(source as any);
-    processImageMock.mockResolvedValue({ texts: ['テスト'], boxes: [{ x: 90, y: 80, w: 20, h: 40 }],
+    withOwnership({ texts: ['テスト'], boxes: [{ x: 90, y: 80, w: 20, h: 40 }],
       directions: ['v'], fontSizes: [18], angles: [0],
       polygons: [[{ x: 90, y: 80 }, { x: 110, y: 80 }, { x: 110, y: 120 }, { x: 90, y: 120 }]] });
     const blobSpy = vi.spyOn(pipelineOrchestrator as any, 'blobToArrayBuffer').mockResolvedValue(new ArrayBuffer(8));
@@ -375,7 +415,7 @@ describe('PipelineOrchestrator', () => {
     vi.spyOn(chrome.runtime, 'sendMessage').mockImplementation((_message: any, callback: any) => {
       callback?.({ activeInpaintId: 'none', bubbleMode: 'off', targetLang: 'en' });
     });
-    processImageMock.mockResolvedValue({
+    withOwnership({
       texts: ['Skipped', 'Rendered'],
       boxes: [{ x: 5, y: 6, w: 7, h: 8 }, { x: 10, y: 20, w: 30, h: 40 }],
       typesetBoxes: [undefined, { x: 15, y: 25, w: 35, h: 45 }],
@@ -404,7 +444,7 @@ describe('PipelineOrchestrator', () => {
     vi.spyOn(chrome.runtime, 'sendMessage').mockImplementation((_message: any, callback: any) => {
       callback?.({ activeInpaintId: 'none', bubbleMode: 'off', targetLang: 'en' });
     });
-    processImageMock.mockResolvedValue({
+    withOwnership({
       texts: ['Blue', 'Plain'],
       boxes: [{ x: 10, y: 20, w: 30, h: 40 }, { x: 60, y: 20, w: 30, h: 40 }],
       polygons: [
@@ -438,7 +478,7 @@ describe('PipelineOrchestrator', () => {
       callback?.({ activeInpaintId: 'none', bubbleMode: 'off', targetLang });
     });
     const bitmapSpy = vi.spyOn(global, 'createImageBitmap').mockResolvedValue(createCanvas(1000, 1000) as any);
-    processImageMock.mockResolvedValue({
+    withOwnership({
       texts: ['テスト', 'もう一つ'],
       boxes: [{ x: 100, y: 100, w: 40, h: 60 }, { x: 125, y: 100, w: 40, h: 60 }],
       directions: ['v', 'v'], fontSizes: [2, 2], angles: [37, 37],

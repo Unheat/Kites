@@ -13,8 +13,8 @@ import { renderTextBlocksBatch, measureBubbleLayoutFontSize, getRenderedBlockGeo
 import { detectBlockTextColorsFromContext, type DetectedTextColor } from '../utils/textColorDetection';
 import { resolveRenderFontFamily } from '../../shared/renderFontPresets';
 import { isBubbleGpuAvailable, isColorGpuAvailable } from '../../shared/utils/hardwareUtils';
-import type { BubbleEngineOptions } from '../engines/bubble/BaseBubbleEngine';
 import { BubbleManager, bubbleManager as defaultBubbleManager } from './BubbleManager';
+import { createPageBubbleOwnership } from './PageBubbleOwnership';
 import { resolveBubbleLayoutsDetailed, type BubbleGeometry } from './BubbleLayoutService';
 import { loadHyphenationLanguage } from '../utils/hyphenation';
 import type { ColorTierId } from '../../shared/colorTiers';
@@ -210,6 +210,59 @@ export class PipelineOrchestrator {
         // Geometry battery simply stays inactive when dimensions are unavailable.
       }
 
+      // 2.5 Shared original-pixel raster. One full-page canvas feeds per-bubble text color
+      // detection AND balloon ownership, which now resolves before merging (both must sample the
+      // ORIGINAL pre-inpaint ink). It is built before OCR because ownership is decided inside the
+      // OCR stage, on the prepared lines.
+      let rawCanvas: OffscreenCanvas | null = null;
+      let rawCtx: OffscreenCanvasRenderingContext2D | null = null;
+      const rawWidth = sourceBitmap?.width ?? (pageWidth || 0);
+      const rawHeight = sourceBitmap?.height ?? (pageHeight || 0);
+      if (rawWidth > 0 && rawHeight > 0) {
+        try {
+          rawCanvas = new OffscreenCanvas(rawWidth, rawHeight);
+          rawCtx = rawCanvas.getContext('2d', { willReadFrequently: true });
+          if (rawCtx) {
+            if (sourceBitmap) {
+              rawCtx.drawImage(sourceBitmap, 0, 0);
+            } else {
+              const tempBitmap = await createImageBitmap(imageRecord.rawImageBlob);
+              rawCtx.drawImage(tempBitmap, 0, 0);
+              tempBitmap.close();
+            }
+          }
+        } catch (err) {
+          // Environments without OffscreenCanvas (or failed raster) degrade both
+          // consumers to their null-color / raw-box fallbacks instead of failing the page.
+          rawCanvas = null;
+          rawCtx = null;
+          console.warn('[PipelineOrchestrator] Original-pixel raster unavailable; using fallback colors and boxes:', err);
+        }
+      }
+
+      // 2.6 Balloon ownership is resolved inside the OCR stage, per raw line, before any merging.
+      // The disabled tier supplies no partitioner, so it keeps the legacy single-bucket merge.
+      const bubbleMode = popupState?.bubbleMode ?? 'heuristic';
+      if (bubbleMode === 'off') {
+        void this.services.bubbleManager.destroy();
+      }
+      // Legacy CJK/RTL rendering does not honor fixed bubble rectangles.
+      const supportsBubbleLayout = (LANGUAGE_ORIENTATION_PRESETS[targetLang.toLowerCase().trim()] ?? 'h') === 'h';
+      const ownership = bubbleMode !== 'off' && supportsBubbleLayout && rawCanvas && rawCtx
+        ? createPageBubbleOwnership({
+            bubbleManager: this.services.bubbleManager,
+            canvas: rawCanvas,
+            image: rawCtx.getImageData(0, 0, rawWidth, rawHeight),
+            pageWidth: rawWidth,
+            pageHeight: rawHeight,
+            bubbleMode,
+            popupState,
+            resolveOptions: (state) => ({ preferGpu: state ? isBubbleGpuAvailable(state) : false }),
+            onEngineLifecycle: makeLifecycle('bubble', bubbleMode),
+          })
+        : undefined;
+      console.log(`[PipelineOrchestrator] Bubble check: mode=${bubbleMode}, supports=${supportsBubbleLayout}, ownership=${Boolean(ownership)}`);
+
       // 3. OCR Detection. OcrManager owns lazy model initialization and cache lifecycle.
       const ocrStart = import.meta.env.DEV ? performance.now() : 0;
       console.log(`[PipelineOrchestrator] Running OCR with ${ocrTier}...`);
@@ -218,7 +271,7 @@ export class PipelineOrchestrator {
         pageWidth,
         pageHeight,
         sfxPolicy: popupState?.sfxPolicy,
-      }, makeLifecycle('ocr', ocrTier));
+      }, makeLifecycle('ocr', ocrTier), ownership ? { partitionLines: (lines) => ownership.partition(lines) } : undefined);
       if (import.meta.env.DEV) {
         const ocrDuration = (performance.now() - ocrStart).toFixed(2);
         console.log(`[PipelineOrchestrator] OCR stage complete in ${ocrDuration}ms.`);
@@ -242,35 +295,6 @@ export class PipelineOrchestrator {
         });
       }
 
-      // 3.0 Shared original-pixel raster. One full-page canvas feeds BOTH per-bubble
-      // text color detection and bubble carrier extraction (both must sample the
-      // ORIGINAL pre-inpaint ink), halving the previous two full-page allocations.
-      let rawCanvas: OffscreenCanvas | null = null;
-      let rawCtx: OffscreenCanvasRenderingContext2D | null = null;
-      const rawWidth = sourceBitmap?.width ?? (pageWidth || 0);
-      const rawHeight = sourceBitmap?.height ?? (pageHeight || 0);
-      if (rawWidth > 0 && rawHeight > 0 && ocrResult.boxes && ocrResult.boxes.length > 0) {
-        try {
-          rawCanvas = new OffscreenCanvas(rawWidth, rawHeight);
-          rawCtx = rawCanvas.getContext('2d', { willReadFrequently: true });
-          if (rawCtx) {
-            if (sourceBitmap) {
-              rawCtx.drawImage(sourceBitmap, 0, 0);
-            } else {
-              const tempBitmap = await createImageBitmap(imageRecord.rawImageBlob);
-              rawCtx.drawImage(tempBitmap, 0, 0);
-              tempBitmap.close();
-            }
-          }
-        } catch (err) {
-          // Environments without OffscreenCanvas (or failed raster) degrade both
-          // consumers to their null-color / raw-box fallbacks instead of failing the page.
-          rawCanvas = null;
-          rawCtx = null;
-          console.warn('[PipelineOrchestrator] Original-pixel raster unavailable; using fallback colors and boxes:', err);
-        }
-      }
-
       // Per-bubble text color detection from the ORIGINAL image (before any
       // inpainting erases the glyphs). Best-effort: nulls and failures fall back
       // to the render-time background-adaptive black/white picker.
@@ -283,44 +307,14 @@ export class PipelineOrchestrator {
         }
       }
 
-      // 3.1 Acquire original bubble geometry only. Final layout waits for translated text/fonts.
+      // 3.1 Project the per-line ownership resolved during OCR onto the merged regions.
       let bubbleGeometry: BubbleGeometry | undefined;
       // OCR-index-aligned flags for fragments absorbed into a dominant chamber (noise guard).
       let bubbleSkipped: boolean[] | undefined;
-      const bubbleMode = popupState?.bubbleMode ?? 'heuristic';
-      // Cleanly evict cached bubble engine if mode is disabled
-      if (bubbleMode === 'off') {
-        void this.services.bubbleManager.destroy();
-      }
-      // Legacy CJK/RTL rendering does not honor fixed bubble rectangles.
-      const supportsBubbleLayout = (LANGUAGE_ORIENTATION_PRESETS[targetLang.toLowerCase().trim()] ?? 'h') === 'h';
-      console.log(`[PipelineOrchestrator] Bubble check: mode=${bubbleMode}, supports=${supportsBubbleLayout}, boxes=${ocrResult.boxes?.length}, hasTypesetBoxes=${Boolean(ocrResult.typesetBoxes)}`);
-      if (bubbleMode !== 'off' && supportsBubbleLayout && rawCanvas && rawCtx && ocrResult.boxes && ocrResult.boxes.length > 0 && !ocrResult.typesetBoxes) {
-        try {
-          console.log('[PipelineOrchestrator] Acquiring bubble engine...');
-          // Acquire engine through BubbleManager (OOP lifecycle & clean eviction).
-          // The engine owns all tier-specific geometry rules; the orchestrator is tier-blind.
-          const { engine, release } = await this.services.bubbleManager.acquireEngine(bubbleMode, popupState, makeLifecycle('bubble', bubbleMode));
-          try {
-            if (engine) {
-              const bubbleOptions: BubbleEngineOptions = {
-                preferGpu: popupState ? isBubbleGpuAvailable(popupState) : false,
-              };
-              bubbleGeometry = await engine.acquireGeometry(
-                rawCanvas,
-                rawCtx.getImageData(0, 0, rawWidth, rawHeight),
-                ocrResult.boxes,
-                bubbleOptions,
-                undefined,
-                ocrResult.mergedGroupLineBoxes,
-              ) ?? undefined;
-            }
-          } finally {
-            release();
-          }
-        } catch (err) {
-          console.warn('[PipelineOrchestrator] Bubble carrier extraction failed, falling back to default text boxes:', err);
-        }
+      if (ownership) {
+        bubbleGeometry = ownership.geometryForRegions(ocrResult.groupLineIndices ?? []);
+        console.log(`[PipelineOrchestrator] Balloon ownership: ${ownership.balloonCount} balloon(s), ` +
+          `${bubbleGeometry?.proposals.filter(Boolean).length ?? 0}/${ocrResult.boxes.length} region(s) framed`);
       }
 
       // 4. Colorization & Inpainting & Translation Stage
@@ -425,6 +419,12 @@ export class PipelineOrchestrator {
           console.log(`  [${i}] "${ocrResult.texts[i]}" -> "${translatedTexts[i] ?? ''}"`);
         }
       }
+
+      // A missing or blank block from the translator must never erase its source pixels without a
+      // replacement. Substitute the recognized text, exactly like the waterfall's engine failure path.
+      translatedTexts = translatedTexts.map((text, index) =>
+        text && text.trim() ? text : (ocrResult.texts[index] ?? ''),
+      );
 
       // 7. Bake the translated text into the image for the Live Web return
       console.log(`[PipelineOrchestrator] Baking translated text into Canvas for Live Web...`);
