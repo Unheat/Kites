@@ -19,7 +19,6 @@ import type { BubbleEngineOptions, BubbleGeometry, IBubbleEngine } from '../engi
 import type { ImagePatchData } from '../engines/bubble/HeuristicBubbleExtractor';
 import type { PreparedPageLine } from '../engines/ocr/BaseOcrEngine';
 import type { BubbleDetectionMode, PopupState } from '../../shared/types';
-import type { BubbleManager } from './BubbleManager';
 
 /** Bucket id for lines that belong to no balloon; they may merge with each other only. */
 export const FREE_TEXT_BUCKET = -1;
@@ -73,10 +72,23 @@ export function resolveLineBuckets(geometry: BubbleGeometry | undefined): LineBu
   return { buckets, balloons };
 }
 
+/** Engine lease handed out by whatever owns lifecycle for the active tier. */
+export interface BubbleEngineLease {
+  /** Active tier engine, or null when that tier is unavailable. */
+  engine: IBubbleEngine | null;
+  /** Releases the engine back to its owner. */
+  release: () => void;
+}
+
 /** Inputs shared by every caller that needs page balloon ownership. */
 export interface PageBubbleOwnershipInput {
-  /** Manager that owns engine lifecycle for the active tier. */
-  bubbleManager: BubbleManager;
+  /**
+   * Acquires the tier engine.
+   *
+   * Injected rather than importing a manager: the reader and Studio pass their `BubbleManager`,
+   * and the Node test flows pass a direct engine lease, so all of them run the same policy.
+   */
+  acquireEngine: () => Promise<BubbleEngineLease>;
   /** Page canvas the tier detects on. */
   canvas: OffscreenCanvas | HTMLCanvasElement | null;
   /** Original page pixels (heuristic morphology input). */
@@ -91,8 +103,6 @@ export interface PageBubbleOwnershipInput {
   popupState: PopupState | undefined;
   /** Resolves per-engine GPU preference and other tier options. */
   resolveOptions?: (popupState: PopupState | undefined) => BubbleEngineOptions;
-  /** Lifecycle hook for model initialization reporting. */
-  onEngineLifecycle?: Parameters<BubbleManager['acquireEngine']>[2];
 }
 
 /** Ownership policy handed to the OCR stage plus the projection back onto merged regions. */
@@ -128,9 +138,7 @@ export function createPageBubbleOwnership(input: PageBubbleOwnershipInput): Page
    * @returns Per-line geometry, or undefined when the tier produced none.
    */
   const detect = async (boxes: BoxRect[]): Promise<BubbleGeometry | undefined> => {
-    const { engine, release } = await input.bubbleManager.acquireEngine(
-      input.bubbleMode, input.popupState, input.onEngineLifecycle,
-    );
+    const { engine, release } = await input.acquireEngine();
     try {
       const active: IBubbleEngine | null = engine;
       if (!active || !input.canvas || !input.image) return undefined;

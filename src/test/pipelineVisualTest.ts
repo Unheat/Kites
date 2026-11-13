@@ -9,6 +9,7 @@ import { createCanvas, loadImage } from 'canvas';
 import type { Point2D } from '../shared/utils/geometry';
 import { resolveBubbleLayoutsDetailed } from '../offscreen/services/BubbleLayoutService';
 import { HeuristicBubbleEngine } from '../offscreen/engines/bubble/HeuristicBubbleEngine';
+import { createPageBubbleOwnership } from '../offscreen/services/PageBubbleOwnership';
 import { detectBlockTextColorsFromContext } from '../offscreen/utils/textColorDetection';
 import { DEFAULT_RENDER_FONT_FAMILY } from '../offscreen/utils/canvasTypesetting';
 
@@ -55,10 +56,25 @@ async function runPipelineVisualTest() {
     const rawCtx = rawCanvas.getContext('2d');
     rawCtx.drawImage(probeImage, 0, 0);
 
-    // 2. OCR text detection
+    // 2. OCR text detection. Balloon ownership is resolved inside the OCR stage, per raw line,
+    // through the same service the extension uses, so this harness cannot drift from the app.
     console.log('[PipelineTest] Running OCR text detection...');
     const sourceLang = (testFile === 'image8.png' || testFile === 'image5.png') ? undefined : 'ja';
-    const ocrResult = await ocrManager.processImage(arrayBuffer, 'v6-small', { sourceLang, pageWidth, pageHeight });
+    const heuristicEngine = new HeuristicBubbleEngine();
+    const ownership = createPageBubbleOwnership({
+      acquireEngine: async () => ({ engine: heuristicEngine, release: () => {} }),
+      canvas: rawCanvas as any,
+      image: (() => {
+        const data = rawCtx.getImageData(0, 0, pageWidth, pageHeight);
+        return { data: data.data, width: pageWidth, height: pageHeight };
+      })(),
+      pageWidth,
+      pageHeight,
+      bubbleMode: 'heuristic',
+      popupState: undefined,
+    });
+    const ocrResult = await ocrManager.processImage(arrayBuffer, 'v6-small', { sourceLang, pageWidth, pageHeight },
+      undefined, { partitionLines: (lines) => ownership.partition(lines) });
     const polygons = ocrResult.polygons as Point2D[][];
     const texts = ocrResult.texts;
     const boxes = ocrResult.boxes;
@@ -72,12 +88,8 @@ async function runPipelineVisualTest() {
     // 3. Pre-inpaint ink color detection (original artwork)
     const detectedColors = detectBlockTextColorsFromContext(rawCtx as any, boxes, pageWidth, pageHeight);
 
-    // 4. Heuristic bubble geometry acquisition (production default)
-    const rawImageData = rawCtx.getImageData(0, 0, pageWidth, pageHeight);
-    const bubbleGeometry = HeuristicBubbleEngine.buildGeometry(
-      { data: rawImageData.data, width: pageWidth, height: pageHeight },
-      boxes
-    );
+    // 4. Region geometry projected from the per-line ownership resolved during OCR.
+    const bubbleGeometry = ownership.geometryForRegions(ocrResult.groupLineIndices ?? []);
 
     // 5. Inpainting (simple fill using raw polygons)
     console.log(`[PipelineTest] Running Inpainting (tier: simple)...`);

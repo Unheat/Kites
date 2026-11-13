@@ -250,7 +250,7 @@ export class PipelineOrchestrator {
       const supportsBubbleLayout = (LANGUAGE_ORIENTATION_PRESETS[targetLang.toLowerCase().trim()] ?? 'h') === 'h';
       const ownership = bubbleMode !== 'off' && supportsBubbleLayout && rawCanvas && rawCtx
         ? createPageBubbleOwnership({
-            bubbleManager: this.services.bubbleManager,
+            acquireEngine: () => this.services.bubbleManager.acquireEngine(bubbleMode, popupState, makeLifecycle('bubble', bubbleMode)),
             canvas: rawCanvas,
             image: rawCtx.getImageData(0, 0, rawWidth, rawHeight),
             pageWidth: rawWidth,
@@ -258,7 +258,6 @@ export class PipelineOrchestrator {
             bubbleMode,
             popupState,
             resolveOptions: (state) => ({ preferGpu: state ? isBubbleGpuAvailable(state) : false }),
-            onEngineLifecycle: makeLifecycle('bubble', bubbleMode),
           })
         : undefined;
       console.log(`[PipelineOrchestrator] Bubble check: mode=${bubbleMode}, supports=${supportsBubbleLayout}, ownership=${Boolean(ownership)}`);

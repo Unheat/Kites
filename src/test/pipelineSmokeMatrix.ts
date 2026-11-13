@@ -7,7 +7,7 @@ import { InpaintManager } from '../offscreen/services/InpaintManager';
 import { ColorManager } from '../offscreen/services/ColorManager';
 import { GoogleTranslateEngine } from '../offscreen/engines/translation/GoogleTranslateEngine';
 import { resolveBubbleLayouts, resolveBubbleLayoutsDetailed } from '../offscreen/services/BubbleLayoutService';
-import { HeuristicBubbleEngine } from '../offscreen/engines/bubble/HeuristicBubbleEngine';
+import { createHeuristicOwnership } from './ownershipHarness';
 import {
   renderTextBlocksBatch,
   measureBubbleLayoutFontSize,
@@ -136,11 +136,22 @@ export async function runPipelineSmokeMatrix(): Promise<void> {
     const arrayBuffer = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) as ArrayBuffer;
     const probe = await loadImage(buffer);
 
+    const rawCanvas = createCanvas(probe.width, probe.height);
+    const rawCtx = rawCanvas.getContext('2d');
+    rawCtx.drawImage(probe, 0, 0);
+    const imgData = rawCtx.getImageData(0, 0, probe.width, probe.height);
+    // Same ownership policy the extension uses: resolved per raw line, before merging.
+    const ownership = createHeuristicOwnership({
+      canvas: rawCanvas as any,
+      image: { data: imgData.data, width: probe.width, height: probe.height },
+      pageWidth: probe.width,
+      pageHeight: probe.height,
+    });
     const ocrResult = await ocrManager.processImage(arrayBuffer, 'v6-small', {
       sourceLang: 'ja',
       pageWidth: probe.width,
       pageHeight: probe.height,
-    });
+    }, undefined, { partitionLines: (lines) => ownership.partition(lines) });
     const inpaintPolygons = (ocrResult.rawPolygons || ocrResult.polygons || []) as Point2D[][];
 
     // Telea Inpainting (FMM)
@@ -149,16 +160,9 @@ export async function runPipelineSmokeMatrix(): Promise<void> {
     console.log(`  Telea inpainting completed in ${(performance.now() - startTelea).toFixed(1)}ms (${cleaned.byteLength} bytes).`);
     if (cleaned.byteLength < 5000) throw new Error('[Combo 2] Telea inpaint returned invalid buffer');
 
-    // Heuristic speech bubble extraction
-    const rawCanvas = createCanvas(probe.width, probe.height);
-    const rawCtx = rawCanvas.getContext('2d');
-    rawCtx.drawImage(probe, 0, 0);
-    const imgData = rawCtx.getImageData(0, 0, probe.width, probe.height);
-
-    const bubbleGeom = HeuristicBubbleEngine.buildGeometry(
-      { data: imgData.data, width: probe.width, height: probe.height },
-      ocrResult.boxes
-    );
+    // Region geometry projected from the per-line ownership resolved during OCR.
+    const bubbleGeom = ownership.geometryForRegions(ocrResult.groupLineIndices ?? []);
+    if (!bubbleGeom) throw new Error('[Combo 2] Balloon ownership produced no geometry.');
     console.log(`  Heuristic carrier extraction completed for ${bubbleGeom.carriers.length} bubbles.`);
 
     const translated = await translator.translate(ocrResult.texts, 'auto', 'en');
@@ -212,18 +216,21 @@ export async function runPipelineSmokeMatrix(): Promise<void> {
     rawCtx.drawImage(probe, 0, 0);
     const imgData = rawCtx.getImageData(0, 0, probe.width, probe.height);
 
+    const ownership = createHeuristicOwnership({
+      canvas: rawCanvas as any,
+      image: { data: imgData.data, width: probe.width, height: probe.height },
+      pageWidth: probe.width,
+      pageHeight: probe.height,
+    });
     const ocrResult = await ocrManager.processImage(arrayBuffer, 'v6-small', {
       sourceLang: 'ja',
       pageWidth: probe.width,
       pageHeight: probe.height,
-    });
+    }, undefined, { partitionLines: (lines) => ownership.partition(lines) });
     const cleaned = await inpaintManager.eraseText(arrayBuffer, ocrResult.polygons as any, 'simple');
     const translated = await translator.translate(ocrResult.texts, 'auto', 'en');
 
-    const bubbleGeom = HeuristicBubbleEngine.buildGeometry(
-      { data: imgData.data, width: probe.width, height: probe.height },
-      ocrResult.boxes
-    );
+    const bubbleGeom = ownership.geometryForRegions(ocrResult.groupLineIndices ?? []);
 
     const cleanImg = await loadImage(Buffer.from(cleaned));
     const canvas = createCanvas(cleanImg.width, cleanImg.height);
@@ -239,7 +246,7 @@ export async function runPipelineSmokeMatrix(): Promise<void> {
     }));
 
     const detailed = resolveBubbleLayoutsDetailed({
-      ...bubbleGeom,
+      ...bubbleGeom!,
       boxes: ocrResult.boxes,
       directions: ocrResult.directions,
       angles: ocrResult.angles,

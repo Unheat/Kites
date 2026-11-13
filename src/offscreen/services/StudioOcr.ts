@@ -158,7 +158,7 @@ export async function runStudioOcr(
         patchBitmap.close();
       }
       ownership = createPageBubbleOwnership({
-        bubbleManager: dependencies.getBubbleManager(),
+        acquireEngine: () => dependencies.getBubbleManager!().acquireEngine(bubbleMode, popupState),
         canvas: safeCanvas.canvas as any,
         // ImagePatchData contract: a real pixel buffer, not the 2D context — passing the ctx made
         // heuristic carrier extraction throw on the missing .data buffer and silently skip layout.

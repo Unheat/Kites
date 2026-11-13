@@ -10,8 +10,7 @@ import type { Point2D } from '../shared/utils/geometry';
 import { NeuralBubbleDetector } from '../offscreen/engines/bubble/NeuralBubbleDetector';
 import { HeuristicBubbleExtractor } from '../offscreen/engines/bubble/HeuristicBubbleExtractor';
 import { resolveBubbleLayoutsDetailed, type BubbleGeometry } from '../offscreen/services/BubbleLayoutService';
-import { HeuristicBubbleEngine } from '../offscreen/engines/bubble/HeuristicBubbleEngine';
-import { NeuralBubbleEngine } from '../offscreen/engines/bubble/NeuralBubbleEngine';
+import { createHeuristicOwnership, createPrecomputedNeuralOwnership } from './ownershipHarness';
 import { DEFAULT_RENDER_FONT_FAMILY } from '../offscreen/utils/canvasTypesetting';
 import { HyphenationService } from '../offscreen/utils/hyphenation/HyphenationService';
 import * as ort from 'onnxruntime-node';
@@ -89,9 +88,21 @@ async function runPipelineVisualBubbleTest() {
     const pageWidth = rawImage.width;
     const pageHeight = rawImage.height;
 
-    // 1. OCR Stage
+    // 1. OCR Stage. Balloon ownership is resolved inside it, per raw line, through the same
+    // service the extension uses.
     console.log('[Pipeline] Running OCR text detection...');
-    const ocrResult = await ocrManager.processImage(arrayBuffer, 'v6-small', { sourceLang: 'ja', pageWidth, pageHeight });
+    const ownershipCanvas = createCanvas(pageWidth, pageHeight);
+    const ownershipCtx = ownershipCanvas.getContext('2d');
+    ownershipCtx.drawImage(rawImage, 0, 0);
+    const ownershipPixels = ownershipCtx.getImageData(0, 0, pageWidth, pageHeight);
+    const heuristicOwnership = createHeuristicOwnership({
+      canvas: ownershipCanvas as any,
+      image: { data: ownershipPixels.data, width: pageWidth, height: pageHeight },
+      pageWidth,
+      pageHeight,
+    });
+    const ocrResult = await ocrManager.processImage(arrayBuffer, 'v6-small', { sourceLang: 'ja', pageWidth, pageHeight },
+      undefined, { partitionLines: (lines) => heuristicOwnership.partition(lines) });
     const polygons = ocrResult.polygons as Point2D[][];
     const texts = ocrResult.texts;
     const boxes = ocrResult.boxes;
@@ -128,7 +139,8 @@ async function runPipelineVisualBubbleTest() {
     // PASS 1: TIER 1 HEURISTIC BUBBLE EXTRACTOR (0 MB)
     // -------------------------------------------------------------
     console.log("\n--- [Pass 1] Tier 1 Heuristic Bubble Expansion ---");
-    const heuristicGeometry = HeuristicBubbleEngine.buildGeometry(rawImageData, boxes);
+    const heuristicGeometry = heuristicOwnership.geometryForRegions(ocrResult.groupLineIndices ?? []);
+    if (!heuristicGeometry) throw new Error('Heuristic balloon ownership produced no geometry');
 
     /**
      * Uses the production acquisition/layout contract after translation and font readiness.
@@ -319,10 +331,10 @@ async function runPipelineVisualBubbleTest() {
         }
       }
 
-      const neuralGeometry = await NeuralBubbleEngine.buildGeometry(null, rawImageData, boxes, undefined, {
-        bubbles: detectedBubbles,
-        shapes: neuralShapes,
-      });
+      const neuralGeometry = createPrecomputedNeuralOwnership(
+        { canvas: null, image: rawImageData, pageWidth, pageHeight },
+        { bubbles: detectedBubbles, shapes: neuralShapes },
+      ).geometryForRegions(ocrResult.groupLineIndices ?? []);
       if (!neuralGeometry) throw new Error('Neural bubble geometry build failed');
       const canvas = createCanvas(pageWidth, pageHeight);
       const ctx = canvas.getContext('2d');
