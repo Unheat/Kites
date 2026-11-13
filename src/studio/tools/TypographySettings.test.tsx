@@ -19,7 +19,11 @@ function makeObject(id: string, partial: Partial<TextObject> = {}): TextObject {
   return {
     id, x: 10, y: 20, width: 140, height: 80, text: 'Original dialogue',
     originalText: 'Original OCR', fontFamily: 'sans-serif', fontSize: 18,
-    color: '#000000', lines: ['Original', 'dialogue'], ...partial,
+    color: '#000000', lines: ['Original', 'dialogue'],
+    // Pipeline dialogue inside a detected balloon carries the chamber polygon that makes
+    // Bubble Contour available; omit it for caption/narration fixtures.
+    contourPoints: [{ x: 0, y: 0 }, { x: 140, y: 0 }, { x: 140, y: 80 }, { x: 0, y: 80 }],
+    ...partial,
   };
 }
 
@@ -318,5 +322,63 @@ describe('TypographySettings editing intent and reflow', () => {
     expect(created.fontSize).toBe(31);
     expect(created.typesetMode).toBeUndefined();
     expect(studioStore.getState().selectedTextId).toBe(created.id);
+  });
+});
+
+describe('typeset engine availability by bubble contour', () => {
+  /** @param label - Button label. @returns The switcher button, if rendered. */
+  function engineButton(label: string): HTMLButtonElement {
+    const button = Array.from(container.querySelectorAll('button')).find(
+      (element) => element.textContent?.trim() === label
+    );
+    if (!button) throw new Error(`Missing engine button: ${label}`);
+    return button as HTMLButtonElement;
+  }
+
+  it('disables Bubble Contour for text that has no detected contour', async () => {
+    studioStore.setState({
+      textObjects: [makeObject('caption', { contourPoints: undefined, typesetMode: 'simple' })],
+      selectedTextId: 'caption',
+    });
+    await render();
+    const contourButton = engineButton('Bubble Contour');
+    expect(contourButton.disabled).toBe(true);
+    expect(contourButton.title).toContain('needs a detected bubble outline');
+    // The two contour-free engines stay available.
+    expect(engineButton('Balanced Fit').disabled).toBe(false);
+    expect(engineButton('Caption Box').disabled).toBe(false);
+  });
+
+  it('refuses to switch a contourless box to Bubble Contour', async () => {
+    studioStore.setState({
+      textObjects: [makeObject('caption', { contourPoints: undefined, typesetMode: 'simple' })],
+      selectedTextId: 'caption',
+    });
+    await render();
+    await click('Bubble Contour');
+    expect(studioStore.getState().textObjects[0].typesetMode).toBe('simple');
+  });
+
+  it('keeps Bubble Contour available after a bubble switches to another engine', async () => {
+    await render();
+    await click('Caption Box');
+    expect(studioStore.getState().textObjects[0].typesetMode).toBe('simple');
+    // The detected contour polygon survives the switch, so contour stays reachable again.
+    expect(engineButton('Bubble Contour').disabled).toBe(false);
+    await click('Bubble Contour');
+    expect(studioStore.getState().textObjects[0].typesetMode).toBe('contour');
+    expect(studioStore.getState().textObjects[0].contourPoints).toHaveLength(4);
+  });
+
+  it('treats a restored detection baseline as bubble evidence', async () => {
+    studioStore.setState({
+      textObjects: [makeObject('restored', {
+        contourPoints: undefined,
+        originalContourPoints: [{ x: 0, y: 0 }, { x: 120, y: 0 }, { x: 120, y: 70 }],
+      })],
+      selectedTextId: 'restored',
+    });
+    await render();
+    expect(engineButton('Bubble Contour').disabled).toBe(false);
   });
 });

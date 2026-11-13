@@ -117,6 +117,8 @@ $$Y_{\text{natural}} = \frac{Y_{\text{pointer}} - Y_{\text{pan}}}{\text{Scale}}$
 
 The shared `TypesetMode` union is `contour | simple | auto-balloon | balloon`; `balloon` is the retained Auto Balloon alias. Legacy persisted `ellipse` restores as `contour`. Studio labels are **Contour**, **Auto Balloon**, and **Caption Box**. Selection changes affect selected objects; without selection, the setting is a default for future edits/objects, not an automatic rewrite of every existing layout.
 
+**Engine availability is gated by bubble evidence, not by the current mode.** `availableTypesetModes()` in `src/shared/constants.ts` derives the offered list from the canonical `TYPESET_MODES` catalog, and `src/studio/canvas/typesetModes.ts` decides membership from `contourPoints` / `originalContourPoints` (≥3 vertices). Text with a detected chamber polygon offers all three engines; captions, narration and free text offer only Balanced Fit and Caption Box, and the Bubble Contour button is disabled with an explanatory tooltip. Because the polygon survives a mode switch and `Reset to Bubble Frame` restores it, a bubble switched to Caption Box can always be switched back to contour — never gate this on `typesetMode`, which records the *current* engine and would lock the object out. A requested mode the object cannot fit with resolves to its first available engine, so a global Contour default never contour-fits a caption.
+
 ```mermaid
 flowchart TD
     Bake["Offscreen fixed region?"] -->|No| Auto["AutoBalloonTypesetter: shared 4-pass fitting"]

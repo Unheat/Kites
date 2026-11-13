@@ -30,6 +30,26 @@ export type TypesetMode = (typeof TYPESET_MODES)[number];
 export const DEFAULT_TYPESET_MODE: TypesetMode = 'contour';
 
 /**
+ * Modes that cannot fit anything without a detected bubble chamber polygon. Region text that
+ * never had a bubble contour (captions, narration, free text) must not be offered these.
+ */
+export const CONTOUR_REQUIRED_TYPESET_MODES = ['contour'] as const satisfies readonly TypesetMode[];
+
+/**
+ * Lists the typeset modes an object may use, derived from the canonical {@link TYPESET_MODES}
+ * catalog so the UI, the editing fallback and any future consumer cannot drift apart.
+ *
+ * @param hasBubbleContour - Whether the object carries detected bubble contour evidence.
+ * @returns Canonical modes this object can actually fit with.
+ */
+export function availableTypesetModes(hasBubbleContour: boolean): TypesetMode[] {
+  if (hasBubbleContour) return [...TYPESET_MODES];
+  return TYPESET_MODES.filter(
+    (mode) => !(CONTOUR_REQUIRED_TYPESET_MODES as readonly TypesetMode[]).includes(mode)
+  );
+}
+
+/**
  * Canonical image formats supported for Studio uploads and processing pipeline.
  * Formats like SVG and multi-frame GIF are explicitly excluded to prevent pipeline stalls.
  */

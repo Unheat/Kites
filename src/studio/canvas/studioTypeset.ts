@@ -5,6 +5,7 @@ import { unwrapWrappedText } from '../../offscreen/utils/typography';
 import type { TypesetMode } from '../../shared/constants';
 import type { TextObject } from '../types';
 import { recordGeneratedLayout } from '../state/layoutGenerations';
+import { resolveTypesetMode } from './typesetModes';
 
 export type StudioTypesetMode = TypesetMode;
 
@@ -183,7 +184,15 @@ export function applyTextObjectUpdates(
   const pinnedFontSize = updates.fontSize !== undefined && updates.fontSize !== object.fontSize
     ? updates.fontSize
     : undefined;
-  return reflowTextObject(updated, chosenMode ?? updated.typesetMode ?? globalMode, pinnedFontSize, liveLayout);
+  // Engine availability is decided from detected bubble evidence, not from the current mode:
+  // a caption must never fall into contour fitting, and a bubble switched to another engine
+  // must stay eligible for contour. See typesetModes.ts.
+  return reflowTextObject(
+    updated,
+    resolveTypesetMode(updated, chosenMode ?? updated.typesetMode ?? globalMode),
+    pinnedFontSize,
+    liveLayout
+  );
 }
 
 export interface BlockTypesetResult {

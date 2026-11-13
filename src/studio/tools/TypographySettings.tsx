@@ -31,6 +31,7 @@ function displayFontFamily(stack: string): string {
 import { studioStore, useStudioStore, extractTypographyStyle } from '../state/studioStore';
 import { studioUndoStack } from '../state/undoStack';
 import { applyTextObjectUpdates, CJK_CHARACTER_REGEX, FONT_SIZE_SLIDER_MAX, prepareInitialTextObject } from '../canvas/studioTypeset';
+import { hasBubbleContour, isTypesetModeAvailable, resolveTypesetMode } from '../canvas/typesetModes';
 import type { TextObject, CharStyleOverride } from '../types';
 
 const SELECTION_ELIGIBLE_KEYS: (keyof CharStyleOverride)[] = [
@@ -81,9 +82,15 @@ export const TypographySettings: React.FC = () => {
   const inlineSelection = useStudioStore((s) => s.inlineSelection);
 
   const selectedObj = textObjects.find((t) => t.id === selectedTextId);
-  const effectiveTypesetMode = globalEditMode
+  // Engine availability comes from detected bubble evidence, not from the current mode: a bubble
+  // switched to Caption Box keeps its contour polygon and must stay eligible for Bubble Contour.
+  const selectedHasBubbleContour = hasBubbleContour(selectedObj);
+  /** Global mode is a stored default for future edits, so it is shown as-is while it is in scope. */
+  const effectiveTypesetMode = globalEditMode || !selectedObj
     ? globalTypesetMode
-    : selectedObj?.typesetMode ?? globalTypesetMode;
+    : resolveTypesetMode(selectedObj, selectedObj.typesetMode ?? globalTypesetMode);
+  /** Bubble Contour is offered for whole-page global defaults and for objects owning a contour. */
+  const contourModeSelectable = globalEditMode || selectedHasBubbleContour;
   // Contour fitting owns baseline pitch, except vertical CJK columns still consume lineSpacing
   // (recalculateBlockTypeset routes isVertical CJK through the vertical branch before mode).
   const isVerticalCjk = Boolean(selectedObj?.isVertical && CJK_CHARACTER_REGEX.test(selectedObj.text));
@@ -325,9 +332,12 @@ export const TypographySettings: React.FC = () => {
 
     if (globalEditMode) {
       // Global editing: set every box's future editing mode, preserving its current pipeline layout.
+      // Boxes without a bubble contour cannot fit contour typesetting, so they resolve to their own
+      // allowed engine instead of inheriting an engine they can never use (see typesetModes.ts).
       next = textObjects.map((t) => applyTextObjectUpdates(t, { typesetMode: newMode }, globalTypesetMode));
     } else if (selectedObj) {
       // Local editing: set ONLY the selected box's future editing mode without fitting it now.
+      if (!isTypesetModeAvailable(selectedObj, newMode)) return;
       next = textObjects.map((t) => t.id === selectedObj.id
         ? applyTextObjectUpdates(t, { typesetMode: newMode }, globalTypesetMode)
         : t);
@@ -725,14 +735,19 @@ export const TypographySettings: React.FC = () => {
           <button
             type="button"
             onClick={() => handleToggleTypesetMode('contour')}
-            className={`flex-1 py-1.5 px-1.5 rounded-md font-semibold transition-all flex items-center justify-center gap-1 cursor-pointer text-[11px] ${
-              effectiveTypesetMode === 'contour'
-                ? 'bg-[#1c1f2e] text-[#e85c82] shadow-xs'
-                : 'text-slate-400 hover:text-white'
+            disabled={!contourModeSelectable}
+            className={`flex-1 py-1.5 px-1.5 rounded-md font-semibold transition-all flex items-center justify-center gap-1 text-[11px] ${
+              !contourModeSelectable
+                ? 'text-slate-600 cursor-not-allowed opacity-50'
+                : effectiveTypesetMode === 'contour'
+                ? 'bg-[#1c1f2e] text-[#e85c82] shadow-xs cursor-pointer'
+                : 'text-slate-400 hover:text-white cursor-pointer'
             }`}
-            title="Bubble Contour: 2D scanline engine fitted to speech bubble curves and ovals with dynamic font sizing (Koharu engine)"
+            title={contourModeSelectable
+              ? 'Bubble Contour: 2D scanline engine fitted to speech bubble curves and ovals with dynamic font sizing (Koharu engine)'
+              : 'Bubble Contour needs a detected bubble outline. This text has no contour (caption, narration or free text), so it can only use Balanced Fit or Caption Box.'}
           >
-            <CircleDot size={12} className={effectiveTypesetMode === 'contour' ? 'text-[#e85c82]' : ''} />
+            <CircleDot size={12} className={effectiveTypesetMode === 'contour' && contourModeSelectable ? 'text-[#e85c82]' : ''} />
             <span className="truncate">Bubble Contour</span>
           </button>
           <button
