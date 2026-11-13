@@ -15,6 +15,7 @@ import { resolveRenderFontFamily } from '../../shared/renderFontPresets';
 import { isBubbleGpuAvailable, isColorGpuAvailable } from '../../shared/utils/hardwareUtils';
 import { BubbleManager, bubbleManager as defaultBubbleManager } from './BubbleManager';
 import { createPageBubbleOwnership } from './PageBubbleOwnership';
+import { analyzePageText } from './PageTextAnalysis';
 import { resolveBubbleLayoutsDetailed, type BubbleGeometry } from './BubbleLayoutService';
 import { loadHyphenationLanguage } from '../utils/hyphenation';
 import type { ColorTierId } from '../../shared/colorTiers';
@@ -265,12 +266,21 @@ export class PipelineOrchestrator {
       // 3. OCR Detection. OcrManager owns lazy model initialization and cache lifecycle.
       const ocrStart = import.meta.env.DEV ? performance.now() : 0;
       console.log(`[PipelineOrchestrator] Running OCR with ${ocrTier}...`);
-      const ocrResult = await this.services.ocrManager.processImage(imageBuffer, ocrTier, {
-        sourceLang: sourceLang !== 'auto' ? sourceLang : undefined,
-        pageWidth,
-        pageHeight,
-        sfxPolicy: popupState?.sfxPolicy,
-      }, makeLifecycle('ocr', ocrTier), ownership ? { partitionLines: (lines) => ownership.partition(lines) } : undefined);
+      // Shared prefix with Studio: OCR (ownership-gated) then region geometry projection.
+      const analysis = await analyzePageText({
+        ocrManager: this.services.ocrManager,
+        imageBuffer,
+        ocrTier,
+        ocrContext: {
+          sourceLang: sourceLang !== 'auto' ? sourceLang : undefined,
+          pageWidth,
+          pageHeight,
+          sfxPolicy: popupState?.sfxPolicy,
+        },
+        ownership,
+        onOcrLifecycle: makeLifecycle('ocr', ocrTier),
+      });
+      const ocrResult = analysis.ocrResult;
       if (import.meta.env.DEV) {
         const ocrDuration = (performance.now() - ocrStart).toFixed(2);
         console.log(`[PipelineOrchestrator] OCR stage complete in ${ocrDuration}ms.`);
@@ -306,12 +316,11 @@ export class PipelineOrchestrator {
         }
       }
 
-      // 3.1 Project the per-line ownership resolved during OCR onto the merged regions.
-      let bubbleGeometry: BubbleGeometry | undefined;
+      // 3.1 Region geometry projected from the per-line ownership resolved during OCR.
+      const bubbleGeometry: BubbleGeometry | undefined = analysis.bubbleGeometry;
       // OCR-index-aligned flags for fragments absorbed into a dominant chamber (noise guard).
       let bubbleSkipped: boolean[] | undefined;
       if (ownership) {
-        bubbleGeometry = ownership.geometryForRegions(ocrResult.groupLineIndices ?? []);
         console.log(`[PipelineOrchestrator] Balloon ownership: ${ownership.balloonCount} balloon(s), ` +
           `${bubbleGeometry?.proposals.filter(Boolean).length ?? 0}/${ocrResult.boxes.length} region(s) framed`);
       }

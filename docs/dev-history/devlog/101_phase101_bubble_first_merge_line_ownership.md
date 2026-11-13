@@ -22,7 +22,8 @@ The analysed alternatives (mask-follows-balloon, mask-follows-frame, both) were 
 4. **Bucket derivation covers both tiers.** Neural lines carry YOLO proposals, so the proposal object *is* the identity. The heuristic tier only assigns a shared proposal when **two or more** lines share a chamber (`MIN_SHARED_GROUP_SIZE = 2`), so a single-line balloon has a carrier and no proposal; ownership therefore falls back to the carrier and merges carriers whose IoU ≥ `0.5`, the same threshold the tier itself uses for "same balloon".
 5. **Repair layers deleted.** `resolveGroupBubbleIndex`, `recoverCarrierFromLines`, `mergedGroupLineBoxes` and the `groupLineBoxes` engine parameter are gone; they existed only to compensate for merging before detection.
 6. **Blank translation falls back to source.** A block that comes back empty (batched reply with an empty segment) substitutes the recognized text instead of erasing without a replacement.
-7. **Failure mode.** If the tier throws, ownership degrades to a single free-text bucket — the legacy page-level merge — rather than blocking OCR.
+7. **One shared prefix, not a mega-pipeline.** `PageTextAnalysis.analyzePageText` owns the ordering both callers share — OCR with ownership gating, then region geometry projection. Layout stays caller-owned because the accept rule genuinely differs (reader fits real fonts, Studio resolves frames without a fit), and translate/inpaint/bake stay with each caller since Studio runs a different subset. The helper takes `Pick<OcrManager, 'processImage'>`, so Studio's injected port fits without widening its dependency surface.
+8. **Failure mode.** If the tier throws, ownership degrades to a single free-text bucket — the legacy page-level merge — rather than blocking OCR.
 
 ### Measurements
 

@@ -12,6 +12,7 @@ import { detectBlockTextColors, type DetectedTextColor } from '../utils/textColo
 import { resolveBubbleLayoutsDetailed, type BubbleGeometry } from './BubbleLayoutService';
 import { precomputeStudioOcrLayouts } from './studioOcrTypeset';
 import { createPageBubbleOwnership, type PageBubbleOwnership } from './PageBubbleOwnership';
+import { analyzePageText } from './PageTextAnalysis';
 import type { BoxRect } from '../utils/bubbleExpansion';
 
 // Preserve Studio's minimum editable text-handle dimensions.
@@ -171,17 +172,19 @@ export async function runStudioOcr(
     }
   }
 
-  const result = await dependencies.getOcrManager().processImage(
+  // Shared prefix with the reader: OCR (ownership-gated) then region geometry projection.
+  const analysis = await analyzePageText({
+    ocrManager: dependencies.getOcrManager(),
     imageBuffer,
-    payload.ocrEngineId || popupState.activeOcrId || 'v6-small',
-    {
+    ocrTier: payload.ocrEngineId || popupState.activeOcrId || 'v6-small',
+    ocrContext: {
       sourceLang: popupState.sourceLang !== 'auto' ? popupState.sourceLang : undefined,
       pageWidth: payload.width,
       pageHeight: payload.height,
     },
-    undefined,
-    ownership ? { partitionLines: (lines) => ownership!.partition(lines) } : undefined,
-  );
+    ownership,
+  });
+  const result = analysis.ocrResult;
   const regions = normalizeRegions(result);
   const unchangedPatch = payload.backgroundPatchBase64 ?? payload.imagePatchBase64;
   console.log(`[Studio OCR] Detected ${regions.length} regions; translate=${payload.translate !== false}, inpaint=${payload.inpaint !== false}.`);
@@ -247,8 +250,7 @@ export async function runStudioOcr(
 
   if (ownership) {
     try {
-      // Project the per-line ownership resolved during OCR onto the merged regions.
-      bubbleGeometry = ownership.geometryForRegions(result.groupLineIndices ?? []);
+      bubbleGeometry = analysis.bubbleGeometry;
       if (bubbleGeometry) {
         const detailed = resolveBubbleLayoutsDetailed({
           ...bubbleGeometry,
