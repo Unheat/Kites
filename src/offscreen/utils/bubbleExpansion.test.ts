@@ -123,6 +123,30 @@ describe('bubbleExpansion', () => {
       expect(typesetBox.y).toBeGreaterThanOrEqual(bubble.y);
       expect(typesetBox.y + typesetBox.h).toBeLessThanOrEqual(bubble.y + bubble.h);
     });
+
+    it('uses the balloon width when a welded text box puts the text center outside the core', () => {
+      // Measured page: a misread column welded onto a vertical balloon column, so the merged box
+      // (191 wide) sits mostly left of the 95-wide balloon. Anchoring on the merged center and then
+      // clamping edges collapsed the frame to a 32px sliver; the balloon offers ~79px.
+      const carrier: BoxRect = { x: 1184, y: 1338, w: 95, h: 415 };
+      const mergedText: BoxRect = { x: 1089, y: 1369, w: 191, h: 290 };
+
+      const typesetBox = computeTypesetBox(mergedText, carrier, true, 1808);
+
+      expect(typesetBox.w).toBeGreaterThanOrEqual(70);
+      expect(typesetBox.x).toBeGreaterThanOrEqual(carrier.x);
+      expect(typesetBox.x + typesetBox.w).toBeLessThanOrEqual(carrier.x + carrier.w);
+    });
+
+    it('keeps donor centroid anchoring when the text center is already inside the core', () => {
+      // Same geometry, but the text sits inside its balloon: no re-anchoring allowed.
+      const carrier: BoxRect = { x: 1184, y: 1338, w: 95, h: 415 };
+      const text: BoxRect = { x: 1200, y: 1390, w: 60, h: 300 };
+
+      const typesetBox = computeTypesetBox(text, carrier, true, 1808);
+
+      expect(Math.abs(typesetBox.x + typesetBox.w / 2 - (text.x + text.w / 2))).toBeLessThanOrEqual(8);
+    });
   });
 
   describe('partitionSharedContainer', () => {
