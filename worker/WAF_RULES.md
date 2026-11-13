@@ -100,7 +100,10 @@ the real adapters and reports verdicts only (`ok`, `rate_limited`, `invalid_key`
 the probe.
 
 The probe is wired into CI as `.github/workflows/worker-key-health.yml` (weekly plus manual
-dispatch), gated on the repository secret `PROVIDER_HEALTH_TOKEN`.
+dispatch), gated on the repository secret `PROVIDER_HEALTH_TOKEN`. The GitHub secret and the
+Worker secret must hold the same value; rotate both together (README: `docs/development/ci-cd.md`
+section 4.1). A missing GitHub secret fails the workflow immediately — that is CI wiring, not a
+dead provider key.
 
 ---
 

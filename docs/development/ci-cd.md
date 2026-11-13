@@ -12,8 +12,9 @@
 | **Kites CI/CD** | [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) | push/PR → `main` | Lint, unit tests, production build, artifact upload |
 | **Pipeline Integration Smoke Test** | [`.github/workflows/pipeline-smoke.yml`](../../.github/workflows/pipeline-smoke.yml) | push/PR touching `src/offscreen/**`, `src/shared/**`, `src/test/**`; manual dispatch | CPU-tier full-pipeline smoke matrix + visual pipeline suite |
 | **Validate Model Registry URLs** | [`.github/workflows/validate-model-registry.yml`](../../.github/workflows/validate-model-registry.yml) | push/PR, weekly (Sun 00:00 UTC) | Headless check that every external model URL in the OCR/inpaint/bubble/color registries resolves |
+| **Worker Provider Key Health** | [`.github/workflows/worker-key-health.yml`](../../.github/workflows/worker-key-health.yml) | push to `main` touching the provider catalog/probe/workflow, weekly (Mon 03:00 UTC), manual dispatch | Probes every production provider credential through the live Worker and fails when one is rejected |
 
-All three workflows install pinned Node (`.nvmrc`, currently 22.14) with `npm ci`.
+All workflows install pinned Node (`.nvmrc`, currently 22.14) with `npm ci`.
 
 ---
 
@@ -50,6 +51,20 @@ Runs `node scripts/validate-model-urls.mjs`, which extracts every external model
 - **Weekly schedule** catches upstream deletions (e.g. Hugging Face repo takedowns) even without code changes.
 - A red run means users would hit a broken model download at runtime — fix the registry before shipping.
 
+## 4.1 Worker Provider Key Health (`worker-key-health.yml`)
+
+Worker secrets are write-only, so the only proof a provider key is alive is letting the Worker use it. The job calls `GET /internal/provider-health` (404 unless `PROVIDER_HEALTH_TOKEN` is configured) and reports verdicts only — never key material.
+
+- **Gate semantics:** a rejected credential (`broken > 0`) fails the run. `request_rejected` (`configIssue`) and `unknown` (timeouts, 5xx, quota) are warnings — they mean the catalog shape or upstream state needs attention, not that the key is dead.
+- **Repository secret:** `PROVIDER_HEALTH_TOKEN` in GitHub Actions must hold the **same** value as the Worker secret of that name. Both are write-only, so a rotation means generating one value and setting it twice:
+  ```bash
+  openssl rand -hex 32 | npx wrangler versions secret put PROVIDER_HEALTH_TOKEN --cwd worker
+  npx wrangler versions deploy <version-id>@100% --cwd worker -y
+  gh secret set PROVIDER_HEALTH_TOKEN --repo Unheat/Kites
+  ```
+  Never print the value into a log, commit, or chat transcript. A missing GitHub secret is CI wiring, not a dead credential: the job fails immediately saying so.
+- **Fork safety:** the job runs only on `Unheat/Kites`, because forks cannot read these secrets.
+
 ## 5. Release Process (Extension)
 
 1. Verify `npm test` and `npm run build` pass locally on `main`.
@@ -70,6 +85,8 @@ Never deploy directly to production users (AGENTS.md §10). The promotion ladder
 4. **Production** — only after tests and staging/preview checks pass, with explicit promotion authorization: `npm --prefix worker run deploy` (or `npx wrangler versions deploy`). Deploy the backward-compatible worker before publishing client hardening.
 
 Provider checks are opt-in: `npm --prefix worker run test:providers -- --run --route=<route-id>` sends one synthetic request using environment credentials and consumes provider allowance. Without `--run`, the script only lists the catalog. Never commit credentials, log raw responses, infer live model health from invalid local keys, or run paid probes without a budget decision.
+
+The weekly `worker-key-health.yml` gate is the credential path instead: it probes every catalog route through the deployed Worker using the `PROVIDER_HEALTH_TOKEN` GitHub secret (section 4.1).
 
 Production `workers.dev` exposure is a separate rollout check: verify the custom-domain auth/WAF path first, then disable alternate production endpoints explicitly. Staging may retain its own controlled `workers.dev` endpoint. Local configuration alone does not prove the current dashboard exposure state.
 

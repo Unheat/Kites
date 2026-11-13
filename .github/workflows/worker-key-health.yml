@@ -25,6 +25,8 @@ jobs:
   key-health:
     name: Probe live provider credentials
     runs-on: ubuntu-latest
+    # Forks cannot hold this repository's secrets; skipping beats a red X nobody can fix.
+    if: github.repository == 'Unheat/Kites'
     steps:
       - name: Fetch credential health report
         env:
@@ -32,7 +34,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "${PROVIDER_HEALTH_TOKEN}" ]; then
-            echo "::error::Missing repository secret PROVIDER_HEALTH_TOKEN"
+            echo "::error::Missing repository secret PROVIDER_HEALTH_TOKEN. It must equal the Worker secret of the same name; see docs/development/ci-cd.md section 4.1."
             exit 1
           fi
           curl -sS --fail-with-body --max-time 90 \
