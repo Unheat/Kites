@@ -80,9 +80,11 @@ describe('Studio OCR independent optional steps', () => {
 
   it('defaults both missing flags to true and honors popup settings', async () => {
     const response = await runStudioOcr(payload, mocks.dependencies);
-    expect(mocks.processImage).toHaveBeenCalledWith(originalBuffer, 'v6-medium', {
+    // Balloon ownership is resolved inside the OCR stage, so the client options travel as a fifth
+    // argument (undefined here: this fixture has no bubble tier enabled).
+    expect(mocks.processImage.mock.calls[0].slice(0, 3)).toEqual([originalBuffer, 'v6-medium', {
       sourceLang: 'ja', pageWidth: 100, pageHeight: 80,
-    });
+    }]);
     expect(mocks.processTranslation).toHaveBeenCalledWith(['こんにちは'], 'ja', 'vi', undefined, popupState);
     expect(mocks.eraseText).toHaveBeenCalledWith(originalBuffer, rawPolygons, 'telea');
     expect(response.inpaintedPatchBase64).toBe(CLEAN_PATCH);

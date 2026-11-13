@@ -49,6 +49,68 @@ describe('OcrManager', () => {
     });
   });
 
+  describe('line ownership gating before merge', () => {
+    /**
+     * Builds a recognizer result with two adjacent vertical columns that the Cotrans merge graph
+     * would normally weld into one region.
+     *
+     * @returns Two-line recognition result with page geometry active.
+     */
+    const twoColumnResult = () => ({
+      texts: ['最初の列', '二列目'],
+      polygons: [
+        [{ x: 100, y: 100 }, { x: 140, y: 100 }, { x: 140, y: 300 }, { x: 100, y: 300 }],
+        [{ x: 150, y: 100 }, { x: 190, y: 100 }, { x: 190, y: 300 }, { x: 150, y: 300 }],
+      ],
+      scores: [0.95, 0.95],
+      detectionScores: [0.95, 0.95],
+      boxes: [{ x: 100, y: 100, w: 40, h: 200 }, { x: 150, y: 100, w: 40, h: 200 }],
+    });
+
+    /**
+     * Installs the two-column recognizer as the next engine instance.
+     */
+    const installTwoColumnEngine = () => {
+      (PaddleOcrEngine as any).mockImplementationOnce(function () {
+        return {
+          init: vi.fn().mockResolvedValue(undefined),
+          recognize: vi.fn().mockResolvedValue(twoColumnResult()),
+          destroy: vi.fn().mockResolvedValue(undefined),
+          isProviderCurrent: vi.fn().mockResolvedValue(true),
+        };
+      });
+    };
+
+    it('merges the columns when no ownership partitioner is supplied', async () => {
+      installTwoColumnEngine();
+      const result = await ocrManager.processImage(new ArrayBuffer(1), 'v6-small', {
+        pageWidth: 800, pageHeight: 1200,
+      });
+      expect(result.texts).toHaveLength(1);
+      // Vertical manga reading order sorts right-to-left, so the right column leads.
+      expect(result.groupLineIndices).toEqual([[1, 0]]);
+    });
+
+    it('refuses to merge lines that the partitioner puts in different buckets', async () => {
+      installTwoColumnEngine();
+      const partitionLines = vi.fn().mockResolvedValue([0, 1]);
+      const result = await ocrManager.processImage(new ArrayBuffer(1), 'v6-small', {
+        pageWidth: 800, pageHeight: 1200,
+      }, undefined, { partitionLines });
+      expect(partitionLines).toHaveBeenCalledTimes(1);
+      expect(result.texts).toHaveLength(2);
+      expect(result.groupLineIndices).toEqual([[1], [0]]);
+    });
+
+    it('fails fast when ownership does not cover every prepared line', async () => {
+      installTwoColumnEngine();
+      await expect(ocrManager.processImage(new ArrayBuffer(1), 'v6-small', {
+        pageWidth: 800, pageHeight: 1200,
+      }, undefined, { partitionLines: vi.fn().mockResolvedValue([0]) }))
+        .rejects.toThrow(/partitionLines returned 1 buckets for 2 lines/);
+    });
+  });
+
   describe('engine lifecycle through processImage', () => {
     it('initializes the default v6-small tier once and reuses it', async () => {
       await ocrManager.processImage(new ArrayBuffer(1));

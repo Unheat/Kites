@@ -11,6 +11,7 @@ import { getRenderedBlockGeometry } from '../utils/canvasTypesetting';
 import { detectBlockTextColors, type DetectedTextColor } from '../utils/textColorDetection';
 import { resolveBubbleLayoutsDetailed, type BubbleGeometry } from './BubbleLayoutService';
 import { precomputeStudioOcrLayouts } from './studioOcrTypeset';
+import { createPageBubbleOwnership, type PageBubbleOwnership } from './PageBubbleOwnership';
 import type { BoxRect } from '../utils/bubbleExpansion';
 
 // Preserve Studio's minimum editable text-handle dimensions.
@@ -141,6 +142,35 @@ export async function runStudioOcr(
 ): Promise<StudioOcrResponse> {
   const imageBuffer = await readPatch(payload.imagePatchBase64);
   const popupState = await dependencies.getPopupState();
+
+  // Balloon ownership is resolved per raw line inside the OCR stage, before merging, so the
+  // detection canvas must exist first. Studio uses the same ownership service as the reader.
+  const bubbleMode = popupState.bubbleMode;
+  let safeCanvas: ReturnType<typeof createSafeCanvas> = null;
+  let ownership: PageBubbleOwnership | undefined;
+  if (bubbleMode && bubbleMode !== 'off' && dependencies.getBubbleManager && typeof createImageBitmap !== 'undefined') {
+    safeCanvas = createSafeCanvas(payload.width, payload.height);
+    if (safeCanvas) {
+      const patchBitmap = await createImageBitmap(new Blob([imageBuffer], { type: 'image/png' }));
+      try {
+        safeCanvas.ctx.drawImage(patchBitmap, 0, 0);
+      } finally {
+        patchBitmap.close();
+      }
+      ownership = createPageBubbleOwnership({
+        bubbleManager: dependencies.getBubbleManager(),
+        canvas: safeCanvas.canvas as any,
+        // ImagePatchData contract: a real pixel buffer, not the 2D context — passing the ctx made
+        // heuristic carrier extraction throw on the missing .data buffer and silently skip layout.
+        image: safeCanvas.ctx.getImageData(0, 0, payload.width, payload.height),
+        pageWidth: payload.width,
+        pageHeight: payload.height,
+        bubbleMode,
+        popupState,
+      });
+    }
+  }
+
   const result = await dependencies.getOcrManager().processImage(
     imageBuffer,
     payload.ocrEngineId || popupState.activeOcrId || 'v6-small',
@@ -149,6 +179,8 @@ export async function runStudioOcr(
       pageWidth: payload.width,
       pageHeight: payload.height,
     },
+    undefined,
+    ownership ? { partitionLines: (lines) => ownership!.partition(lines) } : undefined,
   );
   const regions = normalizeRegions(result);
   const unchangedPatch = payload.backgroundPatchBase64 ?? payload.imagePatchBase64;
@@ -213,63 +245,34 @@ export async function runStudioOcr(
   // OCR-index-aligned flags for fragments absorbed into a dominant chamber (noise guard).
   let bubbleSkipped: boolean[] = [];
 
-  const bubbleMode = popupState.bubbleMode;
-  if (bubbleMode && bubbleMode !== 'off' && dependencies.getBubbleManager && typeof createImageBitmap !== 'undefined') {
+  if (ownership) {
     try {
-      const bubbleManager = dependencies.getBubbleManager();
-      const safeCanvas = createSafeCanvas(payload.width, payload.height);
-      if (safeCanvas) {
-        const patchBitmap = await createImageBitmap(new Blob([imageBuffer], { type: 'image/png' }));
-        try {
-          safeCanvas.ctx.drawImage(patchBitmap, 0, 0);
-          // The engine owns all tier-specific geometry rules; Studio OCR is tier-blind.
-          const { engine, release } = await bubbleManager.acquireEngine(bubbleMode, popupState);
-          try {
-            if (engine) {
-              bubbleGeometry = await engine.acquireGeometry(
-                safeCanvas.canvas as any,
-                // ImagePatchData contract (same as PipelineOrchestrator): a real pixel
-                // buffer, not the 2D context — passing the ctx made heuristic carrier
-                // extraction throw on the missing .data buffer and silently skip layout.
-                safeCanvas.ctx.getImageData(0, 0, payload.width, payload.height),
-                result.boxes,
-                undefined,
-                undefined,
-                result.mergedGroupLineBoxes,
-              ) ?? undefined;
-            }
-          } finally {
-            release();
-          }
+      // Project the per-line ownership resolved during OCR onto the merged regions.
+      bubbleGeometry = ownership.geometryForRegions(result.groupLineIndices ?? []);
+      if (bubbleGeometry) {
+        const detailed = resolveBubbleLayoutsDetailed({
+          ...bubbleGeometry,
+          boxes: result.boxes,
+          directions: result.directions,
+          angles: result.angles,
+          pageWidth: payload.width,
+          pageHeight: payload.height,
+          accept: () => true
+        });
+        resolvedLayouts = detailed.typesetBoxes;
+        bubbleSkipped = detailed.skipped ?? [];
 
-          if (bubbleGeometry) {
-            const detailed = resolveBubbleLayoutsDetailed({
-              ...bubbleGeometry,
-              boxes: result.boxes,
-              directions: result.directions,
-              angles: result.angles,
-              pageWidth: payload.width,
-              pageHeight: payload.height,
-              accept: () => true
-            });
-            resolvedLayouts = detailed.typesetBoxes;
-            bubbleSkipped = detailed.skipped ?? [];
-
-            bubbleContours = result.boxes.map((_, bIdx) => {
-              if (detailed.contourPoints?.[bIdx]) return detailed.contourPoints[bIdx];
-              const box = resolvedLayouts[bIdx];
-              if (!box) return undefined;
-              return [
-                { x: 0, y: 0 },
-                { x: box.w, y: 0 },
-                { x: box.w, y: box.h },
-                { x: 0, y: box.h }
-              ];
-            });
-          }
-        } finally {
-          patchBitmap.close();
-        }
+        bubbleContours = result.boxes.map((_, bIdx) => {
+          if (detailed.contourPoints?.[bIdx]) return detailed.contourPoints[bIdx];
+          const box = resolvedLayouts[bIdx];
+          if (!box) return undefined;
+          return [
+            { x: 0, y: 0 },
+            { x: box.w, y: 0 },
+            { x: box.w, y: box.h },
+            { x: 0, y: box.h }
+          ];
+        });
       }
     } catch (bErr) {
       console.warn('[Studio OCR] Bubble detection skipped or failed:', bErr);

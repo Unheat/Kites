@@ -97,9 +97,6 @@ export interface IBubbleEngine {
    * @param textBoxes - Detected OCR text boxes to align geometry against.
    * @param options - Runtime detection options (hardware acceleration preference).
    * @param precomputed - Optional pre-decoded detection output from visual harnesses.
-   * @param groupLineBoxes - Optional raw OCR lines merged into each text box (parallel array).
-   *          Engines use these to re-resolve balloon membership when the merged rectangle overshoots
-   *          its balloon; tier-specific recovery stays inside the engine.
    * @returns Aligned tier geometry (carriers, proposal identities, shapes, curvatures, contours),
    *          or null when neural inference fails and nothing was precomputed.
    */
@@ -109,7 +106,6 @@ export interface IBubbleEngine {
     textBoxes: BoxRect[],
     options?: BubbleEngineOptions,
     precomputed?: PrecomputedBubbleDetection,
-    groupLineBoxes?: readonly (readonly BoxRect[])[]
   ): Promise<BubbleGeometry | null>;
 
   /**

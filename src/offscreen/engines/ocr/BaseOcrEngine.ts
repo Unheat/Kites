@@ -86,15 +86,6 @@ export interface OcrResult {
   /** Number of source OCR lines merged into each renderable text region. */
   lineCounts?: number[];
 
-  /**
-   * Raw OCR line boxes that were merged into each renderable text region, in output order.
-   *
-   * Merge runs before bubble detection, so a merged box can extend past the balloon it belongs
-   * to (a nearby SFX line gets glued on). Bubble engines use these child boxes to re-ask
-   * "which balloon holds this region?" when the merged box itself fails the coverage test.
-   */
-  mergedGroupLineBoxes?: OcrBox[][];
-
   /** Optional expanded bubble chamber boxes for comfortable word-wrapping and visual centering. */
   typesetBoxes?: (OcrBox | undefined)[];
 

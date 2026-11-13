@@ -950,7 +950,6 @@ export class OcrManager {
     const mergedFontSizes: number[] = [];
     const mergedAngles: number[] = [];
     const mergedLineCounts: number[] = [];
-    const mergedGroupLineBoxes: { x: number, y: number, w: number, h: number }[][] = [];
     const mergedGroupLineIndices: number[][] = [];
 
     // Step 0: page ownership, resolved per raw line BEFORE the merge graph runs.
@@ -1081,12 +1080,6 @@ export class OcrManager {
       mergedLineCounts.push(groupIndices.length);
       // Prepared-line indices of this region, so pre-merge ownership can be projected onto it.
       mergedGroupLineIndices.push([...groupIndices]);
-      // Child line boxes: bubble engines re-ask balloon membership per line when the merged
-      // rectangle itself does not fit any detected balloon.
-      mergedGroupLineBoxes.push(groupIndices.map((idx) => {
-        const lineBox = calculateBoundingBox(workingQuads[idx].pts);
-        return { x: lineBox.x, y: lineBox.y, w: lineBox.width, h: lineBox.height };
-      }));
     }
 
     // Cotrans sort_regions (textblock.py:423): order blocks top-to-bottom, right-to-left for manga
@@ -1138,7 +1131,6 @@ export class OcrManager {
     const finalBoxes = pick(mergedBoxes);
     const finalFontSizes = pick(mergedFontSizes);
     const finalLineCounts = pick(mergedLineCounts);
-    const finalGroupLineBoxes = pick(mergedGroupLineBoxes);
     const { glyphRatios, boxShortSideRatios } = OcrManager.computeGlyphRatios(
       finalBoxes, finalTexts, finalFontSizes, finalLineCounts,
     );
@@ -1195,7 +1187,6 @@ export class OcrManager {
       angles: pick(mergedAngles),
       lineCounts: pick(mergedLineCounts),
       groupLineIndices: pick(mergedGroupLineIndices),
-      mergedGroupLineBoxes: finalGroupLineBoxes,
       detectionScores: result.detectionScores,
       rawPolygons: maskPolygons,
       maskRawCanvas: result.maskRawCanvas

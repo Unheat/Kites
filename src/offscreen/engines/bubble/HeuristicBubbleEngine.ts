@@ -10,16 +10,7 @@ import type {
   PrecomputedBubbleDetection,
 } from './BaseBubbleEngine';
 import { finalizeBubbleGeometry } from './bubbleGeometry';
-import { GROUP_LINE_MAJORITY } from './bubbleAssociation';
 import { HeuristicBubbleExtractor, type BubbleShapeEvidence, type ImagePatchData } from './HeuristicBubbleExtractor';
-
-/**
- * Minimum recovered chamber area, relative to the merged region it replaces.
- *
- * A balloon body is at least as large as the text inside it; a chamber covering a third of the
- * region is a glyph cavity or a border fragment, not the balloon.
- */
-const MIN_RECOVERED_CHAMBER_AREA_RATIO = 0.5;
 
 /** Adapted association threshold, not a semantic bubble detector. */
 export { XIANSCAN_SHARED_BUBBLE_IOU } from './heuristicChamberAssociation';
@@ -94,76 +85,14 @@ export class HeuristicBubbleEngine implements IBubbleEngine {
   }
 
   /**
-   * Recovers a chamber when the merged rectangle spans past the balloon it belongs to.
-   *
-   * Merge runs before detection, so a glued region can be too wide for morphology to close a
-   * chamber around. Re-extracting around each raw child line gives smaller, balloon-sized anchors;
-   * the chamber holding the most line centers is the one the region actually occupies.
-   *
-   * Two guards keep a stray glyph cavity from masquerading as a balloon: a majority of the lines
-   * that produced a chamber must fall inside the winning chamber, and the chamber must cover a
-   * meaningful share of the merged region. Without them, a caption line outside any balloon can
-   * adopt a letter-sized hole and get its translation squeezed into it.
-   *
-   * The vote denominator is the chambers that were actually extracted, not every child line: an
-   * OCR line that produced no chamber is usually the weld artifact this recovery exists to drop.
-   *
-   * @param image - Original image pixel buffer.
-   * @param lineBoxes - Raw OCR lines merged into the failing region.
-   * @param regionBox - The merged region rectangle the chamber must plausibly represent.
-   * @returns The recovered carrier box, or null when no line produced a usable chamber.
-   */
-  static recoverCarrierFromLines(
-    image: ImagePatchData,
-    lineBoxes: readonly BoxRect[],
-    regionBox: BoxRect,
-  ): BoxRect | null {
-    const chambers: BoxRect[] = [];
-    for (const line of lineBoxes) {
-      const chamber = HeuristicBubbleExtractor.extractCarrierBox(image, line, { allTextBoxes: [...lineBoxes] });
-      if (chamber) chambers.push(chamber);
-    }
-    if (chambers.length === 0) return null;
-    const regionArea = Math.max(1, regionBox.w * regionBox.h);
-    let best: BoxRect | null = null;
-    let bestVotes = -1;
-    for (const chamber of chambers) {
-      let votes = 0;
-      for (const line of lineBoxes) {
-        const cx = line.x + line.w / 2;
-        const cy = line.y + line.h / 2;
-        if (cx >= chamber.x && cx <= chamber.x + chamber.w && cy >= chamber.y && cy <= chamber.y + chamber.h) {
-          votes += 1;
-        }
-      }
-      if (votes > bestVotes) {
-        bestVotes = votes;
-        best = chamber;
-      }
-    }
-    if (!best) return null;
-    // Vote against the lines that produced a chamber: the line whose extraction failed is the one
-    // that overshot the balloon, and demanding it vote would reject the correct chamber.
-    const attempted = chambers.length;
-    if (bestVotes / Math.max(1, attempted) < GROUP_LINE_MAJORITY) return null;
-    if ((best.w * best.h) / regionArea < MIN_RECOVERED_CHAMBER_AREA_RATIO) return null;
-    return best;
-  }
-
-  /**
    * Builds the full heuristic geometry: per-box morphological carriers, shape evidence,
    * shared-chamber proposal identities, and the shared curvature/contour finalization.
    *
    * @param image - Original image pixel buffer.
    * @param textBoxes - OCR text boxes to extract chambers around.
-   * @param groupLineBoxes - Raw OCR lines merged into each text box, parallel to `textBoxes`.
    * @returns Heuristic-tier geometry aligned to the OCR boxes.
    */
-  static buildGeometry(
-    image: ImagePatchData,
-    textBoxes: BoxRect[],
-    groupLineBoxes?: readonly (readonly BoxRect[])[],
-  ): BubbleGeometry {
+  static buildGeometry(image: ImagePatchData, textBoxes: BoxRect[]): BubbleGeometry {
     const carriers: (BoxRect | null)[] = textBoxes.map(() => null);
     const shapes: (BubbleShapeEvidence | undefined)[] = textBoxes.map(() => undefined);
     const indices = textBoxes.map((_, index) => index).sort((a, b) =>
@@ -185,12 +114,6 @@ export class HeuristicBubbleEngine implements IBubbleEngine {
         allTextBoxes: textBoxes,
         onShapeEvidence: (shape) => { shapes[i] = shape; },
       });
-      // A chamber that failed to close around an oversized merged rectangle is not free text yet:
-      // retry anchored on the region's own lines, which sit inside the balloon.
-      const lineBoxes = groupLineBoxes?.[i];
-      if (!carriers[i] && lineBoxes && lineBoxes.length > 1) {
-        carriers[i] = HeuristicBubbleEngine.recoverCarrierFromLines(image, lineBoxes, textBoxes[i]);
-      }
     }
 
     const { proposals, shapes: associatedShapes } = HeuristicBubbleEngine.associateSharedChambers(textBoxes, carriers, shapes);
@@ -214,7 +137,6 @@ export class HeuristicBubbleEngine implements IBubbleEngine {
    * @param _canvas - Unused by CPU morphology.
    * @param image - Original image pixel buffer.
    * @param textBoxes - OCR text boxes to extract chambers around.
-   * @param groupLineBoxes - Raw OCR lines merged into each text box, parallel to `textBoxes`.
    * @returns Heuristic-tier geometry aligned to the OCR boxes.
    */
   async acquireGeometry(
@@ -223,9 +145,8 @@ export class HeuristicBubbleEngine implements IBubbleEngine {
     textBoxes: BoxRect[],
     _options?: BubbleEngineOptions,
     _precomputed?: PrecomputedBubbleDetection,
-    groupLineBoxes?: readonly (readonly BoxRect[])[],
   ): Promise<BubbleGeometry> {
-    return HeuristicBubbleEngine.buildGeometry(image, textBoxes, groupLineBoxes);
+    return HeuristicBubbleEngine.buildGeometry(image, textBoxes);
   }
 
   /**
