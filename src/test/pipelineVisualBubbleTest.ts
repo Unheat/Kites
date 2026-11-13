@@ -255,12 +255,23 @@ async function runPipelineVisualBubbleTest() {
       const detectedBubbles = parsedNeural.bubbles;
       console.log(`[Neural] Detected ${detectedBubbles.length} bubble proposals across image.`);
 
+      // Re-run OCR with the neural ownership policy so this pass is gated the same way the extension
+      // gates it (per prepared line), then align shapes with the regions that pass produced.
+      const neuralOwnership = createPrecomputedNeuralOwnership(
+        { canvas: null, image: rawImageData, pageWidth, pageHeight },
+        { bubbles: detectedBubbles, shapes: [] },
+      );
+      const neuralOcr = await ocrManager.processImage(
+        arrayBuffer, 'v6-small', { sourceLang: 'ja', pageWidth, pageHeight },
+        undefined, { partitionLines: (lines) => neuralOwnership.partition(lines) },
+      );
+
       // Pass 2: Unified YOLO (AI) Bubble Expansion with morphological tail severing on prototype masks
-      const neuralShapes: (any | undefined)[] = new Array(boxes.length).fill(undefined);
+      const neuralShapes: (any | undefined)[] = new Array(neuralOcr.boxes.length).fill(undefined);
 
       if (parsedNeural.items && parsedNeural.items.length > 0) {
-        for (let i = 0; i < boxes.length; i++) {
-          const textBox = boxes[i];
+        for (let i = 0; i < neuralOcr.boxes.length; i++) {
+          const textBox = neuralOcr.boxes[i];
           const matchedIdx = NeuralBubbleDetector.matchBubbleIndex(textBox, detectedBubbles);
           if (matchedIdx === -1) continue;
 
@@ -332,17 +343,6 @@ async function runPipelineVisualBubbleTest() {
         }
       }
 
-      // Re-run OCR with the neural ownership policy so this pass is gated the same way the extension
-      // gates it (per prepared line). The shapes above were computed for the heuristic pass's merged
-      // boxes, so they are rebuilt for whatever regions this pass produces.
-      const neuralOwnership = createPrecomputedNeuralOwnership(
-        { canvas: null, image: rawImageData, pageWidth, pageHeight },
-        { bubbles: detectedBubbles, shapes: [] },
-      );
-      const neuralOcr = await ocrManager.processImage(
-        arrayBuffer, 'v6-small', { sourceLang: 'ja', pageWidth, pageHeight },
-        undefined, { partitionLines: (lines) => neuralOwnership.partition(lines) },
-      );
       const neuralGeometry = await NeuralBubbleEngine.buildGeometry(
         null, rawImageData, neuralOcr.boxes, undefined,
         { bubbles: detectedBubbles, shapes: neuralShapes },
