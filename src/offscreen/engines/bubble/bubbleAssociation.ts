@@ -18,8 +18,14 @@ import type { BoxRect } from '../../utils/bubbleExpansion';
 /** Minimum intersection-over-box-area for a box to count as belonging to a balloon. */
 export const BUBBLE_MATCH_COVERAGE = 0.50;
 
-/** Share of a region's child lines that must agree before the region adopts a balloon. */
-export const GROUP_LINE_MAJORITY = 0.60;
+/**
+ * Share of a region's child lines that must agree before the region adopts a balloon.
+ *
+ * 0.5, not a stricter majority: the failure this retry exists for welds one misread column onto a
+ * real text column, so a two-line region is expected to have exactly one confirming line. The
+ * rival-share guard below blocks the harder case, where both lines carry a balloon of their own.
+ */
+export const GROUP_LINE_MAJORITY = 0.50;
 
 /**
  * Share of child lines a rival balloon may hold before the region is rejected.

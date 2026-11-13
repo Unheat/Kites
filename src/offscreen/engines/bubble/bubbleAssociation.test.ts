@@ -41,6 +41,19 @@ describe('resolveGroupBubbleIndex', () => {
     expect(resolveGroupBubbleIndex(merged, lines, [bubbleA, bubbleB])).toBe(0);
   });
 
+  it('accepts a two-line weld when the single confirmed line is the only evidence', () => {
+    // Measured page: a misread column welded onto a balloon column. The merged rectangle sat 0.497
+    // under the coverage floor, one child line was fully inside the balloon, the other matched
+    // nothing at all (it is the misread artifact, not a second balloon).
+    const merged: BoxRect = { x: 1089, y: 1369, w: 191, h: 290 };
+    const balloonBox: BoxRect = { x: 1184, y: 1338, w: 95, h: 415 };
+    const lines = [
+      { x: 1188, y: 1371, w: 92, h: 288 },
+      { x: 1089, y: 1374, w: 112, h: 179 },
+    ];
+    expect(resolveGroupBubbleIndex(merged, lines, [balloonBox])).toBe(0);
+  });
+
   it('refuses when the group genuinely spans two balloons', () => {
     const merged = balloon(40, 10, 220, 80);
     const lines = [balloon(20, 20, 40, 40), balloon(60, 30, 40, 40), balloon(220, 20, 40, 40), balloon(250, 30, 40, 40)];
@@ -63,7 +76,7 @@ describe('resolveGroupBubbleIndex', () => {
   });
 
   it('documents the majority and rival thresholds it enforces', () => {
-    expect(GROUP_LINE_MAJORITY).toBe(0.6);
+    expect(GROUP_LINE_MAJORITY).toBe(0.5);
     expect(GROUP_RIVAL_SHARE).toBe(0.25);
   });
 });
