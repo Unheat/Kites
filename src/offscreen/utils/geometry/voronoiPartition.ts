@@ -6,6 +6,7 @@
 
 import type { Point2D } from '../../../shared/utils/geometry';
 import type { BoxRect } from '../bubbleExpansion';
+import ClipperLib from 'clipper-lib';
 import { pointInPolygon, topologicalFlowCells } from './polygonMath';
 
 export const SIBLING_GAP = 6;
@@ -185,32 +186,34 @@ function isDisjointSingleAnchorPartition(cells: Point2D[][], anchors: Point2D[])
     if (owned !== 1) return false;
     if (!pointInPolygon(cells[i], anchors[i])) return false;
     for (let j = i + 1; j < cells.length; j++) {
-      if (bboxOverlapRatio(cells[i], cells[j]) > PARTITION_OVERLAP_TOLERANCE) return false;
+      if (polygonOverlapRatio(cells[i], cells[j]) > PARTITION_OVERLAP_TOLERANCE) return false;
     }
   }
   return true;
 }
 
 /**
- * Intersection area of two polygons' bounding boxes, relative to the smaller box.
+ * Shared area of two cell polygons, relative to the smaller cell.
+ *
+ * Neck and bisector cells meet along diagonal lines, so their bounding boxes overlap even when the
+ * polygons do not; a bbox test rejects every diagonal split and forces the balloon onto the wrong
+ * partition.
  *
  * @param a - First polygon.
  * @param b - Second polygon.
  * @returns Overlap ratio in 0..1.
  */
-function bboxOverlapRatio(a: Point2D[], b: Point2D[]): number {
-  const box = (poly: Point2D[]) => {
-    const xs = poly.map((p) => p.x);
-    const ys = poly.map((p) => p.y);
-    return { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
-  };
-  const ba = box(a);
-  const bb = box(b);
-  const w = Math.min(ba.x + ba.w, bb.x + bb.w) - Math.max(ba.x, bb.x);
-  const h = Math.min(ba.y + ba.h, bb.y + bb.h) - Math.max(ba.y, bb.y);
-  if (w <= 0 || h <= 0) return 0;
-  const smaller = Math.min(ba.w * ba.h, bb.w * bb.h);
-  return smaller > 0 ? (w * h) / smaller : 0;
+function polygonOverlapRatio(a: Point2D[], b: Point2D[]): number {
+  const toPath = (poly: Point2D[]) => poly.map((p) => new ClipperLib.IntPoint(Math.round(p.x), Math.round(p.y)));
+  const intersection: any[] = [];
+  const clipper = new ClipperLib.Clipper();
+  clipper.AddPath(toPath(a), ClipperLib.PolyType.ptSubject, true);
+  clipper.AddPath(toPath(b), ClipperLib.PolyType.ptClip, true);
+  clipper.Execute(ClipperLib.ClipType.ctIntersection, intersection,
+    ClipperLib.PolyFillType.pftNonZero, ClipperLib.PolyFillType.pftNonZero);
+  const shared = intersection.reduce((sum, path) => sum + Math.abs(ClipperLib.Clipper.Area(path)), 0);
+  const smaller = Math.min(Math.abs(ClipperLib.Clipper.Area(toPath(a))), Math.abs(ClipperLib.Clipper.Area(toPath(b))));
+  return smaller > 0 ? shared / smaller : 0;
 }
 
 export interface BalloonFlowPartitionResult {

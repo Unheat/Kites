@@ -78,9 +78,16 @@ balloon. Measured on the fixture: topological cells `3,1-102,103 | 1,19-116,378 
 while the bisector clipping produced clean bands `1..117 | 116..245 | 248..390`.
 
 The topological split is now accepted only when it actually separates the anchors — one anchor per
-cell, each anchor inside its own cell, and no two cells sharing area — otherwise the bisector path
+cell, each anchor inside its own cell, and no two cells *sharing area* — otherwise the bisector path
 runs. So the three-lobe case is supported; the previous failure was a validation gap, not a limit of
 the algorithm.
+
+The area test must be measured on the polygons, not on their bounding boxes (devlog 075 §C defines the
+neck split as Stage 1 and bisectors as Stage 2). Neck and bisector cells meet along diagonal lines, so
+bbox overlap is large even when the cells are disjoint; validating with boxes rejected every diagonal
+split and pushed balloons onto an axis-aligned partition, which then cut them in the wrong direction.
+`polygonOverlapRatio` measures the true intersection with clipper. Lobe count is not capped: bisectors
+partition any number of anchors, so 4, 5, n stacked lobes follow the same path.
 
 ### Next Steps / Key Takeaways
 

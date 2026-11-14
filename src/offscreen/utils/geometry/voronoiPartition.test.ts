@@ -24,26 +24,27 @@ const THREE_ANCHORS: Point2D[] = [
   { x: 48, y: 318 },
 ];
 
-/** @param cells - Partition cells. @returns Bounding box of each cell. */
-const boxes = (cells: Point2D[][]) => cells.map((cell) => {
-  const xs = cell.map((point) => point.x);
-  const ys = cell.map((point) => point.y);
-  return { x: Math.min(...xs), y: Math.min(...ys), r: Math.max(...xs), b: Math.max(...ys) };
-});
-
 describe('flowCells', () => {
   it('separates three stacked lobes of one joined balloon', () => {
     const cells = flowCells(118, 391, THREE_ANCHORS, THREE_LOBE_CONTOUR);
     expect(cells).toHaveLength(3);
-    const bounds = boxes(cells);
-    for (let i = 0; i < bounds.length; i++) {
+    for (let i = 0; i < cells.length; i++) {
       expect(pointInPolygon(cells[i], THREE_ANCHORS[i])).toBe(true);
-      for (let j = i + 1; j < bounds.length; j++) {
-        const overlapY = Math.min(bounds[i].b, bounds[j].b) - Math.max(bounds[i].y, bounds[j].y);
-        const overlapX = Math.min(bounds[i].r, bounds[j].r) - Math.max(bounds[i].x, bounds[j].x);
-        expect(Math.min(overlapX, overlapY)).toBeLessThanOrEqual(2.5);
+    }
+    // Cells may share bounding boxes along diagonal necks; what matters is that no point of the
+    // balloon is claimed by two cells.
+    const xs = THREE_LOBE_CONTOUR.map((point) => point.x);
+    const ys = THREE_LOBE_CONTOUR.map((point) => point.y);
+    let shared = 0;
+    for (let y = Math.min(...ys); y <= Math.max(...ys); y += 8) {
+      for (let x = Math.min(...xs); x <= Math.max(...xs); x += 8) {
+        const point = { x, y };
+        if (!pointInPolygon(THREE_LOBE_CONTOUR, point)) continue;
+        const owners = cells.filter((cell) => pointInPolygon(cell, point)).length;
+        if (owners > 1) shared += 1;
       }
     }
+    expect(shared).toBe(0);
   });
 
   it('still partitions two anchors inside a plain rectangle', () => {
