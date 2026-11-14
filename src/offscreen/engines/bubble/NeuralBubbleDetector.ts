@@ -367,14 +367,10 @@ export class NeuralBubbleDetector {
   }
 
   /**
-   * Executes neural bubble detection on an image canvas, returning boxes, scores, and optional decoded masks.
-   *
-   * @param canvas - The source image canvas.
-   * @param popupState - Extension settings state to read GPU acceleration overrides.
-   * @returns Detailed detection result with bubble boxes and optional decoded prototype masks, or null if model unavailable.
-   */
-  /**
    * Resolves whether GPU execution is preferred from dedicated engine options.
+   *
+   * @param options - Execution options with the optional GPU preference.
+   * @returns True when GPU execution is preferred.
    */
   private static resolvePreferGpu(options?: BubbleEngineOptions): boolean {
     return Boolean(options?.preferGpu);

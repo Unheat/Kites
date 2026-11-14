@@ -240,6 +240,7 @@ function pointInConvexQuad(px: number, py: number, quad: Point2D[]): boolean {
  * @param originalHeight - Original image height, for rescaling the output.
  * @param threshold - Binarization threshold deciding which pixels join a blob.
  * @param unclipRatio - Polygon dilation factor (Clipper offset), matching DBPostProcess.
+ * @param resizeRatio - Model-to-original scale used by the tiled OCR path; omitted for direct maps.
  * @returns Accepted quadrilaterals in original image coordinates, each with its DBNet score.
  */
 export function extractPolygons(

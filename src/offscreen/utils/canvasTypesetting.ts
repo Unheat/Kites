@@ -261,6 +261,7 @@ function wrapText(
  * @param height - Target box height in pixels.
  * @param isWestern - Whether to wrap on words rather than characters.
  * @param fontFamily - Font family used for measurement and rendering.
+ * @param isBold - Whether the measured face is bold.
  * @returns The chosen font size, the wrapped lines, and the line height.
  */
 export function calculateOptimalFontSize(
@@ -589,6 +590,7 @@ function sampleQuadBackground(ctx: OffscreenCanvasRenderingContext2D, quad: Poin
  * @param targetLang - Target language code (decides renderer orientation).
  * @param imageBounds - Page dimensions (defaults to the canvas size).
  * @param fontFamily - CSS font-family stack to render and measure with.
+ * @param isBold - Whether to render with the bold face.
  * @returns Per-block render info aligned with `blocks` (null for skipped blocks).
  */
 export function renderTextBlocksBatch(
@@ -836,6 +838,7 @@ function renderTextBlocksDefault(
  * @param targetLang - Target language code (decides vertical vs RTL handling).
  * @param bounds - Page dimensions, used to keep blocks on-page during collision solving.
  * @param fontFamily - CSS font-family stack to render and measure with.
+ * @param isBold - Whether to render with the bold face.
  * @returns Per-block render info aligned with `blocks` (null for skipped blocks).
  */
 function renderTextBlocksLegacy(

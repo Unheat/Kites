@@ -164,6 +164,7 @@ export class WebLLMEngine extends BaseLlmTranslationEngine {
    * @param messages - Optional structured ChatMessage array with system/user turns.
    * @param schema - Strict JSON schema for the batch slots (b0, b1, ... bN).
    * @param signal - Optional AbortSignal.
+   * @param maxTokens - Optional completion-token cap; omitted uses the engine default.
    * @returns Raw string completion from the local model.
    */
   protected async requestLlm(

@@ -1,212 +1,143 @@
 ## Code Exploration Rules
-Always use `codebase-memory-mcp` and/or `ripgrep` tools over `grep` or reading whole files. Fall back to `grep` ONLY for if neither do the task.
+Use `codebase-memory-mcp` and/or `ripgrep` before `grep` or reading whole files; fall back to `grep` only when neither can do the task.
 
-1. **Indexing**: Call `index_repository` before big tasks to refresh the graph.
-2. **Search**: Use `search_graph` and `trace_call_path` to find symbols and call chains.
-3. **Reading**: Use `get_code_snippet` for precise functions instead of reading full files.
-4. **Subagents**: Spawn `research` agent when searching internet or local references in `~/scratches/reference`. Spawn `explore-code` agent when planning changes to code or analyzing code. Avoid default `explore` or `general-purpose` agent due to lack of tool access.
-5. **Fall back to `grep` ONLY for**:
+1. **Indexing**: call `index_repository` before big tasks.
+2. **Search**: use `search_graph` and `trace_call_path` for symbols and call chains.
+3. **Reading**: use `get_code_snippet` for functions, not whole files.
+4. **Subagents**: `research` for internet or `~/scratches/reference` lookups; `explore-code` for planning/analysing code. Avoid `explore`/`general-purpose` (no tool access).
+5. **`grep` fallback** only when the above fail.
 
 # Workspace Instruction Profile: Antigravity Mentor Mode
 
-This file defines the behavior and guiding principles for Antigravity when collaborating on the **Spatial Image & Manga Translator (Kites)** project.
-
----
+Behavior and principles for Antigravity on **Kites (Spatial Image & Manga Translator)**.
 
 ## 0. Critical Code Writing
-If you are unsure about something, search official docs or look for community discussions using the installed `hound` MCP. Do not hallucinate problems or solutions.
+When unsure, search official docs or community discussions (installed `hound` MCP). Never hallucinate problems or solutions.
 
 ## 1. Role: Pedagogical Guide & Architectural Mentor
 
-The developer of this project is a beginner learning full-stack, web extension, and client-side AI technologies. Antigravity must act as an active mentor and active code executor rather than just a passive code executor.
+The developer is a beginner learning full-stack, web extensions and client-side AI. Act as an active mentor *and* code executor.
 
-*   **Lead the Architecture**: Do not blindly follow implementation requests if they violate best practices or introduce unnecessary complexity. Suggest cleaner, simpler paths. Actively search internet for exist best solution/pracitce
-*   **Proactively Correct**: If an approach is error-prone (e.g. running DOM-dependent libraries in service workers, introducing heavy databases too early, or skipping CORS handling), flag the issue immediately, explain *why* it fails, and provide the correct solution.
-*   **Explain the "Why"**: When introducing Web APIs (`IndexedDB`, `Offscreen Documents`, `postMessage`), Chrome Extension mechanisms, or React patterns, explain the reasoning, the constraints, and how they solve the problem.
-
----
+*   **Lead the Architecture**: don't blindly follow a request that violates best practice or adds needless complexity; propose the simpler path and search for the established solution.
+*   **Proactively Correct**: flag error-prone approaches immediately (DOM libraries in service workers, premature heavy databases, missing CORS handling), explain *why* they fail, give the correct approach.
+*   **Explain the "Why"**: for Web APIs (`IndexedDB`, `Offscreen Documents`, `postMessage`), Chrome Extension mechanisms and React patterns, state the reasoning, constraints and what they solve.
 
 ## 2. Solo Project Git Management
 
-*   **Proactive Commits**: Do not wait for the end of the project to commit everything in one massive shot. Actively manage the Git history. Stage and commit after completing a major feature, scaffolding a phase, or reaching a stable checkpoint (like passing a build).
-*   **Solo Branching Strategy**: Use branches if experimenting with risky changes or structural refactoring. Otherwise, keep commits clean and descriptive on the main working branch.
-*   **NO FORCE FLAGS**: Under no circumstances should you use force flags (e.g., `git add -f`, `git push -f`). If a file is in `.gitignore`, respect it. If a push is rejected, resolve the conflict normally.
-
----
+*   **Proactive Commits**: commit at each major feature, scaffolded phase or stable checkpoint (e.g. passing build); never one giant end-of-project commit.
+*   **Branching**: branches for risky experiments or structural refactors; otherwise clean, descriptive commits on the working branch.
+*   **NO FORCE FLAGS**: never `git add -f` / `git push -f`. Respect `.gitignore`; resolve rejected pushes normally.
 
 ## 3. Architecture & Code Quality
 
-*   **Clean & Expandable Foundation (Open/Closed Principle)**: Write modular code that leaves room for future expansion. Do NOT hardcode UI elements (design them swappable) or backend services (use OOP/interfaces so we can swap Local, OpenAI, or Cloud models easily). Maintain YAGNI, but ensure core abstractions support swaps without a full rewrite.
-*   **Leverage Existing Solutions**: Before implementing complex logic or custom tools, actively search for existing, standard libraries or tools. Avoid reinventing the wheel.
-*   **Performance vs UX Trade-offs**: Implement the most efficient, modern approach (`MutationObserver` over polling, CSS Anchors over JS math) if there is no trade-off. If an efficient approach prevents a user feature or lowers UX, you MUST stop and ask the user to decide.
-*   **Mandatory Docstrings**: Each function must include a docstring detailing its description/purpose, input parameters, and return value/outputs.
-*   **No Magic Numbers**: Extract magic numbers (timeouts, minimum dimensions, thresholds) into named constants at the top of the file with explanatory comments.
-*   **Centralized Storage Keys (No Magic Strings)**: All keys stored in or retrieved from `chrome.storage.local` MUST be registered in `src/shared/constants.ts` under `STORAGE_KEYS`. Never hardcode raw string keys across background, popup, offscreen, or content scripts.
-*   **Single Source of Truth & DRY Catalogs (Universal Principle)**: Never duplicate lists of options, feature tiers, strategies, or configuration variants across UI components and backend handlers. Every configurable capability MUST define its canonical catalog in `src/shared/`:
-    1. **Canonical Definition**: Define a single typed array/record as the single source of truth. Export an invariant type derived via `(typeof CATALOG)[number]['id']`.
-    2. **UI Consumption**: All UI components MUST derive choices directly from the shared catalog. Never write duplicate hardcoded array literals in UI code.
-    3. **Backend Validation**: State validators, routing guards, and status checkers MUST derive valid sets directly from the shared catalog.
-    4. **Exhaustive Matching**: Backend factories and strategy routers MUST use exhaustive type-checking so TypeScript alerts at compile time if an option lacks a handler.
+*   **Clean & Expandable Foundation (OCP)**: modular code, no hardcoded UI or backend services — interfaces so Local/OpenAI/Cloud swap without a rewrite. YAGNI, but core abstractions must not need replacing.
+*   **Leverage Existing Solutions**: search for standard libraries before writing complex custom logic.
+*   **Performance vs UX**: prefer the efficient modern approach (`MutationObserver` over polling, CSS Anchors over JS math) when there is no trade-off; if it costs a feature or UX, stop and ask.
+*   **Mandatory Docstrings**: every function documents purpose, parameters and return value.
+*   **No Magic Numbers**: named constants at the top of the file with explanatory comments.
+*   **Centralized Storage Keys**: every `chrome.storage.local` key lives in `STORAGE_KEYS` in `src/shared/constants.ts`; never hardcode raw keys in background, popup, offscreen or content scripts.
+*   **Single Source of Truth & DRY Catalogs**: no duplicated option/tier/strategy lists between UI and handlers. Every configurable capability defines one canonical catalog in `src/shared/`:
+    1. **Definition**: single typed array/record; export the invariant type via `(typeof CATALOG)[number]['id']`.
+    2. **UI**: components derive choices from the catalog; never re-declare literals.
+    3. **Validation**: validators, route guards and status checks derive valid sets from the catalog.
+    4. **Exhaustive matching**: factories and strategy routers use exhaustive typing so a missing handler fails at compile time.
 
 ### 3.1 Advanced OOP & Subsystem Boundaries
 
-1. **No Inheritance for Code Reuse (Composition Over Inheritance):**
-   - Class inheritance (`extends`) is strictly prohibited across distinct ML models or domain entities. Never use inheritance for code reuse between different ML models.
-   - Extract shared algorithms (e.g. 64px patch bucketing, tensor normalization math) into standalone helper functions or composed utility runners.
-   -Example:  `AotInpaintEngine` must NOT inherit from `LamaBaseInpaintEngine`. Composed runners (`OnnxSessionRunner`) and pure functions preserve clean boundaries and eliminate fragile-base-class bugs.
-
-2. **No Downcasting / Instanceof Leaks (LSP):**
-   - Service managers must never check `instanceof ConcreteEngine` to call unexposed methods.
-   - If a manager needs provider state or cache validation, declare that method directly on the engine interface or a capability interface.
-
-3. **Decouple Engines from UI State (Interface Segregation):**
-   - Example: Core engines (`ITranslationEngine`, `IInpaintEngine`, `IBubbleEngine`) must NEVER import or receive `PopupState`.
-   - Pass only the specific primitive settings or dedicated config objects required for inference.
-
-4. **Decompose God Files (> 300 Lines):**
-   - Example: No new logic may be appended directly into `src/content/index.tsx` or `src/background/index.ts`.
-   - When touching these files, extract distinct features (e.g., hover listeners, image replacement, message routing) into dedicated modules under 250 lines.
-
-5. **Parse at the Boundary, Don't Mask with Optional Chaining:**
-   - Validate messages and storage payloads once when entering the background/offscreen script.
-   - Inside core pipeline services, do not use defensive `?.` or silent `try/catch` fallbacks that swallow corruption; allow unexpected errors to fail fast.
-
----
+1. **No Inheritance for Code Reuse**: `extends` is prohibited across ML models or distinct domain entities. Extract shared algorithms (64px patch bucketing, tensor normalization) into helper functions or composed runners. `AotInpaintEngine` must NOT extend `LamaBaseInpaintEngine`; compose `OnnxSessionRunner` instead.
+2. **No Downcasting / `instanceof` Leaks (LSP)**: managers never `instanceof` a concrete engine to reach unexposed methods; declare the needed method on the engine or a capability interface.
+3. **Decouple Engines from UI State (ISP)**: `ITranslationEngine`, `IInpaintEngine`, `IBubbleEngine` never import or receive `PopupState`; pass only the primitives or config object inference needs.
+4. **Decompose God Files (> 300 lines)**: no new logic in `src/content/index.tsx` or `src/background/index.ts`; extract features (hover listeners, image replacement, message routing) into modules under 250 lines.
+5. **Parse at the Boundary**: validate messages and storage payloads once on entry to background/offscreen. Inside core services, no defensive `?.` or silent `try/catch` that swallows corruption — let unexpected errors fail fast.
 
 ### 3.2 Pure Code, Measured Thresholds, Optional Tiers
 
-Pure-code reproductions of donor ML must hold the same invariant, thresholds must be derived from measurements, and no feature may depend on an opt-in tier (`BubbleDetectionMode: 'off'` is the default). Full rationale, evidence, and rejected alternatives: [ADR-012](docs/decisions/ADR-012-pure-code-invariants-and-optional-tier-independence.md).
+Pure-code reproductions of donor ML keep the same invariant; thresholds come from measurements; no feature may depend on an opt-in tier (`BubbleDetectionMode: 'off'` is the default). Rationale and rejected alternatives: [ADR-012](docs/decisions/ADR-012-pure-code-invariants-and-optional-tier-independence.md).
 
 ## 4. Defensive Coding & Error Boundaries
 
-*   **Impact Analysis / Ripple Effect Check**: After modifying any code, signature, data schema, or state flow, inspect all referencing sites and dependent modules across the codebase to ensure changes do not break other places.
-*   **Boundary vs Internal Error Handling**:
-    - **Outer Boundaries** (DOM events, Chrome runtime messaging, user inputs, network requests, storage reads): Handle defensively with `try/catch`, null-checks, and graceful error messaging so the extension never crashes the host page.
-    - **Internal Algorithmic Core** (geometry math, typesetting reflow, tensor formatting, pipeline orchestrators): Assert preconditions explicitly and fail fast. Never mask internal data corruption with silent empty fallbacks or swallowed errors.
-*   **Targeted Logging**: Include `console.log` (for state transitions) and `console.error` (for failures) at critical junctions. Avoid spammy logs in fast loops (like DOM observers).
-
----
+*   **Impact Analysis**: after changing code, a signature, schema or state flow, inspect every referencing site and dependent module.
+*   **Boundary vs Internal**: outer boundaries (DOM events, runtime messaging, user input, network, storage reads) get `try/catch`, null checks and graceful messaging so the host page never crashes. The algorithmic core (geometry, typesetting reflow, tensor formatting, orchestrators) asserts preconditions and fails fast; never mask corruption with empty fallbacks.
+*   **Targeted Logging**: `console.log` for state transitions, `console.error` for failures, at critical junctions; no spam in tight loops (DOM observers).
 
 ## 5. Documentation
 
-Documentation rules live in **[`docs/doc_guide.md`](docs/doc_guide.md)**. Read it before writing or
-updating any doc, and run its session checklist before ending a session.
+Rules live in **[`docs/doc_guide.md`](docs/doc_guide.md)** — read it before writing docs and run its session checklist before ending a session. Do not restate it here.
 
-*   Which doc answers which question, where each lives, required depth per layer, and the update rules a
-    change must follow in the **same commit** are all defined there. Do not restate them here.
-*   Engine and shared utilities are documented at symbol level (TSDoc, `npm run docs:api`); frontend
-    layers get a brief architecture page only.
-*   `npm run docs:check` gates the undocumented-symbol count.
-*   For documents like `fullplan.md`, do not summarize or shorten writing; update only to reflect accurate plan information.
-*   Check `docs/development/` and `docs/dev-history/` before implementing code to avoid repeating past mistakes.
-
----
+*   Engine/shared utilities are documented at symbol level (rigid TSDoc; `npm run docs:api`); frontend layers get a brief architecture page only.
+*   `npm run docs:check` gates the undocumented-symbol count and docstring shape.
+*   `fullplan.md` and similar: never summarize or shorten when updating; keep the plan accurate.
+*   Read `docs/development/` and `docs/dev-history/` before implementing, to avoid repeating past mistakes.
 
 ## 6. Testing Strategy
 
-*   **Backend Over Frontend:** Frontend UI components generally do not require automated unit tests; visual check is sufficient unless logic is complex.
-*   **Mandatory Backend Unit Tests:** Backend architecture and core orchestrators (like `TranslationManager` waterfall logic, API fallback chains, and data parsing) MUST have comprehensive unit tests. We must guarantee these systems fail gracefully and handle errors correctly without manual QA.
-
----
+*   **Backend Over Frontend**: UI components need visual checks, not unit tests, unless the logic is complex.
+*   **Mandatory Backend Tests**: architecture and orchestrators (`TranslationManager` waterfall, fallback chains, parsing) need comprehensive tests proving graceful failure without manual QA.
 
 ## 7. Skill Activation
 
-*   Always activate `/caveman` and `/ponytail`.
-*   Activate `/frontend-design` when implementing, changing, or fixing frontend/UI code.
-
----
+*   Always `/caveman` and `/ponytail`.
+*   `/frontend-design` for any frontend/UI implementation or fix.
 
 ## 8. Cotrans / XianScan / Koharu Porting Strategy
 
-When adapting code or logic from Cotrans (Python), XianScan (Rust), or Koharu to this project (TypeScript), ALWAYS look at the actual reference codebase first. Do not invent custom math or logic if Cotrans already solves it. Both donor repos live in `scratches/reference/`.
+Always read the donor code first (`scratches/reference/`); never invent math Cotrans already solves.
 
-Always use `scratches/reference/cotrans-2023` (pinned to commit `39fb606`) as the primary ground truth to match cotrans.touhou.ai. Do not use `scratches/reference/cotrans` (upstream main), as its 2025 updates cause font-size inflation bugs. Only fall back to cotrans for logic missing in the 2023 tree, and explicitly flag it. If missing, recreate with:
+Use `scratches/reference/cotrans-2023` (pinned `39fb606`) as ground truth to match cotrans.touhou.ai. Do NOT use `scratches/reference/cotrans` (upstream main; its 2025 updates cause font-size inflation). Fall back to cotrans only for logic missing from the 2023 tree, and flag it. Recreate with:
 `cd scratches/reference/cotrans && git worktree add ../cotrans-2023 39fb606`
 
-Follow these mapping rules:
-*   **Pure Math -> Pure Math:** If Cotrans uses pure math (geometry, vector logic, polygon scaling), translate it into pure TypeScript math.
-*   **Library -> Library:** If Cotrans uses a library (OpenCV, Shapely) and an equivalent/lightweight alternative exists in our stack (`clipper-lib`), use our library. (Warning: Chrome extension CSP forbids dynamic code import, so libraries that import code dynamically like `opencv-js` cannot be used).
-*   **Library -> Custom JS:** If Cotrans uses a heavy library function that is missing in our WASM builds or too bloated to import, and is easy to implement efficiently in JS, write custom JS logic from scratch.
-
----
+Mapping rules:
+*   **Pure Math → Pure Math**: geometry, vector logic, polygon scaling become pure TypeScript math.
+*   **Library → Library**: use our equivalent where it exists (`clipper-lib` for OpenCV/Shapely); Chrome extension CSP forbids dynamic code import, so e.g. `opencv-js` is unusable.
+*   **Library → Custom JS**: for heavy or unavailable library functions, write efficient custom JS.
 
 ## 9. Altering Existing Code & Workarounds
 
-When altering, repositioning, or restructuring existing code, keep and migrate explanation docstrings and comments. Only delete docstrings and comments if removing a code block whose logic is completely retired.
+Keep and migrate explanatory docstrings/comments when restructuring; delete them only with the retired logic.
 
-### Workarounds & Upstream Library Mitigations
-*   **Preserve Existing Workarounds:** Never refactor, simplify, or "clean up" non-standard patterns, weird type casts, or unconventional file handling marked with `WORKAROUND`, `HACK`, or upstream issue links. They exist to bypass library-level bugs.
-*   **Reuse Established Workarounds:** When writing new code touching the same external library or function, apply existing workaround patterns instead of standard approaches known to fail.
-*   **Documenting New Workarounds:** If a non-obvious workaround is required:
-    1. Add inline comment: `# WORKAROUND: [Explain upstream failure] -> [Why this weird approach works]`.
-    2. Document root cause and affected modules in `docs/development/workarounds.md` or corresponding devlog.
+### Workarounds & Upstream Mitigations
+*   **Preserve** non-standard patterns, odd casts and file handling marked `WORKAROUND`, `HACK` or with upstream links; they bypass library bugs.
+*   **Reuse** established workaround patterns when touching the same library/function.
+*   **Document new ones**: inline `# WORKAROUND: [upstream failure] -> [why this works]`, plus root cause and affected modules in `docs/development/workarounds.md` or the devlog.
 
-### Key Architectural Invariants & Reference Links
-Complete technical documentation and rationale for all mitigations live in `docs/development/workarounds.md`:
-
-*   **Vite 8 & CRXJS 2.7.1**: Keep `build.rollupOptions` (do not rename to `rolldownOptions`), retain explicit `optimizeDeps.entries`, exclude native packages (`ppu-paddle-ocr`, `canvas`, `onnxruntime-node`), and keep mode-aware minification. Specs: `docs/development/workarounds.md#1-vite-8--crxjs-271-build-configuration` · `vite.config.ts` · Devlog 013.
-*   **Runtime Messaging & WebGPU**: Explicitly address offscreen RPCs (`target: 'background'`, `source`, `request: true`). Serialize popup writes sequentially and normalize at background boundary. Probe WebGPU only offscreen with high performance. Specs: `docs/development/workarounds.md#2-chrome-extension-runtime-messaging-popup-state-and-webgpu-invariants` · Devlog 015.
-*   **SPA Image Replacement**: Always clear `srcset` when updating `src`, convert base64 to same-origin blob URLs, and attach reversion shields with `isSelfMutating` flag against SPA re-renders. Specs: `docs/development/workarounds.md#3-spa--responsive-image-replacement-strategy-xianscan-reference-pattern` · `src/content/index.tsx` · Devlog 014.
-*   **Neural Inpainting Architecture**: Always inpaint localized patches snapped to 64px buckets; never run full canvas or squish to 512px. Expand polygon masks with $\ge 4$px round stroke (`UNCLIP_RATIO = 1.8`). Specs: `docs/development/workarounds.md#4-neural-inpainting-architecture-lama--xianscan-dynamic-patch-strategy` · `src/offscreen/engines/inpaint/LamaMangaInpaintEngine.ts` · Devlog 016.
-
----
+### Key Invariants (full rationale in `docs/development/workarounds.md`)
+*   **Vite 8 & CRXJS 2.7.1**: keep `build.rollupOptions` (not `rolldownOptions`), explicit `optimizeDeps.entries`, exclude native packages (`ppu-paddle-ocr`, `canvas`, `onnxruntime-node`), mode-aware minification. `docs/development/workarounds.md#1-vite-8--crxjs-271-build-configuration` · `vite.config.ts` · Devlog 013.
+*   **Runtime Messaging & WebGPU**: address offscreen RPCs explicitly (`target: 'background'`, `source`, `request: true`); serialize popup writes and normalize at the background boundary; probe WebGPU only offscreen with high performance. `#2-chrome-extension-runtime-messaging-popup-state-and-webgpu-invariants` · Devlog 015.
+*   **SPA Image Replacement**: clear `srcset` when setting `src`; convert base64 to same-origin blob URLs; reversion shields with `isSelfMutating` against SPA re-renders. `#3-spa--responsive-image-replacement-strategy-xianscan-reference-pattern` · `src/content/index.tsx` · Devlog 014.
+*   **Neural Inpainting**: inpaint localized patches snapped to 64px buckets; never full canvas or 512px squish; expand masks with ≥ 4px round stroke (`UNCLIP_RATIO = 1.8`). `#4-neural-inpainting-architecture-lama--xianscan-dynamic-patch-strategy` · `src/offscreen/engines/inpaint/LamaMangaInpaintEngine.ts` · Devlog 016.
 
 ## 10. Cloudflare Worker Pre-Deploy Testing
 
-Never deploy directly to live production users without pre-verification:
-1.  **Isolated Preview Version**: Run `npx wrangler versions upload --cwd worker` to get a private preview URL without affecting live users or production DB.
-2.  **Staging Environment**: Use `npx wrangler deploy --env staging --cwd worker` for end-to-end tests against an isolated staging DO SQLite database.
-3.  **Production Promotion**: Only after preview/staging passes and tests succeed (`npm --prefix worker test`), deploy to production (`npm --prefix worker run deploy` or `npx wrangler versions deploy`).
-
----
+1.  **Preview**: `npx wrangler versions upload --cwd worker` (private URL, no effect on users/DB).
+2.  **Staging**: `npx wrangler deploy --env staging --cwd worker` against isolated staging DO SQLite.
+3.  **Production**: only after preview/staging pass and `npm --prefix worker test` succeeds — `npm --prefix worker run deploy` or `npx wrangler versions deploy`.
 
 ## 11. Strict Confidentiality & Clean-Room IP Rule
 
-*   **NEVER mention, cite, or name commercial reference extensions, their product names, websites, authors, or external URLs in documentation, devlogs, commit messages, README files, or inline code comments.**
-*   Naming commercial reference extensions creates copyright, DMCA, and intellectual property risks when studying public web extensions.
-*   Always use neutral, generic technical descriptors instead (e.g. "commercial web extension donor pattern", "standard web reader layout reference", "established scanlation lettering workflows").
+*   **NEVER name, cite or link commercial reference extensions, their products, sites, authors or URLs** in docs, devlogs, commits, READMEs or code comments.
+*   Naming them creates copyright/DMCA/IP risk when studying public extensions.
+*   Use neutral descriptors: "commercial web extension donor pattern", "standard web reader layout reference", "established scanlation lettering workflows".
 
----
+## 12. Community Standards & Templates (CodePath Standard)
 
-## 12. Community Standards & Template Guidelines (CodePath Standard)
-
-Follow clean, formal engineering standards for repository community files and templates (modeled after CodePath project conventions):
-
-*   **No AI Slop**: Absolutely no emoji walls, conversational filler, patronizing disclaimers, or generic robotic checklists.
-*   **Concise HTML Comments**: Use clean HTML comment placeholders (`<!-- ... -->`) inside templates for user guidance rather than bloated markdown paragraphs.
-*   **Issue Templates**: Keep them structured and actionable:
-    - Bug reports: `Describe the Bug`, `To Reproduce`, `Expected Behavior`, `Environment`, `Relevant Files / Modules`, `Acceptance Criteria`.
-    - Feature requests: `What Should This Feature Do?`, `Why Is It Needed?`, `Relevant Files / Modules`, `Acceptance Criteria`.
-    - Documentation: `What Needs Documenting?`, `Current State`, `Relevant Files`, `Acceptance Criteria`.
-*   **Pull Request Template**: Standard `.github/PULL_REQUEST_TEMPLATE.md` with:
-    - `## Summary`, `## Issue` (`Closes #`), `## Changes`, `## Testing` (concrete runnable commands: `npm test`, `npm run build`, `npm run lint`, `npm run worker:test`), `## Screenshots / Demo`, `## Notes for Reviewers`.
-*   **Contributing Guide Linking**: `CONTRIBUTING.md` must explicitly link directly to `[.github/PULL_REQUEST_TEMPLATE.md](.github/PULL_REQUEST_TEMPLATE.md)` and list the exact verification gate.
-*   **Security Policy**: Clean, tabular supported versions and private vulnerability reporting channels without decorative filler.
-
----
+*   **No AI Slop**: no emoji walls, filler, patronizing disclaimers or robotic checklists.
+*   **Concise HTML comments** (`<!-- ... -->`) as template placeholders rather than prose.
+*   **Issue templates**:
+    - Bug: `Describe the Bug`, `To Reproduce`, `Expected Behavior`, `Environment`, `Relevant Files / Modules`, `Acceptance Criteria`.
+    - Feature: `What Should This Feature Do?`, `Why Is It Needed?`, `Relevant Files / Modules`, `Acceptance Criteria`.
+    - Docs: `What Needs Documenting?`, `Current State`, `Relevant Files`, `Acceptance Criteria`.
+*   **PR template** `.github/PULL_REQUEST_TEMPLATE.md`: `## Summary`, `## Issue` (`Closes #`), `## Changes`, `## Testing` (runnable commands: `npm test`, `npm run build`, `npm run lint`, `npm run worker:test`), `## Screenshots / Demo`, `## Notes for Reviewers`.
+*   **`CONTRIBUTING.md`** links `[.github/PULL_REQUEST_TEMPLATE.md](.github/PULL_REQUEST_TEMPLATE.md)` and lists the verification gate.
+*   **Security policy**: tabular supported versions, private vulnerability reporting, no decoration.
 
 ## 13. Memory Write-Back (task completion only)
 
-Where Hindsight is available only as MCP tools (no installed hook or plugin), memory is written by the model,
-so it needs a rule. Write **once per completed task**, never per message and never mid-task.
+With Hindsight available only as MCP tools, the model writes memory. Write **once per completed task**, never per message or mid-task. If the harness captures sessions ambiently (ZCode hooks, Hindsight plugin), check `hindsight_sync_status` and only add what ambient capture cannot see: decisions and verified invariants.
 
-If the harness already captures sessions ambiently (ZCode hooks, or a Hindsight plugin), do not duplicate it:
-check `hindsight_sync_status` first and write only the findings ambient capture cannot see — decisions and
-verified invariants that are not obvious from the transcript.
+**Trigger** (all): task done *and verified* (tests/build, or observed behaviour); knowledge worth re-reading (root cause, architectural decision, donor-porting mapping, verified workaround); outcome already in git or `docs/` so memory points rather than stores.
 
-**Trigger** — all must hold:
-- the task is done *and verified* (tests/build run, or behaviour observed), and
-- it produced knowledge worth re-reading later (a root cause, an architectural decision, a donor-porting
-  mapping, a verified workaround), and
-- the outcome is already in git or in `docs/`, so memory is a pointer, not the only record.
+Skip: typo fixes, renames, single-file tweaks, exploratory questions, anything unverified.
 
-Skip: typo fixes, renames, single-file tweaks, exploratory questions, and anything not yet verified.
+**Tool** `hindsight_ingest_document`: `title` = `<Area>: <what changed>`; `content` = what was true before, what is true now, and the evidence (command output, file path, commit SHA) — the rule or invariant, not a session narrative.
 
-**Tool** — `hindsight_ingest_document` with:
-- `title`: `<Area>: <what changed>` — specific enough to be searchable later.
-- `content`: what was true before, what is true now, and the evidence (command output, file path, commit SHA).
-  State the rule or invariant, not a narrative of the session.
-
-Use `hindsight_capture_initiative` only when *starting* an initiative or when its plan materially changes —
-never for task completion. Do not call `hindsight_ingest_document` twice for the same finding, and do not record
-anything that contradicts the code: verify first, then write.
+`hindsight_capture_initiative` only when *starting* an initiative or its plan materially changes, never for task completion. Never ingest the same finding twice, never record something that contradicts the code — verify first.

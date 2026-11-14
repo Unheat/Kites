@@ -35,7 +35,7 @@
     "test:e2e:nhentai": "node scripts/verify-nhentai-fix.js",
     "validate:urls": "node scripts/validate-model-urls.mjs",
     "docs:api": "typedoc",
-    "docs:check": "node scripts/check-docs.mjs"
+    "docs:check": "node scripts/check-docs.mjs && node scripts/check-docstrings.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.117",

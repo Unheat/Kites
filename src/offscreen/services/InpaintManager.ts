@@ -216,6 +216,7 @@ export class InpaintManager {
    * Acquires a counted engine lease for one inpaint operation.
    *
    * @param tier - Public inpaint tier.
+   * @param onInitialization - Optional lifecycle progress callback.
    * @returns Engine and idempotent release callback.
    */
   private async acquireEngine(

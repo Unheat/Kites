@@ -247,18 +247,10 @@ export class OcrManager {
   }
 
   /**
-   * Returns requested initialized OCR engine, replacing another tier only after its users finish.
-   * Same-tier calls reuse one engine. Serialized creation deduplicates initialization, and failed
-   * initialization leaves no cached state so a later call can retry.
-   *
-   * @param tier - OCR model tier or registry alias.
-   * @returns The initialized OCR engine instance.
-   */
-
-  /**
    * Acquires a counted lease on requested engine so tier replacement cannot destroy it in use.
    *
    * @param tier - OCR model tier or registry alias.
+   * @param onInitialization - Optional lifecycle progress callback.
    * @returns Engine and idempotent release callback.
    */
   private async acquireEngine(
@@ -1332,6 +1324,7 @@ export class OcrManager {
    * filters (XianScan lang.rs); `pageWidth`/`pageHeight` activate the geometry
    * pre-filter battery. All undefined = legacy behavior (no language/geometry filters).
    * @param onInitialization - Optional callback notified around genuine cold initialization.
+   * @param options - Optional line-ownership policy; omitted keeps the single-bucket legacy merge.
    * @returns A promise that resolves to the standardized OCR result.
    */
   async processImage(

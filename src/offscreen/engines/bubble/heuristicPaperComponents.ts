@@ -72,6 +72,7 @@ export function selectPaperComponent(patch: PaperPatch, text: BoxRect): PaperCom
 }
 /** Fill internal ink islands only. Exterior ink and enclosed independent paper components remain barriers.
  * @param component Selected paper mask. @param width Raster width. @param observed All observed paper pixels.
+ * @param maxCounterArea Largest counter island area to fill; 0 fills every enclosed counter.
  * @returns Component including enclosed ink holes, never enclosing another outlined balloon. */
 export function fillEnclosedInk(component: Uint8Array, width: number, observed?: Uint8Array, maxCounterArea: number = 0): Uint8Array {
   const outside = new Uint8Array(component.length);

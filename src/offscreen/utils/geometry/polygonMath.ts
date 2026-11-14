@@ -101,7 +101,14 @@ export function distanceToPolygonBoundary(point: Point2D, poly: Point2D[]): numb
   return minD;
 }
 
-/** @param first @param second - Vertex indices of the splitting diagonal. @returns The two vertex chains between the indices, both inclusive. */
+/**
+ * Splits a closed polygon ring along the chord between two vertices.
+ *
+ * @param poly - Closed polygon ring.
+ * @param first - First vertex index of the splitting diagonal.
+ * @param second - Second vertex index of the splitting diagonal.
+ * @returns The two vertex chains between the indices, both inclusive.
+ */
 export function splitPolygon(poly: Point2D[], first: number, second: number): [Point2D[], Point2D[]] {
   const [f, s] = first <= second ? [first, second] : [second, first];
   const part1 = poly.slice(f, s + 1);

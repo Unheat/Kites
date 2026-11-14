@@ -61,6 +61,13 @@ screenshots and manual checks, so prose there has a short half-life.
   failure behaviour. Never restate the implementation line by line.
 - **Every exported symbol in the full-depth layer gets a TSDoc comment** with `@param` for each
   parameter and `@returns`. Constructors that take no parameters may omit them.
+- **Comment shape is enforced by `npm run docs:check`** (it runs `check-docstrings.mjs` after the
+  coverage count). The rules, so TypeDoc output stays consistent:
+  1. no `@file` block tag — start with a summary line instead;
+  2. `@param` names must match the signature exactly (a rename that misses the docstring fails);
+  3. if a function documents any parameter, it documents all of them;
+  4. the comment starts with a summary line, not a block tag;
+  5. no orphan doc blocks — a comment with no declaration after it is a defect.
 - **Comments on non-obvious decisions are expected** (`WORKAROUND`, `HACK`, donor deviations). Those
   keep their upstream issue link or the devlog that explains them.
 - **No commented-out code, no TODO graffiti.** Use an issue or a devlog entry instead.
@@ -91,7 +98,7 @@ npm run docs:api     # regenerate the reference into docs/api/
 npm run docs:check   # gate: the undocumented-symbol count may not grow
 ```
 
-`docs:check` keeps a baseline in `docs/api-undocumented-baseline.json`. The engine and shared layers
+`docs:check` runs two gates: the coverage ratchet described below, then the comment-shape check. The engine and shared layers
 carry a historical backlog (880 symbols at the time of writing), so the gate does not demand zero: it
 fails when the count increases. New code has to be documented; the backlog can only shrink. Update the
 baseline (`npm run docs:check -- --update`) only when the backlog genuinely grew, and say why in the

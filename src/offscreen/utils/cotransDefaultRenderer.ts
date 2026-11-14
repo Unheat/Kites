@@ -106,6 +106,8 @@ export interface DefaultRenderResult {
  * @param maxFontSizeCap - Optional ceiling on fitted font size.
  * @param fontFamily - CSS font-family stack to render and measure with.
  * @param isBold - Whether to render text in bold weight.
+ * @param measureCache - Optional per-page measurement cache shared across regions.
+ * @param targetLang - Target language code, for hyphenation and wrap rules.
  * @param frame - Explicit inset layout frame. Omitted keeps quad-derived dimensions.
  * @returns Render info, or null if nothing was drawn.
  */

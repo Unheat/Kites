@@ -177,6 +177,7 @@ export function findHyphenationPoints(rawWord: string, targetLang: string = 'en'
  * @param ctx - Text measurement context providing `measureText(string)`.
  * @param text - Single-line or whitespace-delimited paragraph to wrap.
  * @param maxWidth - Maximum available horizontal pixel width for each line.
+ * @param targetLang - Target language code, selecting hyphenation rules.
  * @returns Array of wrapped line strings.
  */
 export function wrapText(
@@ -502,6 +503,7 @@ export function splitIntoLogicalParagraphs(text: string): string[] {
  * @param ctx - Canvas measurement context.
  * @param text - Text content to reflow.
  * @param maxWidth - Available bounding width.
+ * @param targetLang - Target language code, selecting hyphenation rules.
  * @returns Array of wrapped lines ready for canvas rendering.
  */
 export function reflowText(

@@ -113,6 +113,7 @@ async function uploadSinglePage(
  *
  * @param files Array of user-selected image files.
  * @param onProgress Optional progress callback invoked before each page is processed.
+ * @param options Optional batch options (target folder and queue metadata).
  * @returns Array of persisted job IDs in input order.
  * @throws BatchUploadError if queueing any page fails, preserving any already-queued job IDs.
  */
