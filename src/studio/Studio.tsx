@@ -679,6 +679,7 @@ export const Studio: React.FC<StudioProps> = ({
               isRounded: obj.isRounded,
               contourPoints: obj.contourPoints,
               isSkipped: obj.isSkipped,
+              isArtwork: obj.isArtwork,
               angle: obj.rotation ?? 0,
             }));
             await db.textBlocks.bulkAdd(blocksToSave);

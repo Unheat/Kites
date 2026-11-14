@@ -218,6 +218,8 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
     // 2. Render Text Objects
     for (const obj of textObjects) {
       if (obj.isVisible === false) continue;
+      // Preserved artwork was never erased, so painting its translation would double the text.
+      if (obj.isArtwork) continue;
 
       if (obj.warpPreset && obj.warpPreset !== 'none' && obj.quadPoints) {
         let tempCanvas = warpScratchCanvasRef.current;

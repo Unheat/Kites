@@ -51,6 +51,7 @@ export function restoreTextObject(block: TextBlock, targetLang?: string): TextOb
     strokeWidth: 2,
     isVertical: block.direction === 'v' && isCjk,
     isSkipped: block.isSkipped ?? false,
+    isArtwork: block.isArtwork ?? false,
     rotation: block.angle ?? 0,
   });
 }

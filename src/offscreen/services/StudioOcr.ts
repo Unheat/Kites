@@ -282,6 +282,7 @@ export async function runStudioOcr(
   }
 
   const timestamp = Date.now();
+  const artworkIndices = new Set((result.artwork ?? []).map((item) => item.index));
   const textObjects = regions.map(({ polygon, text: originalText, index: origIndex }, index) => {
     const xs = polygon.map(point => point.x);
     const ys = polygon.map(point => point.y);
@@ -346,6 +347,9 @@ export async function runStudioOcr(
       // Noise-guard absorbed fragments stay as editable dashed boxes in Studio
       // (StudioCanvas renders skipped objects without painting their text).
       isSkipped: bubbleSkipped[resolvedIndex] ?? false,
+      // Studio OCR runs the default preserve policy, so every artwork region keeps its ink and
+      // must not be painted by Studio either.
+      isArtwork: artworkIndices.has(resolvedIndex),
       rotation,
       color: detectedTextColors[resolvedIndex]?.textColor,
       strokeColor: detectedTextColors[resolvedIndex]?.strokeColor,

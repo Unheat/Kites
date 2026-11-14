@@ -196,7 +196,8 @@ async function runPipelineVisualBubbleTest() {
       const ctx = canvas.getContext('2d');
       ctx.drawImage(cleanedImage, 0, 0);
       if (typeof document !== 'undefined' && document.fonts) await document.fonts.ready;
-      const heuristicRegions: RegionSet = {
+      const heuristicArtwork = new Set((ocrResult.artwork ?? []).map((item) => item.index));
+    const heuristicRegions: RegionSet = {
         boxes, polygons, texts, translatedTexts,
         directions: ocrResult.directions, angles: ocrResult.angles,
         fontSizes: ocrResult.fontSizes, lineCounts: ocrResult.lineCounts,
@@ -212,6 +213,7 @@ async function runPipelineVisualBubbleTest() {
 
       const textBlockItems: TextBlockItem[] = [];
       for (let i = 0; i < translatedTexts.length; i++) {
+        if (heuristicArtwork.has(i)) continue;
         const text = translatedTexts[i];
         const poly = polygons[i];
         if (text && poly) {
@@ -377,6 +379,7 @@ async function runPipelineVisualBubbleTest() {
         { bubbles: detectedBubbles, shapes: neuralShapes },
       );
       if (!neuralGeometry) throw new Error('Neural bubble geometry build failed');
+      const neuralArtwork = new Set((neuralOcr.artwork ?? []).map((item) => item.index));
       const neuralRegions: RegionSet = {
         boxes: neuralOcr.boxes,
         polygons: (neuralOcr.polygons ?? []) as Point2D[][],
@@ -401,6 +404,7 @@ async function runPipelineVisualBubbleTest() {
 
       const textBlockItems: TextBlockItem[] = [];
       for (let i = 0; i < neuralRegions.translatedTexts.length; i++) {
+        if (neuralArtwork.has(i)) continue;
         const text = neuralRegions.translatedTexts[i];
         const poly = neuralRegions.polygons[i];
         if (text && poly) {

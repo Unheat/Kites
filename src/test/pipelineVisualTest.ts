@@ -85,6 +85,9 @@ async function runPipelineVisualTest() {
     }
     console.log(`[PipelineTest] Detected ${polygons.length} text regions.`);
 
+    // Preserved artwork keeps its ink; the harness renders like the product, so it is skipped too.
+    const artworkIndices = new Set((ocrResult.artwork ?? []).map((item) => item.index));
+
     // 3. Pre-inpaint ink color detection (original artwork)
     const detectedColors = detectBlockTextColorsFromContext(rawCtx as any, boxes, pageWidth, pageHeight);
 
@@ -122,6 +125,7 @@ async function runPipelineVisualTest() {
       const itemOcrIndices: number[] = [];
 
       for (let i = 0; i < translatedTexts.length; i++) {
+        if (artworkIndices.has(i)) continue;
         const text = translatedTexts[i];
         const poly = polygons[i];
         if (text && poly) {

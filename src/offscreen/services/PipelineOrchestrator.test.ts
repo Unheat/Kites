@@ -409,6 +409,35 @@ describe('PipelineOrchestrator', () => {
     bitmapSpy.mockRestore(); blobSpy.mockRestore();
   });
 
+  it('persists preserved artwork as isArtwork and never paints it', async () => {
+    ((db.images as any).first as any).mockResolvedValue({ id: 77, jobId: 7700,
+      rawImageBlob: new Blob(['fake image data'], { type: 'image/png' }) });
+    vi.spyOn(chrome.runtime, 'sendMessage').mockImplementation((_message: any, callback: any) => {
+      callback?.({ activeInpaintId: 'none', bubbleMode: 'off', targetLang: 'en' });
+    });
+    const bitmapSpy = vi.spyOn(global, 'createImageBitmap').mockResolvedValue(createCanvas(200, 200) as any);
+    withOwnership({
+      texts: ['ドン', 'テスト'],
+      boxes: [{ x: 10, y: 10, w: 60, h: 60 }, { x: 10, y: 90, w: 60, h: 60 }],
+      polygons: [
+        [{ x: 10, y: 10 }, { x: 70, y: 10 }, { x: 70, y: 70 }, { x: 10, y: 70 }],
+        [{ x: 10, y: 90 }, { x: 70, y: 90 }, { x: 70, y: 150 }, { x: 10, y: 150 }],
+      ],
+      artwork: [{ index: 0, kind: 'sound-effect' }],
+    });
+    const blobSpy = vi.spyOn(pipelineOrchestrator as any, 'blobToArrayBuffer').mockResolvedValue(new ArrayBuffer(8));
+    const renderSpy = vi.spyOn(canvasTypesetting, 'renderTextBlocksBatch');
+    await pipelineOrchestrator.runPipeline(7700);
+    const saved = vi.mocked(db.textBlocks.bulkAdd).mock.calls[0][0] as any[];
+    // The erase/draw pair: preserved artwork is flagged so Studio keeps its original ink.
+    expect(saved[0]).toMatchObject({ originalText: 'ドン', isArtwork: true });
+    expect(saved[1]).toMatchObject({ originalText: 'テスト', isArtwork: false });
+    // ...and it is never handed to the renderer.
+    const rendered = renderSpy.mock.calls[0][1] as any[];
+    expect(rendered.map((item) => item.originalText)).toEqual(['テスト']);
+    bitmapSpy.mockRestore(); blobSpy.mockRestore(); renderSpy.mockRestore();
+  });
+
   it('maps actual render metadata by OCR index and retains fallback only for skipped blocks', async () => {
     ((db.images as any).first as any).mockResolvedValue({ id: 8, jobId: 800,
       rawImageBlob: new Blob(['fake image data'], { type: 'image/png' }) });

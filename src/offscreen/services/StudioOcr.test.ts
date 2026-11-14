@@ -90,6 +90,25 @@ describe('Studio OCR independent optional steps', () => {
     expect(response.inpaintedPatchBase64).toBe(CLEAN_PATCH);
   });
 
+  it('flags preserved artwork so Studio keeps the original ink', async () => {
+    mocks.processImage.mockImplementation(async (...args: any[]) => {
+      const options = args[4] as { partitionLines?: (lines: any[]) => Promise<number[]> } | undefined;
+      if (options?.partitionLines) {
+        await options.partitionLines([{ box: { x: 0, y: 0, w: 10, h: 10 }, polygon: [], text: '', score: 1, fontSize: 10, direction: 'h' }]);
+      }
+      return {
+        texts: ['ドン'],
+        polygons: [[{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }]],
+        boxes: [{ x: 0, y: 0, w: 10, h: 10 }],
+        rawPolygons: [],
+        artwork: [{ index: 0, kind: 'sound-effect' }],
+        groupLineIndices: [[0]],
+      };
+    });
+    const response = await runStudioOcr({ ...payload, inpaint: false }, mocks.dependencies);
+    expect(response.textObjects[0]).toMatchObject({ isArtwork: true });
+  });
+
   it('honors local engine overrides without mutating popup state', async () => {
     await runStudioOcr({ ...payload, ocrEngineId: 'v6-tiny', inpaintEngineId: 'simple', translationEngineId: 'local-custom' }, mocks.dependencies);
     expect(mocks.processImage.mock.calls[0][1]).toBe('v6-tiny');

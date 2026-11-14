@@ -702,6 +702,9 @@ export class PipelineOrchestrator {
           // Noise-guard absorbed fragments stay in the DB (editable) but flag the
           // suppressed standalone render.
           isSkipped: Boolean(bubbleSkipped?.[i]),
+          // Preserved artwork is never erased and never drawn. Persist that so Studio keeps the
+          // same pair instead of painting a translation over untouched ink.
+          isArtwork: preservedArtwork.has(i),
           angle: renderInfo?.angle ?? ((ocrResult.angles && ocrResult.angles[i] !== undefined)
             ? Math.round(ocrResult.angles[i])
             : undefined),

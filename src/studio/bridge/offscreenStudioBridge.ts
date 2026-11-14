@@ -104,6 +104,8 @@ export async function requestStudioOcr(
       contourPoints?: Array<{ x: number; y: number }>;
       /** Noise-guard absorbed fragment; Studio renders it as a dashed box without text. */
       isSkipped?: boolean;
+      /** Preserved artwork: never erased and never painted. */
+      isArtwork?: boolean;
       /** Detected per-bubble ink color from the original artwork; undefined uses the default. */
       color?: string;
       /** Outline color derived from the detected ink; undefined uses the default. */
@@ -177,6 +179,9 @@ export async function requestStudioOcr(
     detectedHeight: t.height,
     // Absorbed noise fragments stay editable in Studio but do not double-paint.
     isSkipped: t.isSkipped ?? false,
+    // Preserved artwork keeps its original ink; painting a translation over it would break the
+    // erase/draw pair the pipeline guarantees.
+    isArtwork: t.isArtwork ?? false,
     // Detected per-bubble colors ride in from Studio OCR; the hardcoded pair
     // stays as the fallback for older offscreen responses and failed detection.
     color: t.color ?? '#000000',

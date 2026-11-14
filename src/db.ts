@@ -88,6 +88,13 @@ export interface TextBlock {
   italic?: boolean;
   align?: 'left' | 'center' | 'right';
   isSkipped?: boolean;
+  /**
+   * Preserved artwork (sound effect / display lettering / fragment) under the active SFX policy.
+   *
+   * Such a block is never erased and never drawn: the original ink stays on the page. Studio must
+   * honour the same pair, otherwise it paints a translation over artwork the pipeline left intact.
+   */
+  isArtwork?: boolean;
   /** Text block rotation angle in degrees (mean line angle, e.g. -180 to 180). */
   angle?: number;
 }
