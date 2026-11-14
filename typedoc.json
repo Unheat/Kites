@@ -1,0 +1,33 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "name": "Kites \u2014 engine and utilities",
+  "entryPoints": [
+    "src/offscreen",
+    "src/shared"
+  ],
+  "entryPointStrategy": "expand",
+  "tsconfig": "tsconfig.json",
+  "out": "docs/api",
+  "exclude": [
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "src/offscreen/utils/hyphenation/hypherData/**"
+  ],
+  "excludePrivate": true,
+  "excludeInternal": true,
+  "excludeExternals": true,
+  "readme": "none",
+  "navigationLinks": {
+    "Docs guide": "../doc_guide.md",
+    "Architecture": "../architecture/overview.md"
+  },
+  "intentionallyNotExported": [
+    "FontPickerDropdownProps",
+    "LamaProvider"
+  ],
+  "validation": {
+    "notExported": true,
+    "invalidLink": true,
+    "notDocumented": false
+  }
+}

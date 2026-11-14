@@ -1,5 +1,5 @@
 /**
- * @file cotransDefaultRenderer.ts
+ * cotransDefaultRenderer.ts
  * High-level coordinator for Cotrans default region rendering.
  * Delegates line breaking, rasterization, geometry, and layout strategies to dedicated submodules.
  *

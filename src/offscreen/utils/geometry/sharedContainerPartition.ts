@@ -1,5 +1,5 @@
 /**
- * @file sharedContainerPartition.ts
+ * sharedContainerPartition.ts
  * Bounding box core insetting, tail trimming, and sub-chamber territory partitioning.
  * 1:1 port of XianScan `expansion.rs` and `builder.rs:673`.
  */

@@ -1,5 +1,5 @@
 /**
- * @file ITypesetStrategy.ts
+ * ITypesetStrategy.ts
  * Strategy pattern interface for manga and comic text layout algorithms.
  * Encapsulates the three typesetting engines (Contour DP, Simple Rect, Auto Balloon).
  *

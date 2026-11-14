@@ -1,5 +1,5 @@
 /**
- * @file typesetModes.ts
+ * typesetModes.ts
  * Availability rules for the Studio typesetting engine switcher.
  *
  * Provenance problem this module solves: `typesetMode` records the engine a text object is

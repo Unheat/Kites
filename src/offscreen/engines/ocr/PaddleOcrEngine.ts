@@ -47,7 +47,7 @@ const VERTICAL_CROP_ASPECT = 1.5;
 const CROP_BAND_MIN_COUNT = 2;
 
 /** A gap of ink-free rows this tall separates two text bands inside one crop. */
-const CROP_BAND_GAP_MIN_PX = 3;
+export const CROP_BAND_GAP_MIN_PX = 3;
 
 /** Bands thinner than this are glyph fragments or rule lines, not separate text columns. */
 const CROP_BAND_MIN_HEIGHT_PX = 8;

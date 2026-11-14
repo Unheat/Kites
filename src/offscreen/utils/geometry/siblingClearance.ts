@@ -1,5 +1,5 @@
 /**
- * @file siblingClearance.ts
+ * siblingClearance.ts
  * Pairwise clearance clamping and sibling boundary constraints to avoid cross-bubble collisions.
  * 1:1 port of XianScan `expansion.rs:230-269`.
  */

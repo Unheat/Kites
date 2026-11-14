@@ -1,5 +1,5 @@
 /**
- * @file voronoiPartition.ts
+ * voronoiPartition.ts
  * Voronoi perpendicular bisector half-plane clipping and flow cell partitioning.
  * 1:1 port of Koharu `anchor_flow_cells` and `flow_cells` (`crates/koharu-renderer/src/bubble.rs:65-82, 373-445, 563-592`).
  */

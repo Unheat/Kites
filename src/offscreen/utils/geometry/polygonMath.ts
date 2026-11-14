@@ -1,5 +1,5 @@
 /**
- * @file polygonMath.ts
+ * polygonMath.ts
  * Pure polygon geometry algorithms ported from Koharu `crates/koharu-renderer/src/bubble.rs:84-230`.
  * Includes Douglas-Peucker contour simplification, reflex-vertex detection, and topological lobe decomposition.
  */

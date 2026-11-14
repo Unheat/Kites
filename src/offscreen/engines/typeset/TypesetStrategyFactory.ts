@@ -1,5 +1,5 @@
 /**
- * @file TypesetStrategyFactory.ts
+ * TypesetStrategyFactory.ts
  * Factory for resolving the appropriate ITypesetStrategy implementation.
  * Guarantees compile-time exhaustive matching per AGENTS.md Section 3.
  */

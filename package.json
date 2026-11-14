@@ -33,7 +33,9 @@
     "worker:deploy": "npm run deploy --prefix worker",
     "test:e2e:roliascan": "node scripts/verify-roliascan-fix.js",
     "test:e2e:nhentai": "node scripts/verify-nhentai-fix.js",
-    "validate:urls": "node scripts/validate-model-urls.mjs"
+    "validate:urls": "node scripts/validate-model-urls.mjs",
+    "docs:api": "typedoc",
+    "docs:check": "node scripts/check-docs.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.117",
@@ -74,6 +76,7 @@
     "puppeteer": "^24.43.1",
     "tailwindcss": "^4.3.2",
     "tsx": "^4.23.1",
+    "typedoc": "^0.28.20",
     "typescript": "~6.0.2",
     "vite": "^8.1.1",
     "vitest": "^4.1.10"

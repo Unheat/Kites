@@ -1,5 +1,5 @@
 /**
- * @file bubbleGeometry.ts
+ * bubbleGeometry.ts
  * Tier-agnostic geometry finalization shared by every IBubbleEngine implementation:
  * mask curvature classification and closed 2D contour extraction from shape evidence.
  *

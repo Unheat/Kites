@@ -1,5 +1,5 @@
 /**
- * @file untaint.ts
+ * untaint.ts
  * Universal Canvas Untaint Engine
  *
  * Runs at `document_start` in `world: "MAIN"` to prevent cross-origin images

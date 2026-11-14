@@ -89,8 +89,16 @@ Pure-code reproductions of donor ML must hold the same invariant, thresholds mus
 
 ## 5. Documentation
 
+Documentation rules live in **[`docs/doc_guide.md`](docs/doc_guide.md)**. Read it before writing or
+updating any doc, and run its session checklist before ending a session.
+
+*   Which doc answers which question, where each lives, required depth per layer, and the update rules a
+    change must follow in the **same commit** are all defined there. Do not restate them here.
+*   Engine and shared utilities are documented at symbol level (TSDoc, `npm run docs:api`); frontend
+    layers get a brief architecture page only.
+*   `npm run docs:check` gates the undocumented-symbol count.
 *   For documents like `fullplan.md`, do not summarize or shorten writing; update only to reflect accurate plan information.
-*   Check `docs/development/` and `docs/dev-history/` before implementing code to avoid repeating past mistakes. Always update or add devlogs and development docs after implementing new features, architectural shifts, or bug fixes.
+*   Check `docs/development/` and `docs/dev-history/` before implementing code to avoid repeating past mistakes.
 
 ---
 

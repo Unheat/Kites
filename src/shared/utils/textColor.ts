@@ -1,5 +1,5 @@
 /**
- * @file textColor.ts
+ * textColor.ts
  * Background-adaptive text color selection.
  *
  * Ported and adapted from XianScan by Arben Apura.
@@ -28,7 +28,7 @@ export interface TextColorChoice {
 }
 
 /** WCAG relative luminance from linearized sRGB channels. */
-function relativeLuminance(r: number, g: number, b: number): number {
+export function relativeLuminance(r: number, g: number, b: number): number {
   const lin = (c: number): number => {
     const s = c / 255;
     return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);

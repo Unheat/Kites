@@ -1,5 +1,5 @@
 /**
- * @file kinsokuShori.ts
+ * kinsokuShori.ts
  * Punctuation binding, script boundary detection, and Japanese Kinsoku Shori line-start barring rules.
  */
 

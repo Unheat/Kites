@@ -1,7 +1,7 @@
 import { HyphenationService, INSERTED_HYPHEN } from './hyphenation';
 
 /**
- * @file typesetLayout.ts
+ * typesetLayout.ts
  * Typeset Layout Engine for Comic / Manga Speech Bubbles
  * 
  * Ported and adapted from XianScan by Arben Apura.

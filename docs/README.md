@@ -4,6 +4,13 @@ Welcome to the internal engineering and architectural documentation for **Kites 
 
 ---
 
+## 📐 Documentation rules and generated reference
+
+- **[Documentation guide](doc_guide.md)** — the rulebook: which kind of doc answers which question, where each lives, required depth per layer (engine/utilities full, frontend brief), and the update rules a change must follow in the same commit.
+- **[API reference (generated)](api/index.html)** — TypeDoc output for `src/offscreen/**` and `src/shared/**`, built from TSDoc comments with `npm run docs:api`. `npm run docs:check` fails when the undocumented-symbol count grows.
+
+---
+
 ## 🗺️ System Overview & Pipeline Lifecycle
 
 The diagram below illustrates the end-to-end lifecycle of an image translation job across Chrome Manifest V3 boundaries:
@@ -100,19 +107,24 @@ For a high-density, interactive inspection of the entire translation algorithm:
    - Multi-provider waterfall (Mistral, Groq, Google AI Studio, OpenRouter, Workers AI)
    - Token-normalized EMA adaptive timeouts and circuit breaker cooldowns
    - Pre-deploy preview and staging verification workflow
-4. **[Content Script & Media Subsystems](architecture/content-script-and-media.md)**
+4. **[Page Text Pipeline Reference](architecture/page-text-pipeline.md)**
+   - Contract-level index of the OCR → balloon ownership → merge → region units: purpose, inputs, outputs, guarantees
+   - Where bug classes live (welds, splits, masks) and which unit owns each decision
+5. **[Frontend Subsystems (brief)](architecture/frontend.md)**
+   - Popup, content script, background worker and Studio: responsibilities, data flow, entry points
+6. **[Content Script & Media Subsystems](architecture/content-script-and-media.md)**
    - Universal Media Discovery: `MediaTarget` abstraction and hidden backing surface resolution (Twitter/X, Pixiv)
    - SVG placeholder filtering (Issue #2 Roliascan queue wedge fix)
    - Measured-rect in-page translation buttons (shared rAF rect tracker, composited transform placement) with 3px hover race halo guards
    - SPA image replacement & `MutationObserver` reversion shield with `isSelfMutating` recursion guard
    - Screen Crop translation tool: Xnip-style viewport capture and retina display normalization
-5. **[Studio Editor & Typesetting Architecture](architecture/studio-and-typesetting.md)**
+7. **[Studio Editor & Typesetting Architecture](architecture/studio-and-typesetting.md)**
    - Clean Plate Storage: non-destructive separation of background plate and structured text blocks
    - Interactive 8-handle bounding box manipulation and zoom/pan viewport normalization
    - Typography font preset registry (Wild Words, Anime Ace, Comic Hand, etc.)
    - Background color sampling: luminance contrast detection for white-on-black vs black-on-white text
    - Route-specific fitting, positioned-line restore, Canvas export, and documented parity limits
-6. **[AI Models, Runtimes & Hardware Acceleration](architecture/models-and-runtimes.md)**
+8. **[AI Models, Runtimes & Hardware Acceleration](architecture/models-and-runtimes.md)**
    - Hardware detection: WebGPU JSEP shaders with automatic WASM SIMD fallback
    - Complete PaddleOCR registry tiers (`v6-small`, `v6-medium`, `v6-tiny`, `v5`, `v4`, `v3`)
    - Inpainting models: LaMa Manga (Fast Fourier Convolutions), AOT-GAN (Contextual Transformations), and Simple Adaptive Polarity

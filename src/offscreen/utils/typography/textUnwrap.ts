@@ -1,5 +1,5 @@
 /**
- * @file textUnwrap.ts
+ * textUnwrap.ts
  * Normalizes soft hyphens, soft line breaks, and paragraph boundaries across reflow cycles.
  */
 
