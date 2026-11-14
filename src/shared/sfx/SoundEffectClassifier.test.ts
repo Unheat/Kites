@@ -152,6 +152,16 @@ describe('LatinNoiseArtworkClassifier', () => {
       expect(defaultArtworkClassifier.classify({ text }).isArtwork, text).toBe(false);
     }
   });
+
+  it('does not preserve short no-digit Latin blocks inside a balloon', () => {
+    // Balloon context vetoes the debris rule: `OK`/`No` are real short dialogue, and
+    // preserving them used to leave an untranslated bubble with its original ink.
+    for (const text of ['OK!', 'No', 'Hi', 'Eh?']) {
+      expect(defaultArtworkClassifier.classify({ text, inBubble: true }).isArtwork, text).toBe(false);
+    }
+    // Digit-bearing debris stays preserved even in-bubble: erasing it buys nothing.
+    expect(defaultArtworkClassifier.classify({ text: 'A9V', inBubble: true }).kind).toBe('fragment');
+  });
 });
 
 describe('defaultArtworkClassifier', () => {

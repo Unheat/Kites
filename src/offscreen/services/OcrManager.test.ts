@@ -137,6 +137,38 @@ describe('OcrManager', () => {
       expect(result.texts).toHaveLength(2);
     });
 
+    it('keeps a balloon line split from free lines even when free text holds the proximity majority', async () => {
+      // Two free stroke columns (-1) adjacent to one balloon-owned line: free text must
+      // never win a component, or the dialogue is welded onto unowned free text and
+      // typesets outside its balloon.
+      (PaddleOcrEngine as any).mockImplementationOnce(function () {
+        return {
+          init: vi.fn().mockResolvedValue(undefined),
+          recognize: vi.fn().mockResolvedValue({
+            texts: ['一列目', '二列目', '三列目'],
+            polygons: [100, 150, 200].map((x) => [
+              { x, y: 100 }, { x: x + 40, y: 100 }, { x: x + 40, y: 300 }, { x, y: 300 },
+            ]),
+            scores: [0.95, 0.95, 0.95],
+            detectionScores: [0.95, 0.95, 0.95],
+            boxes: [100, 150, 200].map((x) => ({ x, y: 100, w: 40, h: 200 })),
+          }),
+          destroy: vi.fn().mockResolvedValue(undefined),
+          isProviderCurrent: vi.fn().mockResolvedValue(true),
+        };
+      });
+      const result = await ocrManager.processImage(new ArrayBuffer(1), 'v6-small', {
+        pageWidth: 800, pageHeight: 1200,
+      }, undefined, { partitionLines: vi.fn().mockResolvedValue([-1, -1, 0]) });
+      // The two free columns may weld to each other, but the balloon line stays its
+      // own region instead of being absorbed by the free pair.
+      expect(result.texts).toHaveLength(2);
+      const balloonRegion = result.texts.find((text) => text.includes('三列目'));
+      expect(balloonRegion).toBeDefined();
+      expect(balloonRegion).not.toContain('一列目');
+      expect(balloonRegion).not.toContain('二列目');
+    });
+
     it('merges staggered side-by-side columns of one balloon despite size and stagger', async () => {
       // Measured page: one sentence written across columns of very different glyph size and vertical
       // stagger. The donor rule requires aligned column edges, so it used to arrive as two regions.

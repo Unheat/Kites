@@ -38,6 +38,12 @@ export interface OcrBlockDescriptor {
   readonly boxShortSideRatio?: number;
   /** Number of raw OCR lines merged into this block; undefined when the page provided none. */
   readonly lineCount?: number;
+  /**
+   * Whether the block's lines are owned by a detected balloon. Undefined when no ownership
+   * policy ran. Balloon context vetoes script-noise heuristics that would preserve real
+   * short dialogue as artwork.
+   */
+  readonly inBubble?: boolean;
 }
 
 /** Outcome of classifying one block. */
@@ -152,6 +158,10 @@ export class LatinNoiseArtworkClassifier implements IArtworkClassifier {
     if (letters.length === 0 && digits.length === 0) return NO_MATCH;
     // Punctuation-dense debris (`//`, `--`, `..`) is not language either.
     if (others > letters.length + digits.length) return NO_MATCH;
+    // Inside a balloon, a short no-digit Latin block is real dialogue (`OK`, `No`), not
+    // texture debris: the reader expects it translated. Digit-bearing debris (`S1PA`, `A9V`)
+    // stays preserved even in-bubble, since erasing it buys nothing.
+    if (block.inBubble && digits.length === 0) return NO_MATCH;
     // Only digit-bearing debris (`S1PA`, `A9V`) or bare stubs (`ww`, `L`, `AR`, `IM一`) qualify.
     // A real Latin block — including a Latin shout the donor keeps translatable (`HOOO`) — has
     // three or more letters and no digits, so it stays text.

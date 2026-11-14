@@ -444,7 +444,8 @@ export class OcrManager {
    *
    * The merge graph is proximity-based and knows nothing about balloons: a sentence written across
    * columns may touch a balloon edge on one column only. Splitting such a component would translate
-   * one sentence twice, so the component adopts its majority owner instead. A genuine 1:1 weld has
+   * one sentence twice, so the component adopts its majority balloon owner instead (free text can
+   * never win a component). A genuine 1:1 weld has
    * no majority and is left split, which is what keeps a misread stroke column out of a balloon.
    *
    * @param quads - Prepared textline quadrilaterals in merge input order.
@@ -471,9 +472,15 @@ export class OcrManager {
       for (const member of members) {
         counts.set(buckets[member], (counts.get(buckets[member]) ?? 0) + 1);
       }
+      // Only a real balloon can win the component: letting FREE_TEXT_BUCKET stand as a
+      // candidate let a pair of free stroke columns outvote one balloon-owned line and
+      // weld the dialogue onto the unowned free text — the exact escape from its balloon
+      // this gate exists to prevent, in reverse. A component without a balloon majority
+      // stays split.
       let winner: number | undefined;
       let winnerCount = 0;
       for (const [bucket, count] of counts) {
+        if (bucket === FREE_TEXT_BUCKET) continue;
         if (count > winnerCount) {
           winner = bucket;
           winnerCount = count;
@@ -1252,11 +1259,18 @@ export class OcrManager {
     );
     const artwork: { index: number; kind: ArtworkKind }[] = [];
     finalTexts.forEach((text, index) => {
+      // Ownership evidence for the classifiers: a block whose lines are balloon-owned is
+      // dialogue context, which vetoes script-noise heuristics on short in-bubble text.
+      const groupIndices = validFinalGroups[rows[index]];
+      const inBubble = Boolean(
+        buckets && groupIndices?.some((idx) => buckets[idx] !== FREE_TEXT_BUCKET),
+      );
       const block: OcrBlockDescriptor = {
         text,
         glyphRatio: glyphRatios[index],
         boxShortSideRatio: boxShortSideRatios[index],
         lineCount: finalLineCounts[index],
+        inBubble,
       };
       const match = this.artworkClassifier.classify(block);
       if (match.isArtwork && match.kind) artwork.push({ index, kind: match.kind });
