@@ -52,6 +52,23 @@ Heuristic tier on the same page: 10 balloons, 26 regions, 0 regions spanning two
 * **Intentionally unchanged:** `pipelineVisualKoharuExactTest.ts` still builds geometry from merged boxes. It is a frozen parity benchmark against donor output, not an app-flow harness; changing its geometry input would invalidate the comparison it exists to make.
 * **Accepted limitation:** the display-lettering size rule uses a page-relative median, so a page whose every block is drawn huge never trips it. Unchanged by this work; see devlog 095 for the measurement rationale.
 
+### Follow-up in this branch: OCR debris is preserved, not translated
+
+Scanning nine pages of a real gallery through `renderPageCheck.ts` surfaced a second class of visible
+damage: short Latin/digit debris that OCR reads off screentone and lettering (`S1PA`, `A9V`, `ww`,
+`IM一`, `Nr日`) is neither a balloon's text nor language in any script. Translating it produced literal
+nonsense stamped over a grey inpaint patch. `LatinNoiseArtworkClassifier` now classifies such blocks as
+`fragment`, which the preserve pair already means "keep the ink, draw nothing".
+
+Guarded against the donor's old Latin failure: a block with three or more letters and no digits stays
+text, so `HOOO`, `HASUMI`, `Justice` remain translatable. Measured effect: page 2 mask polygons 17 -> 13,
+page 3 19 -> 15, with no dialogue block lost.
+
+**Accepted, not fixed:** OCR boxes cover only the glyphs the recognizer returned. A bubble column the
+recognizer missed (or read only partially) keeps its ink while its neighbour is translated, so the
+English can appear beside untranslated Japanese. Masking is polygon-based by contract; closing that gap
+needs background/ink reconstruction, not a classifier rule.
+
 ### Next Steps / Key Takeaways
 
 * **Takeaway:** when a pipeline stage decides something about a *product* (merged region, inflated rectangle), every later stage that trusts that product inherits its errors. Decide on the unit the evidence is actually attached to.

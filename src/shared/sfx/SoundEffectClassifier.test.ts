@@ -137,6 +137,23 @@ describe('DisplayLetteringArtworkClassifier', () => {
   });
 });
 
+describe('LatinNoiseArtworkClassifier', () => {
+  it('preserves short OCR debris read off artwork or screentone', () => {
+    // Measured on scanned pages: bubble texture and SFX strokes decode to these.
+    for (const text of ['S1PA', 'A9V', 'ww', 'L', 'AR', 'Nr日', 'IM一']) {
+      expect(defaultArtworkClassifier.classify({ text }).kind, text).toBe('fragment');
+    }
+  });
+
+  it('never preserves real Latin words or shouts', () => {
+    // Kept translatable on purpose: Latin blocks are the target language, and the donor's
+    // "HUH?" case showed that preserving them leaves a reader with an untranslated bubble.
+    for (const text of ['HOOO', 'Justice', 'HASUMI', 'Nr day', 'WAIT']) {
+      expect(defaultArtworkClassifier.classify({ text }).isArtwork, text).toBe(false);
+    }
+  });
+});
+
 describe('defaultArtworkClassifier', () => {
   it('catches each failure mode with the right kind', () => {
     expect(defaultArtworkClassifier.classify({ text: 'ピクン' }).kind).toBe('sound-effect');
