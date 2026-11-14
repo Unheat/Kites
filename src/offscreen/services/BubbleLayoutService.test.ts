@@ -720,3 +720,90 @@ describe('conservative bubble layouts', () => {
     });
   });
 });
+
+describe('contour-owned typeset box (tier-blind chamber evidence)', () => {
+  /** @param radiusX - Oval half width. @param radiusY - Oval half height. @returns Synthetic 24-point oval contour. */
+  function oval(radiusX: number, radiusY: number, centerX = 250, centerY = 250): Point2D[] {
+    const points: Point2D[] = [];
+    for (let step = 0; step < 24; step++) {
+      const angle = (step / 24) * Math.PI * 2;
+      points.push({
+        x: Math.round(centerX + radiusX * Math.cos(angle)),
+        y: Math.round(centerY + radiusY * Math.sin(angle)),
+      });
+    }
+    return points;
+  }
+
+  it('uses the traced contour for a region with no chamber proposal', () => {
+    const textBox: BoxRect = { x: 220, y: 120, w: 60, h: 260 };
+    const tightCarrier: BoxRect = { x: 218, y: 118, w: 64, h: 264 };
+    const contour = oval(110, 170);
+    const accept = vi.fn((_index: number, _proposed: BoxRect, _ratio?: number, _contourPoints?: Point2D[]) => true);
+
+    const detailed = resolveBubbleLayoutsDetailed({
+      pageWidth: 500,
+      pageHeight: 500,
+      boxes: [textBox],
+      carriers: [tightCarrier],
+      proposals: [null],
+      shapes: [],
+      curvatures: [{ isRounded: true, borderRadius: 90 }],
+      contours: [contour],
+      directions: ['h'],
+      accept,
+    });
+
+    const box = detailed.typesetBoxes[0]!;
+    expect(box).toBeDefined();
+    // The wide oval defines the frame; a proposal-less region must not fall back to its
+    // tight carrier box (that regression pinned contour layout to the 9px floor).
+    expect(box.w).toBeGreaterThan(tightCarrier.w * 3);
+    expect(box.h).toBeGreaterThan(tightCarrier.h * 1.2);
+    expect(accept.mock.calls[0][1]).toMatchObject({ w: box.w, h: box.h });
+    expect(accept.mock.calls[0][3]).toHaveLength(contour.length);
+  });
+
+  it('rejects a contour that leaked into the page background', () => {
+    const textBox: BoxRect = { x: 220, y: 120, w: 60, h: 260 };
+    const tightCarrier: BoxRect = { x: 218, y: 118, w: 64, h: 264 };
+    const leaked = oval(240, 240);
+
+    const detailed = resolveBubbleLayoutsDetailed({
+      pageWidth: 500,
+      pageHeight: 500,
+      boxes: [textBox],
+      carriers: [tightCarrier],
+      proposals: [null],
+      shapes: [],
+      curvatures: [{ isRounded: true, borderRadius: 90 }],
+      contours: [leaked],
+      directions: ['h'],
+      accept: () => true,
+    });
+
+    // Leaked components must not define the box: falls back to the carrier-derived box.
+    expect(detailed.typesetBoxes[0]).toEqual(computeTypesetBox(textBox, tightCarrier, false, 500, true));
+  });
+
+  it('produces the same box for the same contour regardless of proposal identity', () => {
+    const textBox: BoxRect = { x: 220, y: 120, w: 60, h: 260 };
+    const carrierBox: BoxRect = { x: 130, y: 60, w: 240, h: 380 };
+    const contour = oval(110, 170);
+    /** @param proposal - Chamber proposal identity for this run. @returns Resolved box. */
+    const run = (proposal: BoxRect | null) => resolveBubbleLayoutsDetailed({
+      pageWidth: 500,
+      pageHeight: 500,
+      boxes: [textBox],
+      carriers: [carrierBox],
+      proposals: [proposal],
+      shapes: [],
+      curvatures: [{ isRounded: true, borderRadius: 90 }],
+      contours: [contour],
+      directions: ['h'],
+      accept: () => true,
+    }).typesetBoxes[0];
+
+    expect(run(null)).toEqual(run(carrierBox));
+  });
+});

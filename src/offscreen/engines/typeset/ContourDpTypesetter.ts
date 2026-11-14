@@ -1,5 +1,5 @@
 /**
- * @file ContourDpTypesetter.ts
+ * ContourDpTypesetter.ts
  * Route 2: 1:1 port of Koharu's 2D scanline DP typesetting engine (ComicBalloon).
  * Uses 5-point ink band chord sampling, widest valid span selection, 2D DP line breaking,
  * and Koharu's candidate comparator (fewer lines strictly beats more lines).

@@ -1,5 +1,5 @@
 /**
- * @file ellipseTypeset.ts
+ * ellipseTypeset.ts
  * Rectangular greedy word wrapper with syllable hyphenation, used by the Studio
  * simple-mode edit path and caption boxes. Legacy ellipse-profile fitting was
  * retired when all curved routes moved to the Koharu 2D contour DP engine

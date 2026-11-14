@@ -1,5 +1,5 @@
 /**
- * @file regionGeometry.ts
+ * regionGeometry.ts
  * Quadrilateral and polygon geometry math for text region sizing and rotation.
  * 1:1 port of Cotrans rendering/__init__.py `resize_regions_to_font_size`.
  * Licensed under GNU General Public License v3.0 (GPL-3.0).

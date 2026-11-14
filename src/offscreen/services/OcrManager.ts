@@ -1,4 +1,4 @@
-import type { IOcrEngine, OcrResult } from '../engines/ocr/BaseOcrEngine';
+import type { IOcrEngine, OcrResult, PreparedPageLine } from '../engines/ocr/BaseOcrEngine';
 import { PaddleOcrEngine } from '../engines/ocr/PaddleOcrEngine';
 import { resolveOcrTier } from '../engines/ocr/ocrRegistry';
 import type { Point2D } from '../../shared/utils/geometry';
@@ -6,6 +6,7 @@ import { Quadrilateral, Graph, calculateBoundingBox, computeMinAreaRect, polygon
 import { clusterLinesIntoUtterances } from '../utils/utteranceSplitter';
 import { findBogusContainerIndices } from '../../shared/utils/regionOwnership';
 import { defaultArtworkClassifier } from '../../shared/sfx/SoundEffectClassifier';
+import { FREE_TEXT_BUCKET } from './PageBubbleOwnership';
 import type { ArtworkKind, IArtworkClassifier, OcrBlockDescriptor } from '../../shared/sfx/ArtworkClassifier';
 import { DEFAULT_SFX_POLICY, resolveSfxPolicyStrategy, type SfxPolicyId } from '../../shared/sfx/sfxPolicy';
 import {
@@ -42,6 +43,27 @@ const NEIGHBORHOOD_SUPPRESSION_SCORE_FLOOR = 0.60;
  */
 const NATIVE_DIALOGUE_SCORE_FLOOR = 0.20;
 
+
+/**
+ * Share of a proximity component that must agree on one owner before the whole component adopts it.
+ *
+ * Ownership is resolved per line, so a sentence whose columns straddle a balloon edge can land in
+ * two buckets and be rendered as two separate translations. Two thirds keeps a multi-column
+ * utterance together (2 of 3 lines confirming) while still splitting a 1:1 weld, where a single
+ * misread stroke column would otherwise drag the dialogue out of its balloon again.
+ */
+const OWNERSHIP_COMPONENT_MAJORITY = 2 / 3;
+
+/**
+ * Relaxed merge limits for two side-by-side columns that share one balloon.
+ *
+ * Donor merging requires aligned column edges; staggered columns of one sentence never align, so the
+ * owner is used as the stronger evidence with its own size and gap bounds.
+ */
+const SHARED_OWNER_FONT_RATIO = 3;
+const SHARED_OWNER_ASPECT_TOL = 2;
+const SHARED_OWNER_MIN_Y_OVERLAP = 0.5;
+const SHARED_OWNER_MAX_GAP_CHARS = 4;
 
 /** Minimum height for a box to count as a vertical text column rather than a stray stroke. */
 const VERTICAL_COLUMN_MIN_HEIGHT_PX = 100;
@@ -225,18 +247,10 @@ export class OcrManager {
   }
 
   /**
-   * Returns requested initialized OCR engine, replacing another tier only after its users finish.
-   * Same-tier calls reuse one engine. Serialized creation deduplicates initialization, and failed
-   * initialization leaves no cached state so a later call can retry.
-   *
-   * @param tier - OCR model tier or registry alias.
-   * @returns The initialized OCR engine instance.
-   */
-
-  /**
    * Acquires a counted lease on requested engine so tier replacement cannot destroy it in use.
    *
    * @param tier - OCR model tier or registry alias.
+   * @param onInitialization - Optional lifecycle progress callback.
    * @returns Engine and idempotent release callback.
    */
   private async acquireEngine(
@@ -394,23 +408,150 @@ export class OcrManager {
    * and concatenates text right-to-left.
    */
   /**
+   * Whether two columns of one balloon form a side-by-side pair that must stay one sentence.
+   *
+   * Requires the same owner (already checked by the caller), a substantial shared vertical span,
+   * compatible glyph sizes, no horizontal-vs-vertical aspect conflict, and an ink gap within a few
+   * characters. That is enough to treat staggered columns of one balloon as one utterance without
+   * merging stacked lobes or lines from different balloons.
+   *
+   * @param a - First prepared textline.
+   * @param b - Second prepared textline.
+   * @returns True when the pair should merge despite the donor alignment requirement.
+   */
+  private isSideBySideSharedOwnerPair(a: Quadrilateral, b: Quadrilateral): boolean {
+    const charSize = Math.min(a.font_size, b.font_size);
+    if (charSize <= 0) return false;
+    if (Math.max(a.font_size, b.font_size) / charSize > SHARED_OWNER_FONT_RATIO) return false;
+    if (a.aspect_ratio > SHARED_OWNER_ASPECT_TOL && b.aspect_ratio < 1 / SHARED_OWNER_ASPECT_TOL) return false;
+    if (b.aspect_ratio > SHARED_OWNER_ASPECT_TOL && a.aspect_ratio < 1 / SHARED_OWNER_ASPECT_TOL) return false;
+    const overlapY = Math.min(a.aabb.y + a.aabb.height, b.aabb.y + b.aabb.height) - Math.max(a.aabb.y, b.aabb.y);
+    if (overlapY < SHARED_OWNER_MIN_Y_OVERLAP * Math.min(a.aabb.height, b.aabb.height)) return false;
+    const gap = a.pts ? a.polyDistance(b) : Infinity;
+    return gap <= charSize * SHARED_OWNER_MAX_GAP_CHARS;
+  }
+
+  /**
+   * Keeps a proximity component's lines in one bucket when they overwhelmingly share an owner.
+   *
+   * The merge graph is proximity-based and knows nothing about balloons: a sentence written across
+   * columns may touch a balloon edge on one column only. Splitting such a component would translate
+   * one sentence twice, so the component adopts its majority balloon owner instead (free text can
+   * never win a component). A genuine 1:1 weld has
+   * no majority and is left split, which is what keeps a misread stroke column out of a balloon.
+   *
+   * @param quads - Prepared textline quadrilaterals in merge input order.
+   * @param buckets - Per-line bucket ids, mutated in place.
+   * @returns The buckets with component majorities applied.
+   */
+  private applyComponentOwnership(
+    quads: Quadrilateral[],
+    buckets: number[],
+  ): number[] {
+    const proximity = new Graph();
+    for (let i = 0; i < quads.length; i++) proximity.addNode(i);
+    for (let i = 0; i < quads.length; i++) {
+      for (let j = i + 1; j < quads.length; j++) {
+        if (quadrilateralCanMergeRegion(quads[i], quads[j], 1.9, 2, 1, 3, 2, 1.3)) {
+          proximity.addEdge(i, j);
+        }
+      }
+    }
+    for (const component of proximity.connectedComponents()) {
+      const members = Array.from(component);
+      if (members.length < 2) continue;
+      const counts = new Map<number, number>();
+      for (const member of members) {
+        counts.set(buckets[member], (counts.get(buckets[member]) ?? 0) + 1);
+      }
+      // Only a real balloon can win the component: letting FREE_TEXT_BUCKET stand as a
+      // candidate let a pair of free stroke columns outvote one balloon-owned line and
+      // weld the dialogue onto the unowned free text — the exact escape from its balloon
+      // this gate exists to prevent, in reverse. A component without a balloon majority
+      // stays split.
+      let winner: number | undefined;
+      let winnerCount = 0;
+      for (const [bucket, count] of counts) {
+        if (bucket === FREE_TEXT_BUCKET) continue;
+        if (count > winnerCount) {
+          winner = bucket;
+          winnerCount = count;
+        }
+      }
+      if (winner === undefined) continue;
+      if (winnerCount / members.length < OWNERSHIP_COMPONENT_MAJORITY) continue;
+      for (const member of members) buckets[member] = winner;
+    }
+    return buckets;
+  }
+
+  /**
+   * Resolves the page's line ownership before merging.
+   *
+   * The partitioner receives the cleaned, filtered lines and returns one bucket id per line. Lines
+   * sharing a bucket may be merged; different buckets never merge. Ownership therefore exists
+   * before any region does, which is what keeps balloon text and neighbouring artwork apart.
+   *
+   * @param quads - Prepared textline quadrilaterals, in merge input order.
+   * @param texts - Prepared line texts, parallel to `quads`.
+   * @param scores - Recognition scores, parallel to `quads`.
+   * @param partition - Caller-supplied ownership policy.
+   * @returns One bucket id per line.
+   */
+  private async resolveLineBuckets(
+    quads: Quadrilateral[],
+    texts: string[],
+    scores: number[],
+    partition: (lines: PreparedPageLine[]) => Promise<number[]>,
+  ): Promise<number[]> {
+    const lines: PreparedPageLine[] = quads.map((quad, index) => {
+      const aabb = quad.aabb;
+      return {
+        box: { x: aabb.x, y: aabb.y, w: aabb.width, h: aabb.height },
+        polygon: quad.pts,
+        text: texts[index] ?? '',
+        score: scores[index] ?? 0,
+        fontSize: quad.font_size,
+        direction: quad.direction,
+      };
+    });
+    const buckets = await partition(lines);
+    // Internal contract: ownership must be defined for every line, exactly once.
+    if (buckets.length !== lines.length) {
+      throw new Error(`partitionLines returned ${buckets.length} buckets for ${lines.length} lines`);
+    }
+    return buckets;
+  }
+
+  /**
    * Computes each block's glyph size relative to the page's body-text baseline.
    *
    * The baseline is the character-weighted median of `min(w,h)` — one glyph for both a vertical
    * column (its width) and a horizontal row (its height). Weighting by character count keeps body
    * dialogue dominant so oversized lettering cannot inflate its own reference.
    *
+   * A block's own size uses the Cotrans block font size (real glyph height, `min(line font sizes)`)
+   * rather than the box short side. Merge runs before this point, so a box short side measures the
+   * glued rectangle, not the letters: a welded multi-line region would otherwise read as oversized
+   * display lettering. The raw short side is reported separately for the fragment size sanity check.
+   *
    * @param boxes - Final merged boxes, in output order.
    * @param texts - Final merged texts, parallel to `boxes`.
-   * @returns Per-block size ratio, or all `undefined` when the page is too small to measure.
+   * @param fontSizes - Cotrans block font size per block (source pixels).
+   * @param lineCounts - Number of source OCR lines merged into each block.
+   * @returns Per-block glyph ratio and box short-side ratio, or `undefined` when unmeasurable.
    */
   private static computeGlyphRatios(
     boxes: { w: number; h: number }[],
     texts: string[],
-  ): (number | undefined)[] {
-    if (boxes.length < MIN_BLOCKS_FOR_BASELINE) return boxes.map(() => undefined);
-    const sizes = boxes.map((box) => Math.min(box.w, box.h));
-    const pairs = sizes
+    fontSizes: number[],
+    lineCounts: number[],
+  ): { glyphRatios: (number | undefined)[]; boxShortSideRatios: (number | undefined)[] } {
+    if (boxes.length < MIN_BLOCKS_FOR_BASELINE) {
+      return { glyphRatios: boxes.map(() => undefined), boxShortSideRatios: boxes.map(() => undefined) };
+    }
+    const shortSides = boxes.map((box) => Math.min(box.w, box.h));
+    const pairs = shortSides
       .map((size, index) => ({ size, weight: Math.max(Array.from(texts[index] ?? '').length, 1) }))
       .sort((a, b) => a.size - b.size);
     const totalWeight = pairs.reduce((sum, pair) => sum + pair.weight, 0);
@@ -420,14 +561,27 @@ export class OcrManager {
       accumulated += pair.weight;
       if (accumulated >= totalWeight / 2) { baseline = pair.size; break; }
     }
-    if (!(baseline > 0)) return boxes.map(() => undefined);
-    return sizes.map((size) => size / baseline);
+    if (!(baseline > 0)) {
+      return { glyphRatios: boxes.map(() => undefined), boxShortSideRatios: boxes.map(() => undefined) };
+    }
+    // Real glyph height when the merge produced one; a multi-line block whose line font size is
+    // unavailable cannot claim a size, so its glyph ratio stays undefined instead of guessing.
+    const glyphSizes = boxes.map((box, index) => {
+      const fontSize = fontSizes[index];
+      if (fontSize && fontSize > 0) return fontSize;
+      return (lineCounts[index] ?? 1) <= 1 ? Math.min(box.w, box.h) : 0;
+    });
+    return {
+      glyphRatios: glyphSizes.map((size) => (size > 0 ? size / baseline : undefined)),
+      boxShortSideRatios: shortSides.map((size) => size / baseline),
+    };
   }
 
-  private mergeTextBlocks(
+  private async mergeTextBlocks(
     result: OcrResult,
-    context?: { sourceLang?: string; pageWidth?: number; pageHeight?: number; sfxPolicy?: SfxPolicyId }
-  ): OcrResult {
+    context?: { sourceLang?: string; pageWidth?: number; pageHeight?: number; sfxPolicy?: SfxPolicyId },
+    options?: { partitionLines?: (lines: PreparedPageLine[]) => Promise<number[]> },
+  ): Promise<OcrResult> {
     const sfxPolicy = context?.sfxPolicy ?? DEFAULT_SFX_POLICY;
     // Merge algorithm entry point
     const rawTexts = [...result.texts];
@@ -888,6 +1042,18 @@ export class OcrManager {
     const mergedFontSizes: number[] = [];
     const mergedAngles: number[] = [];
     const mergedLineCounts: number[] = [];
+    const mergedGroupLineIndices: number[][] = [];
+
+    // Step 0: page ownership, resolved per raw line BEFORE the merge graph runs.
+    // The merge graph may only connect lines that share an owner, so a line sitting outside a
+    // balloon can never be welded onto a balloon's dialogue. Undefined = one bucket (disabled
+    // tier and every caller that does not supply a partitioner).
+    const buckets = options?.partitionLines
+      ? this.applyComponentOwnership(
+          workingQuads,
+          await this.resolveLineBuckets(workingQuads, workingTexts, workingScores, options.partitionLines),
+        )
+      : undefined;
 
     // Step 1: divide into text region candidates (textline_merge/__init__.py merge graph).
     // Cotrans call: quadrilateral_can_merge_region(ubox, vbox, aspect_ratio_tol=1.3,
@@ -896,11 +1062,23 @@ export class OcrManager {
     for (let i = 0; i < workingQuads.length; i++) mergeGraph.addNode(i);
     for (let i = 0; i < workingQuads.length; i++) {
       for (let j = i + 1; j < workingQuads.length; j++) {
+        // Ownership gate: never connect lines with different owners.
+        if (buckets && buckets[i] !== buckets[j]) continue;
         if (quadrilateralCanMergeRegion(workingQuads[i], workingQuads[j], 1.9, 2, 1, 3, 2, 1.3)) {
           mergeGraph.addEdge(i, j);
+          continue;
         }
+        // Two columns of ONE balloon that sit side by side belong to one sentence even when their gaps
+        // or staggers exceed the page tolerance. The donor rule requires aligned top/bottom edges for
+        // vertical columns, which staggered columns never have, so one sentence arrived as two
+        // translated regions. Stacked lobes inside a balloon are excluded, so two separate speeches
+        // sharing a balloon stay separate regions.
+        if (!buckets || buckets[i] === FREE_TEXT_BUCKET) continue;
+        if (!this.isSideBySideSharedOwnerPair(workingQuads[i], workingQuads[j])) continue;
+        mergeGraph.addEdge(i, j);
       }
     }
+
 
     // Step 2: postprocess - further split each region using Cotrans Kruskal MST statistics
     const finalGroups: number[][] = [];
@@ -929,6 +1107,17 @@ export class OcrManager {
       const groupQuads = groupIndices.map((idx) => workingQuads[idx]);
       const dir = this.majorityDirection(groupQuads);
       const isVert = dir === 'v';
+
+      // A single balloon holds one speech: its lines are laid out by the bubble partitioner, not by
+      // the staggered-lobe utterance splitter. Splitting them here renders one sentence as several
+      // translations inside the same balloon (measured on a three-column bubble whose columns are
+      // staggered but form one sentence).
+      const owners = new Set(groupIndices.map((idx) => buckets?.[idx] ?? FREE_TEXT_BUCKET));
+      const singleOwner = owners.size === 1 && !owners.has(FREE_TEXT_BUCKET);
+      if (singleOwner) {
+        postSplitGroups.push(groupIndices);
+        continue;
+      }
 
       const splitResults = clusterLinesIntoUtterances(linesForCluster, isCjk, isVert);
       for (const res of splitResults) {
@@ -1004,6 +1193,8 @@ export class OcrManager {
       mergedAngles.push(angleDeg);
       // Cotrans used_rows: number of source OCR lines merged into this region.
       mergedLineCounts.push(groupIndices.length);
+      // Prepared-line indices of this region, so pre-merge ownership can be projected onto it.
+      mergedGroupLineIndices.push([...groupIndices]);
     }
 
     // Cotrans sort_regions (textblock.py:423): order blocks top-to-bottom, right-to-left for manga
@@ -1053,10 +1244,26 @@ export class OcrManager {
     // the default 'off'. A dictionary hit catches lettering; the size ratio catches brush strokes
     // read as text; a bare glyph or two is never language.
     const finalBoxes = pick(mergedBoxes);
-    const glyphRatio = OcrManager.computeGlyphRatios(finalBoxes, finalTexts);
+    const finalFontSizes = pick(mergedFontSizes);
+    const finalLineCounts = pick(mergedLineCounts);
+    const { glyphRatios, boxShortSideRatios } = OcrManager.computeGlyphRatios(
+      finalBoxes, finalTexts, finalFontSizes, finalLineCounts,
+    );
     const artwork: { index: number; kind: ArtworkKind }[] = [];
     finalTexts.forEach((text, index) => {
-      const block: OcrBlockDescriptor = { text, glyphRatio: glyphRatio[index] };
+      // Ownership evidence for the classifiers: a block whose lines are balloon-owned is
+      // dialogue context, which vetoes script-noise heuristics on short in-bubble text.
+      const groupIndices = validFinalGroups[rows[index]];
+      const inBubble = Boolean(
+        buckets && groupIndices?.some((idx) => buckets[idx] !== FREE_TEXT_BUCKET),
+      );
+      const block: OcrBlockDescriptor = {
+        text,
+        glyphRatio: glyphRatios[index],
+        boxShortSideRatio: boxShortSideRatios[index],
+        lineCount: finalLineCounts[index],
+        inBubble,
+      };
       const match = this.artworkClassifier.classify(block);
       if (match.isArtwork && match.kind) artwork.push({ index, kind: match.kind });
     });
@@ -1101,6 +1308,7 @@ export class OcrManager {
       fontSizes: pick(mergedFontSizes),
       angles: pick(mergedAngles),
       lineCounts: pick(mergedLineCounts),
+      groupLineIndices: pick(mergedGroupLineIndices),
       detectionScores: result.detectionScores,
       rawPolygons: maskPolygons,
       maskRawCanvas: result.maskRawCanvas
@@ -1116,6 +1324,7 @@ export class OcrManager {
    * filters (XianScan lang.rs); `pageWidth`/`pageHeight` activate the geometry
    * pre-filter battery. All undefined = legacy behavior (no language/geometry filters).
    * @param onInitialization - Optional callback notified around genuine cold initialization.
+   * @param options - Optional line-ownership policy; omitted keeps the single-bucket legacy merge.
    * @returns A promise that resolves to the standardized OCR result.
    */
   async processImage(
@@ -1123,11 +1332,12 @@ export class OcrManager {
     tier: OcrTier = 'v6-small',
     context?: { sourceLang?: string; pageWidth?: number; pageHeight?: number; sfxPolicy?: SfxPolicyId },
     onInitialization?: InitializationLifecycleCallback,
+    options?: { partitionLines?: (lines: PreparedPageLine[]) => Promise<number[]> },
   ): Promise<OcrResult> {
     const { engine, release } = await this.acquireEngine(tier, onInitialization);
     try {
       const rawResult = await engine.recognize(imageBuffer);
-      return this.mergeTextBlocks(rawResult, context);
+      return await this.mergeTextBlocks(rawResult, context, options);
     } finally {
       release();
     }

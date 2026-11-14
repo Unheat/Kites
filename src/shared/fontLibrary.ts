@@ -1,5 +1,5 @@
 /**
- * @file fontLibrary.ts
+ * fontLibrary.ts
  * On-demand font library: catalog downloads with pinned-hash verification, user file
  * imports, IndexedDB persistence, and FontFace registration in the current document.
  * The offscreen bake document registers persisted faces at boot so typeset measurement
@@ -66,7 +66,7 @@ const GENERIC_FAMILIES = new Set([
 
 /**
  * Requests every font family referenced by the given CSS stacks so canvas text can
- * paint with them. Canvas `fillText` never triggers webfont loading: CSS @font-face
+ * paint with them. Canvas `fillText` never triggers webfont loading: CSS `@font-face`
  * presets (Kites Comic, CC Wild Words, Patrick Hand SC) stay unloaded until some DOM
  * text asks for them, and library faces only exist after ensureFontsRegistered().
  * `document.fonts.ready` alone is insufficient — it only waits for loads already

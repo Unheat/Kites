@@ -60,8 +60,11 @@ export function renderFullCompositeCanvas(
   }
 
   // 4. Render Text & Dialogue Bubbles
+  // Preserve-pair invariant (never erase, never paint): artwork blocks keep
+  // their original ink on the background plate, so their translation must not
+  // be painted on top — matching StudioCanvas and thumbnailRenderer.
   for (const obj of textObjects) {
-    if (obj.isVisible === false || obj.isSkipped) continue;
+    if (obj.isVisible === false || obj.isSkipped || obj.isArtwork) continue;
 
     if (obj.warpPreset && obj.warpPreset !== 'none' && obj.quadPoints) {
       const tempCanvas = document.createElement('canvas');

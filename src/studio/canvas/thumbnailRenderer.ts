@@ -104,7 +104,7 @@ export async function getTranslatedPageThumbnailUrl(
     ctx.save();
     ctx.scale(scale, scale);
     for (const block of textBlocks) {
-      if (block.isSkipped) continue;
+      if (block.isSkipped || block.isArtwork) continue;
       const textObj = restoreTextObject(block);
       TextRenderer.renderText(ctx, textObj);
     }

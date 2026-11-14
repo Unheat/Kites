@@ -1,5 +1,5 @@
 /**
- * @file AutoBalloonTypesetter.ts
+ * AutoBalloonTypesetter.ts
  * Route 1: Auto Balloon XianScan diamond reflow for raw OCR polygons and disabled bubble mode.
  * Encapsulates diamond fitting (measureDefaultLayout).
  */

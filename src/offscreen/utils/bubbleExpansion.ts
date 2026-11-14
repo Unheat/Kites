@@ -1,5 +1,5 @@
 /**
- * @file bubbleExpansion.ts
+ * bubbleExpansion.ts
  * Pure geometric algorithms for speech bubble container expansion, safe core insetting,
  * tail-severed carrier chamber extraction, and multi-utterance sub-chamber partitioning.
  *

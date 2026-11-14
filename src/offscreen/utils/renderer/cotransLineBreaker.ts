@@ -1,5 +1,5 @@
 /**
- * @file cotransLineBreaker.ts
+ * cotransLineBreaker.ts
  * 1:1 port of Cotrans `calc_horizontal` (text_render.py): wraps text into lines that fit `maxWidth`,
  * hyphenating long words at syllable boundaries.
  * Licensed under GNU General Public License v3.0 (GPL-3.0).

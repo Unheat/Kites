@@ -11,6 +11,7 @@ import {
   BareFragmentArtworkClassifier,
   CompositeArtworkClassifier,
   DisplayLetteringArtworkClassifier,
+  LatinNoiseArtworkClassifier,
   type ArtworkMatch,
   type IArtworkClassifier,
   type OcrBlockDescriptor,
@@ -131,4 +132,5 @@ export const defaultArtworkClassifier: IArtworkClassifier = new CompositeArtwork
   new CjkShoutSoundEffectClassifier(),
   new BareFragmentArtworkClassifier(),
   new DisplayLetteringArtworkClassifier(),
+  new LatinNoiseArtworkClassifier(),
 ]);

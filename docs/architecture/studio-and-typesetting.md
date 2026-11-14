@@ -117,6 +117,8 @@ $$Y_{\text{natural}} = \frac{Y_{\text{pointer}} - Y_{\text{pan}}}{\text{Scale}}$
 
 The shared `TypesetMode` union is `contour | simple | auto-balloon | balloon`; `balloon` is the retained Auto Balloon alias. Legacy persisted `ellipse` restores as `contour`. Studio labels are **Contour**, **Auto Balloon**, and **Caption Box**. Selection changes affect selected objects; without selection, the setting is a default for future edits/objects, not an automatic rewrite of every existing layout.
 
+**Engine availability is gated by bubble evidence, not by the current mode.** `availableTypesetModes()` in `src/shared/constants.ts` derives the offered list from the canonical `TYPESET_MODES` catalog, and `src/studio/canvas/typesetModes.ts` decides membership from `contourPoints` / `originalContourPoints` (≥3 vertices). Text with a detected chamber polygon offers all three engines; captions, narration and free text offer only Balanced Fit and Caption Box, and the Bubble Contour button is disabled with an explanatory tooltip. Because the polygon survives a mode switch and `Reset to Bubble Frame` restores it, a bubble switched to Caption Box can always be switched back to contour — never gate this on `typesetMode`, which records the *current* engine and would lock the object out. A requested mode the object cannot fit with resolves to its first available engine, so a global Contour default never contour-fits a caption.
+
 ```mermaid
 flowchart TD
     Bake["Offscreen fixed region?"] -->|No| Auto["AutoBalloonTypesetter: shared 4-pass fitting"]
@@ -176,13 +178,15 @@ flowchart TD
     Restore --> Baseline["Seed transient originalContourPoints and detected dimensions from saved values"]
     Restore --> Paint["TextRenderer Canvas: eligible placements or regular layout"]
     Restore --> Outline["CanvasFurniture: draw stored contour regardless of mode"]
-    Baseline --> Resize["Resize scales baseline contour by new width/height ratios"]
-    Resize --> Reflow["Layout fields changed: invalidate placements and reflow"]
+    Baseline --> Resize["Resize scales the contour with the box, so the outline follows the handles"]
+    Resize --> Reflow["Live refit at a fixed sample rate (~16 Hz); exact refit on pointer release"]
     Reflow --> Save
     Baseline --> Reset["Reset dimensions + contour only; position/rotation unchanged"]
 ```
 
 **Persisted layout is not the full detection history.** `TextBlock` stores `contourPoints`, `positionedLines`, current geometry, lines, font, mode, curvature and skipped status. `originalContourPoints`, `detectedWidth` and `detectedHeight` are transient Studio fields, not persisted columns/payload fields. On reload they are reseeded from the current saved contour and dimensions, so reset is relative to that restored frame, not necessarily the original detector frame. `Reset to Bubble Frame` does not restore position or rotation.
+
+**Resize scales the contour and re-fits the text live.** Dragging a handle applies the Koharu contour affine transform: `contourPoints` scale with the box by the new/old width and height ratios, so the dashed outline stays locked to the handles and the solver's chords grow or shrink with the new bubble. The text is then re-fitted inside that new contour, which is what makes the glyphs grow into an enlarged balloon. Re-fitting is sampled: `computeUpdatedTextObject` re-solves at most once per `LIVE_REFIT_INTERVAL_MS = 60` during a resize gesture, carrying the previous measured layout on the frames in between, and pointer release always fits the exact final frame. Moves and rotations never refit because `x`/`y`/`rotation` are not layout fields. The one-entry contour-fit memo (`resetContourFitMemo()`) is cleared at gesture start, on commit and on `pointercancel`.
 
 **Known integration limitation:** `PipelineOrchestrator` prefers detailed accepted contours but falls back to raw acquisition contours while saving. It can also classify the saved mode from proposal/carrier evidence after the live layout was rejected. A later Studio contour reflow can therefore differ from the free-region bake. `CanvasFurniture` draws any stored non-skipped contour with at least three points regardless of `typesetMode`; its dashed white halo/accent outline proves storage only, not acceptance or solver use.
 

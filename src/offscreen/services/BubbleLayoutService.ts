@@ -23,6 +23,14 @@ export const MIN_SHARED_FONT_RATIO = 0.85;
  */
 export const NOISE_AREA_RATIO = 0.10;
 export const NOISE_MAX_ABSOLUTE_AREA = 400;
+/**
+ * A traced chamber contour may legitimately be several times larger than the text column it
+ * wraps (a pinched oval balloon around one narrow column measures ~5-6x). Past this ratio the
+ * contour is treated as a segmentation leak (balloon merged into the page background) and the
+ * carrier box wins instead. The bound is deliberately generous: under-fitting a real balloon
+ * reproduces the narrow-box/9px-floor failure this guard exists to prevent.
+ */
+export const MAX_CONTOUR_BOX_AREA_RATIO = 10;
 
 export type { BubbleGeometry } from '../engines/bubble/BaseBubbleEngine';
 export { BUBBLE_MATCH_COVERAGE } from '../engines/bubble/NeuralBubbleEngine';
@@ -49,6 +57,20 @@ export interface BubbleLayoutInput extends BubbleGeometry {
 /** @param a - Outer rectangle. @param b - Inner rectangle. @returns Whether all inner edges are contained. */
 function contains(a: BoxRect, b: BoxRect): boolean {
   return b.x >= a.x && b.y >= a.y && b.x + b.w <= a.x + a.w && b.y + b.h <= a.y + a.h;
+}
+
+/**
+ * Decides whether a chamber contour may define a region's typeset box.
+ * @param contour - Traced chamber polygon in page space, if the engine produced one.
+ * @param carrier - Engine carrier box used as the plausible-area reference.
+ * @returns True when the contour is drawable and is not a leaked page-background component.
+ */
+function isUsableContourBox(contour: Point2D[] | undefined, carrier: BoxRect | null | undefined): boolean {
+  if (!contour || contour.length < 3) return false;
+  if (!carrier || carrier.w <= 0 || carrier.h <= 0) return true;
+  const bounds = contourBoundingBox(contour);
+  if (bounds.w <= 0 || bounds.h <= 0) return false;
+  return (bounds.w * bounds.h) <= (carrier.w * carrier.h) * MAX_CONTOUR_BOX_AREA_RATIO;
 }
 
 /** @param points - Polygon. @returns Axis-aligned bounding box; empty polygon yields zero-area box. */
@@ -157,13 +179,20 @@ export function resolveBubbleLayoutsDetailed(input: BubbleLayoutInput): Resolved
       const i = group[0];
       const isAlreadySevered = Boolean(!proposals[i] || shapes[i]?.isSeveredCarrier);
       const contour = contours?.[i];
+      // A traced chamber contour is geometry evidence in its own right, independent of the tier
+      // that produced it: a balloon traced from source pixels describes the usable area even when
+      // no chamber proposal was validated for this box. Gating the contour-derived box on
+      // `proposals[i]` made heuristic regions (no shared-chamber association) lay text out inside
+      // the tight carrier box while still drawing the wide contour around it, pinning layout to the
+      // 9px contour floor. Proposals keep driving grouping identity only.
+      const usableContour = isUsableContourBox(contour, carriers[i]) ? contour : undefined;
 
       let box: BoxRect;
       let localContour: Point2D[] | undefined = undefined;
 
-      if (proposals[i] && contour && contour.length >= 3) {
+      if (usableContour) {
         let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-        for (const pt of contour) {
+        for (const pt of usableContour) {
           if (pt.x < minX) minX = pt.x;
           if (pt.x > maxX) maxX = pt.x;
           if (pt.y < minY) minY = pt.y;
@@ -176,7 +205,7 @@ export function resolveBubbleLayoutsDetailed(input: BubbleLayoutInput): Resolved
           h: Math.min(pageHeight - minY, maxY - minY)
         };
         box = pairwiseClampBox(contourBox, boxes[i], boxes, i);
-        localContour = contour.map((p) => ({ x: p.x - box.x, y: p.y - box.y }));
+        localContour = usableContour.map((p) => ({ x: p.x - box.x, y: p.y - box.y }));
       } else {
         const rawBox = computeTypesetBox(boxes[i], carriers[i]!, directions?.[i] === 'v', pageHeight, isAlreadySevered);
         box = pairwiseClampBox(rawBox, boxes[i], boxes, i);
@@ -189,6 +218,12 @@ export function resolveBubbleLayoutsDetailed(input: BubbleLayoutInput): Resolved
         result[i] = box;
         resultContours[i] = localContour;
       }
+      // One line per region per page: which evidence defined the frame. This is the junction
+      // where a tier regression shows up as "contour drawn wide, text laid out narrow".
+      console.log(
+        `[BubbleLayout] region #${i} frame=${usableContour ? 'contour' : contour ? 'contour-leak' : 'carrier'}`
+        + ` box=${box.w}x${box.h}@${box.x},${box.y} accepted=${Boolean(result[i])}`
+      );
       continue;
     }
     const siblings = group.map((i) => boxes[i]);

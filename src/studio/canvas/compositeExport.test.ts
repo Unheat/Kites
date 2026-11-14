@@ -4,6 +4,7 @@ import {
   downloadCanvasAsFile,
   copyCanvasToClipboard,
 } from './compositeExport';
+import { TextRenderer } from './TextRenderer';
 import type { TextObject, ImageLayer } from '../types';
 
 describe('compositeExport', () => {
@@ -50,9 +51,26 @@ describe('compositeExport', () => {
         color: '#000000',
         isVisible: false,
       },
+      {
+        id: 'tb-artwork',
+        x: 10,
+        y: 320,
+        width: 100,
+        height: 40,
+        text: 'Preserved SFX',
+        fontSize: 14,
+        fontFamily: 'sans-serif',
+        color: '#000000',
+        isVisible: true,
+        isArtwork: true,
+      },
     ];
 
     const imageLayers: ImageLayer[] = [];
+
+    // Preserve-pair invariant: artwork blocks keep their original ink on the
+    // background plate, so the composite export must not paint over them.
+    const renderTextSpy = vi.spyOn(TextRenderer, 'renderText');
 
     const result = renderFullCompositeCanvas(
       400,
@@ -67,6 +85,12 @@ describe('compositeExport', () => {
     expect(result).toBeInstanceOf(HTMLCanvasElement);
     expect(result.width).toBe(400);
     expect(result.height).toBe(600);
+
+    const renderedIds = renderTextSpy.mock.calls.map(([, obj]) => (obj as TextObject).id);
+    expect(renderedIds).toContain('tb-1');
+    expect(renderedIds).not.toContain('tb-skipped');
+    expect(renderedIds).not.toContain('tb-hidden');
+    expect(renderedIds).not.toContain('tb-artwork');
   });
 
   it('renders untouched raw image in original mode', () => {

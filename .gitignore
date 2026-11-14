@@ -83,3 +83,6 @@ public/ort-wasm/
 
 # Local junk/scratch archives from skill and harness experiments
 .junk-*
+
+# Generated API reference (npm run docs:api)
+docs/api/

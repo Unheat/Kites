@@ -1267,10 +1267,24 @@ function GlobalOverlay() {
     );
 
     try {
-      await chrome.runtime.sendMessage({
+      const response = await chrome.runtime.sendMessage({
         type: 'BATCH_QUEUE_TRANSLATIONS',
         payload: { urls },
       });
+      // The background resolves (does not reject) with { status: 'error' } when the
+      // extension or domain is disabled; no jobs exist then, so no TRANSLATION_RESULT
+      // events would ever clear the spinner and queued page states below.
+      if (response?.status === 'error') {
+        console.warn('[Content Script] Batch chapter translation rejected:', response.error);
+        setIsTranslatingChapter(false);
+        setChapterPages((prev) =>
+          prev.map((page) =>
+            urls.includes(page.url) && page.status === 'queued' && !page.isTranslated
+              ? { ...page, status: 'error' as const }
+              : page
+          )
+        );
+      }
     } catch (err) {
       console.warn('[Content Script] Failed to dispatch batch chapter translation:', err);
       setIsTranslatingChapter(false);
@@ -1445,6 +1459,10 @@ function GlobalOverlay() {
     }
   };
 
+  // Latest handleTranslateCrop, readable from stale closures: repeatLastScreenCrop
+  // queues a translation for a crop added in the same tick, before a re-render
+  // replaces the per-render handler whose `crops` snapshot lacks the new crop.
+  const handleTranslateCropRef = useRef<(id: string) => void>(() => {});
   const handleTranslateCrop = (id: string) => {
     captureQueueRef.current = captureQueueRef.current.catch(() => undefined).then(async () => {
       const crop = crops.find((candidate) => candidate.id === id);
@@ -1519,6 +1537,7 @@ function GlobalOverlay() {
       }
     });
   };
+  handleTranslateCropRef.current = handleTranslateCrop;
 
   const handleGeometryChange = useCallback((id: string, bounds: { left: number; top: number; width: number; height: number }) => {
     setCrops((prev) => prev.map((candidate) => candidate.id === id
@@ -1562,7 +1581,9 @@ function GlobalOverlay() {
       };
       setCrops((prev) => [...prev, newCrop]);
       setTimeout(() => {
-        handleTranslateCrop(newId);
+        // Read through the ref: the handler captured in this effect's closure
+        // sees the pre-add `crops` snapshot and would miss the new crop.
+        handleTranslateCropRef.current(newId);
       }, 50);
     };
 

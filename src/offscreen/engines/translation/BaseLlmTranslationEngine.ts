@@ -440,6 +440,7 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
    * @param sourceLang - Resolved source language name.
    * @param targetLang - Resolved target language name.
    * @param glossary - Immutable literal terminology mappings for this request.
+   * @param customPrompt - Optional per-engine prompt override appended to the system rules.
    * @returns Structured system rules and user data messages.
    */
   protected buildMessages(

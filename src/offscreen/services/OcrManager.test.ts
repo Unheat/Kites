@@ -49,6 +49,186 @@ describe('OcrManager', () => {
     });
   });
 
+  describe('line ownership gating before merge', () => {
+    /**
+     * Builds a recognizer result with two adjacent vertical columns that the Cotrans merge graph
+     * would normally weld into one region.
+     *
+     * @returns Two-line recognition result with page geometry active.
+     */
+    const twoColumnResult = () => ({
+      texts: ['最初の列', '二列目'],
+      polygons: [
+        [{ x: 100, y: 100 }, { x: 140, y: 100 }, { x: 140, y: 300 }, { x: 100, y: 300 }],
+        [{ x: 150, y: 100 }, { x: 190, y: 100 }, { x: 190, y: 300 }, { x: 150, y: 300 }],
+      ],
+      scores: [0.95, 0.95],
+      detectionScores: [0.95, 0.95],
+      boxes: [{ x: 100, y: 100, w: 40, h: 200 }, { x: 150, y: 100, w: 40, h: 200 }],
+    });
+
+    /**
+     * Installs the two-column recognizer as the next engine instance.
+     */
+    const installTwoColumnEngine = () => {
+      (PaddleOcrEngine as any).mockImplementationOnce(function () {
+        return {
+          init: vi.fn().mockResolvedValue(undefined),
+          recognize: vi.fn().mockResolvedValue(twoColumnResult()),
+          destroy: vi.fn().mockResolvedValue(undefined),
+          isProviderCurrent: vi.fn().mockResolvedValue(true),
+        };
+      });
+    };
+
+    it('merges the columns when no ownership partitioner is supplied', async () => {
+      installTwoColumnEngine();
+      const result = await ocrManager.processImage(new ArrayBuffer(1), 'v6-small', {
+        pageWidth: 800, pageHeight: 1200,
+      });
+      expect(result.texts).toHaveLength(1);
+      // Vertical manga reading order sorts right-to-left, so the right column leads.
+      expect(result.groupLineIndices).toEqual([[1, 0]]);
+    });
+
+    it('refuses to merge lines that the partitioner puts in different buckets', async () => {
+      installTwoColumnEngine();
+      const partitionLines = vi.fn().mockResolvedValue([0, 1]);
+      const result = await ocrManager.processImage(new ArrayBuffer(1), 'v6-small', {
+        pageWidth: 800, pageHeight: 1200,
+      }, undefined, { partitionLines });
+      expect(partitionLines).toHaveBeenCalledTimes(1);
+      expect(result.texts).toHaveLength(2);
+      expect(result.groupLineIndices).toEqual([[1], [0]]);
+    });
+
+    it('keeps a multi-column utterance together when most of it shares one owner', async () => {
+      // Three adjacent columns of one sentence: two sit inside the balloon, one column's centre
+      // falls outside it. Splitting them would translate the sentence twice.
+      (PaddleOcrEngine as any).mockImplementationOnce(function () {
+        return {
+          init: vi.fn().mockResolvedValue(undefined),
+          recognize: vi.fn().mockResolvedValue({
+            texts: ['一列目', '二列目', '三列目'],
+            polygons: [100, 150, 200].map((x) => [
+              { x, y: 100 }, { x: x + 40, y: 100 }, { x: x + 40, y: 300 }, { x, y: 300 },
+            ]),
+            scores: [0.95, 0.95, 0.95],
+            detectionScores: [0.95, 0.95, 0.95],
+            boxes: [100, 150, 200].map((x) => ({ x, y: 100, w: 40, h: 200 })),
+          }),
+          destroy: vi.fn().mockResolvedValue(undefined),
+          isProviderCurrent: vi.fn().mockResolvedValue(true),
+        };
+      });
+      const result = await ocrManager.processImage(new ArrayBuffer(1), 'v6-small', {
+        pageWidth: 800, pageHeight: 1200,
+      }, undefined, { partitionLines: vi.fn().mockResolvedValue([0, 0, 1]) });
+      // 2 of 3 lines confirm bucket 0, so the third column joins them instead of splitting.
+      expect(result.texts).toHaveLength(1);
+      expect(result.texts[0]).toContain('三列目');
+    });
+
+    it('still splits a 1:1 weld so a stroke column cannot drag dialogue out of its balloon', async () => {
+      installTwoColumnEngine();
+      const result = await ocrManager.processImage(new ArrayBuffer(1), 'v6-small', {
+        pageWidth: 800, pageHeight: 1200,
+      }, undefined, { partitionLines: vi.fn().mockResolvedValue([0, 1]) });
+      expect(result.texts).toHaveLength(2);
+    });
+
+    it('keeps a balloon line split from free lines even when free text holds the proximity majority', async () => {
+      // Two free stroke columns (-1) adjacent to one balloon-owned line: free text must
+      // never win a component, or the dialogue is welded onto unowned free text and
+      // typesets outside its balloon.
+      (PaddleOcrEngine as any).mockImplementationOnce(function () {
+        return {
+          init: vi.fn().mockResolvedValue(undefined),
+          recognize: vi.fn().mockResolvedValue({
+            texts: ['一列目', '二列目', '三列目'],
+            polygons: [100, 150, 200].map((x) => [
+              { x, y: 100 }, { x: x + 40, y: 100 }, { x: x + 40, y: 300 }, { x, y: 300 },
+            ]),
+            scores: [0.95, 0.95, 0.95],
+            detectionScores: [0.95, 0.95, 0.95],
+            boxes: [100, 150, 200].map((x) => ({ x, y: 100, w: 40, h: 200 })),
+          }),
+          destroy: vi.fn().mockResolvedValue(undefined),
+          isProviderCurrent: vi.fn().mockResolvedValue(true),
+        };
+      });
+      const result = await ocrManager.processImage(new ArrayBuffer(1), 'v6-small', {
+        pageWidth: 800, pageHeight: 1200,
+      }, undefined, { partitionLines: vi.fn().mockResolvedValue([-1, -1, 0]) });
+      // The two free columns may weld to each other, but the balloon line stays its
+      // own region instead of being absorbed by the free pair.
+      expect(result.texts).toHaveLength(2);
+      const balloonRegion = result.texts.find((text) => text.includes('三列目'));
+      expect(balloonRegion).toBeDefined();
+      expect(balloonRegion).not.toContain('一列目');
+      expect(balloonRegion).not.toContain('二列目');
+    });
+
+    it('merges staggered side-by-side columns of one balloon despite size and stagger', async () => {
+      // Measured page: one sentence written across columns of very different glyph size and vertical
+      // stagger. The donor rule requires aligned column edges, so it used to arrive as two regions.
+      (PaddleOcrEngine as any).mockImplementationOnce(function () {
+        return {
+          init: vi.fn().mockResolvedValue(undefined),
+          recognize: vi.fn().mockResolvedValue({
+            texts: ['害我们白费这么多功夫…', '拜你所赐让老师跑掉了啊'],
+            polygons: [
+              [{ x: 300, y: 100 }, { x: 360, y: 100 }, { x: 360, y: 500 }, { x: 300, y: 500 }],
+              [{ x: 180, y: 90 }, { x: 290, y: 90 }, { x: 290, y: 560 }, { x: 180, y: 560 }],
+            ],
+            scores: [0.9, 0.9],
+            detectionScores: [0.9, 0.9],
+            boxes: [{ x: 300, y: 100, w: 60, h: 400 }, { x: 180, y: 90, w: 110, h: 470 }],
+          }),
+          destroy: vi.fn().mockResolvedValue(undefined),
+          isProviderCurrent: vi.fn().mockResolvedValue(true),
+        };
+      });
+      const result = await ocrManager.processImage(new ArrayBuffer(1), 'v6-small', {
+        pageWidth: 800, pageHeight: 1200,
+      }, undefined, { partitionLines: vi.fn().mockResolvedValue([0, 0]) });
+      expect(result.texts).toHaveLength(1);
+      expect(result.texts[0]).toContain('拜你所赐');
+    });
+
+    it('keeps two separate speeches in one balloon apart when they are stacked', async () => {
+      (PaddleOcrEngine as any).mockImplementationOnce(function () {
+        return {
+          init: vi.fn().mockResolvedValue(undefined),
+          recognize: vi.fn().mockResolvedValue({
+            texts: ['上の台詞です', '下の台詞です'],
+            polygons: [
+              [{ x: 300, y: 100 }, { x: 360, y: 100 }, { x: 360, y: 300 }, { x: 300, y: 300 }],
+              [{ x: 180, y: 420 }, { x: 240, y: 420 }, { x: 240, y: 620 }, { x: 180, y: 620 }],
+            ],
+            scores: [0.9, 0.9],
+            detectionScores: [0.9, 0.9],
+            boxes: [{ x: 300, y: 100, w: 60, h: 200 }, { x: 180, y: 420, w: 60, h: 200 }],
+          }),
+          destroy: vi.fn().mockResolvedValue(undefined),
+          isProviderCurrent: vi.fn().mockResolvedValue(true),
+        };
+      });
+      const result = await ocrManager.processImage(new ArrayBuffer(1), 'v6-small', {
+        pageWidth: 800, pageHeight: 1200,
+      }, undefined, { partitionLines: vi.fn().mockResolvedValue([0, 0]) });
+      expect(result.texts).toHaveLength(2);
+    });
+
+    it('fails fast when ownership does not cover every prepared line', async () => {
+      installTwoColumnEngine();
+      await expect(ocrManager.processImage(new ArrayBuffer(1), 'v6-small', {
+        pageWidth: 800, pageHeight: 1200,
+      }, undefined, { partitionLines: vi.fn().mockResolvedValue([0]) }))
+        .rejects.toThrow(/partitionLines returned 1 buckets for 2 lines/);
+    });
+  });
+
   describe('engine lifecycle through processImage', () => {
     it('initializes the default v6-small tier once and reuses it', async () => {
       await ocrManager.processImage(new ArrayBuffer(1));

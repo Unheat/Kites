@@ -1,5 +1,5 @@
 /**
- * @file contourTypeset.ts
+ * contourTypeset.ts
  * Koharu 2D contour scanline typesetting engine — Compatibility Facade
  *
  * Re-exports pure core modules and the public layout entry point. All types,

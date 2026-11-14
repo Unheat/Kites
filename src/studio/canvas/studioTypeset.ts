@@ -5,6 +5,7 @@ import { unwrapWrappedText } from '../../offscreen/utils/typography';
 import type { TypesetMode } from '../../shared/constants';
 import type { TextObject } from '../types';
 import { recordGeneratedLayout } from '../state/layoutGenerations';
+import { resolveTypesetMode } from './typesetModes';
 
 export type StudioTypesetMode = TypesetMode;
 
@@ -43,6 +44,57 @@ export const CJK_CHARACTER_REGEX = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf9
 
 /** Canonical minimum font size for contour layout (9px); Auto Balloon stays unchanged. */
 export { MINIMUM_READABLE_FONT_SIZE };
+
+/**
+ * One-entry memo of the last contour fit. A repeated identical request (same text, font, frame
+ * and contour) reuses the previous solve instead of paying a full binary search + DP again,
+ * which is what makes live resize refitting cheap: the Studio samples refits at ~16 Hz and the
+ * intermediate animation frames reuse the carried layout.
+ */
+let lastContourFitKey = '';
+let lastContourFit: BlockTypesetResult | null = null;
+
+/**
+ * Drops the memoized contour fit. Call at gesture start/end so an entry computed for one drag
+ * can never satisfy a request from another (font loads, text edits, mode switches, cancels).
+ */
+export function resetContourFitMemo(): void {
+  lastContourFitKey = '';
+  lastContourFit = null;
+}
+
+/**
+ * Builds the memo key for one contour fit request. Every input that can change the measured
+ * layout is part of it; the contour polygon contributes a checksum so a rescaled outline misses.
+ * @param sourceText - Display text being fitted.
+ * @param fontFamily - Resolved family stack.
+ * @param style - Object typography and contour.
+ * @param frameWidth - Frame width used for the fit.
+ * @param frameHeight - Frame height used for the fit.
+ * @param targetLang - Language driving wrapping rules.
+ * @param pinned - Pinned solver size from a manual font-size edit, if any.
+ * @returns Cache key string.
+ */
+function contourFitKey(
+  sourceText: string,
+  fontFamily: string,
+  style: TypesetStyle,
+  frameWidth: number,
+  frameHeight: number,
+  targetLang: string,
+  pinned: number | undefined
+): string {
+  let checksum = 0;
+  for (const point of style.contourPoints ?? []) {
+    checksum = (checksum * 31 + Math.round(point.x) * 7 + Math.round(point.y)) | 0;
+  }
+  return [
+    sourceText, fontFamily, style.bold ? 'b' : '', style.italic ? 'i' : '',
+    style.letterSpacing ?? 0, style.lineSpacing ?? 0, style.borderRadius ?? 0,
+    targetLang, Math.round(frameWidth), Math.round(frameHeight), pinned ?? '',
+    style.contourPoints?.length ?? 0, checksum,
+  ].join('\u0000');
+}
 
 /** Fields whose actual changes invalidate measured lines; paint/selection changes do not. */
 const LAYOUT_FIELDS = [
@@ -119,7 +171,14 @@ export function applyTextObjectUpdates(
   const pinnedFontSize = updates.fontSize !== undefined && updates.fontSize !== object.fontSize
     ? updates.fontSize
     : undefined;
-  return reflowTextObject(updated, chosenMode ?? updated.typesetMode ?? globalMode, pinnedFontSize);
+  // Engine availability is decided from detected bubble evidence, not from the current mode:
+  // a caption must never fall into contour fitting, and a bubble switched to another engine
+  // must stay eligible for contour. See typesetModes.ts.
+  return reflowTextObject(
+    updated,
+    resolveTypesetMode(updated, chosenMode ?? updated.typesetMode ?? globalMode),
+    pinnedFontSize
+  );
 }
 
 export interface BlockTypesetResult {
@@ -141,7 +200,11 @@ export interface BlockTypesetResult {
  *                         reflow pins the solver to this size instead of auto-fitting.
  * @returns Object copy containing newly measured lines and font size.
  */
-export function reflowTextObject(object: TextObject, mode: StudioTypesetMode, pinnedFontSize?: number): TextObject {
+export function reflowTextObject(
+  object: TextObject,
+  mode: StudioTypesetMode,
+  pinnedFontSize?: number
+): TextObject {
   let width = object.width;
   let fontSize = object.fontSize;
   const startWidth = width;
@@ -387,6 +450,7 @@ export function wrapVerticalTypeset(
  * @param fallbackSize - Baseline starting font size.
  * @param mode - 'balloon' for full comic diamond typesetting or 'simple' for greedy wrap.
  * @param style - Optional object-level weight, slant, tracking, and baseline spacing.
+ * @param pinnedFontSize - Opt-in solver size floor/ceiling pin from a manual font-size edit.
  * @returns Fitted font size and dynamically wrapped lines.
  */
 export function recalculateBlockTypeset(
@@ -457,6 +521,10 @@ export function recalculateBlockTypeset(
       const pinned = pinnedFontSize !== undefined
         ? Math.max(MINIMUM_READABLE_FONT_SIZE, pinnedFontSize)
         : undefined;
+      // The contour scales with the box during a resize, so both the frame and the polygon checksum
+      // participate in the memo key: a re-fitted frame never reuses a fit from a different shape.
+      const fitKey = contourFitKey(sourceText, fontFamily, style, width, height, targetLang, pinned);
+      if (fitKey === lastContourFitKey && lastContourFit) return lastContourFit;
       const result = wrapTextContour(
         sourceText,
         contour,
@@ -477,12 +545,15 @@ export function recalculateBlockTypeset(
         }
       );
       if (!result) return { fontSize: fallbackSize, lines: [sourceText] };
-      return {
+      const layout: BlockTypesetResult = {
         fontSize: result.fontSize,
         lines: result.lines && result.lines.length > 0 ? result.lines : [sourceText],
         height: result.height,
         positionedLines: result.positionedLines,
       };
+      lastContourFitKey = fitKey;
+      lastContourFit = layout;
+      return layout;
     }
 
     // Auto Balloon Mode: full pipeline diamond envelopes, hyphenation, and auto font fitting

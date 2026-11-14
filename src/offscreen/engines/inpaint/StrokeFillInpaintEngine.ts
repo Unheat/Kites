@@ -1,5 +1,5 @@
 /**
- * @file StrokeFillInpaintEngine.ts
+ * StrokeFillInpaintEngine.ts
  * Tier 2 Inpainting Engine: Precise Stroke Fill (Smart Text Eraser).
  *
  * Combines Binarizer's Otsu stroke-mask extraction with SimpleInpaintEngine's

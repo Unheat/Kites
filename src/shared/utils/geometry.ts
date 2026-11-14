@@ -1,5 +1,5 @@
 /**
- * @file geometry.ts
+ * geometry.ts
  * Utility functions for math and geometry, used for text line merging and typesetting
  * of 4-point OCR polygons.
  *
@@ -123,13 +123,13 @@ const HORIZONTAL_JITTER_MAX_DEG = 8;
 const HORIZONTAL_JITTER_MAX_ASPECT = 2.2;
 
 /** Tilts smaller than this are measurement noise and are reported as level. */
-const MIN_MEASURABLE_TILT_DEG = 1.5;
+export const MIN_MEASURABLE_TILT_DEG = 1.5;
 
 /**
  * Tilts beyond this are not line tilt at all (diagonal artwork), so they are reported as level.
  * The OCR noise filters rely on this: an artwork stroke must not look like a tilted text line.
  */
-const MAX_MEASURABLE_TILT_DEG = 45;
+export const MAX_MEASURABLE_TILT_DEG = 45;
 
 /**
  * Measures how far a text quad is rotated from its own reading axis, in degrees.

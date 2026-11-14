@@ -1,5 +1,5 @@
 /**
- * @file TeleaInpaintEngine.ts
+ * TeleaInpaintEngine.ts
  * Tier 2 Inpainting Engine: Mathematical Fast Marching Method (FMM) Diffusion.
  *
  * Implements Alexandru Telea's Fast Marching Method inpainting algorithm (2004)

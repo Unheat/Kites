@@ -47,7 +47,7 @@ const VERTICAL_CROP_ASPECT = 1.5;
 const CROP_BAND_MIN_COUNT = 2;
 
 /** A gap of ink-free rows this tall separates two text bands inside one crop. */
-const CROP_BAND_GAP_MIN_PX = 3;
+export const CROP_BAND_GAP_MIN_PX = 3;
 
 /** Bands thinner than this are glyph fragments or rule lines, not separate text columns. */
 const CROP_BAND_MIN_HEIGHT_PX = 8;
@@ -434,13 +434,6 @@ export class PaddleOcrEngine implements IOcrEngine {
   }
 
   /**
-   * Recognizes text for arbitrary polygon crops from an already prepared source Canvas.
-   * 
-   * @param sourceCanvas - Pre-rendered Canvas instance containing the target image/tile pixels.
-   * @param polygons - Array of 4-point quadrilaterals in sourceCanvas pixel coordinates.
-   * @returns Object containing recognized texts array and confidence scores array.
-   */
-  /**
    * Recognizes one deskewed crop, reading it band by band when it holds several text columns.
    *
    * A bubble whose columns were fused into one detection box produces a crop with one ink band per
@@ -696,22 +689,15 @@ function extractCropBand(platform: any, cropCanvas: any, band: { y: number; heig
 
 /**
  * Custom canvas crop helper that deskews rotated quadrilateral text regions
- * and automatically rotates vertical text lines by 90 degrees counter-clockwise
- * to lay them flat horizontally before character recognition.
- * 
- * @param platform - The platform abstraction layer.
- * @param sourceCanvas - The source canvas containing the full image.
- * @param polygon - The coordinates of the quadrilateral bounding the text region.
- * @returns The cropped and straightened canvas containing the text line.
- */
-/**
- * Custom canvas crop helper that deskews rotated quadrilateral text regions
  * via 4-corner perspective homography with bilinear interpolation and border-replicate clamping.
  * Automatically rotates vertical text lines by 90 degrees counter-clockwise
  * to lay them flat horizontally before character recognition.
  * 
  * @param platform - The platform abstraction layer.
  * @param sourceCanvas - The source canvas containing the full image.
+ * @param srcPixels - Source image RGBA pixels.
+ * @param srcW - Source image width.
+ * @param srcH - Source image height.
  * @param polygon - The coordinates of the quadrilateral bounding the text region.
  * @returns The cropped and straightened canvas containing the text line.
  */

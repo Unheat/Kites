@@ -115,6 +115,8 @@ export interface TextObject {
   isLocked?: boolean;
   isVisible?: boolean;
   isSkipped?: boolean;
+  /** Preserved artwork: never erased and never painted, so Studio must not draw its text. */
+  isArtwork?: boolean;
   /** Preferred engine for future edits, independent of already measured lines. */
   typesetMode?: TypesetMode;
   /**

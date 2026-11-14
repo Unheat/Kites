@@ -180,7 +180,7 @@ export class NeuralBubbleEngine implements IBubbleEngine {
     _image: ImagePatchData,
     textBoxes: BoxRect[],
     options?: BubbleEngineOptions,
-    precomputed?: PrecomputedBubbleDetection
+    precomputed?: PrecomputedBubbleDetection,
   ): Promise<BubbleGeometry | null> {
     let bubbles: BoxRect[];
     let detectionShapes: (BubbleShapeEvidence | undefined)[] | undefined;
@@ -241,7 +241,7 @@ export class NeuralBubbleEngine implements IBubbleEngine {
     image: ImagePatchData,
     textBoxes: BoxRect[],
     options?: BubbleEngineOptions,
-    precomputed?: PrecomputedBubbleDetection
+    precomputed?: PrecomputedBubbleDetection,
   ): Promise<BubbleGeometry | null> {
     return NeuralBubbleEngine.buildGeometry(canvas, image, textBoxes, options, precomputed);
   }

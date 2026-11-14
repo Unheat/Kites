@@ -55,6 +55,13 @@ jobs:
       - name: Run Unit Tests
         run: npm run test
 
+      # Documentation gate: coverage ratchet + enforced TSDoc shape, then a zero-warning reference build
+      - name: Documentation Gate
+        run: npm run docs:check
+
+      - name: Build API Reference
+        run: npm run docs:api
+
       # Attempt to build the Chrome Extension (TypeScript checks + Vite build)
       - name: Build Extension
         run: npm run build

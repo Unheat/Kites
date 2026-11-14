@@ -1,5 +1,5 @@
 export type ReadingCommandMessage = {
-  type: 'TRANSLATE_HOVERED_IMAGE' | 'START_AREA_SELECTION' | 'OPEN_CHAPTER_READER';
+  type: 'TRANSLATE_HOVERED_IMAGE' | 'START_AREA_SELECTION' | 'REPEAT_SCREEN_CROP' | 'OPEN_CHAPTER_READER';
 };
 
 /** Minimal Chrome surface keeps registration safe in older unit-test mocks. */
@@ -25,6 +25,7 @@ const TOP_FRAME_ID = 0;
 export function readingCommandMessage(command: string): ReadingCommandMessage | null {
   if (command === 'translate-hovered-image') return { type: 'TRANSLATE_HOVERED_IMAGE' };
   if (command === 'start-screen-crop') return { type: 'START_AREA_SELECTION' };
+  if (command === 'repeat-screen-crop') return { type: 'REPEAT_SCREEN_CROP' };
   if (command === 'open-chapter-reader') return { type: 'OPEN_CHAPTER_READER' };
   return null;
 }

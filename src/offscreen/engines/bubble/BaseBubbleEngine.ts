@@ -105,7 +105,7 @@ export interface IBubbleEngine {
     image: ImagePatchData,
     textBoxes: BoxRect[],
     options?: BubbleEngineOptions,
-    precomputed?: PrecomputedBubbleDetection
+    precomputed?: PrecomputedBubbleDetection,
   ): Promise<BubbleGeometry | null>;
 
   /**

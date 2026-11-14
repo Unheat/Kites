@@ -112,6 +112,56 @@ describe('DisplayLetteringArtworkClassifier', () => {
   it('does nothing without a baseline', () => {
     expect(classifier.classify({ text: 'こブンャっー' }).isArtwork).toBe(false);
   });
+
+  it('vetoes a merged sentence that a glued box inflated (measured regression)', () => {
+    // Measured page: OCR split one balloon line into two misread columns, merge welded them into
+    // "居个铜时啊w送影", and the 200x288 union scored ~3.4x body size on its box short side.
+    expect(
+      classifier.classify({ text: '居个铜时啊w送影', glyphRatio: 3.4, lineCount: 2 }).isArtwork,
+    ).toBe(false);
+  });
+
+  it('vetoes prose punctuation, which drawn lettering never carries', () => {
+    expect(
+      classifier.classify({ text: '居然两个穴同时用，真亏你们做得出', glyphRatio: 3.0, lineCount: 1 }).isArtwork,
+    ).toBe(false);
+  });
+
+  it('keeps short stacked lettering eligible', () => {
+    expect(classifier.classify({ text: 'ドン', glyphRatio: 3.0, lineCount: 2 }).kind).toBe('display-lettering');
+    expect(classifier.classify({ text: 'バキッ', glyphRatio: 2.6, lineCount: 2 }).kind).toBe('display-lettering');
+  });
+
+  it('keeps one long single-line sound effect eligible', () => {
+    expect(classifier.classify({ text: 'ドドドドドドド', glyphRatio: 2.8, lineCount: 1 }).kind).toBe('display-lettering');
+  });
+});
+
+describe('LatinNoiseArtworkClassifier', () => {
+  it('preserves short OCR debris read off artwork or screentone', () => {
+    // Measured on scanned pages: bubble texture and SFX strokes decode to these.
+    for (const text of ['S1PA', 'A9V', 'ww', 'L', 'AR', 'Nr日', 'IM一']) {
+      expect(defaultArtworkClassifier.classify({ text }).kind, text).toBe('fragment');
+    }
+  });
+
+  it('never preserves real Latin words or shouts', () => {
+    // Kept translatable on purpose: Latin blocks are the target language, and the donor's
+    // "HUH?" case showed that preserving them leaves a reader with an untranslated bubble.
+    for (const text of ['HOOO', 'Justice', 'HASUMI', 'Nr day', 'WAIT']) {
+      expect(defaultArtworkClassifier.classify({ text }).isArtwork, text).toBe(false);
+    }
+  });
+
+  it('does not preserve short no-digit Latin blocks inside a balloon', () => {
+    // Balloon context vetoes the debris rule: `OK`/`No` are real short dialogue, and
+    // preserving them used to leave an untranslated bubble with its original ink.
+    for (const text of ['OK!', 'No', 'Hi', 'Eh?']) {
+      expect(defaultArtworkClassifier.classify({ text, inBubble: true }).isArtwork, text).toBe(false);
+    }
+    // Digit-bearing debris stays preserved even in-bubble: erasing it buys nothing.
+    expect(defaultArtworkClassifier.classify({ text: 'A9V', inBubble: true }).kind).toBe('fragment');
+  });
 });
 
 describe('defaultArtworkClassifier', () => {

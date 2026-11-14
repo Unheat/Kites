@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import { applyTextObjectUpdates, getTypesetDisplayText, getTypesetMeasureContext, prepareInitialTextObject, recalculateBlockTypeset } from './studioTypeset';
+import { applyTextObjectUpdates, getTypesetDisplayText, getTypesetMeasureContext, prepareInitialTextObject, recalculateBlockTypeset, resetContourFitMemo } from './studioTypeset';
+import { availableTypesetModesFor, hasBubbleContour } from './typesetModes';
 import type { TextObject } from '../types';
 
 const object: TextObject = {
@@ -114,7 +115,11 @@ describe('Studio layout ownership', () => {
   });
 
   it('preserves a dragged fontSize through applyTextObjectUpdates on contour objects', () => {
-    const contour = { ...object, typesetMode: 'contour' as const, lines: undefined };
+    // Contour fitting is only available to objects that actually own a bubble polygon.
+    const contour = {
+      ...object, typesetMode: 'contour' as const, lines: undefined,
+      contourPoints: [{ x: 0, y: 0 }, { x: 200, y: 0 }, { x: 200, y: 150 }, { x: 0, y: 150 }],
+    };
     const updated = applyTextObjectUpdates(contour, { fontSize: 24 }, 'contour');
     expect(updated.fontSize).toBe(24);
     // Later geometry edits drop the pin and auto-fit again from the readability floor.
@@ -357,5 +362,86 @@ describe('Studio Algorithmic Typeset & Line Reflow', () => {
       expect(updated.lines).toBeDefined();
       expect(updated.lines!.length).toBeGreaterThanOrEqual(1);
     });
+  });
+});
+
+describe('live resize contour refit', () => {
+  /** @returns Rectangular chamber outline used as the detected bubble polygon. */
+  function chamber(scale = 1): Array<{ x: number; y: number }> {
+    return [
+      { x: Math.round(10 * scale), y: Math.round(10 * scale) },
+      { x: Math.round(190 * scale), y: Math.round(10 * scale) },
+      { x: Math.round(190 * scale), y: Math.round(140 * scale) },
+      { x: Math.round(10 * scale), y: Math.round(140 * scale) },
+    ];
+  }
+
+  const text = 'The fresh armpits of a high school girl are so delicious.';
+
+  it('reuses one solve for an identical request', () => {
+    resetContourFitMemo();
+    const style = { contourPoints: chamber() };
+    const first = recalculateBlockTypeset(text, 'sans-serif', 200, 150, 16, 'contour', style);
+    const second = recalculateBlockTypeset(text, 'sans-serif', 200, 150, 16, 'contour', style);
+    // The memo answers instead of paying a second binary search + DP pass.
+    expect(second).toBe(first);
+  });
+
+  it('re-fits when the box and its contour scale together, as a resize drag produces', () => {
+    resetContourFitMemo();
+    const base = recalculateBlockTypeset(text, 'sans-serif', 200, 150, 16, 'contour', { contourPoints: chamber(1) });
+    // Studio scales contourPoints with the box on every resize frame.
+    const scaled = recalculateBlockTypeset(text, 'sans-serif', 300, 225, 16, 'contour', { contourPoints: chamber(1.5) });
+    expect(scaled).not.toBe(base);
+    expect(scaled.fontSize).toBeGreaterThan(base.fontSize);
+    // Text keeps filling the outline instead of only the frame: same number of lines, bigger glyphs.
+    expect(scaled.lines.length).toBe(base.lines.length);
+  });
+
+  it('re-fits after a frame change so the committed layout is not a stale solve', () => {
+    resetContourFitMemo();
+    const style = { contourPoints: chamber() };
+    const first = recalculateBlockTypeset(text, 'sans-serif', 200, 150, 16, 'contour', style);
+    const narrower = recalculateBlockTypeset(text, 'sans-serif', 60, 150, 16, 'contour', style);
+    expect(narrower).not.toBe(first);
+    expect(narrower.fontSize).toBeLessThan(first.fontSize);
+  });
+
+  it('moves never re-run typeset', () => {
+    const moved = applyTextObjectUpdates({ ...object, typesetMode: 'contour', contourPoints: chamber() }, { x: 40, y: 30 });
+    expect(moved.lines).toBe(object.lines);
+    expect(moved.fontSize).toBe(object.fontSize);
+  });
+});
+
+describe('engine availability from bubble evidence', () => {
+  const chamber = [{ x: 0, y: 0 }, { x: 200, y: 0 }, { x: 200, y: 150 }, { x: 0, y: 150 }];
+  const text = 'Region text that is not inside any speech bubble outline at all.';
+
+  it('offers all three engines for a detected bubble and two for free text', () => {
+    expect(availableTypesetModesFor({ contourPoints: chamber })).toEqual(['contour', 'balloon', 'simple']);
+    expect(availableTypesetModesFor({ contourPoints: undefined })).toEqual(['balloon', 'simple']);
+    expect(availableTypesetModesFor(null)).toEqual(['balloon', 'simple']);
+  });
+
+  it('counts a two-point polygon as no contour', () => {
+    expect(hasBubbleContour({ contourPoints: [{ x: 0, y: 0 }, { x: 10, y: 10 }] })).toBe(false);
+  });
+
+  it('never contour-fits free text even when contour is requested', () => {
+    const caption: TextObject = { ...object, typesetMode: undefined, contourPoints: undefined };
+    const updated = applyTextObjectUpdates(caption, { text }, 'contour');
+    const balloon = recalculateBlockTypeset(text, object.fontFamily, object.width, object.height, object.fontSize, 'balloon');
+    expect(updated.lines).toEqual(balloon.lines);
+  });
+
+  it('keeps contour fitting for a bubble that was switched to another engine', () => {
+    const bubble: TextObject = { ...object, typesetMode: 'simple', contourPoints: chamber };
+    const updated = applyTextObjectUpdates(bubble, { text }, 'simple', 'contour');
+    const contour = recalculateBlockTypeset(text, object.fontFamily, object.width, object.height, object.fontSize, 'contour', {
+      contourPoints: chamber,
+    });
+    expect(updated.lines).toEqual(contour.lines);
+    expect(updated.contourPoints).toHaveLength(4);
   });
 });

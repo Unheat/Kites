@@ -137,6 +137,8 @@ export class HeuristicBubbleEngine implements IBubbleEngine {
    * @param _canvas - Unused by CPU morphology.
    * @param image - Original image pixel buffer.
    * @param textBoxes - OCR text boxes to extract chambers around.
+   * @param _options - Unused by CPU morphology.
+   * @param _precomputed - Unused by CPU morphology.
    * @returns Heuristic-tier geometry aligned to the OCR boxes.
    */
   async acquireGeometry(
@@ -144,7 +146,7 @@ export class HeuristicBubbleEngine implements IBubbleEngine {
     image: ImagePatchData,
     textBoxes: BoxRect[],
     _options?: BubbleEngineOptions,
-    _precomputed?: PrecomputedBubbleDetection
+    _precomputed?: PrecomputedBubbleDetection,
   ): Promise<BubbleGeometry> {
     return HeuristicBubbleEngine.buildGeometry(image, textBoxes);
   }

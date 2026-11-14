@@ -36,6 +36,10 @@ describe('readingCommandMessage', () => {
     expect(readingCommandMessage('open-chapter-reader')).toEqual({ type: 'OPEN_CHAPTER_READER' });
   });
 
+  it('maps repeat-screen-crop', () => {
+    expect(readingCommandMessage('repeat-screen-crop')).toEqual({ type: 'REPEAT_SCREEN_CROP' });
+  });
+
   it.each(['unknown', '_execute_action', 'custom_translate', ''])('returns null for %s', (command) => {
     expect(readingCommandMessage(command)).toBeNull();
   });
@@ -62,6 +66,16 @@ describe('routeReadingCommand', () => {
     expect(api.tabs!.sendMessage).toHaveBeenCalledWith(
       42,
       { type: 'START_AREA_SELECTION' },
+      { frameId: 0 },
+      expect.any(Function),
+    );
+  });
+
+  it('sends REPEAT_SCREEN_CROP to the top frame', () => {
+    routeReadingCommand('repeat-screen-crop', api);
+    expect(api.tabs!.sendMessage).toHaveBeenCalledWith(
+      42,
+      { type: 'REPEAT_SCREEN_CROP' },
       { frameId: 0 },
       expect.any(Function),
     );

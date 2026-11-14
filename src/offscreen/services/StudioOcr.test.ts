@@ -80,12 +80,33 @@ describe('Studio OCR independent optional steps', () => {
 
   it('defaults both missing flags to true and honors popup settings', async () => {
     const response = await runStudioOcr(payload, mocks.dependencies);
-    expect(mocks.processImage).toHaveBeenCalledWith(originalBuffer, 'v6-medium', {
+    // Balloon ownership is resolved inside the OCR stage, so the client options travel as a fifth
+    // argument (undefined here: this fixture has no bubble tier enabled).
+    expect(mocks.processImage.mock.calls[0].slice(0, 3)).toEqual([originalBuffer, 'v6-medium', {
       sourceLang: 'ja', pageWidth: 100, pageHeight: 80,
-    });
+    }]);
     expect(mocks.processTranslation).toHaveBeenCalledWith(['こんにちは'], 'ja', 'vi', undefined, popupState);
     expect(mocks.eraseText).toHaveBeenCalledWith(originalBuffer, rawPolygons, 'telea');
     expect(response.inpaintedPatchBase64).toBe(CLEAN_PATCH);
+  });
+
+  it('flags preserved artwork so Studio keeps the original ink', async () => {
+    mocks.processImage.mockImplementation(async (...args: any[]) => {
+      const options = args[4] as { partitionLines?: (lines: any[]) => Promise<number[]> } | undefined;
+      if (options?.partitionLines) {
+        await options.partitionLines([{ box: { x: 0, y: 0, w: 10, h: 10 }, polygon: [], text: '', score: 1, fontSize: 10, direction: 'h' }]);
+      }
+      return {
+        texts: ['ドン'],
+        polygons: [[{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }]],
+        boxes: [{ x: 0, y: 0, w: 10, h: 10 }],
+        rawPolygons: [],
+        artwork: [{ index: 0, kind: 'sound-effect' }],
+        groupLineIndices: [[0]],
+      };
+    });
+    const response = await runStudioOcr({ ...payload, inpaint: false }, mocks.dependencies);
+    expect(response.textObjects[0]).toMatchObject({ isArtwork: true });
   });
 
   it('honors local engine overrides without mutating popup state', async () => {

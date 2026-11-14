@@ -250,7 +250,7 @@ flowchart TD
 ```
 
 - Neural matching admits class `0: bubble` rather than tight text/free-text classes. Heuristic masks and neural masks produce source-coordinate contours using independent `scaleX` / `scaleY`, avoiding anisotropic drift.
-- A 12% safe core remains in computed-box paths; it is **not** universal. A single neural proposal with a contour can use contour bounds instead. Shared curved balloons can use flow-cell/topological partitioning, not only clean one-axis X/Y splits.
+- A 12% safe core remains in computed-box paths; it is **not** universal. A single-bubble region with a drawable chamber contour uses contour bounds for **both** tiers: contour presence, not chamber-proposal presence, owns the box (`isUsableContourBox`, guarded by `MAX_CONTOUR_BOX_AREA_RATIO` against background leaks). Shared curved balloons can use flow-cell/topological partitioning, not only clean one-axis X/Y splits.
 - Tiny secondary fragments can be suppressed by the dominant-chamber noise guard. Their text remains persisted/editable with `isSkipped`; collision rollback clears those suppressions for the rejected group.
 - Validation checks page bounds and tilt, uses the caller's acceptance callback, rolls back significant external collisions group-wise, then applies sibling boundary constraints. Do not interpret every surviving contour as an independently font-validated final cell: the live acceptance closure measures acquisition contour evidence relative to the proposed box, whereas final cell contours are returned afterward.
 - **Inpainting isolation:** erasers receive original text polygons, never expanded typeset boxes or balloon contours. The OCR raw probability mask remains diagnostic, not the inpaint engine contract.

@@ -224,21 +224,10 @@ chrome.contextMenus.onClicked.addListener(async (info: chrome.contextMenus.OnCli
   }
 });
 
-// Forward keyboard command shortcuts declared in manifest.json to the active content tab
-chrome.commands?.onCommand?.addListener(async (command: string, tab?: chrome.tabs.Tab) => {
-  const activeTabId = tab?.id ?? (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.id;
-  if (!activeTabId) return;
-
-  if (command === 'translate-hovered-image') {
-    chrome.tabs.sendMessage(activeTabId, { type: 'TRANSLATE_HOVERED_IMAGE' }).catch(() => {});
-  } else if (command === 'start-screen-crop') {
-    chrome.tabs.sendMessage(activeTabId, { type: 'START_AREA_SELECTION' }).catch(() => {});
-  } else if (command === 'repeat-screen-crop') {
-    chrome.tabs.sendMessage(activeTabId, { type: 'REPEAT_SCREEN_CROP' }).catch(() => {});
-  } else if (command === 'open-chapter-reader') {
-    chrome.tabs.sendMessage(activeTabId, { type: 'OPEN_CHAPTER_READER' }).catch(() => {});
-  }
-});
+// Keyboard command shortcuts declared in manifest.json are routed exclusively by
+// registerReadingCommands() (src/background/readingCommands.ts) so every command is
+// delivered once, to the top frame. The legacy inline listener that also fired here
+// duplicated delivery into every frame (manifest injects with all_frames: true).
 
 // Forward messages from content script or offscreen to popup
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -834,7 +823,12 @@ const MAX_BATCH_QUEUE_CAPACITY = 100;
  * @returns {Promise<void>}
  */
 export async function queueTranslation(srcUrl: string, tabId?: number, isBatch = false) {
-  // Guard against duplicate queueing if a job for this URL is currently in flight
+  // Guard against duplicate queueing if a job for this URL is currently in flight.
+  // Only actively-running jobs may be treated as stale, and only after the same
+  // no-progress window reclaimStaleJobs uses: a 'queued' job can legitimately wait
+  // minutes behind an active job (e.g. a first-run model download), so bypassing it
+  // re-queued duplicates that each ran the full pipeline. Orphaned queued jobs are
+  // recovered by resetOrphanedInFlightJobs() at service-worker startup instead.
   const inFlightJob = srcUrl
     ? await db.translationJobs
         .where('srcUrl')
@@ -842,7 +836,9 @@ export async function queueTranslation(srcUrl: string, tabId?: number, isBatch =
         .and((job) => ['queued', 'downloading', 'processing'].includes(job.status as string))
         .first()
     : null;
-  const isStale = inFlightJob && (Date.now() - inFlightJob.timestamp > 15000);
+  const isStale = Boolean(inFlightJob)
+    && inFlightJob!.status !== 'queued'
+    && (Date.now() - inFlightJob!.timestamp > STALE_JOB_TIMEOUT_MS);
 
   if (inFlightJob && !isStale) {
     console.log('[Background] URL already in active processing. Skipping duplicate:', srcUrl);

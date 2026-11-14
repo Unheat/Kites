@@ -1,5 +1,5 @@
 /**
- * @file maskContourExtractor.ts
+ * maskContourExtractor.ts
  * Extracts simplified closed 2D polygon contours from binary segmentation masks.
  * 1:1 port of Koharu's mask_geometry (crates/koharu-pipeline/src/stages/detection.rs:1325-1355)
  * using Moore-Neighbor boundary tracing and Douglas-Peucker polygon approximation.

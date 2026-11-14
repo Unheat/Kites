@@ -1,5 +1,5 @@
 /**
- * @file index.ts
+ * index.ts
  * Public entry points for the typesetting engines and Strategy pattern.
  */
 

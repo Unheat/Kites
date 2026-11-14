@@ -1,5 +1,5 @@
 /**
- * @file tokenizer.ts
+ * tokenizer.ts
  * Tokenizes translated dialogue into typographic units with script-aware clustering and linguistic penalties.
  */
 

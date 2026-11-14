@@ -1,5 +1,5 @@
 /**
- * @file SimpleRectTypesetter.ts
+ * SimpleRectTypesetter.ts
  * Route 3: Rectangular box wrapping for captions, rectangular narration panels, and SFX.
  * Wraps clean text within a 4-point bounding quad.
  */

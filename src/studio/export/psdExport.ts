@@ -151,6 +151,10 @@ export function buildPsdDocument(
   for (const block of textBlocks) {
     if ('isVisible' in block && block.isVisible === false) continue;
     if ('isSkipped' in block && block.isSkipped) continue;
+    // Preserve-pair invariant: artwork blocks keep their original ink (never
+    // erased), so no editable translation layer is added for them — matching
+    // StudioCanvas and thumbnailRenderer.
+    if ('isArtwork' in block && block.isArtwork) continue;
 
     const textContent = 'text' in block ? block.text : block.translatedText;
     if (!textContent || !textContent.trim()) continue;

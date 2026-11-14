@@ -1,5 +1,5 @@
 /**
- * @file sharedContainerPartition.ts
+ * sharedContainerPartition.ts
  * Bounding box core insetting, tail trimming, and sub-chamber territory partitioning.
  * 1:1 port of XianScan `expansion.rs` and `builder.rs:673`.
  */
@@ -276,12 +276,29 @@ export function computeTypesetBox(
     ? Math.min(expandedW, Math.round(textBox.w * 1.40))
     : expandedW;
 
-  const centered: BoxRect = {
-    x: targetCx - Math.round(targetW / 2),
-    y: targetCy - Math.round(expandedH / 2),
-    w: targetW,
-    h: expandedH
-  };
+  /**
+   * Merge can leave the region wider than the balloon it belongs to (a welded line sits outside
+   * it), which puts the region's center outside the core. Anchoring on that center and then
+   * clamping the edges collapses the box to a sliver against one side of the balloon instead of
+   * using the width the balloon offers. Only that case re-anchors; a center already inside the core
+   * keeps the donor's exact centroid anchoring, so ordinary off-center text is unchanged.
+   */
+  const anchorOutsideCore = targetCx < core.left || targetCx > core.right
+    || targetCy < core.top || targetCy > core.bottom;
+
+  const centered: BoxRect = anchorOutsideCore
+    ? {
+        x: Math.round(Math.min(Math.max(targetCx, core.left), core.right - targetW)),
+        y: Math.round(Math.min(Math.max(targetCy, core.top), core.bottom - expandedH)),
+        w: targetW,
+        h: expandedH
+      }
+    : {
+        x: targetCx - Math.round(targetW / 2),
+        y: targetCy - Math.round(expandedH / 2),
+        w: targetW,
+        h: expandedH
+      };
 
   return clampBoxToCore(centered, core.left, core.right, core.top, core.bottom);
 }

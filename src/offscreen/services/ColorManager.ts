@@ -86,6 +86,7 @@ export class ColorManager {
    *
    * @param tier - Target color tier ID.
    * @param onInitialization - Optional lifecycle progress callback.
+   * @param options - Optional runtime options such as GPU preference.
    * @returns Initialized color engine.
    */
   private async createEngine(

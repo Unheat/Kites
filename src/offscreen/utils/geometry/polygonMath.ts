@@ -1,5 +1,5 @@
 /**
- * @file polygonMath.ts
+ * polygonMath.ts
  * Pure polygon geometry algorithms ported from Koharu `crates/koharu-renderer/src/bubble.rs:84-230`.
  * Includes Douglas-Peucker contour simplification, reflex-vertex detection, and topological lobe decomposition.
  */
@@ -101,7 +101,14 @@ export function distanceToPolygonBoundary(point: Point2D, poly: Point2D[]): numb
   return minD;
 }
 
-/** @param first @param second - Vertex indices of the splitting diagonal. @returns The two vertex chains between the indices, both inclusive. */
+/**
+ * Splits a closed polygon ring along the chord between two vertices.
+ *
+ * @param poly - Closed polygon ring.
+ * @param first - First vertex index of the splitting diagonal.
+ * @param second - Second vertex index of the splitting diagonal.
+ * @returns The two vertex chains between the indices, both inclusive.
+ */
 export function splitPolygon(poly: Point2D[], first: number, second: number): [Point2D[], Point2D[]] {
   const [f, s] = first <= second ? [first, second] : [second, first];
   const part1 = poly.slice(f, s + 1);
@@ -287,6 +294,14 @@ export function decomposeLobes(
 }
 
 /**
+ * Contour size above which neck decomposition is skipped.
+ *
+ * Donor parity (Koharu `topological_flow_cells`): a raster contour this dense carries no reliable
+ * reflex structure, and decomposition is quadratic in vertices, so it yields to bisector clipping.
+ */
+export const MAX_CONTOUR_POINTS = 1024;
+
+/**
  * Splits a joined balloon into non-overlapping polygons by decomposing at physical
  * constriction necks between lobes (reflex-vertex diagonals).
  * 1:1 port of Koharu `topological_flow_cells` (`crates/koharu-renderer/src/bubble.rs:84-104`).
@@ -295,7 +310,9 @@ export function topologicalFlowCells(
   contour: Point2D[],
   anchors: Point2D[]
 ): Point2D[][] | null {
-  if (contour.length < 4 || anchors.length <= 1) return null;
+  if (contour.length < 4 || contour.length > MAX_CONTOUR_POINTS) return null;
+  if (contour.some((p) => !Number.isFinite(p.x) || !Number.isFinite(p.y))) return null;
+  if (anchors.some((p) => !Number.isFinite(p.x) || !Number.isFinite(p.y))) return null;
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
   for (const p of contour) {
     if (p.x < minX) minX = p.x;

@@ -62,7 +62,6 @@ export class BubbleManager {
   /**
    * Translates application settings into decoupled engine options.
    *
-   * @param mode - Requested bubble detection mode.
    * @param popupState - Extension settings state.
    * @returns Decoupled options for the bubble engine.
    */
@@ -78,6 +77,7 @@ export class BubbleManager {
    *
    * @param mode - Requested bubble detection mode.
    * @param popupState - Settings state for WebGPU overrides.
+   * @param onInitialization - Optional lifecycle progress callback.
    * @returns Leased engine and idempotent release callback.
    */
   async acquireEngine(

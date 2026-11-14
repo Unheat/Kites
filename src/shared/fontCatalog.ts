@@ -1,5 +1,5 @@
 /**
- * @file fontCatalog.ts
+ * fontCatalog.ts
  * Curated on-demand font catalog (single source of truth per AGENTS.md Section 3).
  *
  * Design mirrors the donor renderer's font architecture, scaled to a legally clean set:

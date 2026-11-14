@@ -10,7 +10,7 @@ import type { Point2D } from '../shared/utils/geometry';
 import { NeuralBubbleDetector } from '../offscreen/engines/bubble/NeuralBubbleDetector';
 import { HeuristicBubbleExtractor } from '../offscreen/engines/bubble/HeuristicBubbleExtractor';
 import { resolveBubbleLayoutsDetailed, type BubbleGeometry } from '../offscreen/services/BubbleLayoutService';
-import { HeuristicBubbleEngine } from '../offscreen/engines/bubble/HeuristicBubbleEngine';
+import { createHeuristicOwnership, createPrecomputedNeuralOwnership } from './ownershipHarness';
 import { NeuralBubbleEngine } from '../offscreen/engines/bubble/NeuralBubbleEngine';
 import { DEFAULT_RENDER_FONT_FAMILY } from '../offscreen/utils/canvasTypesetting';
 import { HyphenationService } from '../offscreen/utils/hyphenation/HyphenationService';
@@ -89,9 +89,21 @@ async function runPipelineVisualBubbleTest() {
     const pageWidth = rawImage.width;
     const pageHeight = rawImage.height;
 
-    // 1. OCR Stage
+    // 1. OCR Stage. Balloon ownership is resolved inside it, per raw line, through the same
+    // service the extension uses.
     console.log('[Pipeline] Running OCR text detection...');
-    const ocrResult = await ocrManager.processImage(arrayBuffer, 'v6-small', { sourceLang: 'ja', pageWidth, pageHeight });
+    const ownershipCanvas = createCanvas(pageWidth, pageHeight);
+    const ownershipCtx = ownershipCanvas.getContext('2d');
+    ownershipCtx.drawImage(rawImage, 0, 0);
+    const ownershipPixels = ownershipCtx.getImageData(0, 0, pageWidth, pageHeight);
+    const heuristicOwnership = createHeuristicOwnership({
+      canvas: ownershipCanvas as any,
+      image: { data: ownershipPixels.data, width: pageWidth, height: pageHeight },
+      pageWidth,
+      pageHeight,
+    });
+    const ocrResult = await ocrManager.processImage(arrayBuffer, 'v6-small', { sourceLang: 'ja', pageWidth, pageHeight },
+      undefined, { partitionLines: (lines) => heuristicOwnership.partition(lines) });
     const polygons = ocrResult.polygons as Point2D[][];
     const texts = ocrResult.texts;
     const boxes = ocrResult.boxes;
@@ -128,21 +140,46 @@ async function runPipelineVisualBubbleTest() {
     // PASS 1: TIER 1 HEURISTIC BUBBLE EXTRACTOR (0 MB)
     // -------------------------------------------------------------
     console.log("\n--- [Pass 1] Tier 1 Heuristic Bubble Expansion ---");
-    const heuristicGeometry = HeuristicBubbleEngine.buildGeometry(rawImageData, boxes);
+    const heuristicGeometry = heuristicOwnership.geometryForRegions(ocrResult.groupLineIndices ?? []);
+    if (!heuristicGeometry) throw new Error('Heuristic balloon ownership produced no geometry');
 
     /**
      * Uses the production acquisition/layout contract after translation and font readiness.
      * @param ctx - Actual output measurement context. @param geometry - Original carrier evidence.
      * @returns Accepted fixed boxes, with the same source-font and complete-text fit guard as production.
      */
-    const resolveLayouts = (ctx: any, geometry: BubbleGeometry) => resolveBubbleLayoutsDetailed({
-      ...geometry, boxes, directions: ocrResult.directions, angles: ocrResult.angles, pageWidth, pageHeight,
+    /**
+     * One OCR pass's regions plus their translations. Each tier pass owns its own set: ownership is
+     * resolved per line before merging, so the heuristic and neural passes can produce different
+     * regions for the same page and must never borrow each other's boxes.
+     */
+    type RegionSet = {
+      boxes: typeof boxes;
+      polygons: typeof polygons;
+      texts: string[];
+      translatedTexts: string[];
+      directions?: typeof ocrResult.directions;
+      angles?: typeof ocrResult.angles;
+      fontSizes?: typeof ocrResult.fontSizes;
+      lineCounts?: typeof ocrResult.lineCounts;
+    };
+
+    /**
+     * Resolves fixed balloon frames for one tier pass.
+     *
+     * @param ctx - Measurement context. @param geometry - That pass's balloon geometry.
+     * @param regions - The same pass's regions and translations.
+     * @returns Accepted frames and contours.
+     */
+    const resolveLayouts = (ctx: any, geometry: BubbleGeometry, regions: RegionSet) => resolveBubbleLayoutsDetailed({
+      ...geometry, boxes: regions.boxes, directions: regions.directions, angles: regions.angles,
+      pageWidth, pageHeight,
       accept: (index, proposed) => {
         const curv = geometry.curvatures?.[index];
         const block: TextBlockItem = {
-          text: translatedTexts[index], polygon: polygons[index], fontSize: ocrResult.fontSizes?.[index],
-          direction: ocrResult.directions?.[index], angle: ocrResult.angles?.[index],
-          originalText: texts[index], sourceLineCount: ocrResult.lineCounts?.[index],
+          text: regions.translatedTexts[index], polygon: regions.polygons[index], fontSize: regions.fontSizes?.[index],
+          direction: regions.directions?.[index], angle: regions.angles?.[index],
+          originalText: regions.texts[index], sourceLineCount: regions.lineCounts?.[index],
           isRounded: curv?.isRounded,
           borderRadius: curv?.borderRadius,
           typesetMode: curv?.isRounded ? 'contour' : 'simple',
@@ -159,7 +196,13 @@ async function runPipelineVisualBubbleTest() {
       const ctx = canvas.getContext('2d');
       ctx.drawImage(cleanedImage, 0, 0);
       if (typeof document !== 'undefined' && document.fonts) await document.fonts.ready;
-      const heuristicLayout = resolveLayouts(ctx, heuristicGeometry);
+      const heuristicArtwork = new Set((ocrResult.artwork ?? []).map((item) => item.index));
+    const heuristicRegions: RegionSet = {
+        boxes, polygons, texts, translatedTexts,
+        directions: ocrResult.directions, angles: ocrResult.angles,
+        fontSizes: ocrResult.fontSizes, lineCounts: ocrResult.lineCounts,
+      };
+      const heuristicLayout = resolveLayouts(ctx, heuristicGeometry, heuristicRegions);
       const heuristicTypesetBoxes = heuristicLayout.typesetBoxes;
       const heuristicContours = heuristicLayout.contourPoints;
       if (testFile === 'image6.jpg') {
@@ -170,6 +213,7 @@ async function runPipelineVisualBubbleTest() {
 
       const textBlockItems: TextBlockItem[] = [];
       for (let i = 0; i < translatedTexts.length; i++) {
+        if (heuristicArtwork.has(i)) continue;
         const text = translatedTexts[i];
         const poly = polygons[i];
         if (text && poly) {
@@ -242,12 +286,23 @@ async function runPipelineVisualBubbleTest() {
       const detectedBubbles = parsedNeural.bubbles;
       console.log(`[Neural] Detected ${detectedBubbles.length} bubble proposals across image.`);
 
+      // Re-run OCR with the neural ownership policy so this pass is gated the same way the extension
+      // gates it (per prepared line), then align shapes with the regions that pass produced.
+      const neuralOwnership = createPrecomputedNeuralOwnership(
+        { canvas: null, image: rawImageData, pageWidth, pageHeight },
+        { bubbles: detectedBubbles, shapes: [] },
+      );
+      const neuralOcr = await ocrManager.processImage(
+        arrayBuffer, 'v6-small', { sourceLang: 'ja', pageWidth, pageHeight },
+        undefined, { partitionLines: (lines) => neuralOwnership.partition(lines) },
+      );
+
       // Pass 2: Unified YOLO (AI) Bubble Expansion with morphological tail severing on prototype masks
-      const neuralShapes: (any | undefined)[] = new Array(boxes.length).fill(undefined);
+      const neuralShapes: (any | undefined)[] = new Array(neuralOcr.boxes.length).fill(undefined);
 
       if (parsedNeural.items && parsedNeural.items.length > 0) {
-        for (let i = 0; i < boxes.length; i++) {
-          const textBox = boxes[i];
+        for (let i = 0; i < neuralOcr.boxes.length; i++) {
+          const textBox = neuralOcr.boxes[i];
           const matchedIdx = NeuralBubbleDetector.matchBubbleIndex(textBox, detectedBubbles);
           if (matchedIdx === -1) continue;
 
@@ -319,16 +374,25 @@ async function runPipelineVisualBubbleTest() {
         }
       }
 
-      const neuralGeometry = await NeuralBubbleEngine.buildGeometry(null, rawImageData, boxes, undefined, {
-        bubbles: detectedBubbles,
-        shapes: neuralShapes,
-      });
+      const neuralGeometry = await NeuralBubbleEngine.buildGeometry(
+        null, rawImageData, neuralOcr.boxes, undefined,
+        { bubbles: detectedBubbles, shapes: neuralShapes },
+      );
       if (!neuralGeometry) throw new Error('Neural bubble geometry build failed');
+      const neuralArtwork = new Set((neuralOcr.artwork ?? []).map((item) => item.index));
+      const neuralRegions: RegionSet = {
+        boxes: neuralOcr.boxes,
+        polygons: (neuralOcr.polygons ?? []) as Point2D[][],
+        texts: neuralOcr.texts,
+        translatedTexts: await translator.translate(neuralOcr.texts, 'auto', 'en'),
+        directions: neuralOcr.directions, angles: neuralOcr.angles,
+        fontSizes: neuralOcr.fontSizes, lineCounts: neuralOcr.lineCounts,
+      };
       const canvas = createCanvas(pageWidth, pageHeight);
       const ctx = canvas.getContext('2d');
       ctx.drawImage(cleanedImage, 0, 0);
       if (typeof document !== 'undefined' && document.fonts) await document.fonts.ready;
-      const neuralLayout = resolveLayouts(ctx, neuralGeometry);
+      const neuralLayout = resolveLayouts(ctx, neuralGeometry, neuralRegions);
       const neuralTypesetBoxes = neuralLayout.typesetBoxes;
       const neuralContours = neuralLayout.contourPoints;
 
@@ -339,9 +403,10 @@ async function runPipelineVisualBubbleTest() {
       }
 
       const textBlockItems: TextBlockItem[] = [];
-      for (let i = 0; i < translatedTexts.length; i++) {
-        const text = translatedTexts[i];
-        const poly = polygons[i];
+      for (let i = 0; i < neuralRegions.translatedTexts.length; i++) {
+        if (neuralArtwork.has(i)) continue;
+        const text = neuralRegions.translatedTexts[i];
+        const poly = neuralRegions.polygons[i];
         if (text && poly) {
           const typesetBox = neuralTypesetBoxes[i];
           const fixed = typesetBox !== undefined;
@@ -349,12 +414,12 @@ async function runPipelineVisualBubbleTest() {
           textBlockItems.push({
             text,
             polygon: poly,
-            direction: ocrResult.directions ? ocrResult.directions[i] : 'h',
+            direction: neuralRegions.directions ? neuralRegions.directions[i] : 'h',
             typesetBox,
-            fontSize: ocrResult.fontSizes ? ocrResult.fontSizes[i] : undefined,
-            angle: ocrResult.angles ? ocrResult.angles[i] : undefined,
-            originalText: texts[i],
-            sourceLineCount: ocrResult.lineCounts ? ocrResult.lineCounts[i] : undefined,
+            fontSize: neuralRegions.fontSizes ? neuralRegions.fontSizes[i] : undefined,
+            angle: neuralRegions.angles ? neuralRegions.angles[i] : undefined,
+            originalText: neuralRegions.texts[i],
+            sourceLineCount: neuralRegions.lineCounts ? neuralRegions.lineCounts[i] : undefined,
             isRounded: fixed ? Boolean(curv?.isRounded) : false,
             borderRadius: fixed ? (curv?.borderRadius ?? 0) : 0,
             typesetMode: fixed ? (curv?.isRounded ? 'contour' : 'simple') : 'balloon',

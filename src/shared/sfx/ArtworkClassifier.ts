@@ -26,8 +26,24 @@ export interface OcrBlockDescriptor {
   /**
    * Glyph size relative to the page's body-text baseline, or undefined when the page provides no
    * reliable baseline. Undefined disables every size-based rule rather than guessing.
+   *
+   * This is real glyph height (Cotrans block font size), not the merged box short side: merge runs
+   * before classification, so a welded multi-line box would otherwise look like oversized lettering.
    */
   readonly glyphRatio?: number;
+  /**
+   * Merged box short side relative to the page baseline. Measures the region's rectangle, not its
+   * letters, so it is only meaningful for shapes (fragments), never for glyph size.
+   */
+  readonly boxShortSideRatio?: number;
+  /** Number of raw OCR lines merged into this block; undefined when the page provided none. */
+  readonly lineCount?: number;
+  /**
+   * Whether the block's lines are owned by a detected balloon. Undefined when no ownership
+   * policy ran. Balloon context vetoes script-noise heuristics that would preserve real
+   * short dialogue as artwork.
+   */
+  readonly inBubble?: boolean;
 }
 
 /** Outcome of classifying one block. */
@@ -65,8 +81,24 @@ const DISPLAY_LETTERING_RATIO = 2.0;
 /** Longest block, in glyphs, that can be dismissed as a bare drawing fragment. */
 const MAX_FRAGMENT_GLYPHS = 2;
 
+/** Longest OCR-noise block, in glyphs, that can be dismissed as a misread of the drawing. */
+const MAX_LATIN_NOISE_GLYPHS = 8;
+
+/** Letter count above which a letter-only Latin block is real text rather than OCR debris. */
+const MAX_LATIN_NOISE_LETTERS = 2;
+
 /** Characters that mark real language: sentence punctuation, ellipses, or a leading quote. */
 const LANGUAGE_PUNCTUATION = /[！？!?…ー～~・、。，"'"'（）()「」『』]/;
+
+/**
+ * Punctuation that only appear in prose, never inside drawn lettering.
+ *
+ * Deliberately excludes `！？…ー～` — sound effects use those constantly.
+ */
+const SENTENCE_PUNCTUATION = /[、。，,]/;
+
+/** Longest multi-line block, in glyphs, that can still be drawn lettering split over lines. */
+const MAX_MULTILINE_DISPLAY_GLYPHS = 6;
 
 /** CJK ideographs, kana, and halfwidth katakana — the scripts a fragment can be built from. */
 const CJK_GLYPH = /[\u3005\u3400-\u4dbf\u4e00-\u9fff\u3040-\u30ff\uff66-\uff9f]/;
@@ -97,8 +129,56 @@ export class BareFragmentArtworkClassifier implements IArtworkClassifier {
 }
 
 /**
+ * OCR-debris rule: a short block of Latin letters, digits and punctuation is a misread of the
+ * drawing, not a line of dialogue.
+ *
+ * These blocks are what a bubble's background texture, screentone or hand lettering decodes to
+ * (`S1PA`, `A9V`, `Nr day`). They are not language in any script, so translating them produces
+ * literal nonsense stamped over the artwork, and preserving them costs nothing: the original ink
+ * already reads that way to a human.
+ *
+ * Deliberately excludes anything carrying kana, or more than one CJK glyph: those are handled by the
+ * fragment / shout / lexicon rules, which know better than a script heuristic.
+ */
+export class LatinNoiseArtworkClassifier implements IArtworkClassifier {
+  /**
+   * @param block - Text plus optional size evidence.
+   * @returns Fragment match when the block is short Latin/digit debris.
+   */
+  classify(block: OcrBlockDescriptor): ArtworkMatch {
+    const text = block.text.trim();
+    if (!text) return NO_MATCH;
+    const glyphs = Array.from(text.replace(/\s/g, ''));
+    if (glyphs.length === 0 || glyphs.length > MAX_LATIN_NOISE_GLYPHS) return NO_MATCH;
+    const cjkCount = glyphs.filter((glyph) => CJK_GLYPH.test(glyph)).length;
+    if (cjkCount > 1) return NO_MATCH;
+    const letters = glyphs.filter((glyph) => /[a-zA-Z]/.test(glyph));
+    const digits = glyphs.filter((glyph) => /\d/.test(glyph));
+    const others = glyphs.length - letters.length - digits.length - cjkCount;
+    if (letters.length === 0 && digits.length === 0) return NO_MATCH;
+    // Punctuation-dense debris (`//`, `--`, `..`) is not language either.
+    if (others > letters.length + digits.length) return NO_MATCH;
+    // Inside a balloon, a short no-digit Latin block is real dialogue (`OK`, `No`), not
+    // texture debris: the reader expects it translated. Digit-bearing debris (`S1PA`, `A9V`)
+    // stays preserved even in-bubble, since erasing it buys nothing.
+    if (block.inBubble && digits.length === 0) return NO_MATCH;
+    // Only digit-bearing debris (`S1PA`, `A9V`) or bare stubs (`ww`, `L`, `AR`, `IM一`) qualify.
+    // A real Latin block — including a Latin shout the donor keeps translatable (`HOOO`) — has
+    // three or more letters and no digits, so it stays text.
+    if (digits.length === 0 && letters.length > MAX_LATIN_NOISE_LETTERS) return NO_MATCH;
+    return { isArtwork: true, kind: 'fragment' };
+  }
+}
+
+/**
  * Display-lettering rule: a block whose glyphs are more than twice the page's body size is drawn
  * lettering (a large sound effect or title), never a dialogue line.
+ *
+ * Two corroboration vetoes protect the rule from merge damage, because it is the only rule whose
+ * evidence is a page-relative size rather than the text itself:
+ * - prose punctuation (`、。，,`) never appears inside drawn lettering;
+ * - a multi-line block with more than a word's worth of glyphs is a sentence, not stacked lettering
+ *   (short multi-line lettering such as stacked kana stays eligible).
  */
 export class DisplayLetteringArtworkClassifier implements IArtworkClassifier {
   /**
@@ -107,9 +187,11 @@ export class DisplayLetteringArtworkClassifier implements IArtworkClassifier {
    */
   classify(block: OcrBlockDescriptor): ArtworkMatch {
     if (block.glyphRatio === undefined) return NO_MATCH;
-    return block.glyphRatio >= DISPLAY_LETTERING_RATIO
-      ? { isArtwork: true, kind: 'display-lettering' }
-      : NO_MATCH;
+    if (block.glyphRatio < DISPLAY_LETTERING_RATIO) return NO_MATCH;
+    if (SENTENCE_PUNCTUATION.test(block.text)) return NO_MATCH;
+    const glyphs = Array.from(block.text.replace(/\s/g, '')).length;
+    if ((block.lineCount ?? 1) >= 2 && glyphs > MAX_MULTILINE_DISPLAY_GLYPHS) return NO_MATCH;
+    return { isArtwork: true, kind: 'display-lettering' };
   }
 }
 
