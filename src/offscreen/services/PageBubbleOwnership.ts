@@ -109,8 +109,13 @@ export interface PageBubbleOwnershipInput {
   acquireEngine: () => Promise<BubbleEngineLease>;
   /** Page canvas the tier detects on. */
   canvas: OffscreenCanvas | HTMLCanvasElement | null;
-  /** Original page pixels (heuristic morphology input). */
-  image: ImagePatchData | null;
+  /**
+   * Original page pixels (heuristic morphology input).
+   * May be a supplier, resolved lazily on first detect: pages whose OCR yields
+   * at most one raw line never run the tier, so an eager full-page ImageData
+   * copy (several MB) would be retained and copied for nothing.
+   */
+  image: ImagePatchData | null | (() => ImagePatchData | null);
   /** Page width in pixels. */
   pageWidth: number;
   /** Page height in pixels. */
@@ -149,6 +154,15 @@ export function createPageBubbleOwnership(input: PageBubbleOwnershipInput): Page
   let lineBuckets: number[] = [];
   let balloons: BoxRect[] = [];
 
+  /** Resolves the pixel supplier once and caches the buffer for the page lifetime. */
+  let imageCache: ImagePatchData | null | undefined;
+  const resolveImage = (): ImagePatchData | null => {
+    if (imageCache === undefined) {
+      imageCache = typeof input.image === 'function' ? input.image() : input.image;
+    }
+    return imageCache;
+  };
+
   /**
    * Runs the tier's geometry once for the prepared lines.
    *
@@ -159,10 +173,12 @@ export function createPageBubbleOwnership(input: PageBubbleOwnershipInput): Page
     const { engine, release } = await input.acquireEngine();
     try {
       const active: IBubbleEngine | null = engine;
-      if (!active || !input.canvas || !input.image) return undefined;
+      if (!active || !input.canvas) return undefined;
+      const image = resolveImage();
+      if (!image) return undefined;
       return await active.acquireGeometry(
         input.canvas,
-        input.image,
+        image,
         boxes,
         resolveOptions(input.popupState),
       ) ?? undefined;
@@ -205,8 +221,10 @@ export function createPageBubbleOwnership(input: PageBubbleOwnershipInput): Page
     /**
      * Projects per-line ownership onto merged regions.
      *
-     * Every line of a region shares one bucket by construction (merge only connects same-bucket
-     * lines), so the region inherits its first owned line's balloon, carrier, and contour.
+     * Merge only connects same-bucket lines, and component welds set every member to its winning
+     * balloon, so a region projects onto one balloon: its first line's. The projection reads the
+     * OCR stage's FINAL per-line buckets — {@link partition}'s result may have been welded onto a
+     * majority balloon afterwards, and re-deriving buckets here would silently drop that weld.
      *
      * @param groupLineIndices - Prepared-line indices per merged region, in output order.
      * @returns Region-aligned geometry for the layout resolver, or undefined without a tier run.
@@ -221,7 +239,11 @@ export function createPageBubbleOwnership(input: PageBubbleOwnershipInput): Page
       // Regions of one balloon must share the SAME proposal object: the layout resolver groups
       // sibling utterances by identity, so per-line proposals that merely overlap (separate objects)
       // would leave a multi-lobe balloon as several ungrouped singletons with overlapping frames.
-      const { buckets, balloons: identities } = resolveLineBuckets(lineGeometry);
+      // Identities are deterministic from the tier geometry; only the bucket assignment carries
+      // the welds, so it is taken from the stored post-weld buckets when available.
+      const assignment = resolveLineBuckets(lineGeometry);
+      const identities = assignment.balloons;
+      const buckets = lineBuckets.length === assignment.buckets.length ? lineBuckets : assignment.buckets;
 
       for (const lineIndices of groupLineIndices) {
         const representative = lineIndices.find((lineIndex) =>

@@ -253,7 +253,9 @@ export class PipelineOrchestrator {
         ? createPageBubbleOwnership({
             acquireEngine: () => this.services.bubbleManager.acquireEngine(bubbleMode, popupState, makeLifecycle('bubble', bubbleMode)),
             canvas: rawCanvas,
-            image: rawCtx.getImageData(0, 0, rawWidth, rawHeight),
+            // Supplied lazily: pages with at most one raw line never run the
+            // bubble tier, and an eager copy retains a full-page ImageData for nothing.
+            image: () => rawCtx.getImageData(0, 0, rawWidth, rawHeight),
             pageWidth: rawWidth,
             pageHeight: rawHeight,
             bubbleMode,

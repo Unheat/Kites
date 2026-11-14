@@ -152,9 +152,10 @@ export async function runStudioOcr(
   if (bubbleMode && bubbleMode !== 'off' && dependencies.getBubbleManager && typeof createImageBitmap !== 'undefined') {
     safeCanvas = createSafeCanvas(payload.width, payload.height);
     if (safeCanvas) {
+      const safeCtx = safeCanvas.ctx;
       const patchBitmap = await createImageBitmap(new Blob([imageBuffer], { type: 'image/png' }));
       try {
-        safeCanvas.ctx.drawImage(patchBitmap, 0, 0);
+        safeCtx.drawImage(patchBitmap, 0, 0);
       } finally {
         patchBitmap.close();
       }
@@ -163,7 +164,8 @@ export async function runStudioOcr(
         canvas: safeCanvas.canvas as any,
         // ImagePatchData contract: a real pixel buffer, not the 2D context — passing the ctx made
         // heuristic carrier extraction throw on the missing .data buffer and silently skip layout.
-        image: safeCanvas.ctx.getImageData(0, 0, payload.width, payload.height),
+        // Supplied lazily: pages with at most one raw line never run the bubble tier.
+        image: () => safeCtx.getImageData(0, 0, payload.width, payload.height),
         pageWidth: payload.width,
         pageHeight: payload.height,
         bubbleMode,
