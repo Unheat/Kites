@@ -69,6 +69,19 @@ recognizer missed (or read only partially) keeps its ink while its neighbour is 
 English can appear beside untranslated Japanese. Masking is polygon-based by contract; closing that gap
 needs background/ink reconstruction, not a classifier rule.
 
+### Follow-up: a three-lobe balloon was partitioned by a bad topological split
+
+`flowCells` preferred the Koharu topological (reflex-neck) split whenever it returned exactly one cell
+per anchor. On a tall three-lobe balloon it returned three cells, but the middle one still spanned two
+lobes, so the middle utterance's frame overlapped its neighbours and its text rendered outside the
+balloon. Measured on the fixture: topological cells `3,1-102,103 | 1,19-116,378 | 3,240-110,390`,
+while the bisector clipping produced clean bands `1..117 | 116..245 | 248..390`.
+
+The topological split is now accepted only when it actually separates the anchors — one anchor per
+cell, each anchor inside its own cell, and no two cells sharing area — otherwise the bisector path
+runs. So the three-lobe case is supported; the previous failure was a validation gap, not a limit of
+the algorithm.
+
 ### Next Steps / Key Takeaways
 
 * **Takeaway:** when a pipeline stage decides something about a *product* (merged region, inflated rectangle), every later stage that trusts that product inherits its errors. Decide on the unit the evidence is actually attached to.

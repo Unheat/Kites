@@ -218,11 +218,18 @@ export function createPageBubbleOwnership(input: PageBubbleOwnershipInput): Page
       const shapes: BubbleGeometry['shapes'] = [];
       const curvatures: NonNullable<BubbleGeometry['curvatures']> = [];
       const contours: NonNullable<BubbleGeometry['contours']> = [];
+      // Regions of one balloon must share the SAME proposal object: the layout resolver groups
+      // sibling utterances by identity, so per-line proposals that merely overlap (separate objects)
+      // would leave a multi-lobe balloon as several ungrouped singletons with overlapping frames.
+      const { buckets, balloons: identities } = resolveLineBuckets(lineGeometry);
 
       for (const lineIndices of groupLineIndices) {
         const representative = lineIndices.find((lineIndex) =>
           lineGeometry!.proposals[lineIndex] || lineGeometry!.carriers[lineIndex]);
-        const proposal = representative === undefined ? null : lineGeometry.proposals[representative];
+        const bucket = lineIndices.length > 0 ? buckets[lineIndices[0]] : FREE_TEXT_BUCKET;
+        const proposal = bucket >= 0 && identities[bucket]
+          ? identities[bucket]
+          : representative === undefined ? null : lineGeometry.proposals[representative];
         proposals.push(proposal);
         carriers.push(representative === undefined ? null : lineGeometry.carriers[representative] ?? proposal);
         shapes.push(representative === undefined ? undefined : lineGeometry.shapes[representative]);

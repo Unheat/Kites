@@ -6,7 +6,7 @@
 
 import type { Point2D } from '../../../shared/utils/geometry';
 import type { BoxRect } from '../bubbleExpansion';
-import { topologicalFlowCells } from './polygonMath';
+import { pointInPolygon, topologicalFlowCells } from './polygonMath';
 
 export const SIBLING_GAP = 6;
 const EPSILON = 1e-5;
@@ -153,11 +153,64 @@ export function flowCells(
   if (anchors.length === 0) return [];
   if (contour && contour.length >= 4) {
     const topo = topologicalFlowCells(contour, anchors);
-    if (topo && topo.length === anchors.length) {
+    // A topological split is only usable when it actually separated the anchors: a three-lobe
+    // balloon can yield one neck split plus a cell that still spans two lobes, which produced
+    // overlapping frames. Validate before trusting it, otherwise clip by bisectors.
+    if (topo && topo.length === anchors.length && isDisjointSingleAnchorPartition(topo, anchors)) {
       return topo;
     }
   }
   return anchorFlowCells(width, height, anchors, contour, siblingGap);
+}
+
+/** Largest bbox overlap, relative to the smaller cell, still treated as touching rather than sharing. */
+const PARTITION_OVERLAP_TOLERANCE = 0.02;
+
+/**
+ * Whether a partition actually separated the anchors: every cell holds exactly one anchor and no two
+ * cells share area. Guards against a decomposition that returns the right cell count without
+ * separating the lobes.
+ *
+ * @param cells - Candidate cells in local container coordinates.
+ * @param anchors - Anchor points in the same coordinates.
+ * @returns True when the partition is disjoint and one-anchor-per-cell.
+ */
+function isDisjointSingleAnchorPartition(cells: Point2D[][], anchors: Point2D[]): boolean {
+  for (let i = 0; i < cells.length; i++) {
+    if (cells[i].length < 3) return false;
+    let owned = 0;
+    for (const anchor of anchors) {
+      if (pointInPolygon(cells[i], anchor)) owned += 1;
+    }
+    if (owned !== 1) return false;
+    if (!pointInPolygon(cells[i], anchors[i])) return false;
+    for (let j = i + 1; j < cells.length; j++) {
+      if (bboxOverlapRatio(cells[i], cells[j]) > PARTITION_OVERLAP_TOLERANCE) return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Intersection area of two polygons' bounding boxes, relative to the smaller box.
+ *
+ * @param a - First polygon.
+ * @param b - Second polygon.
+ * @returns Overlap ratio in 0..1.
+ */
+function bboxOverlapRatio(a: Point2D[], b: Point2D[]): number {
+  const box = (poly: Point2D[]) => {
+    const xs = poly.map((p) => p.x);
+    const ys = poly.map((p) => p.y);
+    return { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
+  };
+  const ba = box(a);
+  const bb = box(b);
+  const w = Math.min(ba.x + ba.w, bb.x + bb.w) - Math.max(ba.x, bb.x);
+  const h = Math.min(ba.y + ba.h, bb.y + bb.h) - Math.max(ba.y, bb.y);
+  if (w <= 0 || h <= 0) return 0;
+  const smaller = Math.min(ba.w * ba.h, bb.w * bb.h);
+  return smaller > 0 ? (w * h) / smaller : 0;
 }
 
 export interface BalloonFlowPartitionResult {
