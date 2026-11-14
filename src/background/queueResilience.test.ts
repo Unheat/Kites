@@ -470,4 +470,24 @@ describe('queue capacity limit', () => {
       },
     });
   });
+
+  it('never re-queues a duplicate while the existing job is only queued, however long it has waited', async () => {
+    // A queued job can legitimately wait minutes behind an active job (e.g. a
+    // first-run model download); the duplicate guard must not treat its age as
+    // staleness and insert a second pipeline run for the same URL.
+    await db.translationJobs.add({
+      timestamp: Date.now() - 10 * 60 * 1000,
+      status: 'queued',
+      srcUrl: 'https://cdn.example.com/waiting.webp',
+      tabId: 1,
+    });
+
+    await queueTranslation('https://cdn.example.com/waiting.webp', 1);
+
+    const count = await db.translationJobs
+      .where('srcUrl')
+      .equals('https://cdn.example.com/waiting.webp')
+      .count();
+    expect(count).toBe(1);
+  });
 });
