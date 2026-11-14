@@ -77,12 +77,14 @@ async function main(): Promise<void> {
   let invariantBreaks = 0;
   groups.forEach((lineIndices, index) => {
     const bucket = lineGeometry?.proposals[lineIndices[0]] ?? null;
+    const lineBuckets = resolveLineBuckets(lineGeometry);
     const balloonIndex = bucket ? balloons.indexOf(bucket) : -1;
     const kind = artwork.get(index) ?? '-';
     const mixed = lineIndices.some((lineIndex) => (lineGeometry?.proposals[lineIndex] ?? null) !== bucket);
     if (mixed) invariantBreaks += 1;
     console.log(
       `#${String(index).padStart(2)} lines=${lineIndices.length} balloon=${String(balloonIndex).padStart(2)} ` +
+      `bucket=${lineBuckets.buckets[lineIndices[0]] ?? '?'} ` +
       `${mixed ? 'MIXED ' : ''}${kind.padEnd(16)} "${result.texts[index]}"`,
     );
   });

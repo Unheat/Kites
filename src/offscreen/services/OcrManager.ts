@@ -6,6 +6,7 @@ import { Quadrilateral, Graph, calculateBoundingBox, computeMinAreaRect, polygon
 import { clusterLinesIntoUtterances } from '../utils/utteranceSplitter';
 import { findBogusContainerIndices } from '../../shared/utils/regionOwnership';
 import { defaultArtworkClassifier } from '../../shared/sfx/SoundEffectClassifier';
+import { FREE_TEXT_BUCKET } from './PageBubbleOwnership';
 import type { ArtworkKind, IArtworkClassifier, OcrBlockDescriptor } from '../../shared/sfx/ArtworkClassifier';
 import { DEFAULT_SFX_POLICY, resolveSfxPolicyStrategy, type SfxPolicyId } from '../../shared/sfx/sfxPolicy';
 import {
@@ -52,6 +53,17 @@ const NATIVE_DIALOGUE_SCORE_FLOOR = 0.20;
  * misread stroke column would otherwise drag the dialogue out of its balloon again.
  */
 const OWNERSHIP_COMPONENT_MAJORITY = 2 / 3;
+
+/**
+ * Relaxed merge limits for two side-by-side columns that share one balloon.
+ *
+ * Donor merging requires aligned column edges; staggered columns of one sentence never align, so the
+ * owner is used as the stronger evidence with its own size and gap bounds.
+ */
+const SHARED_OWNER_FONT_RATIO = 3;
+const SHARED_OWNER_ASPECT_TOL = 2;
+const SHARED_OWNER_MIN_Y_OVERLAP = 0.5;
+const SHARED_OWNER_MAX_GAP_CHARS = 4;
 
 /** Minimum height for a box to count as a vertical text column rather than a stray stroke. */
 const VERTICAL_COLUMN_MIN_HEIGHT_PX = 100;
@@ -403,6 +415,30 @@ export class OcrManager {
    * Uses convex hull to generate accurate bounding polygons for merged blocks,
    * and concatenates text right-to-left.
    */
+  /**
+   * Whether two columns of one balloon form a side-by-side pair that must stay one sentence.
+   *
+   * Requires the same owner (already checked by the caller), a substantial shared vertical span,
+   * compatible glyph sizes, no horizontal-vs-vertical aspect conflict, and an ink gap within a few
+   * characters. That is enough to treat staggered columns of one balloon as one utterance without
+   * merging stacked lobes or lines from different balloons.
+   *
+   * @param a - First prepared textline.
+   * @param b - Second prepared textline.
+   * @returns True when the pair should merge despite the donor alignment requirement.
+   */
+  private isSideBySideSharedOwnerPair(a: Quadrilateral, b: Quadrilateral): boolean {
+    const charSize = Math.min(a.font_size, b.font_size);
+    if (charSize <= 0) return false;
+    if (Math.max(a.font_size, b.font_size) / charSize > SHARED_OWNER_FONT_RATIO) return false;
+    if (a.aspect_ratio > SHARED_OWNER_ASPECT_TOL && b.aspect_ratio < 1 / SHARED_OWNER_ASPECT_TOL) return false;
+    if (b.aspect_ratio > SHARED_OWNER_ASPECT_TOL && a.aspect_ratio < 1 / SHARED_OWNER_ASPECT_TOL) return false;
+    const overlapY = Math.min(a.aabb.y + a.aabb.height, b.aabb.y + b.aabb.height) - Math.max(a.aabb.y, b.aabb.y);
+    if (overlapY < SHARED_OWNER_MIN_Y_OVERLAP * Math.min(a.aabb.height, b.aabb.height)) return false;
+    const gap = a.pts ? a.polyDistance(b) : Infinity;
+    return gap <= charSize * SHARED_OWNER_MAX_GAP_CHARS;
+  }
+
   /**
    * Keeps a proximity component's lines in one bucket when they overwhelmingly share an owner.
    *
@@ -1031,7 +1067,16 @@ export class OcrManager {
         if (buckets && buckets[i] !== buckets[j]) continue;
         if (quadrilateralCanMergeRegion(workingQuads[i], workingQuads[j], 1.9, 2, 1, 3, 2, 1.3)) {
           mergeGraph.addEdge(i, j);
+          continue;
         }
+        // Two columns of ONE balloon that sit side by side belong to one sentence even when their gaps
+        // or staggers exceed the page tolerance. The donor rule requires aligned top/bottom edges for
+        // vertical columns, which staggered columns never have, so one sentence arrived as two
+        // translated regions. Stacked lobes inside a balloon are excluded, so two separate speeches
+        // sharing a balloon stay separate regions.
+        if (!buckets || buckets[i] === FREE_TEXT_BUCKET) continue;
+        if (!this.isSideBySideSharedOwnerPair(workingQuads[i], workingQuads[j])) continue;
+        mergeGraph.addEdge(i, j);
       }
     }
 
@@ -1063,6 +1108,17 @@ export class OcrManager {
       const groupQuads = groupIndices.map((idx) => workingQuads[idx]);
       const dir = this.majorityDirection(groupQuads);
       const isVert = dir === 'v';
+
+      // A single balloon holds one speech: its lines are laid out by the bubble partitioner, not by
+      // the staggered-lobe utterance splitter. Splitting them here renders one sentence as several
+      // translations inside the same balloon (measured on a three-column bubble whose columns are
+      // staggered but form one sentence).
+      const owners = new Set(groupIndices.map((idx) => buckets?.[idx] ?? FREE_TEXT_BUCKET));
+      const singleOwner = owners.size === 1 && !owners.has(FREE_TEXT_BUCKET);
+      if (singleOwner) {
+        postSplitGroups.push(groupIndices);
+        continue;
+      }
 
       const splitResults = clusterLinesIntoUtterances(linesForCluster, isCjk, isVert);
       for (const res of splitResults) {
