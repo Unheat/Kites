@@ -65,7 +65,7 @@ Pure-code reproductions of donor ML keep the same invariant; thresholds come fro
 Rules live in **[`docs/doc_guide.md`](docs/doc_guide.md)** — read it before writing docs and run its session checklist before ending a session. Do not restate it here.
 
 *   Engine/shared utilities are documented at symbol level (rigid TSDoc; `npm run docs:api`); frontend layers get a brief architecture page only.
-*   `npm run docs:check` gates the undocumented-symbol count and docstring shape.
+*   Verification gate includes docs: `npm run docs:check` (coverage ratchet + TSDoc shape) and `npm run docs:api` must generate with zero warnings — run both like `npm test`.
 *   `fullplan.md` and similar: never summarize or shorten when updating; keep the plan accurate.
 *   Read `docs/development/` and `docs/dev-history/` before implementing, to avoid repeating past mistakes.
 

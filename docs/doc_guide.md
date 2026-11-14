@@ -94,9 +94,11 @@ was measured**, the architecture doc records **how it works now**.
 ## Verification
 
 ```bash
-npm run docs:api     # regenerate the reference into docs/api/
-npm run docs:check   # gate: the undocumented-symbol count may not grow
+npm run docs:check   # gate: coverage ratchet + TSDoc shape (run it like npm test)
+npm run docs:api     # regenerate the reference; must emit zero warnings
 ```
+
+CI runs both in `.github/workflows/ci.yml`, before the extension build.
 
 `docs:check` runs two gates: the coverage ratchet described below, then the comment-shape check. The engine and shared layers
 carry a historical backlog (880 symbols at the time of writing), so the gate does not demand zero: it
