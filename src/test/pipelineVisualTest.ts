@@ -4,14 +4,10 @@ import { fileURLToPath } from 'url';
 import { OcrManager } from '../offscreen/services/OcrManager';
 import { InpaintManager } from '../offscreen/services/InpaintManager';
 import { GoogleTranslateEngine } from '../offscreen/engines/translation/GoogleTranslateEngine';
-import { renderTextBlocksBatch, measureBubbleLayoutFontSize, type TextBlockItem } from '../offscreen/utils/canvasTypesetting';
+import { renderTextBlocksBatch, type TextBlockItem } from '../offscreen/utils/canvasTypesetting';
 import { createCanvas, loadImage } from 'canvas';
 import type { Point2D } from '../shared/utils/geometry';
-import { resolveBubbleLayoutsDetailed } from '../offscreen/services/BubbleLayoutService';
-import { HeuristicBubbleEngine } from '../offscreen/engines/bubble/HeuristicBubbleEngine';
-import { createPageBubbleOwnership } from '../offscreen/services/PageBubbleOwnership';
 import { detectBlockTextColorsFromContext } from '../offscreen/utils/textColorDetection';
-import { DEFAULT_RENDER_FONT_FAMILY } from '../offscreen/utils/canvasTypesetting';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -56,25 +52,12 @@ async function runPipelineVisualTest() {
     const rawCtx = rawCanvas.getContext('2d');
     rawCtx.drawImage(probeImage, 0, 0);
 
-    // 2. OCR text detection. Balloon ownership is resolved inside the OCR stage, per raw line,
-    // through the same service the extension uses, so this harness cannot drift from the app.
+    // 2. OCR text detection with the DISABLED bubble tier: no ownership policy, so the whole page
+    // merges as one bucket and every region renders through the plain rectangle path. Bubble-tier
+    // behaviour is covered by pipelineVisualBubbleTest, which runs heuristic and neural passes.
     console.log('[PipelineTest] Running OCR text detection...');
     const sourceLang = (testFile === 'image8.png' || testFile === 'image5.png') ? undefined : 'ja';
-    const heuristicEngine = new HeuristicBubbleEngine();
-    const ownership = createPageBubbleOwnership({
-      acquireEngine: async () => ({ engine: heuristicEngine, release: () => {} }),
-      canvas: rawCanvas as any,
-      image: (() => {
-        const data = rawCtx.getImageData(0, 0, pageWidth, pageHeight);
-        return { data: data.data, width: pageWidth, height: pageHeight };
-      })(),
-      pageWidth,
-      pageHeight,
-      bubbleMode: 'heuristic',
-      popupState: undefined,
-    });
-    const ocrResult = await ocrManager.processImage(arrayBuffer, 'v6-small', { sourceLang, pageWidth, pageHeight },
-      undefined, { partitionLines: (lines) => ownership.partition(lines) });
+    const ocrResult = await ocrManager.processImage(arrayBuffer, 'v6-small', { sourceLang, pageWidth, pageHeight });
     const polygons = ocrResult.polygons as Point2D[][];
     const texts = ocrResult.texts;
     const boxes = ocrResult.boxes;
@@ -91,8 +74,7 @@ async function runPipelineVisualTest() {
     // 3. Pre-inpaint ink color detection (original artwork)
     const detectedColors = detectBlockTextColorsFromContext(rawCtx as any, boxes, pageWidth, pageHeight);
 
-    // 4. Region geometry projected from the per-line ownership resolved during OCR.
-    const bubbleGeometry = ownership.geometryForRegions(ocrResult.groupLineIndices ?? []);
+    // 4. Disabled tier: no bubble geometry, so the renderer uses the plain rectangle path.
 
     // 5. Inpainting (simple fill using raw polygons)
     console.log(`[PipelineTest] Running Inpainting (tier: simple)...`);
@@ -145,43 +127,7 @@ async function runPipelineVisualTest() {
         }
       }
 
-      // Resolve bubble layouts and contour points (Route 2: Koharu Contour DP / Route 3: Simple Rect)
-      if (bubbleGeometry) {
-        const blockByOcrIndex = new Map(itemOcrIndices.map((idx, pos) => [idx, textBlockItems[pos]]));
-        const detailed = resolveBubbleLayoutsDetailed({
-          ...bubbleGeometry,
-          boxes,
-          directions: ocrResult.directions,
-          angles: ocrResult.angles,
-          pageWidth,
-          pageHeight,
-          accept: (index, proposed) => {
-            const block = blockByOcrIndex.get(index);
-            if (!block) return false;
-            const curv = bubbleGeometry?.curvatures?.[index];
-            const blockWithCurv = curv?.isRounded
-              ? { ...block, isRounded: true, borderRadius: curv.borderRadius, typesetMode: 'contour' as const }
-              : { ...block, isRounded: false, borderRadius: 0, typesetMode: 'simple' as const };
-            const fitted = measureBubbleLayoutFontSize(ctx as any, blockWithCurv, proposed, DEFAULT_RENDER_FONT_FAMILY);
-            return fitted > 0;
-          }
-        });
-
-        itemOcrIndices.forEach((index, position) => {
-          const typesetBox = detailed.typesetBoxes?.[index];
-          textBlockItems[position].typesetBox = typesetBox;
-          textBlockItems[position].contourPoints = detailed.contourPoints?.[index];
-          if (detailed.skipped?.[index]) textBlockItems[position].isSkipped = true;
-          if (typesetBox) {
-            const curv = bubbleGeometry?.curvatures?.[index];
-            if (curv) {
-              textBlockItems[position].isRounded = curv.isRounded;
-              textBlockItems[position].borderRadius = curv.borderRadius;
-              textBlockItems[position].typesetMode = curv.isRounded ? 'contour' : 'simple';
-            }
-          }
-        });
-      }
+      // Disabled tier: no bubble geometry, so every region stays on the plain rectangle path.
 
       // Render all blocks through the production renderer
       const renderInfos = renderTextBlocksBatch(ctx as any, textBlockItems, pass.lang, { width: img.width, height: img.height });
