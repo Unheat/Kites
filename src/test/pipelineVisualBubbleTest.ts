@@ -148,14 +148,38 @@ async function runPipelineVisualBubbleTest() {
      * @param ctx - Actual output measurement context. @param geometry - Original carrier evidence.
      * @returns Accepted fixed boxes, with the same source-font and complete-text fit guard as production.
      */
-    const resolveLayouts = (ctx: any, geometry: BubbleGeometry) => resolveBubbleLayoutsDetailed({
-      ...geometry, boxes, directions: ocrResult.directions, angles: ocrResult.angles, pageWidth, pageHeight,
+    /**
+     * One OCR pass's regions plus their translations. Each tier pass owns its own set: ownership is
+     * resolved per line before merging, so the heuristic and neural passes can produce different
+     * regions for the same page and must never borrow each other's boxes.
+     */
+    type RegionSet = {
+      boxes: typeof boxes;
+      polygons: typeof polygons;
+      texts: string[];
+      translatedTexts: string[];
+      directions?: typeof ocrResult.directions;
+      angles?: typeof ocrResult.angles;
+      fontSizes?: typeof ocrResult.fontSizes;
+      lineCounts?: typeof ocrResult.lineCounts;
+    };
+
+    /**
+     * Resolves fixed balloon frames for one tier pass.
+     *
+     * @param ctx - Measurement context. @param geometry - That pass's balloon geometry.
+     * @param regions - The same pass's regions and translations.
+     * @returns Accepted frames and contours.
+     */
+    const resolveLayouts = (ctx: any, geometry: BubbleGeometry, regions: RegionSet) => resolveBubbleLayoutsDetailed({
+      ...geometry, boxes: regions.boxes, directions: regions.directions, angles: regions.angles,
+      pageWidth, pageHeight,
       accept: (index, proposed) => {
         const curv = geometry.curvatures?.[index];
         const block: TextBlockItem = {
-          text: translatedTexts[index], polygon: polygons[index], fontSize: ocrResult.fontSizes?.[index],
-          direction: ocrResult.directions?.[index], angle: ocrResult.angles?.[index],
-          originalText: texts[index], sourceLineCount: ocrResult.lineCounts?.[index],
+          text: regions.translatedTexts[index], polygon: regions.polygons[index], fontSize: regions.fontSizes?.[index],
+          direction: regions.directions?.[index], angle: regions.angles?.[index],
+          originalText: regions.texts[index], sourceLineCount: regions.lineCounts?.[index],
           isRounded: curv?.isRounded,
           borderRadius: curv?.borderRadius,
           typesetMode: curv?.isRounded ? 'contour' : 'simple',
@@ -172,7 +196,12 @@ async function runPipelineVisualBubbleTest() {
       const ctx = canvas.getContext('2d');
       ctx.drawImage(cleanedImage, 0, 0);
       if (typeof document !== 'undefined' && document.fonts) await document.fonts.ready;
-      const heuristicLayout = resolveLayouts(ctx, heuristicGeometry);
+      const heuristicRegions: RegionSet = {
+        boxes, polygons, texts, translatedTexts,
+        directions: ocrResult.directions, angles: ocrResult.angles,
+        fontSizes: ocrResult.fontSizes, lineCounts: ocrResult.lineCounts,
+      };
+      const heuristicLayout = resolveLayouts(ctx, heuristicGeometry, heuristicRegions);
       const heuristicTypesetBoxes = heuristicLayout.typesetBoxes;
       const heuristicContours = heuristicLayout.contourPoints;
       if (testFile === 'image6.jpg') {
@@ -348,11 +377,19 @@ async function runPipelineVisualBubbleTest() {
         { bubbles: detectedBubbles, shapes: neuralShapes },
       );
       if (!neuralGeometry) throw new Error('Neural bubble geometry build failed');
+      const neuralRegions: RegionSet = {
+        boxes: neuralOcr.boxes,
+        polygons: (neuralOcr.polygons ?? []) as Point2D[][],
+        texts: neuralOcr.texts,
+        translatedTexts: await translator.translate(neuralOcr.texts, 'auto', 'en'),
+        directions: neuralOcr.directions, angles: neuralOcr.angles,
+        fontSizes: neuralOcr.fontSizes, lineCounts: neuralOcr.lineCounts,
+      };
       const canvas = createCanvas(pageWidth, pageHeight);
       const ctx = canvas.getContext('2d');
       ctx.drawImage(cleanedImage, 0, 0);
       if (typeof document !== 'undefined' && document.fonts) await document.fonts.ready;
-      const neuralLayout = resolveLayouts(ctx, neuralGeometry);
+      const neuralLayout = resolveLayouts(ctx, neuralGeometry, neuralRegions);
       const neuralTypesetBoxes = neuralLayout.typesetBoxes;
       const neuralContours = neuralLayout.contourPoints;
 
@@ -363,9 +400,9 @@ async function runPipelineVisualBubbleTest() {
       }
 
       const textBlockItems: TextBlockItem[] = [];
-      for (let i = 0; i < translatedTexts.length; i++) {
-        const text = translatedTexts[i];
-        const poly = polygons[i];
+      for (let i = 0; i < neuralRegions.translatedTexts.length; i++) {
+        const text = neuralRegions.translatedTexts[i];
+        const poly = neuralRegions.polygons[i];
         if (text && poly) {
           const typesetBox = neuralTypesetBoxes[i];
           const fixed = typesetBox !== undefined;
@@ -373,12 +410,12 @@ async function runPipelineVisualBubbleTest() {
           textBlockItems.push({
             text,
             polygon: poly,
-            direction: ocrResult.directions ? ocrResult.directions[i] : 'h',
+            direction: neuralRegions.directions ? neuralRegions.directions[i] : 'h',
             typesetBox,
-            fontSize: ocrResult.fontSizes ? ocrResult.fontSizes[i] : undefined,
-            angle: ocrResult.angles ? ocrResult.angles[i] : undefined,
-            originalText: texts[i],
-            sourceLineCount: ocrResult.lineCounts ? ocrResult.lineCounts[i] : undefined,
+            fontSize: neuralRegions.fontSizes ? neuralRegions.fontSizes[i] : undefined,
+            angle: neuralRegions.angles ? neuralRegions.angles[i] : undefined,
+            originalText: neuralRegions.texts[i],
+            sourceLineCount: neuralRegions.lineCounts ? neuralRegions.lineCounts[i] : undefined,
             isRounded: fixed ? Boolean(curv?.isRounded) : false,
             borderRadius: fixed ? (curv?.borderRadius ?? 0) : 0,
             typesetMode: fixed ? (curv?.isRounded ? 'contour' : 'simple') : 'balloon',
