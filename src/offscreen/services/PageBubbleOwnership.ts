@@ -34,6 +34,20 @@ export const FREE_TEXT_BUCKET = -1;
  */
 const CARRIER_IDENTITY_IOU = 0.5;
 
+
+/**
+ * Whether a box's centre lies inside another box.
+ *
+ * @param outer - Candidate container box.
+ * @param inner - Box whose centre is tested.
+ * @returns True when the inner box's centre sits inside the outer box.
+ */
+function containsCenter(outer: BoxRect, inner: BoxRect): boolean {
+  const cx = inner.x + inner.w / 2;
+  const cy = inner.y + inner.h / 2;
+  return cx >= outer.x && cx <= outer.x + outer.w && cy >= outer.y && cy <= outer.y + outer.h;
+}
+
 /** Per-line balloon identities plus the representative box of each identity. */
 export interface LineBucketAssignment {
   /** Bucket id per line: an identity index, or {@link FREE_TEXT_BUCKET}. */
@@ -64,7 +78,11 @@ export function resolveLineBuckets(geometry: BubbleGeometry | undefined): LineBu
     for (let identity = 0; identity < balloons.length; identity++) {
       const existing = balloons[identity];
       // Shared proposal objects are the same balloon; overlapping carriers are the same balloon.
+      // A carrier that merely closes around a different part of the same balloon (two columns of one
+      // bubble can close separate chambers) is also the same balloon: one contains the other's
+      // centre. Without this, one sentence written across columns is emitted as several regions.
       if (existing === anchor || boxIoU(existing, anchor) >= CARRIER_IDENTITY_IOU) return identity;
+      if (containsCenter(existing, anchor) || containsCenter(anchor, existing)) return identity;
     }
     balloons.push(anchor);
     return balloons.length - 1;

@@ -102,6 +102,41 @@ describe('OcrManager', () => {
       expect(result.groupLineIndices).toEqual([[1], [0]]);
     });
 
+    it('keeps a multi-column utterance together when most of it shares one owner', async () => {
+      // Three adjacent columns of one sentence: two sit inside the balloon, one column's centre
+      // falls outside it. Splitting them would translate the sentence twice.
+      (PaddleOcrEngine as any).mockImplementationOnce(function () {
+        return {
+          init: vi.fn().mockResolvedValue(undefined),
+          recognize: vi.fn().mockResolvedValue({
+            texts: ['一列目', '二列目', '三列目'],
+            polygons: [100, 150, 200].map((x) => [
+              { x, y: 100 }, { x: x + 40, y: 100 }, { x: x + 40, y: 300 }, { x, y: 300 },
+            ]),
+            scores: [0.95, 0.95, 0.95],
+            detectionScores: [0.95, 0.95, 0.95],
+            boxes: [100, 150, 200].map((x) => ({ x, y: 100, w: 40, h: 200 })),
+          }),
+          destroy: vi.fn().mockResolvedValue(undefined),
+          isProviderCurrent: vi.fn().mockResolvedValue(true),
+        };
+      });
+      const result = await ocrManager.processImage(new ArrayBuffer(1), 'v6-small', {
+        pageWidth: 800, pageHeight: 1200,
+      }, undefined, { partitionLines: vi.fn().mockResolvedValue([0, 0, 1]) });
+      // 2 of 3 lines confirm bucket 0, so the third column joins them instead of splitting.
+      expect(result.texts).toHaveLength(1);
+      expect(result.texts[0]).toContain('三列目');
+    });
+
+    it('still splits a 1:1 weld so a stroke column cannot drag dialogue out of its balloon', async () => {
+      installTwoColumnEngine();
+      const result = await ocrManager.processImage(new ArrayBuffer(1), 'v6-small', {
+        pageWidth: 800, pageHeight: 1200,
+      }, undefined, { partitionLines: vi.fn().mockResolvedValue([0, 1]) });
+      expect(result.texts).toHaveLength(2);
+    });
+
     it('fails fast when ownership does not cover every prepared line', async () => {
       installTwoColumnEngine();
       await expect(ocrManager.processImage(new ArrayBuffer(1), 'v6-small', {

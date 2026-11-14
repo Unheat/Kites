@@ -43,6 +43,16 @@ const NEIGHBORHOOD_SUPPRESSION_SCORE_FLOOR = 0.60;
 const NATIVE_DIALOGUE_SCORE_FLOOR = 0.20;
 
 
+/**
+ * Share of a proximity component that must agree on one owner before the whole component adopts it.
+ *
+ * Ownership is resolved per line, so a sentence whose columns straddle a balloon edge can land in
+ * two buckets and be rendered as two separate translations. Two thirds keeps a multi-column
+ * utterance together (2 of 3 lines confirming) while still splitting a 1:1 weld, where a single
+ * misread stroke column would otherwise drag the dialogue out of its balloon again.
+ */
+const OWNERSHIP_COMPONENT_MAJORITY = 2 / 3;
+
 /** Minimum height for a box to count as a vertical text column rather than a stray stroke. */
 const VERTICAL_COLUMN_MIN_HEIGHT_PX = 100;
 
@@ -393,6 +403,53 @@ export class OcrManager {
    * Uses convex hull to generate accurate bounding polygons for merged blocks,
    * and concatenates text right-to-left.
    */
+  /**
+   * Keeps a proximity component's lines in one bucket when they overwhelmingly share an owner.
+   *
+   * The merge graph is proximity-based and knows nothing about balloons: a sentence written across
+   * columns may touch a balloon edge on one column only. Splitting such a component would translate
+   * one sentence twice, so the component adopts its majority owner instead. A genuine 1:1 weld has
+   * no majority and is left split, which is what keeps a misread stroke column out of a balloon.
+   *
+   * @param quads - Prepared textline quadrilaterals in merge input order.
+   * @param buckets - Per-line bucket ids, mutated in place.
+   * @returns The buckets with component majorities applied.
+   */
+  private applyComponentOwnership(
+    quads: Quadrilateral[],
+    buckets: number[],
+  ): number[] {
+    const proximity = new Graph();
+    for (let i = 0; i < quads.length; i++) proximity.addNode(i);
+    for (let i = 0; i < quads.length; i++) {
+      for (let j = i + 1; j < quads.length; j++) {
+        if (quadrilateralCanMergeRegion(quads[i], quads[j], 1.9, 2, 1, 3, 2, 1.3)) {
+          proximity.addEdge(i, j);
+        }
+      }
+    }
+    for (const component of proximity.connectedComponents()) {
+      const members = Array.from(component);
+      if (members.length < 2) continue;
+      const counts = new Map<number, number>();
+      for (const member of members) {
+        counts.set(buckets[member], (counts.get(buckets[member]) ?? 0) + 1);
+      }
+      let winner: number | undefined;
+      let winnerCount = 0;
+      for (const [bucket, count] of counts) {
+        if (count > winnerCount) {
+          winner = bucket;
+          winnerCount = count;
+        }
+      }
+      if (winner === undefined) continue;
+      if (winnerCount / members.length < OWNERSHIP_COMPONENT_MAJORITY) continue;
+      for (const member of members) buckets[member] = winner;
+    }
+    return buckets;
+  }
+
   /**
    * Resolves the page's line ownership before merging.
    *
@@ -957,7 +1014,10 @@ export class OcrManager {
     // balloon can never be welded onto a balloon's dialogue. Undefined = one bucket (disabled
     // tier and every caller that does not supply a partitioner).
     const buckets = options?.partitionLines
-      ? await this.resolveLineBuckets(workingQuads, workingTexts, workingScores, options.partitionLines)
+      ? this.applyComponentOwnership(
+          workingQuads,
+          await this.resolveLineBuckets(workingQuads, workingTexts, workingScores, options.partitionLines),
+        )
       : undefined;
 
     // Step 1: divide into text region candidates (textline_merge/__init__.py merge graph).

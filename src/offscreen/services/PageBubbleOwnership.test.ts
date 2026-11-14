@@ -39,6 +39,16 @@ describe('resolveLineBuckets', () => {
     expect(buckets).toEqual([0, 0]);
   });
 
+  it('treats a chamber that closes around part of the same balloon as the same balloon', () => {
+    // Two columns of one bubble can each close their own chamber, so IoU stays low even though one
+    // centre sits inside the other. They must share an identity or the sentence is split in two.
+    const wide = box(100, 100, 260, 400);
+    const part = box(120, 150, 90, 300);
+    const { buckets, balloons } = resolveLineBuckets(geometry([null, null], [wide, part]));
+    expect(buckets).toEqual([0, 0]);
+    expect(balloons).toHaveLength(1);
+  });
+
   it('puts lines with no balloon evidence in the free-text bucket', () => {
     const { buckets } = resolveLineBuckets(geometry([null, null], [null, null]));
     expect(buckets).toEqual([FREE_TEXT_BUCKET, FREE_TEXT_BUCKET]);
