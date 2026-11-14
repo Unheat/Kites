@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { readPsd } from 'ag-psd';
 import { hexToRgb, buildPsdDocument, exportCanvasToPsdBlob, PSD_MIME_TYPE } from './psdExport';
 import type { TextBlock } from '../../db';
 import type { ImageLayer, TextObject } from '../types';
@@ -109,6 +110,20 @@ describe('psdExport', () => {
         align: 'left',
         isSkipped: true,
       },
+      {
+        id: 't-4',
+        text: 'Preserved SFX',
+        x: 40,
+        y: 50,
+        width: 50,
+        height: 20,
+        fontSize: 12,
+        fontFamily: 'Arial',
+        color: '#000000',
+        align: 'left',
+        isVisible: true,
+        isArtwork: true,
+      },
     ];
 
     const imageLayers: ImageLayer[] = [
@@ -137,6 +152,21 @@ describe('psdExport', () => {
 
     const magic = String.fromCharCode(...new Uint8Array(arrayBuffer, 0, 4));
     expect(magic).toBe('8BPS');
+
+    // Preserve-pair invariant: artwork blocks keep their original ink (never
+    // erased), so the PSD gains no editable text layer for them.
+    const psd = readPsd(arrayBuffer, { skipCompositeImageData: true, skipThumbnail: true });
+    const layerNames: string[] = [];
+    const collectNames = (nodes: typeof psd.children | undefined): void => {
+      for (const node of nodes ?? []) {
+        layerNames.push(node.name ?? '');
+        if ('children' in node) collectNames(node.children);
+      }
+    };
+    collectNames(psd.children);
+    // Sanity: the visible text layer is present, so the absence check below is real.
+    expect(layerNames.join('\n')).toContain('Visible dialogue');
+    expect(layerNames.join('\n')).not.toContain('Preserved SFX');
   });
 
   it('exportCanvasToPsdBlob handles fallback dimensions when sources are null', async () => {
