@@ -82,6 +82,15 @@ cell, each anchor inside its own cell, and no two cells *sharing area* — other
 runs. So the three-lobe case is supported; the previous failure was a validation gap, not a limit of
 the algorithm.
 
+Donor audit (`scratches/reference/koharu/crates/koharu-renderer/src/bubble.rs`): `flow_cells` is
+topological-first with bisector fallback (65-82), and its cells are a true partition by construction —
+`split_polygon` (358-371) cuts the ring at a reflex-vertex chord, so polygons can never overlap. What
+overlaps is their **bounding boxes**, which the donor never uses as a frame because it typesets inside
+the cell polygon; our contour renderer does the same. Fidelity gaps found during the audit and fixed:
+the `MAX_CONTOUR_POINTS = 1024` cap and the finite-coordinate guard in `topological_flow_cells`
+(bubble.rs:88-96) were missing, so dense noisy contours ran the quadratic decomposition instead of
+deferring to bisectors.
+
 The area test must be measured on the polygons, not on their bounding boxes (devlog 075 §C defines the
 neck split as Stage 1 and bisectors as Stage 2). Neck and bisector cells meet along diagonal lines, so
 bbox overlap is large even when the cells are disjoint; validating with boxes rejected every diagonal

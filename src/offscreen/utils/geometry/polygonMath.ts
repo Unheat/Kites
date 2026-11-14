@@ -287,6 +287,14 @@ export function decomposeLobes(
 }
 
 /**
+ * Contour size above which neck decomposition is skipped.
+ *
+ * Donor parity (Koharu `topological_flow_cells`): a raster contour this dense carries no reliable
+ * reflex structure, and decomposition is quadratic in vertices, so it yields to bisector clipping.
+ */
+export const MAX_CONTOUR_POINTS = 1024;
+
+/**
  * Splits a joined balloon into non-overlapping polygons by decomposing at physical
  * constriction necks between lobes (reflex-vertex diagonals).
  * 1:1 port of Koharu `topological_flow_cells` (`crates/koharu-renderer/src/bubble.rs:84-104`).
@@ -295,7 +303,9 @@ export function topologicalFlowCells(
   contour: Point2D[],
   anchors: Point2D[]
 ): Point2D[][] | null {
-  if (contour.length < 4 || anchors.length <= 1) return null;
+  if (contour.length < 4 || contour.length > MAX_CONTOUR_POINTS) return null;
+  if (contour.some((p) => !Number.isFinite(p.x) || !Number.isFinite(p.y))) return null;
+  if (anchors.some((p) => !Number.isFinite(p.x) || !Number.isFinite(p.y))) return null;
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
   for (const p of contour) {
     if (p.x < minX) minX = p.x;
