@@ -9,6 +9,7 @@
 import { ProviderRouteConfig } from '../config/providers';
 import { OpenAIChatRequest, OpenAIChatResponse } from '../types';
 import { AdapterExecutionResult } from './openai-compatible';
+import { resolveOutputPlan } from './outputMode';
 
 /** Maximum concurrent background Workers AI executions permitted simultaneously */
 const MAX_CONCURRENT_WORKERS_AI = 2;
@@ -70,12 +71,13 @@ export async function executeWorkersAI(
     };
   }
 
-  // Concurrency cap: if active executions have reached max, reject immediately
-  if (activeWorkersAiInFlight >= MAX_CONCURRENT_WORKERS_AI) {
+  // Concurrency cap: catalog value wins, module constant is the fallback.
+  const maxInflight = route.maxInflight ?? MAX_CONCURRENT_WORKERS_AI;
+  if (activeWorkersAiInFlight >= maxInflight) {
     return {
       success: false,
       statusCode: 429,
-      error: `Workers AI concurrent execution capacity reached (${activeWorkersAiInFlight}/${MAX_CONCURRENT_WORKERS_AI})`,
+      error: `Workers AI concurrent execution capacity reached (${activeWorkersAiInFlight}/${maxInflight})`,
       retryAfterSeconds: 2,
     };
   }
@@ -105,16 +107,13 @@ export async function executeWorkersAI(
         temperature: request.temperature ?? 0.1,
       };
 
-      if (route.outputCapability === 'json-schema') {
-        if (request.response_format?.type === 'json_schema') {
-          runOptions.response_format = {
-            type: 'json_schema',
-            json_schema: request.response_format.json_schema.schema,
-          };
-        } else {
-          runOptions.response_format = { type: 'json_object' };
-        }
-      } else if (route.outputCapability === 'json-object') {
+      const outputPlan = resolveOutputPlan(route, request);
+      if (outputPlan.kind === 'json-schema') {
+        runOptions.response_format = {
+          type: 'json_schema',
+          json_schema: outputPlan.schema,
+        };
+      } else if (outputPlan.kind === 'json-object') {
         runOptions.response_format = { type: 'json_object' };
       }
 

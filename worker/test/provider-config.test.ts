@@ -20,6 +20,8 @@ import type { OpenAIChatRequest } from '../src/types';
 
 const originalFetch = globalThis.fetch;
 
+const baseSchema = { type: 'object', properties: { b0: { type: 'string' } } };
+
 const baseRequest: OpenAIChatRequest = {
   model: 'kites-translation',
   messages: [
@@ -31,7 +33,7 @@ const baseRequest: OpenAIChatRequest = {
     json_schema: {
       name: 'translation_response',
       strict: true,
-      schema: { type: 'object', properties: { b0: { type: 'string' } } },
+      schema: baseSchema,
     },
   },
 };
@@ -207,7 +209,7 @@ describe('gemini route configuration', () => {
 
     expect(result.success).toBe(true);
     const config = body().generationConfig;
-    expect(config.responseSchema).toEqual(baseRequest.response_format?.json_schema.schema);
+    expect(config.responseSchema).toEqual(baseSchema);
     expect(config).not.toHaveProperty('responseJsonSchema');
   });
 
@@ -218,7 +220,7 @@ describe('gemini route configuration', () => {
 
     expect(result.success).toBe(true);
     const config = body().generationConfig;
-    expect(config.responseJsonSchema).toEqual(baseRequest.response_format?.json_schema.schema);
+    expect(config.responseJsonSchema).toEqual(baseSchema);
     expect(config).not.toHaveProperty('responseSchema');
   });
 
@@ -363,10 +365,11 @@ describe('workers-ai concurrency configuration', () => {
 
     expect(result.success).toBe(true);
     if (!capturedOptions) throw new Error('Workers AI run was not called');
+    const options: Record<string, unknown> = capturedOptions;
     if (expected === undefined) {
-      expect(capturedOptions).not.toHaveProperty('response_format');
+      expect(options).not.toHaveProperty('response_format');
     } else {
-      expect(capturedOptions.response_format).toEqual(expected);
+      expect(options.response_format).toEqual(expected);
     }
   });
 });

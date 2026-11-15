@@ -8,6 +8,8 @@
 
 import { ProviderRouteConfig } from '../config/providers';
 import { OpenAIChatRequest, OpenAIChatResponse } from '../types';
+import { createJsonSchemaResponseFormat } from '../../../src/shared/translation/poolContract';
+import { resolveOutputPlan } from './outputMode';
 import { readUpstreamBody, MAX_UPSTREAM_RESPONSE_BYTES } from './responseBody';
 
 const MAX_RESPONSE_BYTES = MAX_UPSTREAM_RESPONSE_BYTES; // 64 KB response body guard
@@ -64,37 +66,20 @@ function buildRequestBody(route: ProviderRouteConfig, request: OpenAIChatRequest
     stream: false,
   };
 
-  // Structured output formatting based strictly on provider capabilities catalog
-  if (route.outputCapability === 'json-schema') {
-    if (request.response_format?.type === 'json_schema') {
-      const format = request.response_format;
-      payload.response_format = {
-        type: 'json_schema',
-        json_schema: {
-          name: format.json_schema.name,
-          strict: true,
-          schema: format.json_schema.schema,
-        },
-      };
-    } else {
-      payload.response_format = { type: 'json_object' };
-    }
-  } else if (route.outputCapability === 'json-object') {
+  // Structured output formatting derives from one shared capability plan.
+  const outputPlan = resolveOutputPlan(route, request);
+  if (outputPlan.kind === 'json-schema') {
+    payload.response_format = createJsonSchemaResponseFormat(outputPlan.schema);
+  } else if (outputPlan.kind === 'json-object') {
     payload.response_format = { type: 'json_object' };
   }
 
-  // Route-specific reasoning controls to prevent token burnout
-  if (route.id.startsWith('groq-gpt-oss')) {
-    payload.include_reasoning = false;
-    payload.reasoning_effort = 'low';
-  } else if (route.id.startsWith('groq-qwen')) {
-    payload.reasoning_format = 'parsed';
-  }
-
-  // OpenRouter strict feature-routing parameter
-  if (route.id === 'openrouter-free') {
-    payload.provider = { require_parameters: true };
-  }
+  // Provider-specific parameters come from the catalog, never from the route id.
+  const options = route.requestOptions;
+  if (options?.includeReasoning !== undefined) payload.include_reasoning = options.includeReasoning;
+  if (options?.reasoningEffort) payload.reasoning_effort = options.reasoningEffort;
+  if (options?.reasoningFormat) payload.reasoning_format = options.reasoningFormat;
+  if (options?.requireParameters) payload.provider = { require_parameters: true };
 
   return payload;
 }

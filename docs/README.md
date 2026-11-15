@@ -147,6 +147,7 @@ Key technical decisions and architectural trade-offs are documented under [`docs
 - **[ADR-008: Dual Typesetting and Typography Invariants](decisions/ADR-008-dual-typesetting-engine-and-advanced-typography-invariants.md)** — Historical decision; its two-engine taxonomy is superseded by ADR-010.
 - **[ADR-009: On-Demand Font Library and Shared Picker](decisions/ADR-009-on-demand-font-catalog-and-koharu-2d-contour-invariants.md)** — Catalog integrity, imports, IndexedDB storage, document-local registration, and distribution limits.
 - **[ADR-010: Contour Layout Metadata and Browser Validation](decisions/ADR-010-contour-layout-and-browser-validation.md)** — Three active strategies, coordinate ownership, stored line placements, and evidence required for parity claims.
+- **[ADR-013: Config-Driven Provider Routes](decisions/ADR-013-config-driven-provider-routes.md)** — One shared output-mode catalog, catalog-owned request parameters, a single exhaustive output plan, and one Gemini schema field per route.
 
 ---
 
@@ -178,4 +179,5 @@ All historical development records, research reports, and phase logs are preserv
 - **[Devlog 078: Browser Font and Contour Investigation](dev-history/devlog/078_phase78_koharu_typesetting_visual_parity_browser_canvas_discrepancy.md)** — Reproduced syntax defect, rejected hypotheses, custom tuning, and visual-validation limits.
 - **[Devlog 079: Font Catalog and Picker](dev-history/devlog/079_phase79_on_demand_font_catalog_and_picker.md)** — On-demand library, imports, schema, and search-index crash.
 - **[Devlog 080: Cumulative Integration Catch-up](dev-history/devlog/080_phase80_cumulative_integration_documentation_catchup.md)** — Storage, translation, export, inference scheduling, and Studio integration changes outside the font incident.
+- **[Devlog 103: Config-Driven Provider Routes](dev-history/devlog/103_phase103_config_driven_provider_routes.md)** — Worker provider parameters moved into the catalog, one output-mode plan, one Gemini schema field, and the verification evidence.
 - **[`docs/fullplan.md`](fullplan.md)** — The master project scope specification and roadmap.

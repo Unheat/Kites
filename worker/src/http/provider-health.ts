@@ -15,9 +15,7 @@
 
 import type { ProviderRouteConfig } from '../config/providers';
 import { PROVIDER_ROUTES } from '../config/providers';
-import { executeGemini } from '../adapters/gemini';
-import { executeOpenAICompatible } from '../adapters/openai-compatible';
-import { executeWorkersAI } from '../adapters/workers-ai';
+import { dispatchAdapter } from '../adapters/dispatch';
 import type { Env, OpenAIChatRequest } from '../types';
 import { jsonResponse } from './response';
 
@@ -120,12 +118,7 @@ async function probeRoute(route: ProviderRouteConfig, env: Env): Promise<KeyProb
 
   const startedAt = Date.now();
   try {
-    const result =
-      route.type === 'workers-ai'
-        ? await executeWorkersAI(route, PROBE_REQUEST, env.AI, PROBE_TIMEOUT_MS)
-        : route.type === 'gemini'
-          ? await executeGemini(route, PROBE_REQUEST, secret as string, PROBE_TIMEOUT_MS)
-          : await executeOpenAICompatible(route, PROBE_REQUEST, secret as string, PROBE_TIMEOUT_MS);
+    const result = await dispatchAdapter(route, PROBE_REQUEST, env, PROBE_TIMEOUT_MS);
 
     const verdict = result.success ? 'ok' : classifyVerdict(result.statusCode ?? null);
     if (verdict !== 'ok') {

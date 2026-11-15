@@ -18,7 +18,6 @@ function makeEnv(overrides: Record<string, unknown> = {}): any {
     GEMINI_API_KEY: 'test-key',
     OPENROUTER_API_KEY: 'test-key',
     MISTRAL_API_KEY: 'test-key',
-    NVIDIA_API_KEY: 'test-key',
     ...overrides,
   };
 }

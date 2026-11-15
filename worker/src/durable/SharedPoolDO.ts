@@ -10,10 +10,9 @@
 
 import { DurableObject } from 'cloudflare:workers';
 import { Env, OpenAIChatRequest, ProviderAttemptLog, ProviderMetadata, TranslationQuotaInfo, TranslationResult } from '../types';
-import { PROVIDER_ROUTES, ProviderRouteConfig } from '../config/providers';
-import { executeOpenAICompatible, AdapterExecutionResult } from '../adapters/openai-compatible';
-import { executeWorkersAI } from '../adapters/workers-ai';
-import { executeGemini } from '../adapters/gemini';
+import { PROVIDER_ROUTES } from '../config/providers';
+import { dispatchAdapter } from '../adapters/dispatch';
+import type { AdapterExecutionResult } from '../adapters/openai-compatible';
 import { QuotaAccountingService } from './quotaService';
 import { DurableSqlStore } from './quotaStore';
 import { CircuitBreakerService } from '../routing/circuitBreaker';
@@ -22,10 +21,6 @@ import { deriveExpectedKeys, ensureRequestResponseFormat, validateCompletion } f
 import { estimateTokenCount } from '../../../src/shared/translation/tokenEstimation';
 
 const MAX_TOTAL_WATERFALL_MS = 12_500;
-
-function assertNever(x: never): never {
-  throw new Error(`Unhandled provider route type: ${x}`);
-}
 
 export class SharedPoolDO extends DurableObject<Env> {
   private quotaService = new QuotaAccountingService();
@@ -48,28 +43,6 @@ export class SharedPoolDO extends DurableObject<Env> {
   /** Read-only user quota query. */
   async getQuota(userHash: string): Promise<TranslationQuotaInfo> {
     return this.quotaService.getQuota(userHash, this.store);
-  }
-
-  /** Exhaustively dispatches request to adapter based on route protocol. */
-  private async dispatchAdapter(
-    route: ProviderRouteConfig,
-    request: OpenAIChatRequest,
-    timeoutMs: number
-  ): Promise<AdapterExecutionResult> {
-    switch (route.type) {
-      case 'openai-compatible': {
-        const apiKey = (route.apiKeyEnvVar ? this.env[route.apiKeyEnvVar] : '') || '';
-        return executeOpenAICompatible(route, request, apiKey, timeoutMs);
-      }
-      case 'workers-ai':
-        return executeWorkersAI(route, request, this.env.AI, timeoutMs);
-      case 'gemini': {
-        const apiKey = (route.apiKeyEnvVar ? this.env[route.apiKeyEnvVar] : '') || '';
-        return executeGemini(route, request, apiKey, timeoutMs);
-      }
-      default:
-        return assertNever(route.type);
-    }
   }
 
   /**
@@ -128,7 +101,7 @@ export class SharedPoolDO extends DurableObject<Env> {
         let result: AdapterExecutionResult;
 
         try {
-          result = await this.dispatchAdapter(route, structuredRequest, timeoutMs);
+          result = await dispatchAdapter(route, structuredRequest, this.env, timeoutMs);
         } finally {
           this.circuitBreaker.releaseRoute(route.id);
         }
