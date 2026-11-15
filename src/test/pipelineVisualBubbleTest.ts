@@ -289,7 +289,10 @@ async function runPipelineVisualBubbleTest() {
       // Re-run OCR with the neural ownership policy so this pass is gated the same way the extension
       // gates it (per prepared line), then align shapes with the regions that pass produced.
       const neuralOwnership = createPrecomputedNeuralOwnership(
-        { canvas: null, image: rawImageData, pageWidth, pageHeight },
+        // The ownership service requires a real canvas before it will run any tier; passing null
+        // here silently downgraded every neural pass to free text, so the harness split sentences
+        // that the production offscreen pipeline merges.
+        { canvas: ownershipCanvas as any, image: rawImageData, pageWidth, pageHeight },
         { bubbles: detectedBubbles, shapes: [] },
       );
       const neuralOcr = await ocrManager.processImage(
