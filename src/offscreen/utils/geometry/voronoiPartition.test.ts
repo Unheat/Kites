@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { anchorFlowCells, flowCells } from './voronoiPartition';
-import { pointInPolygon } from './polygonMath';
+import { pointInPolygon, segmentsIntersect } from './polygonMath';
 import type { Point2D } from '../../../shared/utils/geometry';
 
 /**
@@ -52,5 +52,11 @@ describe('flowCells', () => {
     expect(cells).toHaveLength(2);
     expect(pointInPolygon(cells[0], { x: 50, y: 50 })).toBe(true);
     expect(pointInPolygon(cells[1], { x: 150, y: 50 })).toBe(true);
+  });
+
+  it('rejects a diagonal that only touches the contour', () => {
+    // Donor parity: Koharu `segments_intersect` treats an endpoint on the other segment as a
+    // crossing. A diagonal that touches the contour is not a valid split.
+    expect(segmentsIntersect({ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 5, y: 0 }, { x: 5, y: 10 })).toBe(true);
   });
 });

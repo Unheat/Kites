@@ -61,14 +61,34 @@ export function ccw(a: Point2D, b: Point2D, c: Point2D): number {
   return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
 }
 
-/** @returns True when segments a1-a2 and b1-b2 strictly cross (touching endpoints within eps do not count). */
+/** @returns True when the point lies on the segment within eps. */
+function pointOnSegment(start: Point2D, end: Point2D, point: Point2D, eps: number): boolean {
+  return Math.abs(ccw(start, end, point)) <= eps
+    && point.x >= Math.min(start.x, end.x) - eps
+    && point.x <= Math.max(start.x, end.x) + eps
+    && point.y >= Math.min(start.y, end.y) - eps
+    && point.y <= Math.max(start.y, end.y) + eps;
+}
+
+/**
+ * @returns True when segments a1-a2 and b1-b2 cross or touch.
+ *
+ * Donor parity: Koharu `segments_intersect` also treats an endpoint lying on the other segment as
+ * an intersection. A diagonal that merely touches the contour is not a valid split; accepting it
+ * produces overlapping cells whose bounding boxes scramble the layout.
+ */
 export function segmentsIntersect(a1: Point2D, a2: Point2D, b1: Point2D, b2: Point2D, eps = 1e-4): boolean {
   const d1 = ccw(a1, a2, b1);
   const d2 = ccw(a1, a2, b2);
   const d3 = ccw(b1, b2, a1);
   const d4 = ccw(b1, b2, a2);
-  return (((d1 > eps && d2 < -eps) || (d1 < -eps && d2 > eps)) &&
-    ((d3 > eps && d4 < -eps) || (d3 < -eps && d4 > eps)));
+  const crosses = ((d1 > eps && d2 < -eps) || (d1 < -eps && d2 > eps)) &&
+    ((d3 > eps && d4 < -eps) || (d3 < -eps && d4 > eps));
+  return crosses
+    || pointOnSegment(a1, a2, b1, eps)
+    || pointOnSegment(a1, a2, b2, eps)
+    || pointOnSegment(b1, b2, a1, eps)
+    || pointOnSegment(b1, b2, a2, eps);
 }
 
 /** @param points - Arbitrary point set. @returns Convex hull vertices in counter-clockwise order (Andrew's monotone chain). */

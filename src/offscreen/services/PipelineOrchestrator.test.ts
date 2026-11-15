@@ -6,6 +6,7 @@ import { createCanvas, Canvas } from 'canvas';
 import { resolveRenderFontFamily } from '../../shared/renderFontPresets';
 import * as canvasTypesetting from '../utils/canvasTypesetting';
 import * as textColorDetection from '../utils/textColorDetection';
+import { pointInPolygon } from '../utils/geometry/polygonMath';
 
 
 /**
@@ -372,14 +373,18 @@ describe('PipelineOrchestrator', () => {
     for (const block of fixed) {
       // Each sibling expands well past its narrow 60px OCR region inside the shared chamber.
       expect(block.height).toBeGreaterThan(80);
-      // The partition contour describes the sibling's own region, not the whole chamber.
+      // The partition contour describes the sibling's own cell, not the whole chamber. The text
+      // box is now inscribed inside that cell, so the cell polygon may extend past the box; the
+      // invariant is that the box lies inside its own cell, not the reverse.
       expect(block.contourPoints.length).toBeGreaterThanOrEqual(3);
-      const xs = block.contourPoints.map((p: { x: number }) => p.x);
-      const ys = block.contourPoints.map((p: { y: number }) => p.y);
-      expect(Math.min(...xs)).toBeGreaterThanOrEqual(-2);
-      expect(Math.min(...ys)).toBeGreaterThanOrEqual(-2);
-      expect(Math.max(...xs)).toBeLessThanOrEqual(block.width + 2);
-      expect(Math.max(...ys)).toBeLessThanOrEqual(block.height + 2);
+      for (const corner of [
+        { x: 0, y: 0 },
+        { x: block.width, y: 0 },
+        { x: 0, y: block.height },
+        { x: block.width, y: block.height },
+      ]) {
+        expect(pointInPolygon(block.contourPoints, corner, 0.5)).toBe(true);
+      }
     }
     const [top, bottom] = fixed;
     expect(top.posY + top.height).toBeLessThanOrEqual(bottom.posY + 2);
