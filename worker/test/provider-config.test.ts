@@ -236,6 +236,26 @@ describe('gemini route configuration', () => {
     expect(result.success).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  it('defaults to the public Gemini endpoint when baseUrl is absent', async () => {
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      expect(url).toBe('https://generativelanguage.googleapis.com/v1beta/models/gemma-test:generateContent');
+      return new Response(
+        JSON.stringify({
+          candidates: [
+            { content: { parts: [{ text: '{"b0":"Hello"}' }] }, finishReason: 'STOP' },
+          ],
+        }),
+        { status: 200 }
+      );
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const result = await executeGemini(geminiRoute, baseRequest, 'secret', 2000);
+
+    expect(result.success).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('workers-ai concurrency configuration', () => {
@@ -272,5 +292,40 @@ describe('workers-ai concurrency configuration', () => {
 
     resolveFirst({ response: '{"b0":"Hello"}' });
     await first;
+  });
+
+  it.each([
+    ['json-schema', {
+      type: 'json_schema',
+      json_schema: { type: 'object', properties: { b0: { type: 'string' } } },
+    }],
+    ['json-object', { type: 'json_object' }],
+    ['prompt-only', undefined],
+  ] as const)('maps %s capability to the Workers AI request', async (capability, expected) => {
+    let capturedOptions: Record<string, unknown> | null = null;
+    const ai = {
+      run: vi.fn().mockImplementation((_model: string, options: Record<string, unknown>) => {
+        capturedOptions = options;
+        return Promise.resolve({ response: '{"b0":"Hello"}', finish_reason: 'stop' });
+      }),
+    };
+    const cfRoute = route({
+      id: 'cf-route',
+      type: 'workers-ai',
+      baseUrl: undefined,
+      modelName: '@cf/test/model',
+      apiKeyEnvVar: undefined,
+      outputCapability: capability,
+    });
+
+    const result = await executeWorkersAI(cfRoute, baseRequest, ai, 2000);
+
+    expect(result.success).toBe(true);
+    if (!capturedOptions) throw new Error('Workers AI run was not called');
+    if (expected === undefined) {
+      expect(capturedOptions).not.toHaveProperty('response_format');
+    } else {
+      expect(capturedOptions.response_format).toEqual(expected);
+    }
   });
 });
