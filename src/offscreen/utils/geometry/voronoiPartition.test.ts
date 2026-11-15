@@ -24,6 +24,24 @@ const THREE_ANCHORS: Point2D[] = [
   { x: 48, y: 318 },
 ];
 
+/**
+ * Tall joined balloon measured on image8 (three stacked utterances). Its only reflex vertices sit
+ * on the right wall, so the topological split can separate the anchors with a full-height strip.
+ * The donor's anchor bisectors are the intended fallback and produce horizontal bands.
+ */
+const TALL_BALLOON_CONTOUR: Point2D[] = [
+  [20, 0], [60, 0], [70, 8], [77, 8], [92, 23], [102, 49], [102, 71], [100, 75],
+  [100, 83], [87, 105], [97, 113], [107, 128], [112, 139], [115, 165], [117, 169], [115, 173],
+  [115, 191], [110, 203], [110, 210], [95, 240], [100, 244], [110, 263], [110, 330], [107, 334],
+  [105, 356], [97, 379], [90, 390], [0, 390], [-3, 386], [-3, 375], [0, 371], [0, 15],
+].map(([x, y]) => ({ x, y }));
+
+const TALL_BALLOON_ANCHORS: Point2D[] = [
+  { x: 49, y: 320 },
+  { x: 53, y: 177.5 },
+  { x: 43.5, y: 60 },
+];
+
 describe('flowCells', () => {
   it('separates three stacked lobes of one joined balloon', () => {
     const cells = flowCells(118, 391, THREE_ANCHORS, THREE_LOBE_CONTOUR);
@@ -47,6 +65,24 @@ describe('flowCells', () => {
     expect(shared).toBe(0);
   });
 
+  it('falls back to horizontal anchor bands when a topological lobe spans the whole balloon', () => {
+    const cells = flowCells(117, 391, TALL_BALLOON_ANCHORS, TALL_BALLOON_CONTOUR);
+    expect(cells).toHaveLength(3);
+    const contourHeight = Math.max(...TALL_BALLOON_CONTOUR.map((point) => point.y))
+      - Math.min(...TALL_BALLOON_CONTOUR.map((point) => point.y));
+    const cellCenters = cells.map((cell) => {
+      const ys = cell.map((point) => point.y);
+      expect(Math.max(...ys) - Math.min(...ys)).toBeLessThan(contourHeight * 0.85);
+      return ys.reduce((sum, y) => sum + y, 0) / ys.length;
+    });
+    // Anchors are ordered bottom, middle, top; horizontal bands must follow that order.
+    expect(cellCenters[0]).toBeGreaterThan(cellCenters[1]);
+    expect(cellCenters[1]).toBeGreaterThan(cellCenters[2]);
+    for (let i = 0; i < cells.length; i++) {
+      expect(pointInPolygon(cells[i], TALL_BALLOON_ANCHORS[i])).toBe(true);
+    }
+  });
+
   it('still partitions two anchors inside a plain rectangle', () => {
     const cells = anchorFlowCells(200, 100, [{ x: 50, y: 50 }, { x: 150, y: 50 }]);
     expect(cells).toHaveLength(2);
@@ -54,7 +90,7 @@ describe('flowCells', () => {
     expect(pointInPolygon(cells[1], { x: 150, y: 50 })).toBe(true);
   });
 
-  it('rejects a diagonal that only touches the contour', () => {
+  it('treats a touching endpoint as an intersection (donor parity)', () => {
     // Donor parity: Koharu `segments_intersect` treats an endpoint on the other segment as a
     // crossing. A diagonal that touches the contour is not a valid split.
     expect(segmentsIntersect({ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 5, y: 0 }, { x: 5, y: 10 })).toBe(true);

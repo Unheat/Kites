@@ -1,7 +1,6 @@
 import type { Point2D } from '../../shared/utils/geometry';
 import type { BubbleGeometry } from '../engines/bubble/BaseBubbleEngine';
 import { generateBubbleContour } from '../utils/contourTypeset';
-import { pointInPolygon } from '../utils/geometry/polygonMath';
 import {
   applySiblingBoundaryConstraints,
   boxIoU,
@@ -134,57 +133,6 @@ export interface ResolvedBubbleLayout {
   contourPoints: (Point2D[] | undefined)[];
   /** Boxes absorbed into a dominant chamber by the noise guard; downstream must not render them. */
   skipped?: boolean[];
-}
-
-/**
- * Expands a text box inside a cell polygon without crossing its boundary.
- *
- * Flow-cell cells can be diagonal; their bounding box spans two lobes even though the cell itself
- * contains only one. Starting from the utterance box (or a small box at its center when the OCR box
- * crosses the cell edge) and growing each side while all four corners stay inside gives the text a
- * usable rectangle in its own lobe instead of the whole diagonal bbox.
- *
- * @param box - Utterance box in page coordinates.
- * @param contour - Cell polygon in page coordinates.
- * @param limit - Local window the expansion may not leave, keeping a diagonal cell from growing
- *                the top utterance down into the middle lobe.
- * @returns A box inside the contour, or the original box when no interior seed exists.
- */
-function expandBoxInsideContour(box: BoxRect, contour: Point2D[], limit: BoxRect): BoxRect {
-  const step = 2;
-  const inside = (candidate: BoxRect): boolean => {
-    if (candidate.x < limit.x || candidate.y < limit.y
-      || candidate.x + candidate.w > limit.x + limit.w
-      || candidate.y + candidate.h > limit.y + limit.h) return false;
-    const corners = [
-      { x: candidate.x, y: candidate.y },
-      { x: candidate.x + candidate.w, y: candidate.y },
-      { x: candidate.x, y: candidate.y + candidate.h },
-      { x: candidate.x + candidate.w, y: candidate.y + candidate.h },
-    ];
-    return corners.every((corner) => pointInPolygon(contour, corner, 0.5));
-  };
-
-  let { x, y, w, h } = box;
-  if (!inside({ x, y, w, h })) {
-    const cx = x + w / 2;
-    const cy = y + h / 2;
-    x = cx - 4;
-    y = cy - 4;
-    w = 8;
-    h = 8;
-    if (!inside({ x, y, w, h })) return box;
-  }
-
-  let changed = true;
-  while (changed) {
-    changed = false;
-    if (inside({ x: x - step, y, w: w + step, h })) { x -= step; w += step; changed = true; }
-    if (inside({ x, y, w: w + step, h })) { w += step; changed = true; }
-    if (inside({ x, y: y - step, w, h: h + step })) { y -= step; h += step; changed = true; }
-    if (inside({ x, y, w, h: h + step })) { h += step; changed = true; }
-  }
-  return { x, y, w, h };
 }
 
 /**
@@ -376,20 +324,7 @@ export function resolveBubbleLayoutsDetailed(input: BubbleLayoutInput): Resolved
 
       const candidates = group.map((i, position) => {
         const chamber = subChambers[position];
-        // Flow-cell chambers are territories, not text boxes. A diagonal cell can span two lobes,
-        // so centering the utterance in the cell bbox moves the top text down into the middle lobe.
-        // Seed from the utterance's own box and grow only inside the cell polygon and a local
-        // window; the cell contour still defines the bubble outline.
-        const seed = boxes[i];
-        const cell = cellContours[position];
-        const limit: BoxRect = {
-          x: seed.x - seed.w,
-          y: seed.y - seed.h,
-          w: seed.w * 3,
-          h: seed.h * 3,
-        };
-        const inscribed = cell && cell.length >= 3 ? expandBoxInsideContour(seed, cell, limit) : seed;
-        return pairwiseClampBox(inscribed, boxes[i], boxes, i, chamber, SIBLING_GAP, group);
+        return pairwiseClampBox(chamber, boxes[i], boxes, i, chamber, SIBLING_GAP, group);
       });
       // Same contract as the rectangular path: acceptance sees the exact cell-local
       // contour (or none) that assignment will store for this sibling.

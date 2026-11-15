@@ -10,6 +10,13 @@ import { topologicalFlowCells } from './polygonMath';
 
 export const SIBLING_GAP = 6;
 const EPSILON = 1e-5;
+/**
+ * A topological "lobe" taller than this fraction of the balloon is a full-height strip, not a
+ * lobe. With three or more flows it is the signature of a diagonal that separates anchors but
+ * does not follow a physical neck (the tall stacked-balloon case); the donor's anchor bisectors
+ * are the correct fallback and produce horizontal bands.
+ */
+const MAX_TOPOLOGICAL_CELL_HEIGHT_RATIO = 0.85;
 
 /**
  * Clips a polygon with an oriented half-plane (Sutherland-Hodgman).
@@ -157,7 +164,17 @@ export function flowCells(
     // per anchor. `split_polygon` cuts the ring at a chord, so the cells are a true partition by
     // construction; an extra overlap gate would reject valid diagonal necks and fall back to
     // bisectors, which is not what Koharu does.
-    if (topo && topo.length === anchors.length) {
+    // The one exception is a full-height "lobe" in a 3+ flow balloon: that is a diagonal that
+    // separates anchors without following a neck, and it squeezes the text into a vertical strip.
+    // The donor's anchor bisectors produce the intended horizontal bands for that stack.
+    const contourYs = contour.map((point) => point.y);
+    const contourHeight = Math.max(...contourYs) - Math.min(...contourYs);
+    const isFullHeightStrip = anchors.length >= 3 && Boolean(topo?.some((cell) => {
+      const ys = cell.map((point) => point.y);
+      return contourHeight > 0
+        && Math.max(...ys) - Math.min(...ys) >= contourHeight * MAX_TOPOLOGICAL_CELL_HEIGHT_RATIO;
+    }));
+    if (topo && topo.length === anchors.length && !isFullHeightStrip) {
       return topo;
     }
   }

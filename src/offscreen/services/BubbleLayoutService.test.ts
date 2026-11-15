@@ -806,44 +806,4 @@ describe('contour-owned typeset box (tier-blind chamber evidence)', () => {
 
     expect(run(null)).toEqual(run(carrierBox));
   });
-
-  it('keeps three stacked utterances in their own lobes of a diagonal flow-cell balloon', () => {
-    // Measured on image8: the tall joined balloon has three anchors, but the topological split
-    // returns a diagonal middle cell whose bbox spans two lobes. Centering each utterance in that
-    // bbox moved the top text down into the middle; the text must stay in its own lobe.
-    const contour: Point2D[] = [
-      [1, 163], [1, 21], [3, 19], [3, 15], [9, 9], [15, 5], [19, 5], [27, 1], [53, 1], [55, 3],
-      [77, 9], [94, 29], [94, 33], [100, 45], [102, 67], [100, 69], [100, 77], [98, 79], [96, 89],
-      [88, 103], [88, 107], [100, 119], [110, 137], [112, 149], [114, 151], [114, 167], [116, 169],
-      [114, 173], [114, 189], [112, 191], [112, 196], [110, 198], [110, 204], [108, 206], [104, 222],
-      [100, 230], [92, 238], [92, 240], [104, 252], [108, 262], [108, 268], [110, 270], [108, 334],
-      [106, 336], [104, 356], [102, 358], [100, 368], [96, 374], [96, 378], [88, 388], [84, 388],
-      [82, 390], [15, 390], [13, 388], [9, 388], [3, 382], [3, 378], [1, 376],
-    ].map(([x, y]) => ({ x, y }));
-    const boxes: BoxRect[] = [
-      { x: 412, y: 876, w: 50, h: 20 },
-      { x: 395, y: 722, w: 92, h: 43 },
-      { x: 408, y: 611, w: 47, h: 30 },
-    ];
-    const carrierBox: BoxRect = { x: 388, y: 566, w: 120, h: 394 };
-    const detailed = resolveBubbleLayoutsDetailed({
-      pageWidth: 640,
-      pageHeight: 960,
-      boxes,
-      carriers: boxes.map(() => carrierBox),
-      proposals: boxes.map(() => carrierBox),
-      shapes: [],
-      curvatures: boxes.map(() => ({ isRounded: true, borderRadius: 40 })),
-      contours: boxes.map(() => contour),
-      directions: boxes.map(() => 'h'),
-      accept: () => true,
-    });
-
-    const [bottom, middle, top] = detailed.typesetBoxes;
-    expect(bottom).toBeDefined();
-    expect(middle).toBeDefined();
-    expect(top).toBeDefined();
-    expect(top!.y + top!.h).toBeLessThanOrEqual(middle!.y);
-    expect(middle!.y + middle!.h).toBeLessThanOrEqual(bottom!.y);
-  });
 });

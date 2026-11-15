@@ -72,8 +72,8 @@ recognize ─ prepareLines ─ assign owner per line ─ merge within a bucket �
 | Unit | Purpose | Input → output | Guarantee |
 |---|---|---|---|
 | `matchBoxToBubbleIndex` | Single ownership predicate used by both tiers. | box + balloons → index \| `-1` | centre inside and ≥ 50 % coverage |
-| `flowCells` | Splits one joined balloon between its utterances. | width, height, anchors, contour → cell polygons | Stage 1 reflex-neck split when it genuinely separates the anchors, else bisectors; ≥ 4, 5, n stacked lobes follow the same path |
-| `partitionBalloonFlowCells` | Turns cells into the frame rectangles and local contours the renderer consumes. | container, sibling boxes, contour → `{ subChambers, cellContours }` | cells are disjoint polygons; text is clipped by its own cell contour |
+| `flowCells` | Splits one joined balloon between its utterances. | width, height, anchors, contour → cell polygons | Stage 1 reflex-neck split when it genuinely separates the anchors, except a 3+ flow split that leaves a full-height strip; then stage 2 bisectors give the horizontal bands a stacked balloon needs |
+| `partitionBalloonFlowCells` | Turns cells into the frame rectangles and local contours the renderer consumes. | container, sibling boxes, contour → `{ subChambers, cellContours }` | cells are disjoint polygons; text uses the cell bbox as its frame and the cell polygon as its contour |
 
 ## Artwork classification (`defaultArtworkClassifier`)
 
