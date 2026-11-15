@@ -17,8 +17,6 @@ Translate manga, webtoons, and comics in place. Free, unlimited on-device AI. No
 
 Translate manga, webtoons, and comics in place. Free, unlimited on-device AI. No sign-up, no ads, 100% free, unlimited, and private.
 
-No subscriptions. No daily caps. No waiting.
-
 Kites is a manga translator powered by your own graphics card (WebGPU). It finds each speech bubble, erases the original text without damaging the artwork, and sets the translation back inside the same bubble — matched to that bubble's color and reflowed to fit its shape.
 
 Works on manga sites, long-strip webtoons, and artwork feeds. No copy-paste, no side-by-side popups, no broken page layouts.
