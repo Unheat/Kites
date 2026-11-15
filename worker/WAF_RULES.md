@@ -77,7 +77,6 @@ npx wrangler secret put GOOGLE_EXTENSION_CLIENT_ID
 npx wrangler secret put JWT_SALT
 
 # Active AI Provider Keys (as needed)
-npx wrangler secret put NVIDIA_API_KEY
 npx wrangler secret put OPENROUTER_API_KEY
 npx wrangler secret put GEMINI_API_KEY
 npx wrangler secret put GROQ_API_KEY

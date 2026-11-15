@@ -132,7 +132,6 @@ export interface Env {
    */
   GOOGLE_EXTENSION_CLIENT_ID?: string;
   JWT_SALT?: string;
-  NVIDIA_API_KEY?: string;
   OPENROUTER_API_KEY?: string;
   GEMINI_API_KEY?: string;
   GROQ_API_KEY?: string;

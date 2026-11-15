@@ -5,14 +5,9 @@
  * All quota limits (RPM, RPS, RPD) are historical unverified configured guards, not confirmed account quotas.
  */
 
-/** Canonical catalog of supported model output capabilities */
-export const OUTPUT_MODES = [
-  { id: 'prompt-only', description: 'Prompt-guided completion without JSON schema enforcement' },
-  { id: 'json-object', description: 'Enforces generic valid JSON object output ({ type: "json_object" })' },
-  { id: 'json-schema', description: 'Enforces strict constrained JSON schema grammar' },
-] as const;
-
-export type OutputModeCapability = (typeof OUTPUT_MODES)[number]['id'];
+export { STRUCTURED_OUTPUT_MODES as OUTPUT_MODES } from '../../../src/shared/translation/outputModes';
+export type { StructuredOutputModeId as OutputModeCapability } from '../../../src/shared/translation/outputModes';
+import type { StructuredOutputModeId as OutputModeCapability } from '../../../src/shared/translation/outputModes';
 
 /** Canonical verification evidence states */
 export const VERIFICATION_EVIDENCE_STATES = [
@@ -31,6 +26,26 @@ export const QUALITY_TIERS = [
 ] as const;
 
 export type QualityTier = (typeof QUALITY_TIERS)[number]['id'];
+
+/**
+ * Protocol-specific request parameters a route needs beyond the canonical chat body.
+ * Keep these in the catalog so adapters never branch on provider ids.
+ */
+export interface ProviderRequestOptions {
+  /** Send `include_reasoning` (Groq GPT-OSS routes disable hidden reasoning). */
+  includeReasoning?: boolean;
+  /** Send `reasoning_effort` when the upstream accepts a reasoning budget. */
+  reasoningEffort?: 'low' | 'medium' | 'high';
+  /** Send `reasoning_format` (Groq Qwen routes request parsed reasoning markers). */
+  reasoningFormat?: 'parsed';
+  /** Send OpenRouter's `provider.require_parameters` feature-routing flag. */
+  requireParameters?: boolean;
+}
+
+/**
+ * Gemini structured-output field name. The two fields are alternatives; never send both.
+ */
+export type GeminiSchemaParam = 'responseSchema' | 'responseJsonSchema';
 
 export interface ProviderRouteConfig {
   /** Unique ID for health tracking and internal metrics */
@@ -67,8 +82,10 @@ export interface ProviderRouteConfig {
   outputCapability: OutputModeCapability;
   /** Verification status of model capability and endpoint */
   verificationEvidence: VerificationEvidenceState;
-  /** Whether upstream supports reasoning parameters (e.g. reasoning_effort) */
-  supportsReasoningEffort?: boolean;
+  /** Optional upstream-specific request parameters. */
+  requestOptions?: ProviderRequestOptions;
+  /** Gemini only: which structured-output field this endpoint accepts. */
+  schemaParam?: GeminiSchemaParam;
 }
 
 export const PROVIDER_ROUTES: ProviderRouteConfig[] = [
@@ -89,6 +106,7 @@ export const PROVIDER_ROUTES: ProviderRouteConfig[] = [
     maxInflight: 3,
     defaultTimeoutMs: 3500,
     outputCapability: 'json-schema',
+    requestOptions: { includeReasoning: false, reasoningEffort: 'low' },
     verificationEvidence: 'documented',
   },
 
@@ -108,6 +126,7 @@ export const PROVIDER_ROUTES: ProviderRouteConfig[] = [
     maxInflight: 3,
     defaultTimeoutMs: 3000,
     outputCapability: 'json-schema',
+    requestOptions: { reasoningFormat: 'parsed' },
     verificationEvidence: 'documented',
   },
 
@@ -127,6 +146,7 @@ export const PROVIDER_ROUTES: ProviderRouteConfig[] = [
     maxInflight: 3,
     defaultTimeoutMs: 3000,
     outputCapability: 'json-schema',
+    requestOptions: { includeReasoning: false, reasoningEffort: 'low' },
     verificationEvidence: 'documented',
   },
 
@@ -146,6 +166,7 @@ export const PROVIDER_ROUTES: ProviderRouteConfig[] = [
     maxInflight: 3,
     defaultTimeoutMs: 3500,
     outputCapability: 'json-object',
+    requestOptions: { reasoningFormat: 'parsed' },
     verificationEvidence: 'documented',
   },
 
@@ -164,6 +185,7 @@ export const PROVIDER_ROUTES: ProviderRouteConfig[] = [
     maxInflight: 4,
     defaultTimeoutMs: 4000,
     outputCapability: 'json-schema',
+    schemaParam: 'responseJsonSchema',
     verificationEvidence: 'documented',
   },
 
@@ -182,6 +204,7 @@ export const PROVIDER_ROUTES: ProviderRouteConfig[] = [
     maxInflight: 4,
     defaultTimeoutMs: 4000,
     outputCapability: 'json-schema',
+    schemaParam: 'responseJsonSchema',
     verificationEvidence: 'documented',
   },
 
@@ -205,6 +228,7 @@ export const PROVIDER_ROUTES: ProviderRouteConfig[] = [
     maxInflight: 2,
     defaultTimeoutMs: 4500,
     outputCapability: 'json-object',
+    requestOptions: { requireParameters: true },
     verificationEvidence: 'documented',
   },
 

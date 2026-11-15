@@ -9,9 +9,13 @@
 import { ProviderRouteConfig } from '../config/providers';
 import { OpenAIChatRequest, OpenAIChatResponse } from '../types';
 import { AdapterExecutionResult, parseRetryAfter } from './openai-compatible';
+import { resolveOutputPlan } from './outputMode';
 import { readUpstreamBody, MAX_UPSTREAM_RESPONSE_BYTES } from './responseBody';
 
 const MAX_RESPONSE_BYTES = MAX_UPSTREAM_RESPONSE_BYTES; // 64 KB maximum response body guard
+
+/** Public Gemini API root used when a catalog route does not override `baseUrl`. */
+const GEMINI_DEFAULT_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
 
 /**
  * Normalizes Google Gemini candidate finishReason to standard OpenAI finish_reason.
@@ -53,7 +57,8 @@ export async function executeGemini(
   apiKey: string,
   timeoutMs: number
 ): Promise<AdapterExecutionResult> {
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${route.modelName}:generateContent`;
+  const baseUrl = (route.baseUrl ?? GEMINI_DEFAULT_BASE_URL).replace(/\/+$/, '');
+  const endpoint = `${baseUrl}/models/${route.modelName}:generateContent`;
 
   const systemMsg = request.messages.find((m) => m.role === 'system');
   const nonSystemMsgs = request.messages.filter((m) => m.role !== 'system');
@@ -68,15 +73,13 @@ export async function executeGemini(
     maxOutputTokens: request.max_tokens ?? 1024,
   };
 
-  // Structured output support: configure schema when route capability is json-schema
-  if (route.outputCapability === 'json-schema') {
+  // One capability plan decides the JSON mode; exactly one schema field is sent.
+  const outputPlan = resolveOutputPlan(route, request);
+  if (outputPlan.kind !== 'none') {
     generationConfig.responseMimeType = 'application/json';
-    if (request.response_format?.type === 'json_schema') {
-      generationConfig.responseSchema = request.response_format.json_schema.schema;
-      generationConfig.responseJsonSchema = request.response_format.json_schema.schema;
-    }
-  } else if (route.outputCapability === 'json-object') {
-    generationConfig.responseMimeType = 'application/json';
+  }
+  if (outputPlan.kind === 'json-schema') {
+    generationConfig[route.schemaParam ?? 'responseJsonSchema'] = outputPlan.schema;
   }
 
   const bodyObj: Record<string, unknown> = {

@@ -118,10 +118,7 @@ describe('Gemini Adapter Unit Tests', () => {
       type: 'object',
       properties: { b0: { type: 'string' } },
     });
-    expect(capturedBody.generationConfig.responseSchema).toEqual({
-      type: 'object',
-      properties: { b0: { type: 'string' } },
-    });
+    expect(capturedBody.generationConfig).not.toHaveProperty('responseSchema');
   });
 
   it('detects promptFeedback safety block reason as terminal refusal', async () => {
@@ -192,6 +189,7 @@ describe('OpenAI-Compatible Adapter Unit Tests', () => {
     defaultTimeoutMs: 3000,
     outputCapability: 'json-schema',
     verificationEvidence: 'documented',
+    requestOptions: { includeReasoning: false, reasoningEffort: 'low' },
   };
 
   const sampleRequest: OpenAIChatRequest = {
