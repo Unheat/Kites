@@ -13,7 +13,9 @@ import {
   getActiveWorkersAiInFlight,
   resetWorkersAiInFlightForTesting,
 } from '../src/adapters/workers-ai';
+import { OUTPUT_MODES, PROVIDER_ROUTES } from '../src/config/providers';
 import type { ProviderRouteConfig } from '../src/config/providers';
+import { STRUCTURED_OUTPUT_MODES } from '../../src/shared/customApi';
 import type { OpenAIChatRequest } from '../src/types';
 
 const originalFetch = globalThis.fetch;
@@ -94,6 +96,14 @@ const completion = {
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
+});
+
+describe('structured output catalog', () => {
+  it('exposes the shared catalog ids in the worker', () => {
+    expect(OUTPUT_MODES.map((mode) => mode.id)).toEqual(
+      STRUCTURED_OUTPUT_MODES.map((mode) => mode.id)
+    );
+  });
 });
 
 describe('openai-compatible request options', () => {
@@ -256,6 +266,37 @@ describe('gemini route configuration', () => {
     expect(result.success).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  it.each(['gemma-4-26b-a4b-it', 'gemma-4-31b-it'])(
+    'sends exactly one schema field for real catalog model %s',
+    async (modelName) => {
+      const catalogRoute = PROVIDER_ROUTES.find((candidate) => candidate.modelName === modelName);
+      if (!catalogRoute) throw new Error(`Missing catalog route for ${modelName}`);
+      let capturedBody: Record<string, any> | null = null;
+      globalThis.fetch = vi.fn().mockImplementation(async (_url: string, init: { body?: string }) => {
+        capturedBody = JSON.parse(init.body ?? '{}') as Record<string, any>;
+        return new Response(
+          JSON.stringify({
+            candidates: [
+              { content: { parts: [{ text: '{"b0":"Hello"}' }] }, finishReason: 'STOP' },
+            ],
+          }),
+          { status: 200 }
+        );
+      }) as unknown as typeof fetch;
+
+      const result = await executeGemini(catalogRoute, baseRequest, 'secret', 2000);
+
+      expect(result.success).toBe(true);
+      if (!capturedBody) throw new Error('Fetch was not called');
+      const config = (capturedBody as Record<string, any>).generationConfig;
+      expect(config.responseMimeType).toBe('application/json');
+      const schemaFields = ['responseSchema', 'responseJsonSchema'].filter(
+        (field) => config[field] !== undefined
+      );
+      expect(schemaFields).toHaveLength(1);
+    }
+  );
 });
 
 describe('workers-ai concurrency configuration', () => {
