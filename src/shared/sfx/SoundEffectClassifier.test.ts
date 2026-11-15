@@ -89,6 +89,14 @@ describe('BareFragmentArtworkClassifier', () => {
     }
   });
 
+  it('keeps a high-confidence two-glyph name whose punctuation OCR dropped', () => {
+    // Measured: 莲实!! was read as 莲实 at 0.99 confidence. The punctuation gate cannot see the
+    // dropped marks, so confidence is the remaining evidence that this is a name, not a stroke.
+    expect(classifier.classify({ text: '莲实', score: 0.99 }).isArtwork).toBe(false);
+    expect(classifier.classify({ text: '又千', score: 0.4 }).isArtwork).toBe(true);
+    expect(classifier.classify({ text: '莲实' }).isArtwork).toBe(true);
+  });
+
   it('ignores longer text and Latin blocks', () => {
     for (const text of ['这等屈辱', 'S16A', '']) {
       expect(classify(text).isArtwork, text).toBe(false);

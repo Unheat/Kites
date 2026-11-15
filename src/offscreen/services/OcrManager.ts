@@ -1266,6 +1266,7 @@ export class OcrManager {
     // pruned as junk), which is exactly why they need their own state: a box that passed every
     // filter is otherwise assumed to be dialogue, so it gets translated and its art erased.
     const finalTexts = pick(mergedTexts);
+    const finalScores = pick(mergedScores);
 
     // Classification runs on text plus one size ratio, so it works in every bubble tier including
     // the default 'off'. A dictionary hit catches lettering; the size ratio catches brush strokes
@@ -1289,6 +1290,7 @@ export class OcrManager {
         glyphRatio: glyphRatios[index],
         boxShortSideRatio: boxShortSideRatios[index],
         lineCount: finalLineCounts[index],
+        score: finalScores[index],
         inBubble,
       };
       const match = this.artworkClassifier.classify(block);

@@ -38,6 +38,8 @@ export interface OcrBlockDescriptor {
   readonly boxShortSideRatio?: number;
   /** Number of raw OCR lines merged into this block; undefined when the page provided none. */
   readonly lineCount?: number;
+  /** OCR confidence for the block, when the engine reports one. */
+  readonly score?: number;
   /**
    * Whether the block's lines are owned by a detected balloon. Undefined when no ownership
    * policy ran. Balloon context vetoes script-noise heuristics that would preserve real
@@ -124,6 +126,11 @@ export class BareFragmentArtworkClassifier implements IArtworkClassifier {
     // One CJK glyph is enough; the rest may be digits or letters OCR picked up from the drawing
     // ("名0"), but a block of Latin/digits alone is caught by other filters and is not a fragment.
     const hasCjkGlyph = glyphs.some((glyph) => CJK_GLYPH.test(glyph));
+    // A two-glyph CJK block read with high confidence is a short name or caption whose terminal
+    // punctuation OCR dropped (measured: 莲实!! read as 莲实 at 0.99). One-glyph fragments and
+    // low-confidence two-glyph fragments stay artwork; the confidence gate only rescues the
+    // high-confidence case, so brush strokes read as text are still preserved.
+    if (glyphs.length === 2 && block.score !== undefined && block.score >= 0.8) return NO_MATCH;
     return hasCjkGlyph ? { isArtwork: true, kind: 'fragment' } : NO_MATCH;
   }
 }
