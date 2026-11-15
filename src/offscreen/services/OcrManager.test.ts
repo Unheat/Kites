@@ -169,6 +169,41 @@ describe('OcrManager', () => {
       expect(balloonRegion).not.toContain('二列目');
     });
 
+    it('does not weld a free sound effect that sits outside the winning balloon', async () => {
+      // Two balloon lines form a 2/3 majority; the free SFX is proximity-connected but lies
+      // completely outside the balloon's box. Welding it in widens the region and pushes the
+      // translated dialogue outside the bubble.
+      (PaddleOcrEngine as any).mockImplementationOnce(function () {
+        return {
+          init: vi.fn().mockResolvedValue(undefined),
+          recognize: vi.fn().mockResolvedValue({
+            texts: ['一列目', '二列目', 'ギニニニ'],
+            polygons: [
+              [{ x: 100, y: 100 }, { x: 140, y: 100 }, { x: 140, y: 300 }, { x: 100, y: 300 }],
+              [{ x: 150, y: 100 }, { x: 190, y: 100 }, { x: 190, y: 300 }, { x: 150, y: 300 }],
+              [{ x: 220, y: 100 }, { x: 260, y: 100 }, { x: 260, y: 300 }, { x: 220, y: 300 }],
+            ],
+            scores: [0.95, 0.95, 0.9],
+            detectionScores: [0.95, 0.95, 0.9],
+            boxes: [
+              { x: 100, y: 100, w: 40, h: 200 },
+              { x: 150, y: 100, w: 40, h: 200 },
+              { x: 220, y: 100, w: 40, h: 200 },
+            ],
+          }),
+          destroy: vi.fn().mockResolvedValue(undefined),
+          isProviderCurrent: vi.fn().mockResolvedValue(true),
+        };
+      });
+      const result = await ocrManager.processImage(new ArrayBuffer(1), 'v6-small', {
+        pageWidth: 800, pageHeight: 1200,
+      }, undefined, { partitionLines: vi.fn().mockResolvedValue([0, 0, -1]) });
+      expect(result.texts).toHaveLength(2);
+      const balloonRegion = result.texts.find((text) => text.includes('一列目'));
+      expect(balloonRegion).toBeDefined();
+      expect(balloonRegion).not.toContain('ギニニニ');
+    });
+
     it('merges staggered side-by-side columns of one balloon despite size and stagger', async () => {
       // Measured page: one sentence written across columns of very different glyph size and vertical
       // stagger. The donor rule requires aligned column edges, so it used to arrive as two regions.
@@ -196,10 +231,10 @@ describe('OcrManager', () => {
       expect(result.texts[0]).toContain('拜你所赐');
     });
 
-    it('merges staggered free-text columns of one caption despite the donor alignment rule', async () => {
-      // No balloon exists for a rectangular caption, so both columns carry FREE_TEXT. The donor
-      // alignment rule rejects staggered columns; without the relaxed pair rule the caption is
-      // translated as two separate regions.
+    it('keeps stepped free-text caption panels separate instead of welding them into one region', async () => {
+      // Two conjoined stepped caption panels: the right panel starts higher and the left panel
+      // starts lower, with a gutter wider than most of the narrower panel. They are separate
+      // captions, not two columns of one sentence, so the relaxed column rule must not merge them.
       (PaddleOcrEngine as any).mockImplementationOnce(function () {
         return {
           init: vi.fn().mockResolvedValue(undefined),
@@ -220,9 +255,70 @@ describe('OcrManager', () => {
       const result = await ocrManager.processImage(new ArrayBuffer(1), 'v6-small', {
         pageWidth: 800, pageHeight: 1200,
       }, undefined, { partitionLines: vi.fn().mockResolvedValue([-1, -1]) });
+      expect(result.texts).toHaveLength(2);
+      expect(result.texts.some((text) => text.includes('天老人半部長态'))).toBe(true);
+      expect(result.texts.some((text) => text.includes('这样下去的话'))).toBe(true);
+    });
+
+    it('splits two stacked utterances of one figure-8 balloon into separate regions', async () => {
+      // Measured on page 1 of the reported gallery: the two utterances overlap vertically inside
+      // one tall balloon, so the proximity graph connects them; they are separate lobes, not two
+      // columns of one sentence. Ownership alone (one bucket) must not suppress the lobe splitter.
+      (PaddleOcrEngine as any).mockImplementationOnce(function () {
+        return {
+          init: vi.fn().mockResolvedValue(undefined),
+          recognize: vi.fn().mockResolvedValue({
+            texts: ['……我知道了！', '但是千万不要勉强自己！'],
+            polygons: [
+              [{ x: 361, y: 875 }, { x: 405, y: 875 }, { x: 405, y: 1051 }, { x: 361, y: 1051 }],
+              [{ x: 308, y: 918 }, { x: 359, y: 918 }, { x: 359, y: 1219 }, { x: 308, y: 1219 }],
+            ],
+            scores: [0.97, 1.0],
+            detectionScores: [0.97, 1.0],
+            boxes: [{ x: 361, y: 875, w: 44, h: 176 }, { x: 308, y: 918, w: 51, h: 301 }],
+          }),
+          destroy: vi.fn().mockResolvedValue(undefined),
+          isProviderCurrent: vi.fn().mockResolvedValue(true),
+        };
+      });
+      const result = await ocrManager.processImage(new ArrayBuffer(1), 'v6-small', {
+        pageWidth: 1280, pageHeight: 1808,
+      }, undefined, { partitionLines: vi.fn().mockResolvedValue([0, 0]) });
+      expect(result.texts).toHaveLength(2);
+      expect(result.texts.some((text) => text.includes('我知道了'))).toBe(true);
+      expect(result.texts.some((text) => text.includes('勉强自己'))).toBe(true);
+    });
+
+    it('keeps three staggered columns of one sentence together inside one balloon', async () => {
+      // The columns drift vertically and the first ends with terminal punctuation, which used to
+      // satisfy the absolute lobe rule. Their shift is a small fraction of the column height, so
+      // they are columns of one sentence, not lobes.
+      (PaddleOcrEngine as any).mockImplementationOnce(function () {
+        return {
+          init: vi.fn().mockResolvedValue(undefined),
+          recognize: vi.fn().mockResolvedValue({
+            texts: ['一列目！', '二列目', '三列目'],
+            polygons: [
+              [{ x: 300, y: 100 }, { x: 360, y: 100 }, { x: 360, y: 400 }, { x: 300, y: 400 }],
+              [{ x: 250, y: 130 }, { x: 310, y: 130 }, { x: 310, y: 450 }, { x: 250, y: 450 }],
+              [{ x: 200, y: 90 }, { x: 260, y: 90 }, { x: 260, y: 400 }, { x: 200, y: 400 }],
+            ],
+            scores: [0.9, 0.9, 0.9],
+            detectionScores: [0.9, 0.9, 0.9],
+            boxes: [
+              { x: 300, y: 100, w: 60, h: 300 },
+              { x: 250, y: 130, w: 60, h: 320 },
+              { x: 200, y: 90, w: 60, h: 310 },
+            ],
+          }),
+          destroy: vi.fn().mockResolvedValue(undefined),
+          isProviderCurrent: vi.fn().mockResolvedValue(true),
+        };
+      });
+      const result = await ocrManager.processImage(new ArrayBuffer(1), 'v6-small', {
+        pageWidth: 800, pageHeight: 1200,
+      }, undefined, { partitionLines: vi.fn().mockResolvedValue([0, 0, 0]) });
       expect(result.texts).toHaveLength(1);
-      expect(result.texts[0]).toContain('天老人半部長态');
-      expect(result.texts[0]).toContain('这样下去的话');
     });
 
     it('keeps two separate speeches in one balloon apart when they are stacked', async () => {

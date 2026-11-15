@@ -6,8 +6,7 @@
 
 import type { Point2D } from '../../../shared/utils/geometry';
 import type { BoxRect } from '../bubbleExpansion';
-import ClipperLib from 'clipper-lib';
-import { pointInPolygon, topologicalFlowCells } from './polygonMath';
+import { topologicalFlowCells } from './polygonMath';
 
 export const SIBLING_GAP = 6;
 const EPSILON = 1e-5;
@@ -154,66 +153,15 @@ export function flowCells(
   if (anchors.length === 0) return [];
   if (contour && contour.length >= 4) {
     const topo = topologicalFlowCells(contour, anchors);
-    // A topological split is only usable when it actually separated the anchors: a three-lobe
-    // balloon can yield one neck split plus a cell that still spans two lobes, which produced
-    // overlapping frames. Validate before trusting it, otherwise clip by bisectors.
-    if (topo && topo.length === anchors.length && isDisjointSingleAnchorPartition(topo, anchors)) {
+    // Donor parity: `flow_cells` trusts the topological decomposition whenever it returns one cell
+    // per anchor. `split_polygon` cuts the ring at a chord, so the cells are a true partition by
+    // construction; an extra overlap gate would reject valid diagonal necks and fall back to
+    // bisectors, which is not what Koharu does.
+    if (topo && topo.length === anchors.length) {
       return topo;
     }
   }
   return anchorFlowCells(width, height, anchors, contour, siblingGap);
-}
-
-/** Largest bbox overlap, relative to the smaller cell, still treated as touching rather than sharing. */
-const PARTITION_OVERLAP_TOLERANCE = 0.02;
-
-/**
- * Whether a partition actually separated the anchors: every cell holds exactly one anchor and no two
- * cells share area. Guards against a decomposition that returns the right cell count without
- * separating the lobes.
- *
- * @param cells - Candidate cells in local container coordinates.
- * @param anchors - Anchor points in the same coordinates.
- * @returns True when the partition is disjoint and one-anchor-per-cell.
- */
-function isDisjointSingleAnchorPartition(cells: Point2D[][], anchors: Point2D[]): boolean {
-  for (let i = 0; i < cells.length; i++) {
-    if (cells[i].length < 3) return false;
-    let owned = 0;
-    for (const anchor of anchors) {
-      if (pointInPolygon(cells[i], anchor)) owned += 1;
-    }
-    if (owned !== 1) return false;
-    if (!pointInPolygon(cells[i], anchors[i])) return false;
-    for (let j = i + 1; j < cells.length; j++) {
-      if (polygonOverlapRatio(cells[i], cells[j]) > PARTITION_OVERLAP_TOLERANCE) return false;
-    }
-  }
-  return true;
-}
-
-/**
- * Shared area of two cell polygons, relative to the smaller cell.
- *
- * Neck and bisector cells meet along diagonal lines, so their bounding boxes overlap even when the
- * polygons do not; a bbox test rejects every diagonal split and forces the balloon onto the wrong
- * partition.
- *
- * @param a - First polygon.
- * @param b - Second polygon.
- * @returns Overlap ratio in 0..1.
- */
-function polygonOverlapRatio(a: Point2D[], b: Point2D[]): number {
-  const toPath = (poly: Point2D[]) => poly.map((p) => new ClipperLib.IntPoint(Math.round(p.x), Math.round(p.y)));
-  const intersection: any[] = [];
-  const clipper = new ClipperLib.Clipper();
-  clipper.AddPath(toPath(a), ClipperLib.PolyType.ptSubject, true);
-  clipper.AddPath(toPath(b), ClipperLib.PolyType.ptClip, true);
-  clipper.Execute(ClipperLib.ClipType.ctIntersection, intersection,
-    ClipperLib.PolyFillType.pftNonZero, ClipperLib.PolyFillType.pftNonZero);
-  const shared = intersection.reduce((sum, path) => sum + Math.abs(ClipperLib.Clipper.Area(path)), 0);
-  const smaller = Math.min(Math.abs(ClipperLib.Clipper.Area(toPath(a))), Math.abs(ClipperLib.Clipper.Area(toPath(b))));
-  return smaller > 0 ? shared / smaller : 0;
 }
 
 export interface BalloonFlowPartitionResult {

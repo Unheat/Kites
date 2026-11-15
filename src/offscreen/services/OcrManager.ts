@@ -428,7 +428,11 @@ export class OcrManager {
     const overlapY = Math.min(a.aabb.y + a.aabb.height, b.aabb.y + b.aabb.height) - Math.max(a.aabb.y, b.aabb.y);
     if (overlapY < SHARED_OWNER_MIN_Y_OVERLAP * Math.min(a.aabb.height, b.aabb.height)) return false;
     const gap = a.pts ? a.polyDistance(b) : Infinity;
-    return gap <= charSize * SHARED_OWNER_MAX_GAP_CHARS;
+    // A gap wider than most of the narrower column is a gutter between two panels/bubbles, not
+    // spacing between columns of one sentence. The measured stepped caption panels have a 46px
+    // gutter against a 45px column; one sentence's columns stay well inside their own width.
+    const maxGap = Math.min(charSize * SHARED_OWNER_MAX_GAP_CHARS, Math.min(a.aabb.width, b.aabb.width) * 0.8);
+    return gap <= maxGap;
   }
 
   /**
@@ -480,7 +484,27 @@ export class OcrManager {
       }
       if (winner === undefined) continue;
       if (winnerCount / members.length < OWNERSHIP_COMPONENT_MAJORITY) continue;
-      for (const member of members) buckets[member] = winner;
+      // A free line only joins the winning balloon when it actually reaches that balloon's
+      // territory. A sound effect sitting beside the balloon can be proximity-connected to its
+      // dialogue, but welding it in widens the region and pushes the translated text outside the
+      // bubble. The union of the winning lines is a conservative stand-in for the balloon box.
+      const winnerBoxes = members
+        .filter((member) => buckets[member] === winner)
+        .map((member) => quads[member].aabb);
+      const left = Math.min(...winnerBoxes.map((box) => box.x));
+      const top = Math.min(...winnerBoxes.map((box) => box.y));
+      const right = Math.max(...winnerBoxes.map((box) => box.x + box.width));
+      const bottom = Math.max(...winnerBoxes.map((box) => box.y + box.height));
+      for (const member of members) {
+        if (buckets[member] !== FREE_TEXT_BUCKET) {
+          buckets[member] = winner;
+          continue;
+        }
+        const box = quads[member].aabb;
+        const reachesBalloon = box.x < right && box.x + box.width > left
+          && box.y < bottom && box.y + box.height > top;
+        if (reachesBalloon) buckets[member] = winner;
+      }
     }
     return buckets;
   }
@@ -1119,17 +1143,9 @@ export class OcrManager {
       const dir = this.majorityDirection(groupQuads);
       const isVert = dir === 'v';
 
-      // A single balloon holds one speech: its lines are laid out by the bubble partitioner, not by
-      // the staggered-lobe utterance splitter. Splitting them here renders one sentence as several
-      // translations inside the same balloon (measured on a three-column bubble whose columns are
-      // staggered but form one sentence).
-      const owners = new Set(groupIndices.map((idx) => buckets?.[idx] ?? FREE_TEXT_BUCKET));
-      const singleOwner = owners.size === 1 && !owners.has(FREE_TEXT_BUCKET);
-      if (singleOwner) {
-        postSplitGroups.push(groupIndices);
-        continue;
-      }
-
+      // A single balloon can still hold several stacked utterances (a figure-8 or a two-lobe
+      // balloon), so ownership alone must not suppress the lobe splitter. Two columns of ONE
+      // sentence are kept together by the splitter's lobe-shift ratio, not by skipping it wholesale.
       const splitResults = clusterLinesIntoUtterances(linesForCluster, isCjk, isVert);
       for (const res of splitResults) {
         postSplitGroups.push(res.map((l) => l.id));

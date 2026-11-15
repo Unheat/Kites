@@ -52,6 +52,18 @@ export const BOX_TRANSLATION_MIN_TOP_STAGGER = 30.0;
 /** Maximum allowable opposing bottom shrink in font size multiples (guards against convex oval bubble shrinkage). */
 export const BOX_TRANSLATION_OPPOSING_SHRINK_TOLERANCE_RATIO = 0.5;
 
+/**
+ * Minimum vertical centre shift for a staggered pair to be a separate lobe, relative to the shorter
+ * column's height.
+ *
+ * The donor/XianScan lobe rules were written for conjoined balloons, where one lobe sits clearly
+ * above or below its neighbour. Two columns of ONE sentence can also be staggered by a few
+ * characters, and the absolute pixel floor alone would split them into two translations. A real
+ * lobe shifts by a large fraction of the column height (measured figure-8: 105px over a 176px
+ * column), while one sentence's columns shift by a small fraction.
+ */
+export const LOBE_MIN_CENTER_SHIFT_HEIGHT_RATIO = 0.35;
+
 export function polygonThickness(poly: { x: number; y: number }[]): number {
   if (poly.length >= 4) {
     const dx01 = poly[1].x - poly[0].x;
@@ -241,6 +253,9 @@ export function clusterLinesIntoUtterances(
           const minCenterShift = Math.max(BOX_TRANSLATION_MIN_CENTER_SHIFT, medianTh * BOX_TRANSLATION_CENTER_SHIFT_RATIO);
           const minTopStagger = Math.max(BOX_TRANSLATION_MIN_TOP_STAGGER, medianTh * BOX_TRANSLATION_TOP_STAGGER_RATIO);
           const maxOpposingShrink = medianTh * BOX_TRANSLATION_OPPOSING_SHRINK_TOLERANCE_RATIO;
+          // A true lobe moves by a large fraction of the shorter column; staggered columns of one
+          // sentence only drift by a few characters.
+          const isLobeShift = Math.abs(centerShiftY) >= Math.max(1.0, LOBE_MIN_CENTER_SHIFT_HEIGHT_RATIO * Math.min(prevBounds.h, b.h));
 
           // 2a. Staggered multi-lobe split with terminal punctuation (XianScan clustering.rs:60-63):
           // Distinct utterances in conjoined/staggered double-bubbles (e.g. figure-8 lobes) are split
@@ -249,6 +264,7 @@ export function clusterLinesIntoUtterances(
           const isPunctuationLobeSplit =
             horizStep >= VERTICAL_COLUMN_MIN_HORIZ_STEP &&
             endsWithTerm &&
+            isLobeShift &&
             Math.abs(centerShiftY) >= minCenterShift &&
             (topStagger >= 15 || botStagger >= 25 || (overlapY <= 0 && vertGap >= Math.max(6.0, medianTh * 0.45)));
 
@@ -267,6 +283,7 @@ export function clusterLinesIntoUtterances(
 
           const isExtremeBoxTranslation =
             horizStep >= VERTICAL_COLUMN_MIN_HORIZ_STEP &&
+            isLobeShift &&
             (isDownwardBoxTranslation || isUpwardBoxTranslation);
 
           const isStaggeredLobeSplit = isPunctuationLobeSplit || isExtremeBoxTranslation;
