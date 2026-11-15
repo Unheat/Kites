@@ -196,6 +196,35 @@ describe('OcrManager', () => {
       expect(result.texts[0]).toContain('拜你所赐');
     });
 
+    it('merges staggered free-text columns of one caption despite the donor alignment rule', async () => {
+      // No balloon exists for a rectangular caption, so both columns carry FREE_TEXT. The donor
+      // alignment rule rejects staggered columns; without the relaxed pair rule the caption is
+      // translated as two separate regions.
+      (PaddleOcrEngine as any).mockImplementationOnce(function () {
+        return {
+          init: vi.fn().mockResolvedValue(undefined),
+          recognize: vi.fn().mockResolvedValue({
+            texts: ['天老人半部長态', '这样下去的话…'],
+            polygons: [
+              [{ x: 124, y: 6 }, { x: 234, y: 6 }, { x: 234, y: 237 }, { x: 124, y: 237 }],
+              [{ x: 33, y: 73 }, { x: 78, y: 73 }, { x: 78, y: 257 }, { x: 33, y: 257 }],
+            ],
+            scores: [0.9, 0.9],
+            detectionScores: [0.9, 0.9],
+            boxes: [{ x: 124, y: 6, w: 110, h: 231 }, { x: 33, y: 73, w: 45, h: 184 }],
+          }),
+          destroy: vi.fn().mockResolvedValue(undefined),
+          isProviderCurrent: vi.fn().mockResolvedValue(true),
+        };
+      });
+      const result = await ocrManager.processImage(new ArrayBuffer(1), 'v6-small', {
+        pageWidth: 800, pageHeight: 1200,
+      }, undefined, { partitionLines: vi.fn().mockResolvedValue([-1, -1]) });
+      expect(result.texts).toHaveLength(1);
+      expect(result.texts[0]).toContain('天老人半部長态');
+      expect(result.texts[0]).toContain('这样下去的话');
+    });
+
     it('keeps two separate speeches in one balloon apart when they are stacked', async () => {
       (PaddleOcrEngine as any).mockImplementationOnce(function () {
         return {

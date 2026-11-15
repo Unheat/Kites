@@ -419,7 +419,7 @@ export class OcrManager {
    * @param b - Second prepared textline.
    * @returns True when the pair should merge despite the donor alignment requirement.
    */
-  private isSideBySideSharedOwnerPair(a: Quadrilateral, b: Quadrilateral): boolean {
+  private isSideBySideColumnPair(a: Quadrilateral, b: Quadrilateral): boolean {
     const charSize = Math.min(a.font_size, b.font_size);
     if (charSize <= 0) return false;
     if (Math.max(a.font_size, b.font_size) / charSize > SHARED_OWNER_FONT_RATIO) return false;
@@ -1073,8 +1073,19 @@ export class OcrManager {
         // vertical columns, which staggered columns never have, so one sentence arrived as two
         // translated regions. Stacked lobes inside a balloon are excluded, so two separate speeches
         // sharing a balloon stay separate regions.
-        if (!buckets || buckets[i] === FREE_TEXT_BUCKET) continue;
-        if (!this.isSideBySideSharedOwnerPair(workingQuads[i], workingQuads[j])) continue;
+        if (!buckets || buckets[i] === FREE_TEXT_BUCKET) {
+          // Free-text columns of one caption have no balloon to borrow evidence from. Apply the
+          // same relaxed column rule when BOTH lines are free: captions and rectangular narration
+          // boxes are commonly two staggered vertical columns, and the donor alignment rule would
+          // emit them as two translated regions. A balloon/free pair still stays split, which is
+          // what keeps a misread stroke column from being welded back onto dialogue.
+          if (buckets && buckets[i] === FREE_TEXT_BUCKET && buckets[j] === FREE_TEXT_BUCKET
+            && this.isSideBySideColumnPair(workingQuads[i], workingQuads[j])) {
+            mergeGraph.addEdge(i, j);
+          }
+          continue;
+        }
+        if (!this.isSideBySideColumnPair(workingQuads[i], workingQuads[j])) continue;
         mergeGraph.addEdge(i, j);
       }
     }
