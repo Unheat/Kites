@@ -106,6 +106,8 @@ export interface KeyProbeResult {
   mode: ProbeMode;
   verdict: KeyVerdict;
   detail?: KeyDetail;
+  /** Upstream attempts made; 2 means the first answer was unusable and the probe retried once. */
+  attempts: number;
   statusCode: number | null;
   latencyMs: number;
 }
@@ -196,7 +198,7 @@ export function classifyProbeContent(
 async function probeRoute(route: ProviderRouteConfig, env: Env): Promise<KeyProbeResult> {
   const secretName = route.apiKeyEnvVar ?? null;
   const secret = secretName ? (env[secretName] as string | undefined) : undefined;
-  const base: Omit<KeyProbeResult, 'verdict' | 'statusCode' | 'latencyMs'> = {
+  const base: Omit<KeyProbeResult, 'verdict' | 'statusCode' | 'latencyMs' | 'attempts'> = {
     id: route.id,
     type: route.type,
     enabled: route.enabled,
@@ -206,31 +208,43 @@ async function probeRoute(route: ProviderRouteConfig, env: Env): Promise<KeyProb
   };
 
   if (route.type !== 'workers-ai' && !secret) {
-    return { ...base, verdict: 'missing_secret', statusCode: null, latencyMs: 0 };
+    return { ...base, verdict: 'missing_secret', statusCode: null, latencyMs: 0, attempts: 0 };
   }
 
   const startedAt = Date.now();
   try {
-    const result = await dispatchAdapter(route, PROBE_REQUEST, env, PROBE_TIMEOUT_MS);
-    const latencyMs = Date.now() - startedAt;
+    let result = await dispatchAdapter(route, PROBE_REQUEST, env, PROBE_TIMEOUT_MS);
+    let attempts = 1;
 
     if (!result.success) {
       const verdict = classifyVerdict(result.statusCode ?? null);
       // Server-side only: wrangler tail shows the diagnostic, the HTTP report never does.
       console.error(`[provider-health] ${route.id} verdict=${verdict} status=${result.statusCode} error=${result.error ?? 'none'}`);
-      return { ...base, verdict, statusCode: result.statusCode ?? null, latencyMs };
+      return { ...base, verdict, statusCode: result.statusCode ?? null, latencyMs: Date.now() - startedAt, attempts };
     }
 
-    const content = result.isTerminalRefusal
+    let content = result.isTerminalRefusal
       ? { verdict: 'invalid_output' as const, detail: 'safety_refusal' as const }
       : classifyProbeContent(result.data?.choices?.[0]);
-    if (content.verdict !== 'ok') {
-      console.error(`[provider-health] ${route.id} verdict=${content.verdict} detail=${content.detail} status=${result.statusCode}`);
+
+    // A router that picks a backend per request can answer 200 with nothing usable because that one
+    // backend spent the budget thinking. Retry once so a single unlucky pick does not read as a
+    // broken route; a genuinely broken route fails both attempts and is still reported.
+    if (content.verdict === 'invalid_output' && !result.isTerminalRefusal) {
+      attempts = 2;
+      result = await dispatchAdapter(route, PROBE_REQUEST, env, PROBE_TIMEOUT_MS);
+      content = result.success
+        ? classifyProbeContent(result.data?.choices?.[0])
+        : { verdict: 'invalid_output', detail: content.detail };
     }
-    return { ...base, ...content, statusCode: result.statusCode ?? null, latencyMs };
+
+    if (content.verdict !== 'ok') {
+      console.error(`[provider-health] ${route.id} verdict=${content.verdict} detail=${content.detail} status=${result.statusCode} attempts=${attempts}`);
+    }
+    return { ...base, ...content, statusCode: result.statusCode ?? null, latencyMs: Date.now() - startedAt, attempts };
   } catch {
     // Only a thrown transport error reaches here; the adapter already handles HTTP failures.
-    return { ...base, verdict: 'upstream_error', statusCode: null, latencyMs: Date.now() - startedAt };
+    return { ...base, verdict: 'upstream_error', statusCode: null, latencyMs: Date.now() - startedAt, attempts: 1 };
   }
 }
 

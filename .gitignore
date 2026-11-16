@@ -46,6 +46,7 @@ skills-lock.json
 
 # Project-private skills are SOURCE, not derived. After `harness skill create <name>`, un-ignore it:
 #   !.agents/skills/<name>/
+!.agents/skills/worker-provider-onboarding/
 
 !docs/fullplan.md
 docs/dev-history/editor_port_full_plan.md

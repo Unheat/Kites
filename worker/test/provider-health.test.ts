@@ -170,6 +170,29 @@ describe('provider health verdicts', () => {
     }
   });
 
+  it('retries once when a 200 answer is unusable, so one unlucky backend is not a broken route', async () => {
+    let call = 0;
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      call += 1;
+      // First attempt: a reasoning-heavy backend burns the budget and returns nothing usable.
+      // Second attempt: a different backend answers correctly.
+      const content = call === 1 ? '"null"' : '{"b0":"Hello.","b1":"Thank you!"}';
+      const finish = call === 1 ? 'length' : 'stop';
+      return new Response(
+        JSON.stringify({ choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: finish }] }),
+        { status: 200 }
+      );
+    }) as unknown as typeof fetch);
+
+    const body = await (
+      await handleProviderHealth(makeRequest('diag-token', '203.0.113.40', '?route=mistral-3b'), makeEnv(), 'req-retry', {})
+    ).json() as any;
+
+    expect(body.results[0].verdict).toBe('ok');
+    expect(body.results[0].attempts).toBe(2);
+    expect(call).toBe(2);
+  });
+
   it('probes a single route when one is named', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(
       JSON.stringify({
