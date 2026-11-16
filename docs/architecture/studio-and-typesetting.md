@@ -115,9 +115,11 @@ $$Y_{\text{natural}} = \frac{Y_{\text{pointer}} - Y_{\text{pan}}}{\text{Scale}}$
 
 ## Typesetting Modes: Backend vs Studio Edits
 
-The shared `TypesetMode` union is `contour | simple | auto-balloon | balloon`; `balloon` is the retained Auto Balloon alias. Legacy persisted `ellipse` restores as `contour`. Studio labels are **Contour**, **Auto Balloon**, and **Caption Box**. Selection changes affect selected objects; without selection, the setting is a default for future edits/objects, not an automatic rewrite of every existing layout.
+The shared `TypesetMode` union is `contour | simple | auto-balloon | balloon`; `balloon` is the retained Auto Balloon alias. Legacy persisted `ellipse` restores as `contour`. Studio labels are **Bubble Contour**, **Balanced Fit**, and **Caption Box**. Selection changes affect selected objects; without selection, the setting is a default for future edits/objects, not an automatic rewrite of every existing layout.
 
 **Engine availability is gated by bubble evidence, not by the current mode.** `availableTypesetModes()` in `src/shared/constants.ts` derives the offered list from the canonical `TYPESET_MODES` catalog, and `src/studio/canvas/typesetModes.ts` decides membership from `contourPoints` / `originalContourPoints` (≥3 vertices). Text with a detected chamber polygon offers all three engines; captions, narration and free text offer only Balanced Fit and Caption Box, and the Bubble Contour button is disabled with an explanatory tooltip. Because the polygon survives a mode switch and `Reset to Bubble Frame` restores it, a bubble switched to Caption Box can always be switched back to contour — never gate this on `typesetMode`, which records the *current* engine and would lock the object out. A requested mode the object cannot fit with resolves to its first available engine, so a global Contour default never contour-fits a caption.
+
+**Studio resize semantics differ by engine.** Bubble Contour treats measured lines as generated layout: a resize un-wraps them and `wrapTextContour()` re-breaks the words, matching Koharu's reflow. Caption Box preserves the persisted word-to-line split and re-fits only the glyph size to the box; a manual size edit pins that size until the next geometry edit. Balanced Fit re-runs `measureDefaultLayout()` with the 120px slider ceiling, not the current font size as a ceiling.
 
 ```mermaid
 flowchart TD
@@ -129,11 +131,11 @@ flowchart TD
     Vertical -->|Yes| CJK["Vertical column fitting"]
     Vertical -->|No| Mode{"Mode"}
     Mode -->|contour| StudioContour["Stored contour or generated fallback; wrapTextContour"]
-    Mode -->|simple| Greedy["Fixed current font; wrapRectangular"]
+    Mode -->|simple| Caption["Fit existing lines; wrap only new text"]
     Mode -->|balloon / auto-balloon| StudioAuto["measureDefaultLayout"]
 ```
 
-A fixed contour takes priority in `TypesetStrategyFactory.resolve()`, even with a `simple` label. Studio simple edits instead use their explicit branch and fixed-font wrapping. Contour DP uses a 9px default floor and current custom 18/20/24px ceilings (dense dialogue / short dialogue / single uppercase scream); the shared free fitter can search down to 6px. **These caps are not Koharu parity:** donor bubble maximum is horizontal width or vertical height; 24 is only the donor nonbubble maximum.
+A fixed contour takes priority in `TypesetStrategyFactory.resolve()`, even with a `simple` label. Studio simple edits use their explicit branch and keep the existing line split while fitting its scale. Contour DP uses a 9px default floor and current custom 18/20/24px ceilings (dense dialogue / short dialogue / single uppercase scream); the shared free fitter can search down to 6px. **These caps are not Koharu parity:** donor bubble maximum is horizontal width or vertical height; 24 is only the donor nonbubble maximum.
 
 ---
 

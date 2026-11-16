@@ -364,6 +364,8 @@ export async function runStudioOcr(
     return { inpaintedPatchBase64, textObjects: textObjects.map((object, index) => ({
       ...object, fontFamily: typography.fontFamily, bold: typography.bold, targetLang: typography.targetLang,
       ...(typography.layouts[index] ? { fontSize: typography.layouts[index]!.fontSize,
-        lines: typography.layouts[index]!.lines, positionedLines: typography.layouts[index]!.positionedLines } : {}),
+        lines: typography.layouts[index]!.lines, positionedLines: typography.layouts[index]!.positionedLines,
+        // These lines are renderer output, so a later contour/caption resize may re-flow them.
+        textFromGeneratedLines: true } : {}),
     })) };
 }

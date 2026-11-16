@@ -150,7 +150,7 @@ graph TB
 ### 6. Kites Studio & Typesetting Editor (`src/studio/Studio.tsx`, hosted by `src/App.tsx`)
 - A full-screen desktop dashboard built with React 19 and Tailwind CSS 4.
 - **Interactive 8-Point Bounding Boxes & Gesture State Machine:** 3px drag deadzone, RAF-throttled reflow, decoupled double-click editing, and clamped handle hit radii.
-- **Three Typesetting Choices:** Contour, Auto Balloon and Caption Box. Backend contour-priority routing differs from Studio explicit edit branches; Caption Box edits retain current size. Canvas `TextRenderer` paints text, not SVG.
+- **Three Typesetting Choices:** Bubble Contour, Balanced Fit and Caption Box. Backend contour-priority routing differs from Studio explicit edit branches; Bubble Contour re-breaks words on resize, while Caption Box keeps the word-to-line split and re-fits its size. Canvas `TextRenderer` paints text, not SVG.
 - **Font Library:** Bundled comic faces plus an on-demand catalog/import library, searchable pickers, per-document FontFace registration and explicit selected-family loading for the live bake.
 - **Current Caveats:** Stored raw contours may outlive rejected bubble layouts; furniture visibility does not prove solver use. Reset restores transient frame dimensions/contour, not position/rotation. Current 18/20/24 contour caps are customization, not donor parity.
 - **Advanced Lettering Tools:** Rotation angle slider with curved handle & snapping, partial word selection styling, and stroke-then-fill canvas layering.

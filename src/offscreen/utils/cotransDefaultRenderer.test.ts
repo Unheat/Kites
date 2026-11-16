@@ -142,6 +142,15 @@ describe('shared default layout measurement', () => {
     expect(draws.length).toBeGreaterThan(1);
     expect(draws[1][2] - draws[0][2]).toBeCloseTo(drawn.fontSize * drawn.lineSpacing);
   });
+
+  it('lets a caller-supplied cap above 48px grow a previous fit', () => {
+    // Regression: the cap used to be clamped to max(currentSize, 48), so an object already
+    // fitted at 59px could never grow into a larger box even with a 120px slider ceiling.
+    const ctx = createCanvas(800, 600).getContext('2d');
+    const measured = measureDefaultLayout(ctx, 'A', 500, 500, 59, 120, 'Georgia, serif');
+    expect(measured.size).toBeGreaterThan(48);
+    expect(measured.size).toBeLessThanOrEqual(120);
+  });
 });
 
 describe('font family propagation', () => {

@@ -17,9 +17,9 @@ Auto Balloon is the free-region route used by the Western default renderer when 
 
 `measureDefaultLayout()` sanitizes and compacts text, then calls `fitFontSizeWithLines()` with a 5% inset and an upper bound of:
 
-$$S_{max}=\min(\max(\text{requestedSize},48),\text{maxFontSizeCap or }\infty)$$
+$$S_{max}=\text{maxFontSizeCap or }48$$
 
-The shared fitter uses rectangular usable dimensions `max(10, dimension * 0.90)`, `fontSpec()` and a per-font measurement cache. Its lower probe bound is `MIN_FONT_SIZE = 6`, not a guaranteed 9px or 14px floor. The strategy passes `options.minFontSize ?? 14` as the requested/start size; that argument does not replace the shared fitter's 6px lower bound.
+The cap is the caller's ceiling, not the current size: a fit already at 59px can grow when the caller allows 120px. The shared fitter uses rectangular usable dimensions `max(10, dimension * 0.90)`, `fontSpec()` and a per-font measurement cache. Its lower probe bound is `MIN_FONT_SIZE = 6`, not a guaranteed 9px or 14px floor. The strategy passes `options.minFontSize ?? 14` as the requested/start size; that argument does not replace the shared fitter's 6px lower bound.
 
 Balanced wrapping can form a diamond-like stanza, but the current strategy does **not** implement the previously documented per-line ellipse chord equation or golden-aspect cost formula. Those formulas were design descriptions, not this route's current acceptance predicate.
 

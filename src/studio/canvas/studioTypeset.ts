@@ -9,7 +9,7 @@ import { resolveTypesetMode } from './typesetModes';
 
 export type StudioTypesetMode = TypesetMode;
 
-type TypesetStyle = Pick<TextObject, 'bold' | 'italic' | 'letterSpacing' | 'lineSpacing' | 'isVertical' | 'borderRadius' | 'targetLang' | 'contourPoints'> &
+type TypesetStyle = Pick<TextObject, 'bold' | 'italic' | 'letterSpacing' | 'lineSpacing' | 'isVertical' | 'borderRadius' | 'targetLang' | 'contourPoints' | 'lines' | 'uppercase' | 'lowercase'> &
   Pick<TextObject, 'textFromGeneratedLines'>;
 
 /**
@@ -39,6 +39,10 @@ const VERTICAL_COLUMN_WIDTH_RATIO = 1.3;
 const DEFAULT_VERTICAL_LINE_SPACING = 1.15;
 /** Minimum font size floor during auto-balloon vertical fitting. */
 const MIN_VERTICAL_FONT_SIZE = 8;
+/** Caption Box fitting floor; captions may shrink further than dialogue before clipping. */
+const CAPTION_MIN_FONT_SIZE = 6;
+/** Fallback line pitch used by the Studio renderer when an object has no explicit spacing. */
+const DEFAULT_HORIZONTAL_LINE_SPACING = 1.2;
 /** Standard CJK character range regex matching Japanese Kana, Kanji, and Chinese Hanzi. */
 export const CJK_CHARACTER_REGEX = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/;
 
@@ -132,6 +136,53 @@ export function prepareInitialTextObject(object: TextObject): TextObject {
 }
 
 /**
+ * Grows or shrinks a caption's existing line structure to fill its box.
+ * Caption Box deliberately keeps the word-to-line mapping: only the glyph size changes, so a
+ * caption never re-wraps when the author drags its handles.
+ *
+ * @param ctx - Measurement context with the object family already selected per probe.
+ * @param lines - Existing caption lines, already in final display casing.
+ * @param width - Caption box width in image pixels.
+ * @param height - Caption box height in image pixels.
+ * @param fallbackSize - Starting size used when no line fits.
+ * @param style - Object typography carrying line spacing and weight/slant.
+ * @param familyStack - CSS family stack for font probes.
+ * @param stylePrefix - 'bold ' / 'italic ' prefix matching the paint font.
+ * @returns Largest whole-pixel size whose unchanged lines fit the box.
+ */
+function fitCaptionLines(
+  ctx: CanvasRenderingContext2D,
+  lines: string[],
+  width: number,
+  height: number,
+  fallbackSize: number,
+  style: TypesetStyle,
+  familyStack: string,
+  stylePrefix: string
+): number {
+  if (lines.length === 0) return fallbackSize;
+  const safeWidth = Math.max(MIN_SIMPLE_WIDTH, width);
+  const safeHeight = Math.max(MIN_LAYOUT_DIMENSION, height);
+  const lineSpacing = style.lineSpacing ?? DEFAULT_HORIZONTAL_LINE_SPACING;
+  let low = CAPTION_MIN_FONT_SIZE;
+  let high = FONT_SIZE_SLIDER_MAX;
+  let best = Math.min(high, Math.max(low, Math.round(fallbackSize)));
+  while (low <= high) {
+    const size = Math.floor((low + high) / 2);
+    ctx.font = `${stylePrefix}${size}px ${familyStack}`;
+    const widest = lines.reduce((max, line) => Math.max(max, ctx.measureText(line).width), 0);
+    const totalHeight = lines.length * size * lineSpacing;
+    if (widest <= safeWidth && totalHeight <= safeHeight) {
+      best = size;
+      low = size + 1;
+    } else {
+      high = size - 1;
+    }
+  }
+  return best;
+}
+
+/**
  * Merges an edit and recomputes layout only when measured inputs actually change.
  * Engine preference alone never changes existing layout. Character overrides invalidate
  * lines, but the shared fitter currently measures uniform object-level typography, not runs.
@@ -154,8 +205,13 @@ export function applyTextObjectUpdates(
   }
   const updated = { ...object, ...updates };
   // A user-authored text edit is no longer generated layout output: never unwrap its
-  // explicit line breaks on the next reflow.
-  if (updates.text !== undefined) updated.textFromGeneratedLines = false;
+  // explicit line breaks on the next reflow. Drop the stale measured lines too, otherwise
+  // Caption Box would keep the previous word-to-line structure for entirely new text.
+  if (updates.text !== undefined) {
+    updated.textFromGeneratedLines = false;
+    updated.lines = undefined;
+    updated.positionedLines = undefined;
+  }
   if (!LAYOUT_FIELDS.some((field) => {
     if (field === 'charStyles') {
       // Keep indices for metric overrides, ignoring color/stroke-only array entries.
@@ -496,20 +552,45 @@ export function recalculateBlockTypeset(
       const measure = (s: string) => ctx.measureText(s).width;
       const wrapParagraph = (paragraph: string): string[] =>
         wrapRectangular(paragraph.split(/\s+/).filter(Boolean), width, measure, targetLang);
-      // Authored text: each source line is a mandatory break; generated text: one stream.
-      const lines = style.textFromGeneratedLines
-        ? wrapParagraph(sourceText)
-        : sourceText.split(/\r?\n/).flatMap((paragraph) =>
-            paragraph.trim() ? wrapParagraph(paragraph) : ['']);
-      return {
-        fontSize: fallbackSize,
-        lines: lines.length > 0 ? lines : [sourceText],
-      };
+      // Caption Box keeps a persisted word-to-line structure and only scales the glyphs.
+      // Generated text without persisted lines still heals and wraps once; authored text
+      // without persisted lines keeps its explicit newlines.
+      // Persisted lines are trusted only when they describe the same text stream; a stale
+      // line fixture from before a text edit must not freeze the old words in place.
+      const suppliedLines = style.lines?.length
+        ? style.lines.map((line) => getTypesetDisplayText(line, style))
+        : null;
+      const linesMatchText = suppliedLines !== null
+        && unwrapWrappedText(suppliedLines.join('\n')).toLocaleLowerCase()
+          === unwrapWrappedText(text).toLocaleLowerCase();
+      const structuredLines = linesMatchText
+        ? suppliedLines
+        : (!style.textFromGeneratedLines && sourceText.includes('\n')
+            ? sourceText.split(/\r?\n/)
+            : null);
+      const lines = structuredLines
+        ? structuredLines
+        : (style.textFromGeneratedLines
+            ? wrapParagraph(sourceText)
+            : sourceText.split(/\r?\n/).flatMap((paragraph) =>
+                paragraph.trim() ? wrapParagraph(paragraph) : ['']));
+      const finalLines = lines.length > 0 ? lines : [sourceText];
+      // A manual size edit is an explicit authoring constraint, matching contour pinning.
+      // Resize gestures omit the pin, so a later drag re-fits the caption to its box.
+      const fontSize = pinnedFontSize !== undefined
+        ? Math.max(CAPTION_MIN_FONT_SIZE, pinnedFontSize)
+        : fitCaptionLines(ctx, finalLines, width, height, fallbackSize, style, familyStack, stylePrefix);
+      return { fontSize, lines: finalLines };
     }
 
     // Contour Mode: Koharu 2D scanline ray-casting on bubble polygon or curved contour (Route 2)
     if (mode === 'contour') {
-      const sourceText = resolveTypesetSource(text, style);
+      // Any object that already owns measured lines is running generated layout, even when an
+      // older Studio OCR path forgot the provenance marker. Bubble Contour must re-break those
+      // words on resize instead of treating the previous line breaks as authored.
+      const sourceText = style.lines?.length
+        ? unwrapWrappedText(text)
+        : resolveTypesetSource(text, style);
       const contour = (style.contourPoints && style.contourPoints.length >= 3)
         ? style.contourPoints
         : generateBubbleContour(width, height, style.borderRadius);

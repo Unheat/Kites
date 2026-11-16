@@ -285,6 +285,37 @@ describe('Studio Algorithmic Typeset & Line Reflow', () => {
     expect(contour.lines.some((line) => line.includes('thought Second'))).toBe(false);
   });
 
+  it('grows Caption Box glyphs while keeping the persisted word-to-line structure', () => {
+    const lines = ['A short caption', 'with two lines'];
+    const text = lines.join('\n');
+    const small = recalculateBlockTypeset(text, 'sans-serif', 120, 80, 10, 'simple', { lines });
+    const large = recalculateBlockTypeset(text, 'sans-serif', 400, 240, 10, 'simple', { lines });
+    expect(small.lines).toEqual(lines);
+    expect(large.lines).toEqual(lines);
+    expect(large.fontSize).toBeGreaterThan(small.fontSize);
+    expect(large.fontSize).toBeGreaterThan(10);
+  });
+
+  it('keeps a manually pinned Caption Box size instead of auto-growing it', () => {
+    const lines = ['A short caption', 'with two lines'];
+    const updated = applyTextObjectUpdates(
+      { ...object, typesetMode: 'simple', text: lines.join('\n'), lines }, { fontSize: 20 }, 'simple'
+    );
+    expect(updated.fontSize).toBe(20);
+    expect(updated.lines).toEqual(lines);
+  });
+
+  it('re-wraps Bubble Contour words when the box changes, even if persisted lines exist', () => {
+    const lines = ['The quick brown fox', 'jumps over the lazy dog', 'while everyone watches.'];
+    const text = lines.join('\n');
+    const narrow = recalculateBlockTypeset(text, 'sans-serif', 130, 260, 16, 'contour', { lines });
+    const wide = recalculateBlockTypeset(text, 'sans-serif', 360, 120, 16, 'contour', { lines });
+    expect(narrow.lines.join(' ')).toBe(lines.join(' '));
+    expect(wide.lines.join(' ')).toBe(lines.join(' '));
+    expect(narrow.lines).not.toEqual(lines);
+    expect(wide.lines).not.toEqual(narrow.lines);
+  });
+
   it('heals soft hyphen line breaks only for generated layout text', () => {
     const generated = 'Summer at the com-\nmunity pool';
     const healed = recalculateBlockTypeset(generated, 'sans-serif', 400, 300, 16, 'simple', {

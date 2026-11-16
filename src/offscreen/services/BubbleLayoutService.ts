@@ -24,13 +24,12 @@ export const MIN_SHARED_FONT_RATIO = 0.85;
 export const NOISE_AREA_RATIO = 0.10;
 export const NOISE_MAX_ABSOLUTE_AREA = 400;
 /**
- * A traced chamber contour may legitimately be several times larger than the text column it
- * wraps (a pinched oval balloon around one narrow column measures ~5-6x). Past this ratio the
- * contour is treated as a segmentation leak (balloon merged into the page background) and the
- * carrier box wins instead. The bound is deliberately generous: under-fitting a real balloon
- * reproduces the narrow-box/9px-floor failure this guard exists to prevent.
+ * A traced chamber contour may be far larger than its text column: a short line in a large
+ * balloon can cover 10-20x the carrier area without being a segmentation leak. A leaked
+ * component instead tends to absorb most of the page. Reject only contours whose bounding box
+ * covers more than this fraction of the page, so sparse dialogue still gets the real balloon.
  */
-export const MAX_CONTOUR_BOX_AREA_RATIO = 10;
+export const MAX_CONTOUR_PAGE_AREA_RATIO = 0.8;
 
 export type { BubbleGeometry } from '../engines/bubble/BaseBubbleEngine';
 export { BUBBLE_MATCH_COVERAGE } from '../engines/bubble/NeuralBubbleEngine';
@@ -62,15 +61,22 @@ function contains(a: BoxRect, b: BoxRect): boolean {
 /**
  * Decides whether a chamber contour may define a region's typeset box.
  * @param contour - Traced chamber polygon in page space, if the engine produced one.
- * @param carrier - Engine carrier box used as the plausible-area reference.
+ * @param pageWidth - Page width used to reject page-background segmentation leaks.
+ * @param pageHeight - Page height used to reject page-background segmentation leaks.
  * @returns True when the contour is drawable and is not a leaked page-background component.
  */
-function isUsableContourBox(contour: Point2D[] | undefined, carrier: BoxRect | null | undefined): boolean {
+function isUsableContourBox(
+  contour: Point2D[] | undefined,
+  pageWidth: number,
+  pageHeight: number
+): boolean {
   if (!contour || contour.length < 3) return false;
-  if (!carrier || carrier.w <= 0 || carrier.h <= 0) return true;
   const bounds = contourBoundingBox(contour);
   if (bounds.w <= 0 || bounds.h <= 0) return false;
-  return (bounds.w * bounds.h) <= (carrier.w * carrier.h) * MAX_CONTOUR_BOX_AREA_RATIO;
+  const pageArea = pageWidth * pageHeight;
+  if (Number.isFinite(pageArea) && pageArea > 0
+    && bounds.w * bounds.h > pageArea * MAX_CONTOUR_PAGE_AREA_RATIO) return false;
+  return true;
 }
 
 /** @param points - Polygon. @returns Axis-aligned bounding box; empty polygon yields zero-area box. */
@@ -185,7 +191,7 @@ export function resolveBubbleLayoutsDetailed(input: BubbleLayoutInput): Resolved
       // `proposals[i]` made heuristic regions (no shared-chamber association) lay text out inside
       // the tight carrier box while still drawing the wide contour around it, pinning layout to the
       // 9px contour floor. Proposals keep driving grouping identity only.
-      const usableContour = isUsableContourBox(contour, carriers[i]) ? contour : undefined;
+      const usableContour = isUsableContourBox(contour, pageWidth, pageHeight) ? contour : undefined;
 
       let box: BoxRect;
       let localContour: Point2D[] | undefined = undefined;

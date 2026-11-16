@@ -31,9 +31,9 @@ Uniform fallback may return `overflowed: true`; no minimum font size guarantees 
 
 ## 4. Studio Simple Edits Are Deliberately Different
 
-`recalculateBlockTypeset(..., 'simple', ...)` retains the current/user font size and calls `wrapRectangular()` for rectangular word wrapping. It does not rerun the backend `SimpleRectTypesetter` font-size search. Generated soft-hyphen wraps are healed at the restore boundary; in-session authored line breaks remain distinct. It preserves valid CSS font stacks and returns newly wrapped lines at the existing size.
+`recalculateBlockTypeset(..., 'simple', ...)` keeps an existing caption's word-to-line structure and grows or shrinks the glyph size until those lines fit the box; only unmeasured or newly edited text is wrapped once with `wrapRectangular()`. A manual font-size edit pins that exact size, matching Contour's authored override. Generated soft-hyphen wraps are healed at the restore boundary; in-session authored line breaks remain distinct. It preserves valid CSS font stacks.
 
-Thus initial backend caption fitting and subsequent Studio Caption Box edits do not share identical sizing policy. Contour Studio edits instead call `wrapTextContour()` with stored contour points or generated geometry; Auto Balloon edits use `measureDefaultLayout()`.
+Thus initial backend caption fitting and subsequent Studio Caption Box edits do not share identical sizing policy: the backend runs the rectangle DP search for a fresh bake, while Studio preserves the persisted line split and re-fits its scale. Contour Studio edits call `wrapTextContour()` with stored contour points or generated geometry and deliberately re-break the words on resize; Auto Balloon edits use `measureDefaultLayout()`.
 
 ## 5. Output Contract
 

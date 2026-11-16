@@ -764,6 +764,29 @@ describe('contour-owned typeset box (tier-blind chamber evidence)', () => {
     expect(accept.mock.calls[0][3]).toHaveLength(contour.length);
   });
 
+  it('accepts a sparse text carrier inside a large real balloon', () => {
+    // A short line in a big balloon can be >10x the carrier area without being a leak.
+    // The old carrier-relative ratio rejected this and pinned text to the tight text box.
+    const textBox: BoxRect = { x: 220, y: 220, w: 60, h: 60 };
+    const tightCarrier: BoxRect = { x: 218, y: 218, w: 64, h: 64 };
+    const contour = oval(125, 125);
+    const detailed = resolveBubbleLayoutsDetailed({
+      pageWidth: 500,
+      pageHeight: 500,
+      boxes: [textBox],
+      carriers: [tightCarrier],
+      proposals: [null],
+      shapes: [],
+      curvatures: [{ isRounded: true, borderRadius: 90 }],
+      contours: [contour],
+      directions: ['h'],
+      accept: () => true,
+    });
+    const box = detailed.typesetBoxes[0]!;
+    expect(box.w).toBeGreaterThan(tightCarrier.w * 3);
+    expect(box.h).toBeGreaterThan(tightCarrier.h * 3);
+  });
+
   it('rejects a contour that leaked into the page background', () => {
     const textBox: BoxRect = { x: 220, y: 120, w: 60, h: 260 };
     const tightCarrier: BoxRect = { x: 218, y: 118, w: 64, h: 264 };

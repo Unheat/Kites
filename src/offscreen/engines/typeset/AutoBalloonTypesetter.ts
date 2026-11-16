@@ -37,7 +37,10 @@ export function measureDefaultLayout(
     width,
     height,
     fontSize,
-    Math.min(Math.max(fontSize, DEFAULT_FIT_MAX_FONT_SIZE), maxFontSizeCap ?? Number.POSITIVE_INFINITY),
+    // The cap is the caller's ceiling, not the current font size. Clamping to
+    // `max(fontSize, 48)` made an existing 59px fit a permanent 59px ceiling: every
+    // reflow could shrink but never grow back into a larger box.
+    maxFontSizeCap ?? DEFAULT_FIT_MAX_FONT_SIZE,
     DEFAULT_FIT_INSET,
     undefined,
     isBold,

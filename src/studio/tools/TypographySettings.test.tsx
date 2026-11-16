@@ -152,7 +152,9 @@ describe('TypographySettings editing intent and reflow', () => {
     await click('Bold');
     const [simple, balloon] = studioStore.getState().textObjects;
     expect(simple.bold).toBe(true);
-    expect(simple.fontSize).toBe(18);
+    // Caption Box now grows its glyphs to fill the box while keeping the word-to-line split.
+    expect(simple.fontSize).toBeGreaterThan(18);
+    expect(simple.lines).toEqual(['Original', 'dialogue']);
     expect(simple.charStyles?.[0]).toEqual({ color: '#ff0000' });
     expect(balloon.lines).toEqual(['balloon: Original dialogue']);
     expect(balloon.charStyles).toBeUndefined();
