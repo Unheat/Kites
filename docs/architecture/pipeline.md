@@ -1,12 +1,11 @@
-# Translation Pipeline & Algorithm Guide 📐
-
-This document describes Kites' spatial comic translation pipeline. **Current-code audit: 2026-10-28, cumulative `origin/main..main` through `656d720`.** The numbered overview groups work into five stages; the detailed sections separate bubble resolution from drawing. Current route-specific behavior below supersedes older universal ellipse/four-pass descriptions; no end-to-end pixel parity is implied.
+# Translation Pipeline & Algorithm Guide
+This document describes Kites' spatial comic translation pipeline. **Current-code audit: 2026-10-28, cumulative `origin/main..main` through `656d720`; tiling thresholds, overlap deduplication and polygon unclipping re-verified 2026-11-15.** The numbered overview groups work into five stages; the detailed sections separate bubble resolution from drawing. Current route-specific behavior below supersedes older universal ellipse/four-pass descriptions; no end-to-end pixel parity is implied.
 
 > 💡 **Want to explore interactively?** Open [`docs/workflow.html`](../workflow.html) for an explorable architecture diagram with inspectable parameters and formula cards.
 
 ---
 
-## 🔄 The 5-Stage Processing Pipeline
+## The 5-Stage Processing Pipeline
 
 ```mermaid
 flowchart LR
@@ -53,25 +52,24 @@ flowchart LR
 
 ---
 
-## 🔍 Detailed Algorithmic Breakdown
+## Detailed Algorithmic Breakdown
 
 ### Stage 1: Text Detection & Recognition (`OcrManager.ts` & `PaddleOcrEngine.ts`)
 
 #### 1. Automatic 1D Vertical Tiling for Tall Webtoons
 Modern webtoons (Naver, Kakao, Webtoon, Bilibili) are rendered as tall stitched image strips often reaching 10,000–30,000 pixels in height. Processing these full-canvas causes GPU memory crashes or squashes aspect ratios into illegibility.
 
-When an image height exceeds `2500 px` ($H \ge 2500$), Kites activates **1D in-memory canvas tiling**:
-- **Tile Dimensions:** Sliding window of height $H_{\text{tile}} = 1000\text{ px}$ with step size $S = 700\text{ px}$, creating an overlap zone of $300\text{ px}$.
+When an image height exceeds `2500 px` ($H \ge 2500$) **and** its height/width aspect ratio is at least `2.0` (`isTallStrip` in `tallStripTiling.ts`), Kites activates **1D in-memory canvas tiling**:
+- **Tile Dimensions:** Sliding window of height $H_{\text{tile}} = 1000\text{ px}$ with step size $S = 700\text{ px}$, creating an overlap zone of $300\text{ px}$; slices shorter than `32 px` skip inference.
 - **Local OCR Inference:** Each slice is cropped onto a reusable offscreen canvas and recognized independently.
 - **Coordinate Re-projection:** Polygon coordinates $(x, y)$ are projected back to full-page coordinates by adding the tile's vertical offset $Y_{\text{offset}}$.
-- **IoU Boundary Deduplication:** Polygons in the overlap zone are matched using Intersection-over-Union ($\text{IoU} \ge 0.40$). The instance with higher recognition confidence is retained.
+- **IoU Boundary Deduplication:** Polygons in the overlap zone are matched using Intersection-over-Union (IoU ≥ 0.30) plus a confidence margin (a replacement must beat the existing score by more than 0.05). The instance with higher recognition confidence is retained.
 
 #### 2. DBNet Text Detection
 - **Dynamic Dimension Scaling:** Slices are normalized with maximum dimension clamped to $960\text{ px}$ while preserving aspect ratio.
 - **Probability Map & Binarization:** DBNet produces an approximate segmentation map. Pixels with probability $\ge 0.3$ are binarized.
-- **Polygon Extraction (`dt_polys`):** Connected components with contour area $\ge 15\text{ px}^2$ are extracted as convex hull quadrilaterals.
-- **Unclipping:** Contours are expanded using the Vatti polygon clipping algorithm with:
-  $$\text{Distance} = \frac{\text{Area} \times (1 - r^2)}{\text{Perimeter}}, \quad r = 1.5$$
+- **Polygon Extraction (`dt_polys`):** Connected blobs of at least `15` pixels are extracted as convex hull quadrilaterals; a box score (mean probability inside the blob) must reach `0.5`, or `0.35` for thin vertical columns.
+- **Unclipping:** Contours are expanded with a Clipper offset (`extractPolygons.ts`), `distance = area × unclipRatio / perimeter`. `CustomPaddleDetector` passes `UNCLIP_RATIO = 1.8`; the helper's own default is `1.5` (the PaddleOCR `--det_db_unclip_ratio` convention).
 
 #### 3. Projective Homography & CTC Recognition
 - **Bicubic Perspective Warp:** Rotated text bounding boxes $[p_0, p_1, p_2, p_3]$ are projectively warped to standard horizontal rectangular matrices.
@@ -270,10 +268,10 @@ The factory routes fixed contours/contour mode/rounded non-simple regions to `Co
 - **Contour DP:** scanline line-band profiles, block-tip guard, grammatical/slack/overflow penalties, unhyphenated-first then Liang LastResort fallback, positioned line output. Default minimum 9px; current 18/20/24px ceilings are Kites custom dialogue policy, **not Koharu parity**. Donor bubble maximum is width for horizontal writing and height for vertical writing; donor 24 applies only to nonbubble text.
 - **Auto Balloon:** shared `measureDefaultLayout()` / `fitFontSizeWithLines()`, 5% inset, 6px lower search bound, four fitting/recovery passes and balanced wrapping. It is not the removed ellipse DP route or an exact ellipse-chord equation.
 - **Color:** per-block ink/background clustering, anti-alias fringe rejection and snapping with contrast fallback replace a universal black/white luminance-only account.
-- **Font:** resolve preset/library family, register bytes per document, explicitly load named selected families before the live bake's measurement, then await readiness. Missing faces can still fall back. Full [font resolution/measurement/draw Mermaid flow](../development/cotrans_renderer_spec.md#2-font-resolution-measurement--draw-lifecycle).
+- **Font:** resolve preset/library family, register bytes per document, explicitly load named selected families before the live bake's measurement, then await readiness. Missing faces can still fall back. Full [font resolution/measurement/draw Mermaid flow](cotrans-default-renderer.md#2-font-resolution-measurement--draw-lifecycle).
 - **Draw:** `renderRegionDefault()` applies an affine Canvas transform and draws all outline lines before all fill lines. Positioned lines supply local top offsets/spans when present; otherwise the block centers vertically. Active default composition does not rasterize a text bitmap and perspective-warp it. Studio `TextRenderer` also uses Canvas, not SVG.
 - **Save/return:** return baked PNG data for the webpage; save the clean background and structured text records in Dexie. Persist actual rendered font, lines, line spacing, placements, geometry and angle when available.
 
-**Known persistence gap:** saving can fall back from rejected detailed contours to raw acquisition contours and infer contour/simple mode from proposal/carrier evidence. Studio can later reflow a stored contour that the live bake did not use. Current original-contour/detected-dimension baselines are transient, reseeded from saved geometry; reset restores dimensions/contour only, not position/rotation. A visible `CanvasFurniture` contour is not solver evidence. See [renderer specification](../development/cotrans_renderer_spec.md), [Auto Balloon](../development/auto_balloon_typesetting_spec.md), and [Simple Rect](../development/simple_rect_typesetting_spec.md).
+**Known persistence gap:** saving can fall back from rejected detailed contours to raw acquisition contours and infer contour/simple mode from proposal/carrier evidence. Studio can later reflow a stored contour that the live bake did not use. Current original-contour/detected-dimension baselines are transient, reseeded from saved geometry; reset restores dimensions/contour only, not position/rotation. A visible `CanvasFurniture` contour is not solver evidence. See [renderer specification](cotrans-default-renderer.md), [Auto Balloon](auto-balloon-typesetting.md), and [Simple Rect](simple-rect-typesetting.md).
 
 Visual fixtures and Chrome probes exercise selected routes. Their existence and parity-oriented names do not establish end-to-end pixel parity across donor fonts, browser rasterization, DB restore and Studio editing.

@@ -1,4 +1,4 @@
-# Cotrans Default Region Renderer Specification
+# Cotrans default region renderer
 
 ## 1. Overview & Purpose
 
@@ -41,7 +41,7 @@ Font registration is document-local. Catalog downloads verify pinned SHA-256 bef
 
 `fontSpec()` keeps comma-separated CSS stacks unquoted as a whole and orders CJK fallbacks according to sample text. Contour probes retain fractional sizes. Studio OCR precomputes only accepted fixed boxes with the canonical strategy, selected family/weight/language, and awaited font/dictionary resources; free boxes retain the Auto Balloon route rather than receiving accidental contour precomputation.
 
-The contour default maximum follows the inset frame width without 18/20/24 or 48 px caps. Explicit user constraints remain separate; page-level XianScan harmonization affects only free boxes. See [the Koharu port mapping](koharu_typesetting_pipeline_spec.md) for algorithm proof and measurement limitations.
+The contour default maximum follows the inset frame width without 18/20/24 or 48 px caps. Explicit user constraints remain separate; page-level XianScan harmonization affects only free boxes. See [the Koharu port mapping](typesetting-pipeline-contract.md) for algorithm proof and measurement limitations.
 
 ## 3. Rigid 2D Affine Transformation Matrix
 

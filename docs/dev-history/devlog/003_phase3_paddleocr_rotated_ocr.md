@@ -2,7 +2,7 @@
 
 * **Date:** 2026-07-16
 * **Feature/Task:** Implement Local Rotated & Vertical OCR Engine
-* **Ticket/Issue Link:** [Local OCR Architecture](file:///Users/dangtruongan/study/Kites/src/offscreen/engines/ocr/PaddleOcrEngine.ts)
+* **Ticket/Issue Link:** [Local OCR Architecture](../../../src/offscreen/engines/ocr/PaddleOcrEngine.ts)
 * **Status:** Completed
 
 ---

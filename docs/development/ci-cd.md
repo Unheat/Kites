@@ -1,6 +1,6 @@
 # CI/CD & Release Pipeline
 
-**Status:** Current as of v1.3.0 (2026-10-30)
+**Status:** Current as of v1.4.1 (2026-11-15)
 **Scope:** GitHub Actions workflows, release packaging, Cloudflare Worker deployment, and Chrome Web Store distribution.
 
 ---
@@ -9,7 +9,7 @@
 
 | Workflow | File | Triggers | Purpose |
 | --- | --- | --- | --- |
-| **Kites CI/CD** | [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) | push/PR → `main` | Lint, unit tests, production build, artifact upload |
+| **Kites CI/CD** | [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) | push/PR → `main` | Lint, unit tests, docs gate, API reference, production build, artifact upload |
 | **Pipeline Integration Smoke Test** | [`.github/workflows/pipeline-smoke.yml`](../../.github/workflows/pipeline-smoke.yml) | push/PR touching `src/offscreen/**`, `src/shared/**`, `src/test/**`; manual dispatch | CPU-tier full-pipeline smoke matrix + visual pipeline suite |
 | **Validate Model Registry URLs** | [`.github/workflows/validate-model-registry.yml`](../../.github/workflows/validate-model-registry.yml) | push/PR, weekly (Sun 00:00 UTC) | Headless check that every external model URL in the OCR/inpaint/bubble/color registries resolves |
 | **Worker Provider Key Health** | [`.github/workflows/worker-key-health.yml`](../../.github/workflows/worker-key-health.yml) | push to `main` touching the provider catalog/probe/workflow, weekly (Mon 03:00 UTC), manual dispatch | Probes every production provider credential through the live Worker and fails when one is rejected |
@@ -26,8 +26,10 @@ Job `test-and-build` runs, in order:
 
 1. **Lint** — `npm run lint` (Oxlint).
 2. **Unit tests** — `npm run test` (Vitest, `src/` only; visual tests are NOT part of this gate).
-3. **Build** — `npm run build` (`copy-wasm` → `tsc -b` → `vite build`). TypeScript project checks fail the build.
-4. **Artifact** — `dist/` uploaded as `kites-extension-build`, 7-day retention.
+3. **Documentation gate** — `npm run docs:check` (undocumented-symbol ratchet, then TSDoc shape).
+4. **API reference** — `npm run docs:api` (TypeDoc; must generate without validation warnings).
+5. **Build** — `npm run build` (`copy-wasm` → `tsc -b` → `vite build`). TypeScript project checks fail the build.
+6. **Artifact** — `dist/` uploaded as `kites-extension-build`, 7-day retention.
 
 PRs to `main` must pass this workflow before merge.
 

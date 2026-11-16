@@ -1,10 +1,9 @@
-# Coding Standards & Architectural Invariants 🛡️
-
-When contributing to Kites, please adhere to these core coding principles, performance invariants, and established library workarounds.
+# Coding Standards & Architectural Invariants
+When contributing to Kites, please adhere to these core coding principles, performance invariants, and established library workarounds. [`AGENTS.md`](../../AGENTS.md) holds the authoritative rule list (subsystem boundaries, catalog single-source rules, donor-porting constraints); this page summarises the invariants that break the build or the pipeline when violated, and [`doc_guide.md`](../doc_guide.md) covers documentation rules.
 
 ---
 
-## 🏛️ 1. Code Quality & Architectural Principles
+## 1. Code Quality & Architectural Principles
 
 ### Mandatory Docstrings
 Every function, class, and interface must include a clear JSDoc comment describing its purpose, inputs, outputs, and any edge-case considerations:
@@ -39,7 +38,7 @@ const INPAINT_MASK_STROKE_WIDTH = 4;
 
 ---
 
-## ⚡ 2. WebGPU & Neural Pipeline Invariants
+## 2. WebGPU & Neural Pipeline Invariants
 
 ### Dynamic 64px Patch Bucketing (Zero-Resizing Invariant)
 - **Do not pass full-page scans into neural inpainters:** Running FFC convolutions across untouched backgrounds wastes 90% of GPU compute and takes 10+ seconds.
@@ -56,7 +55,7 @@ const INPAINT_MASK_STROKE_WIDTH = 4;
 
 ---
 
-## 🌐 3. Chrome Extension & DOM Invariants
+## 3. Chrome Extension & DOM Invariants
 
 ### Explicit RPC Message Addressing
 `chrome.runtime.sendMessage()` broadcasts across all extension contexts. To prevent dropped messages and port closures:
@@ -73,7 +72,7 @@ When replacing comic panels in modern SPAs (Twitter/X, Reddit, MangaDex):
 
 ---
 
-## 🔧 4. Preserving Upstream Library Workarounds
+## 4. Preserving Upstream Library Workarounds
 
 Never refactor, simplify, or delete patterns marked with `# WORKAROUND` or `// WORKAROUND`:
 

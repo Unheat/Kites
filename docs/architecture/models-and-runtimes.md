@@ -1,10 +1,9 @@
-# AI Models, Runtimes & Hardware Acceleration 🧠
-
+# AI Models, Runtimes & Hardware Acceleration
 Kites combines modern computer vision, neural inpainting, and large language models (LLMs) to perform spatial comic translation directly in the user's browser. This document details the underlying neural architectures, execution providers, weight distribution, and cache lifecycles.
 
 ---
 
-## 🏗️ Hardware Acceleration Matrix
+## Hardware Acceleration Matrix
 
 ```mermaid
 graph TD
@@ -40,7 +39,7 @@ If WebGPU is disabled by enterprise policy, unsupported by hardware, or encounte
 
 ---
 
-## 👁️ Text Detection & Recognition (PaddleOCR Engine)
+## Text Detection & Recognition (PaddleOCR Engine)
 
 Kites employs an optimized TypeScript port of Baidu's **PaddleOCR (PP-OCR)** pipeline.
 
@@ -67,7 +66,7 @@ Kites employs an optimized TypeScript port of Baidu's **PaddleOCR (PP-OCR)** pip
 
 ---
 
-## 🎨 Inpainting Models & Patch Architecture
+## Inpainting Models & Patch Architecture
 
 ```mermaid
 flowchart TD
@@ -123,7 +122,7 @@ flowchart TD
 
 ---
 
-## 💬 Translation Engines & Large Language Models
+## Translation Engines & Large Language Models
 
 Kites provides multiple translation tiers depending on user preference, hardware, and privacy requirements:
 
@@ -197,11 +196,12 @@ The previous 640px detector-v4 model and separate `neural-mask` choice are histo
 
 ---
 
-## 💾 Model Caching, Lifecycle Management & Tensor Disposal
+## Model Caching, Lifecycle Management & Tensor Disposal
 
-1. **Persistent Browser Cache API (`caches.open('kites-model-cache')`):**
-   - ONNX model buffers (`.onnx`), external tensor blobs (`.data`), and character dictionaries (`.txt`) are cached upon first download.
-   - Subsequent extension launches load models from local disk cache with zero network requests.
+1. **Persistent Browser Cache API (one cache per model family):**
+   - `kites-ocr-models-v1`, `kites-inpaint-models-v1`, `kites-bubble-models-v1` and `kites-color-models-v1` are opened by the matching `*CacheManager`. The cache name is a versioned constant in each manager; bumping it invalidates previous downloads.
+   - ONNX model buffers (`.onnx`), external tensor blobs (`.data`), and character dictionaries (`.txt`) are cached on first download.
+   - Subsequent extension launches load models from the local disk cache with zero network requests.
 2. **Multi-Stage Cold-Start Lifecycle Feedback:**
    - Cold model initialization across `ocr`, `inpaint`, `translation`, and `bubble` managers triggers `ModelInitializationMessage` events.
    - UI status indicators display informative badges (e.g. `"Preparing OCR (v6-medium)…"`) with a snappy 150ms debounce, giving instant feedback when switching tiers.

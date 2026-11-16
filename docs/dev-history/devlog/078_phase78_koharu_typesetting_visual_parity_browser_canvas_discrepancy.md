@@ -77,4 +77,4 @@ Recorded checks at merge: 104 Vitest files / 1,122 tests passed, and production 
 6. Do not change an expected unit-test size merely to imply visual correctness; record why the behavior changed and inspect the browser output independently.
 7. Do not call an implementation “1:1” because a filename, commit subject, or named constant says so.
 
-Current contracts and remaining limitations are maintained in [the typesetting specification](../../development/koharu_typesetting_pipeline_spec.md), [workarounds section 15](../../development/workarounds.md#15-canvas-font-syntax-and-contour-coordinate-contracts), and [ADR-010](../../decisions/ADR-010-contour-layout-and-browser-validation.md).
+Current contracts and remaining limitations are maintained in [the typesetting specification](../../architecture/typesetting-pipeline-contract.md), [workarounds section 15](../../development/workarounds.md#15-canvas-font-syntax-and-contour-coordinate-contracts), and [ADR-010](../../decisions/ADR-010-contour-layout-and-browser-validation.md).

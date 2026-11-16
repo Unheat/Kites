@@ -41,4 +41,4 @@ Closer inventory coverage, but does not resolve licensing, font-format support, 
 - Hash failures are rejected before registration, preventing silent CDN byte changes.
 - The cached registration promise and family-based deduplication can leave open documents stale after cross-document imports or same-family replacement; this is not a live synchronization guarantee.
 - Bundling CC Wild Words/Anime Ace reference files does not itself establish redistribution rights.
-- No claim of exact Koharu layout follows from this architecture. See [font specification](../development/font_library_spec.md) and [ADR-010](ADR-010-contour-layout-and-browser-validation.md).
+- No claim of exact Koharu layout follows from this architecture. See [font specification](../architecture/font-library.md) and [ADR-010](ADR-010-contour-layout-and-browser-validation.md).

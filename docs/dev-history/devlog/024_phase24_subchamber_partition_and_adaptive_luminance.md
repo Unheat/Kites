@@ -87,7 +87,7 @@ Two-pass refactor of the `bubbleMode !== 'off'` block (gate and `!ocrResult.type
 
 ## 6. Future Work — Additional Segmentation Tier & Curved-Region Layout (Deferred)
 
-**Proposal only: none of the following is implemented, validated, or deployed by this note.** The full future-work rationale and acceptance gates are recorded in [the upgrade plan, Section 9](../../development/bubble_detection_and_typesetting_upgrade_plan.md#9-future-work--additional-segmentation-tier--curved-region-ownership-deferred).
+**Proposal only: none of the following is implemented, validated, or deployed by this note.** The full future-work rationale and acceptance gates are recorded in [the upgrade plan, Section 9](../plans/bubble_detection_and_typesetting_upgrade_plan.md#9-future-work--additional-segmentation-tier--curved-region-ownership-deferred).
 
 ### A. Additional YOLO11n Manga109 Segmentation Candidate
 

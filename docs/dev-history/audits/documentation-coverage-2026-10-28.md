@@ -31,7 +31,7 @@ Runtime changes were already merged at the user's request. This catch-up changes
 
 - `docs/README.md` links current specs, ADR-009/010, and devlogs 078–080.
 - `docs/architecture/` has current pipeline, model/font-runtime, persistence, and Studio lifecycle descriptions.
-- `docs/dev-history/kites_flow.md` preserves its older snapshot with a current-state overlay.
+- `docs/dev-history/research/kites_flow.md` preserves its older snapshot with a current-state overlay.
 - `docs/fullplan.md` retains its detailed plan and adds a current-state correction rather than shortening history.
 - The interactive graph source/output status is described in the documentation hub; generated diagrams are not implementation or visual-parity evidence.
 

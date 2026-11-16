@@ -22,7 +22,7 @@ surfaces stop looking like three different products.
    editor and Projects dashboard, 1440px and 390px site). The Studio needed a
    seeded `KitesDatabase` (job + image + text blocks) so the editor could render
    without running a real translation.
-2. **Wrote `docs/ux-audit.md`** (usability only) and **`docs/ui-audit.md`**
+2. **Wrote `docs/dev-history/audits/ux-audit.md`** (usability only) and **`docs/dev-history/audits/ui-audit.md`**
    (visual/system only), each with code evidence, measured contrast, and a
    minimal recommended fix.
 3. **Fixed the popup's dead Studio entry point.** `Open Edit Studio` sat inside
@@ -88,7 +88,7 @@ surfaces stop looking like three different products.
 - **Deliberately not implemented:** an engine-status row on the popup Home tab,
   removing the duplicate "Global Edit Mode" affordance, and repacking the batch
   toolbar. Each needs a layout or product decision, so they are recommendations in
-  `docs/ux-audit.md` rather than edits.
+  `docs/dev-history/audits/ux-audit.md` rather than edits.
 - **Kept:** the gradient hero headline (the one accent gradient that is identity,
   not decoration) and the demo card's white ring.
 

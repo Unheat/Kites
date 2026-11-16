@@ -2,7 +2,7 @@
 
 Scope: the Chrome extension popup (`src/popup`), the Edit Studio dashboard + editor
 (`src/studio`, `src/App.tsx`), and the marketing site with its interactive demo
-(`site/`). Visual/design findings live separately in `docs/ui-audit.md`; this
+(`site/`). Visual/design findings live separately in `docs/dev-history/audits/ui-audit.md`; this
 document is about usability only.
 
 Method: Impeccable `critique` heuristics (working-memory load, state visibility,

@@ -78,9 +78,20 @@ npm run lint
 # 2. Automated unit test suite (Vitest)
 npm test
 
-# 3. Production build check (TypeScript + Vite)
+# 3. Documentation gate (coverage ratchet + TSDoc shape)
+npm run docs:check
+
+# 4. API reference builds without warnings
+npm run docs:api
+
+# 5. Production build check (TypeScript + Vite)
 npm run build
 ```
+
+Documentation is part of the gate, not a follow-up: any exported symbol you add in `src/offscreen/` or
+`src/shared/` needs TSDoc, and any behaviour you change must land with the matching
+[architecture page](docs/architecture/) update in the same commit. See the
+[documentation guide](docs/doc_guide.md).
 
 To run end-to-end browser tests:
 ```bash
@@ -115,6 +126,7 @@ We follow **Conventional Commits**:
    ```bash
    npm test          # Run automated unit tests
    npm run lint      # Run linter
+   npm run docs:check # Documentation gate
    npm run build     # Verify TypeScript types and production bundle
    ```
    *(If modifying the translation worker, also run `npm run worker:test`)*
@@ -133,6 +145,7 @@ Before submitting for review, ensure:
 - [ ] Follows project [Coding Standards](docs/development/coding-standards.md) (docstrings, named constants, defensive null checks).
 - [ ] `npm test` passes with zero failures.
 - [ ] `npm run lint` passes with zero errors.
+- [ ] `npm run docs:check` passes, and changed behaviour is reflected in the matching architecture doc.
 - [ ] `npm run build` succeeds without TypeScript or bundling warnings.
 - [ ] Preserves established library workarounds (Vite 8 config, popup RPC routing, LaMa cache reuse).
 - [ ] PR description uses the [Pull Request Template](.github/pull_request_template.md).

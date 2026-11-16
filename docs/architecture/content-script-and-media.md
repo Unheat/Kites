@@ -1,10 +1,9 @@
-# Content Script & Media Subsystems 🖼️
-
+# Content Script & Media Subsystems
 The Kites **Content Script** (`src/content/`) executes directly in the context of webpages. It is responsible for discovering comic images across diverse web architectures, anchoring non-intrusive UI controls, replacing images safely against reactive SPA frameworks, and providing manual screen-crop capture.
 
 ---
 
-## 🏗️ Architectural Topology
+## Architectural Topology
 
 ```mermaid
 flowchart TD
@@ -51,7 +50,7 @@ flowchart TD
 
 ---
 
-## 🔍 Universal Media Discovery (`mediaTargets.ts`)
+## Universal Media Discovery (`mediaTargets.ts`)
 
 Standard extensions rely on simple `document.querySelectorAll('img')`. On modern comic reader platforms and social media, this approach fails due to complex layout techniques:
 
@@ -82,7 +81,7 @@ Many manga readers (such as `roliascan.com`) lazy-load chapters inside empty `di
 
 ---
 
-## 🛡️ SPA Image Replacement & Reversion Shield
+## SPA Image Replacement & Reversion Shield
 
 Modern Single-Page Applications (React Native for Web, Vue, Next.js) manage DOM nodes through a virtual DOM. When Kites modifies an image's `src`, the SPA re-renders and silently reverts the comic page back to its untranslated state.
 
@@ -112,7 +111,7 @@ sequenceDiagram
 
 ---
 
-## 🎯 Button Overlays & Hover Race Mitigation
+## Button Overlays & Hover Race Mitigation
 
 ### 1. Measured-Rect Placement (`overlayPlacement.ts`)
 Each mounted control subscribes to its image's viewport rectangle through one shared `requestAnimationFrame` tracker, which only notifies when the rect actually changes:
@@ -162,7 +161,7 @@ mounted, so the eye toggle never re-resolves a recycled backing image by URL.
 
 ---
 
-## 📖 Distraction-Free Chapter Reader & Streaming Mode (`ChapterReaderModal.tsx`)
+## Distraction-Free Chapter Reader & Streaming Mode (`ChapterReaderModal.tsx`)
 
 To provide an immersive comic reading experience without intrusive webpage clutter or ads, Kites incorporates the **Distraction-Free Chapter Reader**:
 
@@ -201,13 +200,15 @@ flowchart TD
 
 ---
 
-## ⌨️ In-Page Reading Shortcuts & Custom Site Rules
+## In-Page Reading Shortcuts & Custom Site Rules
 
 ### 1. Cross-Platform Reading Hotkeys
-Kites registers global keyboard shortcuts with cross-platform keydown fallbacks:
-- `Alt + Shift + Z`: Translates the currently hovered comic panel or visible viewport image.
-- `Alt + Shift + X`: Launches the Xnip-style Screen Crop overlay tool.
-- `F`: Instantly toggles between the translated composite and the original raw artwork (Peek mode).
+`src/content/readingShortcuts.ts` is the single source of truth; popup/reader help text derives from the same handlers. Registration uses `event.code` with an `event.key` fallback and ignores events from editable targets (including shadow-DOM hosts), `metaKey`/Command combinations and auto-repeat:
+- `F` (unmodified): toggles original vs translated for the hovered translated image; the handler also tracks hold-to-peek (`isHoldPeeking`) for press-and-hold comparison.
+- `Ctrl + Shift + Z` or `Alt + Shift + Z`: translates the currently hovered comic panel or visible viewport image.
+- `Ctrl + Shift + X` or `Alt + Shift + X`: launches the screen crop overlay tool.
+
+- `Ctrl + Shift + M` or `Alt + Shift + M`: opens the distraction-free chapter reader.
 
 ### 2. Domain Disable Toggle & Blacklist
 - Users can disable Kites on specific domains with a single click from the popup.
@@ -215,7 +216,7 @@ Kites registers global keyboard shortcuts with cross-platform keydown fallbacks:
 
 ---
 
-## ✂️ Screen Crop Translation Subsystem (`captureArea.ts`)
+## Screen Crop Translation Subsystem (`captureArea.ts`)
 
 For comics rendered inside protected HTML5 `<canvas>` elements, WebGL games, or complex iframe readers where direct DOM image extraction is impossible, Kites provides the **Screen Crop Tool**:
 

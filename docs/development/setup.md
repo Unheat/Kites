@@ -1,10 +1,9 @@
-# Development Environment & Setup Guide 🛠️
-
+# Development Environment & Setup Guide
 This guide walks you through setting up your local environment to develop, build, and debug **Kites**.
 
 ---
 
-## 💻 Prerequisites
+## Prerequisites
 
 | Requirement | Recommended Version | Notes |
 | :--- | :--- | :--- |
@@ -15,7 +14,7 @@ This guide walks you through setting up your local environment to develop, build
 
 ---
 
-## 🚀 Step-by-Step Installation
+## Step-by-Step Installation
 
 ### 1. Clone the Repository
 ```bash
@@ -48,7 +47,7 @@ The compiled, ready-to-load extension will be located in the `dist/` directory.
 
 ---
 
-## 🔌 Loading the Extension into Chrome
+## Loading the Extension into Chrome
 
 1. Open your Chromium browser and go to `chrome://extensions/`.
 2. Toggle on **Developer mode** in the top-right corner.
@@ -59,7 +58,7 @@ The compiled, ready-to-load extension will be located in the `dist/` directory.
 
 ---
 
-## ⚡ Enabling WebGPU Hardware Acceleration
+## Enabling WebGPU Hardware Acceleration
 
 To run local ONNX Runtime Web and WebLLM models on your GPU:
 
@@ -72,7 +71,7 @@ To run local ONNX Runtime Web and WebLLM models on your GPU:
 
 ---
 
-## 🔄 Daily Development Workflow
+## Daily Development Workflow
 
 ### Starting the Vite Dev Server
 ```bash
@@ -93,7 +92,7 @@ npm test
 
 ---
 
-## ☁️ (Optional) Cloudflare Shared Pool Backend
+## (Optional) Cloudflare Shared Pool Backend
 
 If you want to test or run the multi-provider community fallback pool:
 

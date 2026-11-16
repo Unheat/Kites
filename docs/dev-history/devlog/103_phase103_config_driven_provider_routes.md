@@ -54,7 +54,7 @@ chains, a duplicated mode catalog, duplicated dispatch, and stale dev-secret ent
 ## Decisions
 
 - The Gemini switch from two schema fields to one is intentional and documented in
-  [ADR-013](../decisions/ADR-013-config-driven-provider-routes.md). No live probe was
+  [ADR-013](../../decisions/ADR-013-config-driven-provider-routes.md). No live probe was
   performed; both Gemma routes set `responseJsonSchema` explicitly, and a failed probe can
   switch to `responseSchema` through configuration.
 - The health probe does not attempt schema mode. Changing diagnostic semantics was out of

@@ -1,76 +1,53 @@
-A structured, easy-to-understand developer log (dev log) is one of the most critical habits you can build. For big tech companies in the USA, engineering managers and senior devs value clear communication just as much as clean code. A great dev log acts as a technical audit trail—it proves your problem-solving process and makes writing performance reviews or onboarding others seamless.
+# How to write a devlog
 
-The most effective way to structure a dev log is to follow a **modular, action-oriented template** that focuses on the *why* and *how*, rather than just a dump of code snippets.
+A devlog is the dated, append-only record of a shipped change: what was broken, why, what was
+measured, and what was rejected. It is not a tutorial and not a status report — the next engineer
+reads it to avoid re-litigating a decision or re-diagnosing a bug. Current behaviour lives in
+[`docs/architecture/`](../../architecture/); a devlog describes the state at the time it was written.
 
----
+## File and numbering
 
-## The Master Dev Log Structure
+- Path: `docs/dev-history/devlog/NNN_phaseNNN_topic.md`, next free number (`ls | tail`).
+  Older entries reuse some numbers (e.g. two files numbered 023, 032, 039, 059, 060, 063, 074);
+  never renumber a merged file, because links and devlogs point at those paths.
+- Devlogs are append-only: fix a wrong link or a stale path, never rewrite what was measured or
+  claimed. Corrections go in a newer entry.
+- Dated audits, plans and research do not belong here — use
+  [`../audits/`](../audits/), [`../plans/`](../plans/), [`../research/`](../research/).
 
-Every entry should be broken down into five distinct, highly scannable sections:
+## Sections
 
-### 1. Metadata (Context at a Glance)
+Same order every time, so a reader can skim:
 
-Keep this brief so anyone looking at the log immediately knows the timeline and scope.
+1. **Title** — `Devlog NNN: <what changed>`, then metadata bullets: `Date`, `Feature/Task`,
+   `Status` (with the branch or `main`).
+2. **Objective** — one or two sentences: the behaviour that had to become true.
+3. **Root causes** — the actual mechanism, not the symptom. Cite the file and function that
+   misbehaved. If the cause was assumed rather than proven, say so.
+4. **Implementation** — a numbered list of the changes, each pointing at the file that carries it.
+   Mention donor lineage when code was ported, and state what was *not* copied.
+5. **Evidence** — the commands that ran and their result: test counts, build exit codes,
+   `docs:check` violations, artifact paths, screenshots inspected. Distinguish "unit test proves the
+   contract" from "I opened the image and it looked right".
+6. **Decision** — the durable rule the change establishes, in one paragraph, so future work can cite
+   it instead of rediscovering it.
 
-* **Date:** [YYYY-MM-DD]
-* **Feature/Task:** [Short title, e.g., Implement OAuth2 Authentication]
-* **Ticket/Issue Link:** [Link to Jira, GitHub Issue, etc.]
-* **Status:** [In Progress / Blocked / Completed]
+Add **Roadblocks** only when something was tried and rejected; that is the most valuable part of the
+log and the part a summary drops.
 
-### 2. The Objective (The "Why")
+## Writing rules
 
-Write 1–2 sentences explaining what you are trying to achieve and what problem it solves. Do not assume the reader knows the context.
+- **Numbers with their source.** "1,484 tests in 126 files" beats "all tests pass". Name the
+  measurement host or run date if it can drift.
+- **Never overstate.** A green run is not visual parity; a browser script exit is not acceptance.
+  Say what the evidence covers and what it does not.
+- **Do not paste code.** Keep one line or one config fragment, and link the file for the rest.
+- **Confidentiality.** Never name commercial extensions, products, sites or authors. Use neutral
+  descriptors such as "commercial web-reader pattern" (AGENTS.md §11).
+- **Keep it short.** 60–110 lines is the house range; the structured sections, not length, make it
+  readable.
 
-### 3. Current Workflow & Implementation Steps (The "How")
+## Example
 
-This is the core of your log. Instead of writing a wall of text, use a numbered list to document your step-by-step workflow. If you are changing the state of a system, a simple flowchart or sequence description works best here.
-
-### 4. Roadblocks & Decisions (The Pivot Points)
-
-Document what went wrong, the errors you encountered, and *why* you chose a specific solution over an alternative. This shows big tech interviewers and managers your architectural reasoning.
-
-### 5. Next Steps / Key Takeaways
-
-What needs to happen tomorrow? Or, if the task is finished, what is the key lesson learned or optimization made?
-
----
-
-## Dedicated Example
-
-Here is how a professional dev log entry looks in practice:
-
-### Date: 2026-07-12
-
-* **Feature/Task:** Optimize User Feed Query Latency
-* **Ticket:** #ENG-402
-* **Status:** Completed
-
-### Objective
-
-The user profile feed is taking over 2.5 seconds to load for users with more than 500 connections because the current PostgreSQL query performs an unindexed nested loop join. The goal is to reduce this latency to under 200ms.
-
-### Workflow & Implementation Steps
-
-1. **Profile Current Query:** Ran `EXPLAIN ANALYZE` on the production-size staging database to isolate the bottleneck. Confirmed a sequential scan was occurring on the `posts` table.
-2. **Database Indexing:** Designed and applied a composite index on the foreign keys to allow fast index-scan lookups.
-3. **Refactor ORM Layer:** Updated the backend service layer to eager-load connection data instead of executing a new query per connection (fixing the $N+1$ query problem).
-4. **Local Verification:** Re-ran latency metrics locally using mock data mimicking a high-connection user profile.
-
-### Roadblocks & Decisions
-
-* **The Problem:** Adding a standard index on `created_at` alone didn't solve the join latency.
-* **The Solution:** I pivoted to a composite index `(user_id, created_at DESC)`.
-* **Reasoning:** Users always fetch feeds sorted by the latest posts. The composite index allows the database to filter by user and sort the results in a single $O(\log N)$ operation, completely bypassing the expensive sorting step in memory.
-
-### Next Steps / Key Takeaways
-
-* **Takeaway:** Always look at `EXPLAIN ANALYZE` output before guessing what index to add. Eager loading cut down database roundtrips from 50+ to exactly 1.
-* **Next Action:** Monitor the production Datadog metrics post-deployment tomorrow morning to ensure real-world latency matches staging results.
-
----
-
-## Best Practices for Clarity
-
-* **Use Action Verbs:** Start your workflow bullet points with verbs like *Investigated, Configured, Implemented, Refactored,* or *Tested*.
-* **Isolate Code and Logs:** Never paste 100 lines of code. Paste only the exact line causing the failure or the specific config change, using proper markdown formatting.
-* **Write for Your Future Self:** Write the log assuming you will completely forget this project six months from now. If you can understand it then, your team can understand it now.
+See [Devlog 106](106_phase106_per_image_reader_controls.md) for a complete entry: per-image overlay
+state, the three root causes, five implementation points, the evidence list and the resulting rule.

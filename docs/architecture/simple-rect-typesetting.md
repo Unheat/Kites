@@ -1,4 +1,4 @@
-# Route 3: Simple Rectangular Typesetting Specification
+# Route 3: Simple Rectangular typesetting
 
 ## 1. Overview & Current Scope
 
@@ -25,7 +25,7 @@ The shared DP scores line slack, overflow, grammatical breaks and discretionary 
 
 Backend rectangular DP uses the same fractional font search and LastResort policy as contour layout. The default minimum is 9 px, and automatic maximum follows the inset horizontal frame width. Explicit authored maximum/cap settings remain inputs; there are no implicit 18/20/24, 48 px, or height-percentage caps in this route.
 
-Clean fitting above the minimum integer bucket is retained. At the minimum bucket, LastResort can recover a larger bucket; at each size a fitting clean layout still wins. See the source mapping and platform limitations in [the Koharu specification](koharu_typesetting_pipeline_spec.md).
+Clean fitting above the minimum integer bucket is retained. At the minimum bucket, LastResort can recover a larger bucket; at each size a fitting clean layout still wins. See the source mapping and platform limitations in [the Koharu parity contract](typesetting-pipeline-contract.md).
 
 Uniform fallback may return `overflowed: true`; no minimum font size guarantees arbitrary text fits. Acceptance rejects an overflowing fixed result instead of treating any returned lines as proof of containment.
 

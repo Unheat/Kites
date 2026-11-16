@@ -1,8 +1,8 @@
-# Route 1: Auto Balloon Typesetting Specification
+# Route 1: Auto Balloon typesetting
 
 ## 1. Overview & Current Scope
 
-**Current-code audit: 2026-10-28, cumulative `origin/main..main` through `656d720`.** Earlier versions of this specification described an exact ellipse-chord solver and a 9px floor. Those descriptions are superseded by the implementation below. Reference-derived algorithms do not establish end-to-end pixel parity.
+**Current-code audit: 2026-10-28, cumulative `origin/main..main` through `656d720`.** Earlier descriptions of this route described an exact ellipse-chord solver and a 9px floor. Those descriptions are superseded by the implementation below. Reference-derived algorithms do not establish end-to-end pixel parity.
 
 Auto Balloon is the free-region route used by the Western default renderer when no accepted `typesetBox` is available. `TypesetMode` includes `balloon` and `auto-balloon` as aliases, plus `contour` and `simple`; `ellipse` is retired and normalized to `contour` when restoring old Studio records.
 
@@ -42,4 +42,4 @@ Non-Western output routing belongs to `renderTextBlocksBatch()` in `canvasTypese
 
 The live free-region renderer can resize/decollide OCR quads and cap short non-scream text relative to the page dialogue median before invoking this strategy. Fixed bubble layouts bypass those movement operations. Studio Auto Balloon reuses `measureDefaultLayout()` but supplies its own ceiling and style adapter. Studio contour and simple editing are separate branches; their behavior must not be inferred from Auto Balloon's four passes.
 
-For font readiness, final Canvas drawing and persistence caveats, see [Cotrans renderer](cotrans_renderer_spec.md) and [Studio architecture](../architecture/studio-and-typesetting.md).
+For font readiness, final Canvas drawing and persistence caveats, see [Cotrans renderer](cotrans-default-renderer.md) and [Studio architecture](studio-and-typesetting.md).

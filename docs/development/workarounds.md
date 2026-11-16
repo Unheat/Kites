@@ -6,8 +6,8 @@ This document preserves the complete technical background, rationale, and implem
 
 ## 1. Vite 8 + CRXJS 2.7.1 Build Configuration
 
-**Affected Files:** [`vite.config.ts`](file:///Users/dangtruongan/study/Kites/vite.config.ts)  
-**Related Devlog:** [`013_phase13_dev_instrumentation_and_vite8_crxjs_compatibility.md`](file:///Users/dangtruongan/study/Kites/docs/dev-history/devlog/013_phase13_dev_instrumentation_and_vite8_crxjs_compatibility.md)  
+**Affected Files:** [`vite.config.ts`](../../vite.config.ts)  
+**Related Devlog:** [`013_phase13_dev_instrumentation_and_vite8_crxjs_compatibility.md`](../dev-history/devlog/013_phase13_dev_instrumentation_and_vite8_crxjs_compatibility.md)  
 **Upstream Contribution:** `scratches/reference/chrome-extension-tools` (branch `fix/vite-8-rolldown-options`, commit `28aed46`)
 
 * **Do not rename `build.rollupOptions` to `build.rolldownOptions` in `vite.config.ts` yet:**
@@ -23,8 +23,8 @@ This document preserves the complete technical background, rationale, and implem
 
 ## 2. Chrome Extension Runtime Messaging, Popup State, and WebGPU Invariants
 
-**Affected Files:** [`src/popup/index.tsx`](file:///Users/dangtruongan/study/Kites/src/popup/index.tsx), [`src/background/index.ts`](file:///Users/dangtruongan/study/Kites/src/background/index.ts), [`src/offscreen/utils/hardware.ts`](file:///Users/dangtruongan/study/Kites/src/offscreen/utils/hardware.ts)  
-**Related Devlog:** [`015_phase15_offscreen_webgpu_detection_and_lama_recovery.md`](file:///Users/dangtruongan/study/Kites/docs/dev-history/devlog/015_phase15_offscreen_webgpu_detection_and_lama_recovery.md)
+**Affected Files:** [`src/popup/index.tsx`](../../src/popup/index.tsx), [`src/background/index.ts`](../../src/background/index.ts), [`src/offscreen/utils/hardware.ts`](../../src/offscreen/utils/hardware.ts)  
+**Related Devlog:** [`015_phase15_offscreen_webgpu_detection_and_lama_recovery.md`](../dev-history/devlog/015_phase15_offscreen_webgpu_detection_and_lama_recovery.md)
 
 * **Address every offscreen RPC explicitly:**
   `chrome.runtime.sendMessage()` broadcasts to all extension contexts; it is not a point-to-point background/offscreen channel. Popup and dashboard requests must specify `target: 'background'`, `source`, and `request: true`. Background must retarget forwarded requests to `target: 'offscreen'` and `source: 'background'`. Offscreen must ignore messages that do not match those markers. Never forward the original unaddressed object or remove the listener guards: competing background/offscreen responders cause `The message port closed before a response was received`, silent model downloads, and dropped processing responses.
@@ -47,8 +47,8 @@ This document preserves the complete technical background, rationale, and implem
 
 ## 3. SPA & Responsive Image Replacement Strategy (XianScan Reference Pattern)
 
-**Affected Files:** [`src/content/index.tsx`](file:///Users/dangtruongan/study/Kites/src/content/index.tsx)  
-**Related Devlog:** [`014_phase14_spa_image_replacement_and_xianscan_pattern.md`](file:///Users/dangtruongan/study/Kites/docs/dev-history/devlog/014_phase14_spa_image_replacement_and_xianscan_pattern.md)
+**Affected Files:** [`src/content/index.tsx`](../../src/content/index.tsx)  
+**Related Devlog:** [`014_phase14_spa_image_replacement_and_xianscan_pattern.md`](../dev-history/devlog/014_phase14_spa_image_replacement_and_xianscan_pattern.md)
 
 * **Always wipe `srcset` when updating `src`:**
   Per the W3C HTML5 specification, when an `<img>` has a non-empty `srcset` attribute, the browser rendering engine prioritizes `srcset` candidates over `src`. Setting `targetImg.src` alone leaves the original image visible on modern responsive sites (Twitter, Reddit, MangaDex). Always backup `data-kites-orig-srcset`, set `targetImg.srcset = ''`, and call `targetImg.removeAttribute('srcset')`.
@@ -67,8 +67,8 @@ This document preserves the complete technical background, rationale, and implem
 
 ## 4. Neural Inpainting Architecture (LaMa & XianScan Dynamic Patch Strategy)
 
-**Affected Files:** [`src/offscreen/engines/inpaint/LamaMangaInpaintEngine.ts`](file:///Users/dangtruongan/study/Kites/src/offscreen/engines/inpaint/LamaMangaInpaintEngine.ts), [`src/offscreen/engines/inpaint/LamaBaseInpaintEngine.ts`](file:///Users/dangtruongan/study/Kites/src/offscreen/engines/inpaint/LamaBaseInpaintEngine.ts)  
-**Related Devlog:** [`016_phase16_xianscan_dynamic_patch_inpainting_and_lama_quality_recovery.md`](file:///Users/dangtruongan/study/Kites/docs/dev-history/devlog/016_phase16_xianscan_dynamic_patch_inpainting_and_lama_quality_recovery.md)
+**Affected Files:** [`src/offscreen/engines/inpaint/LamaMangaInpaintEngine.ts`](../../src/offscreen/engines/inpaint/LamaMangaInpaintEngine.ts), [`src/offscreen/engines/inpaint/LamaBaseInpaintEngine.ts`](../../src/offscreen/engines/inpaint/LamaBaseInpaintEngine.ts)  
+**Related Devlog:** [`016_phase16_xianscan_dynamic_patch_inpainting_and_lama_quality_recovery.md`](../dev-history/devlog/016_phase16_xianscan_dynamic_patch_inpainting_and_lama_quality_recovery.md)
 
 * **Avoid Full-Canvas Inpainting on High-Res Manga:**
   Never pass entire full-resolution pages (e.g. 1280×1808, 2.3M pixels) into neural inpainters. Running FFC convolutions across untouched backgrounds and non-text margins wastes 90% of GPU compute and takes 10+ seconds. Use localized patch inpainting (`LamaMangaInpaintEngine.ts` / XianScan `inpaint_patch_mode`).
@@ -83,8 +83,8 @@ This document preserves the complete technical background, rationale, and implem
 
 ## 5. PaddleOCR WebGPU Kernel Resolver & Model Format (`.ort` vs `.onnx`)
 
-**Affected Files:** [`src/offscreen/engines/ocr/PaddleOcrEngine.ts`](file:///Users/dangtruongan/study/Kites/src/offscreen/engines/ocr/PaddleOcrEngine.ts)  
-**Related Devlog:** [`webgpu_ocr_onnx_forum_report.md`](file:///Users/dangtruongan/study/Kites/docs/dev-history/devlog/webgpu_ocr_onnx_forum_report.md)
+**Affected Files:** [`src/offscreen/engines/ocr/PaddleOcrEngine.ts`](../../src/offscreen/engines/ocr/PaddleOcrEngine.ts)  
+**Related Devlog:** [`webgpu_ocr_onnx_forum_report.md`](../dev-history/devlog/webgpu_ocr_onnx_forum_report.md)
 
 * **Always rewrite default `ppu-paddle-ocr` `.ort` URLs to `.onnx` (`toOnnxModelUrls`):**
   `ppu-paddle-ocr` defaults to pre-compiled `.ort` (ORT-format) binaries. In `onnxruntime-web` >= 1.27.0, WebGPU execution fails during session initialization with `ResolveKernelTypeStr Failed to find op_id: com.ms.internal.nhwc:Conv:1` because `.ort` bakes in fixed CPU kernel resolvers lacking NHWC operators injected by the WebGPU JSEP compiler.
@@ -95,8 +95,8 @@ This document preserves the complete technical background, rationale, and implem
 
 ## 6. Studio Interactive Hotkeys & Stale Store Closures
 
-**Affected Files:** [`src/studio/canvas/StudioCanvas.tsx`](file:///Users/dangtruongan/study/Kites/src/studio/canvas/StudioCanvas.tsx)  
-**Related Devlog:** [`040_phase40_codebase_audit_hotkey_closures_and_inpaint_masking.md`](file:///Users/dangtruongan/study/Kites/docs/dev-history/devlog/040_phase40_codebase_audit_hotkey_closures_and_inpaint_masking.md)
+**Affected Files:** [`src/studio/canvas/StudioCanvas.tsx`](../../src/studio/canvas/StudioCanvas.tsx)  
+**Related Devlog:** [`040_phase40_codebase_audit_hotkey_closures_and_inpaint_masking.md`](../dev-history/devlog/040_phase40_codebase_audit_hotkey_closures_and_inpaint_masking.md)
 
 * **Always read live state from `studioStore.getState().textObjects` inside keyboard listeners:**
   Canvas hotkey listeners (`Delete`, `Backspace`, `Ctrl+D`, `Space`) attach at window scope inside `useEffect`. If handlers read component-scoped `textObjects` from the React render closure, modifying or moving other text boxes leaves the listener bound to an outdated snapshot. When the user subsequently deletes or duplicates a box, the stale array silently overwrites and deletes all intervening edits.
@@ -107,8 +107,8 @@ This document preserves the complete technical background, rationale, and implem
 
 ## 7. Studio Localized Inpaint Masking vs Blanket Bounding Box
 
-**Affected Files:** [`src/studio/canvas/StudioCanvas.tsx`](file:///Users/dangtruongan/study/Kites/src/studio/canvas/StudioCanvas.tsx), [`src/studio/canvas/BrushEngine.ts`](file:///Users/dangtruongan/study/Kites/src/studio/canvas/BrushEngine.ts), [`src/offscreen/index.ts`](file:///Users/dangtruongan/study/Kites/src/offscreen/index.ts), [`src/offscreen/utils/maskPolygonExtractor.ts`](file:///Users/dangtruongan/study/Kites/src/offscreen/utils/maskPolygonExtractor.ts)  
-**Related Devlog:** [`040_phase40_codebase_audit_hotkey_closures_and_inpaint_masking.md`](file:///Users/dangtruongan/study/Kites/docs/dev-history/devlog/040_phase40_codebase_audit_hotkey_closures_and_inpaint_masking.md)
+**Affected Files:** [`src/studio/canvas/StudioCanvas.tsx`](../../src/studio/canvas/StudioCanvas.tsx), [`src/studio/canvas/BrushEngine.ts`](../../src/studio/canvas/BrushEngine.ts), [`src/offscreen/index.ts`](../../src/offscreen/index.ts), [`src/offscreen/utils/maskPolygonExtractor.ts`](../../src/offscreen/utils/maskPolygonExtractor.ts)  
+**Related Devlog:** [`040_phase40_codebase_audit_hotkey_closures_and_inpaint_masking.md`](../dev-history/devlog/040_phase40_codebase_audit_hotkey_closures_and_inpaint_masking.md)
 
 * **Preserve the Polygon-Only Engine Contract via Mask Connected-Component Extraction:**
   Per ADR-002 and fullplan Section F, all inpainting engines receive text polygons only (`maskPolygons: Point2D[][]`). For user-drawn inpaint brush strokes in Studio, never fill a blanket rectangle `fillRect(0, 0, w, h)` across the whole padded crop.
@@ -119,8 +119,8 @@ This document preserves the complete technical background, rationale, and implem
 
 ## 8. Decoupled Background Translation Job Completion
 
-**Affected Files:** [`src/background/index.ts`](file:///Users/dangtruongan/study/Kites/src/background/index.ts)  
-**Related Devlog:** [`040_phase40_codebase_audit_hotkey_closures_and_inpaint_masking.md`](file:///Users/dangtruongan/study/Kites/docs/dev-history/devlog/040_phase40_codebase_audit_hotkey_closures_and_inpaint_masking.md)
+**Affected Files:** [`src/background/index.ts`](../../src/background/index.ts)  
+**Related Devlog:** [`040_phase40_codebase_audit_hotkey_closures_and_inpaint_masking.md`](../dev-history/devlog/040_phase40_codebase_audit_hotkey_closures_and_inpaint_masking.md)
 
 * **Never condition `db.translationJobs.update(jobId, { status: 'completed' })` on `tabId`:**
   `tabId` is optional across the background translation pipeline (`queueTranslation`, batch queueing, Studio operations). If the tab ID is missing or the tab closes while the pipeline is in flight, translation nevertheless succeeds and writes its baked image. Coupling the database status update to `&& tabId` leaves successful jobs permanently stuck in status `'processing'` until the 2-minute stale-job timeout forces an error. Mark database status `'completed'` unconditionally on pipeline success, and guard only the UI message dispatch with `if (tabId)`.
@@ -129,8 +129,8 @@ This document preserves the complete technical background, rationale, and implem
 
 ## 9. WebGPU Performance Flags & Invariant Boundaries
 
-**Affected Files:** [`src/offscreen/utils/hardware.ts`](file:///Users/dangtruongan/study/Kites/src/offscreen/utils/hardware.ts), [`src/offscreen/engines/ocr/PaddleOcrEngine.ts`](file:///Users/dangtruongan/study/Kites/src/offscreen/engines/ocr/PaddleOcrEngine.ts), [`src/offscreen/engines/inpaint/LamaBaseInpaintEngine.ts`](file:///Users/dangtruongan/study/Kites/src/offscreen/engines/inpaint/LamaBaseInpaintEngine.ts), [`src/offscreen/engines/bubble/NeuralBubbleDetector.ts`](file:///Users/dangtruongan/study/Kites/src/offscreen/engines/bubble/NeuralBubbleDetector.ts)  
-**Related Devlog:** [`041_phase41_webgpu_performance_audit_and_optimization_invariants.md`](file:///Users/dangtruongan/study/Kites/docs/dev-history/devlog/041_phase41_webgpu_performance_audit_and_optimization_invariants.md)
+**Affected Files:** [`src/offscreen/utils/hardware.ts`](../../src/offscreen/utils/hardware.ts), [`src/offscreen/engines/ocr/PaddleOcrEngine.ts`](../../src/offscreen/engines/ocr/PaddleOcrEngine.ts), [`src/offscreen/engines/inpaint/LamaBaseInpaintEngine.ts`](../../src/offscreen/engines/inpaint/LamaBaseInpaintEngine.ts), [`src/offscreen/engines/bubble/NeuralBubbleDetector.ts`](../../src/offscreen/engines/bubble/NeuralBubbleDetector.ts)  
+**Related Devlog:** [`041_phase41_webgpu_performance_audit_and_optimization_invariants.md`](../dev-history/devlog/041_phase41_webgpu_performance_audit_and_optimization_invariants.md)
 
 * **Do not add `requiredLimits` to vision models:**
   WebGPU's default 128 MB storage buffer and 256 MB buffer limits easily accommodate Kites' sliced vision patches (text strips ~3 MB, LaMa 64px buckets ~1–8 MB, YOLO 640×640 ~5 MB). Unclamping limits gives zero speed gain. WebLLM automatically requests adapter limits internally in TVM.
@@ -145,8 +145,8 @@ This document preserves the complete technical background, rationale, and implem
 
 ## 10. Native Node.js CPU vs. Browser WebGPU/WASM Precision Drift (FP64 vs. FP32)
 
-**Affected Files:** [`src/offscreen/engines/ocr/extractPolygons.ts`](file:///Users/dangtruongan/study/Kites/src/offscreen/engines/ocr/extractPolygons.ts)  
-**Related Research:** [`docs/dev-history/PaddleOCR ONNX Precision Discrepancy.docx`](file:///Users/dangtruongan/study/Kites/docs/dev-history/PaddleOCR%20ONNX%20Precision%20Discrepancy.docx)
+**Affected Files:** [`src/offscreen/engines/ocr/extractPolygons.ts`](../../src/offscreen/engines/ocr/extractPolygons.ts)  
+**Related Research:** [`docs/dev-history/PaddleOCR ONNX Precision Discrepancy.docx`](../dev-history/research/PaddleOCR%20ONNX%20Precision%20Discrepancy.docx)
 
 * **Why identical models and images produce different bounding boxes in Node vs. Chrome:**
   Native C++ (`onnxruntime-node`) compiles to direct CPU machine instructions, performing internal Fused Multiply-Add (FMA) accumulations in 64-bit floating point registers (FP64 / Double). Chrome browser (`onnxruntime-web` WebGPU JSEP / WASM SIMD128) is strictly constrained to 32-bit float registers (FP32). Because floating-point addition is non-associative and intermediate sums truncate to 32 bits, a systematic numerical drift of **~0.004** occurs on output probability maps.
@@ -159,9 +159,9 @@ This document preserves the complete technical background, rationale, and implem
 
 ## 11. Alexandru Telea FMM Gradient Stabilization & Taylor Series Boundary Capping
 
-**Affected Files:** [`src/offscreen/engines/inpaint/TeleaInpaintEngine.ts`](file:///Users/dangtruongan/study/Kites/src/offscreen/engines/inpaint/TeleaInpaintEngine.ts) (the FMM helpers are defined in this engine file; there is no separate `telea.ts` module)
-**Related Devlog:** [`043_phase43_real_telea_fmm_precise_fill_and_centralized_inpaint_catalog.md`](file:///Users/dangtruongan/study/Kites/docs/dev-history/devlog/043_phase43_real_telea_fmm_precise_fill_and_centralized_inpaint_catalog.md)  
-**Related ADR:** [`ADR-007-alexandru-telea-fmm-inpainting-and-centralized-catalog.md`](file:///Users/dangtruongan/study/Kites/docs/decisions/ADR-007-alexandru-telea-fmm-inpainting-and-centralized-catalog.md)
+**Affected Files:** [`src/offscreen/engines/inpaint/TeleaInpaintEngine.ts`](../../src/offscreen/engines/inpaint/TeleaInpaintEngine.ts) (the FMM helpers are defined in this engine file; there is no separate `telea.ts` module)
+**Related Devlog:** [`043_phase43_real_telea_fmm_precise_fill_and_centralized_inpaint_catalog.md`](../dev-history/devlog/043_phase43_real_telea_fmm_precise_fill_and_centralized_inpaint_catalog.md)  
+**Related ADR:** [`ADR-007-alexandru-telea-fmm-inpainting-and-centralized-catalog.md`](../decisions/ADR-007-alexandru-telea-fmm-inpainting-and-centralized-catalog.md)
 
 * **Why classical Telea FMM produces Taylor gradient explosions in pure TypeScript:**
   Classical Fast Marching Method (FMM) approximates image gradients $\nabla I$ along the distance wavefront $T(x,y)$:
@@ -176,8 +176,8 @@ This document preserves the complete technical background, rationale, and implem
 
 ## 12. Studio Pointer Gesture State Machine & 3px Drag Deadzone
 
-**Affected Files:** [`src/studio/canvas/StudioCanvas.tsx`](file:///Users/dangtruongan/study/Kites/src/studio/canvas/StudioCanvas.tsx), [`src/studio/canvas/CanvasFurniture.ts`](file:///Users/dangtruongan/study/Kites/src/studio/canvas/CanvasFurniture.ts)  
-**Related Devlog:** [`048_phase48_reader_studio_runtime_improvements.md`](file:///Users/dangtruongan/study/Kites/docs/dev-history/devlog/048_phase48_reader_studio_runtime_improvements.md)
+**Affected Files:** [`src/studio/canvas/StudioCanvas.tsx`](../../src/studio/canvas/StudioCanvas.tsx), [`src/studio/canvas/CanvasFurniture.ts`](../../src/studio/canvas/CanvasFurniture.ts)  
+**Related Devlog:** [`048_phase48_reader_studio_runtime_improvements.md`](../dev-history/devlog/048_phase48_reader_studio_runtime_improvements.md)
 
 * **Why rapid clicking froze Studio text dragging:**
   Native browser pointer events fire `pointerdown` and `dblclick` in rapid succession. If drag states and double-click timers are managed simultaneously inside `pointerdown`, rapid clicks on a box are misclassified as drag attempts or text-editing entries, locking mouse capture and leaving the box frozen during subsequent movements.
@@ -191,9 +191,9 @@ This document preserves the complete technical background, rationale, and implem
 
 ## 13. Strict 7-Letter Hyphenation & Korean Hangul Script Invariants
 
-**Affected Files:** [`src/offscreen/utils/typesetLayout.ts`](file:///Users/dangtruongan/study/Kites/src/offscreen/utils/typesetLayout.ts), [`src/shared/utils/textCleaning.ts`](file:///Users/dangtruongan/study/Kites/src/shared/utils/textCleaning.ts)  
-**Related Devlog:** [`049_phase49_typesetting_text_postprocess_and_dual_engine.md`](file:///Users/dangtruongan/study/Kites/docs/dev-history/devlog/049_phase49_typesetting_text_postprocess_and_dual_engine.md)  
-**Related ADR:** [`ADR-008-dual-typesetting-engine-and-advanced-typography-invariants.md`](file:///Users/dangtruongan/study/Kites/docs/decisions/ADR-008-dual-typesetting-engine-and-advanced-typography-invariants.md)
+**Affected Files:** [`src/offscreen/utils/typesetLayout.ts`](../../src/offscreen/utils/typesetLayout.ts), [`src/shared/utils/textCleaning.ts`](../../src/shared/utils/textCleaning.ts)  
+**Related Devlog:** [`049_phase49_typesetting_text_postprocess_and_dual_engine.md`](../dev-history/devlog/049_phase49_typesetting_text_postprocess_and_dual_engine.md)  
+**Related ADR:** [`ADR-008-dual-typesetting-engine-and-advanced-typography-invariants.md`](../decisions/ADR-008-dual-typesetting-engine-and-advanced-typography-invariants.md)
 
 * **Never allow hyphenation on words shorter than 7 letters:**
   Lowering the hyphenation threshold for narrow speech bubbles (e.g. allowing 4-letter stems) produces awkward, jarring breaks in dialogue (`th-at`, `wi-th`, `fo-rce`). Stems shorter than 7 characters (`stem.length < 7`) must wrap whole to the next line or scale down via binary search font fitting. Words $\ge 7$ letters must retain at least 3 letters on the head line and 3 letters on the tail line.
@@ -204,8 +204,8 @@ This document preserves the complete technical background, rationale, and implem
 
 ## 14. Canvas Untaint & Same-Origin Data URL / Blob Normalization for Studio Export
 
-**Affected Files:** [`src/studio/canvas/StudioCanvas.tsx`](file:///Users/dangtruongan/study/Kites/src/studio/canvas/StudioCanvas.tsx), [`src/studio/Studio.tsx`](file:///Users/dangtruongan/study/Kites/src/studio/Studio.tsx)
-**Related Devlog:** [`046_phase46_advanced_lettering_rotation_untaint_peek_shortcuts.md`](file:///Users/dangtruongan/study/Kites/docs/dev-history/devlog/046_phase46_advanced_lettering_rotation_untaint_peek_shortcuts.md)
+**Affected Files:** [`src/studio/canvas/StudioCanvas.tsx`](../../src/studio/canvas/StudioCanvas.tsx), [`src/studio/Studio.tsx`](../../src/studio/Studio.tsx)
+**Related Devlog:** [`046_phase46_advanced_lettering_rotation_untaint_peek_shortcuts.md`](../dev-history/devlog/046_phase46_advanced_lettering_rotation_untaint_peek_shortcuts.md)
 
 * **Why direct canvas export throws `SecurityError: The operation is insecure`:**
   Under HTML5 canvas security specifications, drawing an image loaded from a cross-origin URL without CORS headers marks the canvas as "tainted". Any subsequent call to `canvas.toDataURL()` or `canvas.toBlob()` throws a fatal `SecurityError`.
@@ -218,9 +218,9 @@ This document preserves the complete technical background, rationale, and implem
 
 **Classification:** application integration defects, not evidence of a Chromium arithmetic bug or an upstream library workaround. Corrections below supersede earlier explanations from this investigation.
 
-**Affected Files:** [`src/offscreen/utils/contourTypeset.ts`](file:///Users/dangtruongan/study/Kites/src/offscreen/utils/contourTypeset.ts), [`src/studio/canvas/studioTypeset.ts`](file:///Users/dangtruongan/study/Kites/src/studio/canvas/studioTypeset.ts), [`src/offscreen/services/PipelineOrchestrator.ts`](file:///Users/dangtruongan/study/Kites/src/offscreen/services/PipelineOrchestrator.ts), [`src/offscreen/services/BubbleLayoutService.ts`](file:///Users/dangtruongan/study/Kites/src/offscreen/services/BubbleLayoutService.ts)
-**Related Devlog:** [`078_phase78_koharu_typesetting_visual_parity_browser_canvas_discrepancy.md`](file:///Users/dangtruongan/study/Kites/docs/dev-history/devlog/078_phase78_koharu_typesetting_visual_parity_browser_canvas_discrepancy.md)
-**Related ADR:** [`ADR-009-on-demand-font-catalog-and-koharu-2d-contour-invariants.md`](file:///Users/dangtruongan/study/Kites/docs/decisions/ADR-009-on-demand-font-catalog-and-koharu-2d-contour-invariants.md)
+**Affected Files:** [`src/offscreen/utils/contourTypeset.ts`](../../src/offscreen/utils/contourTypeset.ts), [`src/studio/canvas/studioTypeset.ts`](../../src/studio/canvas/studioTypeset.ts), [`src/offscreen/services/PipelineOrchestrator.ts`](../../src/offscreen/services/PipelineOrchestrator.ts), [`src/offscreen/services/BubbleLayoutService.ts`](../../src/offscreen/services/BubbleLayoutService.ts)
+**Related Devlog:** [`078_phase78_koharu_typesetting_visual_parity_browser_canvas_discrepancy.md`](../dev-history/devlog/078_phase78_koharu_typesetting_visual_parity_browser_canvas_discrepancy.md)
+**Related ADR:** [`ADR-009-on-demand-font-catalog-and-koharu-2d-contour-invariants.md`](../decisions/ADR-009-on-demand-font-catalog-and-koharu-2d-contour-invariants.md)
 
 * **Invalid font assignment retains the previous font:**
   Wrapping the already quoted family stack in another pair of quotes produces invalid syntax such as `16px ""CC Wild Words", "WildWords", sans-serif"`. A real-Chrome probe reproduced the setter ignoring that assignment without throwing. The context retains its previous font: `10px sans-serif` on a fresh canvas, but possibly a preceding block's draw font on a reused canvas. That state dependence explains both oversized and undersized results. Measurement used one font while painting used a valid stack and another size. Node's visual runner passed `CCWildWords, sans-serif`, a different string; wrapping that whole string instead requests one family whose name contains commas. Its output therefore was not proof that it measured the registered reference font. Do not describe this as demonstrated Node tolerance of identical invalid nested quotes.
@@ -241,8 +241,8 @@ This document preserves the complete technical background, rationale, and implem
   `computeMaskCurvature()` now uses `fillRatio >= 0.94` for its rectangular classification. This is a local threshold, not proof that a shape is a caption. The pipeline also treats contour presence as routing evidence. `CanvasFurniture` displays available contours regardless of mode; seeing blue dashes does not establish which strategy produced the current saved lines. See the current pipeline and Studio specs for rejected-layout and persistence limitations.
 ## 16. Hover Target Paint Order & Measured-Rect Button Placement
 
-**Affected Files:** [`src/content/mediaTargets.ts`](file:///Users/dangtruongan/study/Kites/src/content/mediaTargets.ts), [`src/content/overlayPlacement.ts`](file:///Users/dangtruongan/study/Kites/src/content/overlayPlacement.ts), [`src/content/index.tsx`](file:///Users/dangtruongan/study/Kites/src/content/index.tsx)  
-**Related Devlog:** [`096_phase96_pixiv_reader_hover_topmost_and_measured_placement.md`](file:///Users/dangtruongan/study/Kites/docs/dev-history/devlog/096_phase96_pixiv_reader_hover_topmost_and_measured_placement.md)
+**Affected Files:** [`src/content/mediaTargets.ts`](../../src/content/mediaTargets.ts), [`src/content/overlayPlacement.ts`](../../src/content/overlayPlacement.ts), [`src/content/index.tsx`](../../src/content/index.tsx)  
+**Related Devlog:** [`096_phase96_pixiv_reader_hover_topmost_and_measured_placement.md`](../dev-history/devlog/096_phase96_pixiv_reader_hover_topmost_and_measured_placement.md)
 
 * **Never rank overlapping hover candidates by rendered area:**
   Layered manga readers render the visible page in a fixed overlay above the artwork page's own `<img>`. Aspect-ratio rounding made the covered image `375.83px` wide versus `375.73px` for the visible page, so an area ranking anchored the control to the hidden page and queued it for translation no matter which page the cursor was over. The fast path must take the first usable candidate from `elementsFromPoint` paint order (`selectTopmostTarget`); area ranking stays only in the descendant fallback search, where paint order is unavailable.
@@ -251,8 +251,8 @@ This document preserves the complete technical background, rationale, and implem
 
 ## 17. Community Pool Auth: Two Google OAuth Clients, One Gateway
 
-**Affected Files:** [`worker/src/auth/tokeninfo.ts`](file:///Users/dangtruongan/study/Kites/worker/src/auth/tokeninfo.ts), [`worker/src/auth/google.ts`](file:///Users/dangtruongan/study/Kites/worker/src/auth/google.ts), [`worker/src/http/auth-guard.ts`](file:///Users/dangtruongan/study/Kites/worker/src/http/auth-guard.ts), [`src/background/auth/GoogleOAuthStrategy.ts`](file:///Users/dangtruongan/study/Kites/src/background/auth/GoogleOAuthStrategy.ts)
-**Related Devlog:** [`097_phase97_worker_dual_oauth_client_audience_and_auth_rejection_logging.md`](file:///Users/dangtruongan/study/Kites/docs/dev-history/devlog/097_phase97_worker_dual_oauth_client_audience_and_auth_rejection_logging.md)
+**Affected Files:** [`worker/src/auth/tokeninfo.ts`](../../worker/src/auth/tokeninfo.ts), [`worker/src/auth/google.ts`](../../worker/src/auth/google.ts), [`worker/src/http/auth-guard.ts`](../../worker/src/http/auth-guard.ts), [`src/background/auth/GoogleOAuthStrategy.ts`](../../src/background/auth/GoogleOAuthStrategy.ts)
+**Related Devlog:** [`097_phase97_worker_dual_oauth_client_audience_and_auth_rejection_logging.md`](../dev-history/devlog/097_phase97_worker_dual_oauth_client_audience_and_auth_rejection_logging.md)
 
 * **The extension mints tokens from two different Google clients:**
   Interactive sign-in uses the Web Application client through `chrome.identity.launchWebAuthFlow`; the silent refresh inside `GoogleOAuthStrategy.getValidToken()` uses the Chrome Extension client declared in `manifest.json`'s `oauth2.client_id`. Google stamps the minting client into the token audience, so a gateway that verifies against a single client ID rejects every token produced by the other path.

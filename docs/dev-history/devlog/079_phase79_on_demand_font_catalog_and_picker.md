@@ -41,4 +41,4 @@ The curated OFL catalog follows an on-demand architecture, not a wholesale mirro
 
 Catalog, font library, picker, and preset suites were added/updated. At local-main merge the complete suite reported 1,122 passing tests and the production build passed. The original picker crash had a unit-tested repair, but no claim is made here that every download/import, script, cold-start race, or open-context synchronization path has passed browser visual acceptance.
 
-The [font library specification](../../development/font_library_spec.md) records current interfaces and limits. [ADR-009](../../decisions/ADR-009-on-demand-font-catalog-and-koharu-2d-contour-invariants.md) records the storage/catalog decision and rejected alternatives.
+The [font library specification](../../architecture/font-library.md) records current interfaces and limits. [ADR-009](../../decisions/ADR-009-on-demand-font-catalog-and-koharu-2d-contour-invariants.md) records the storage/catalog decision and rejected alternatives.

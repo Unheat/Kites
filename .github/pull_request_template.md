@@ -11,6 +11,7 @@ Closes #
 ## Testing
 <!-- How did you verify your changes? -->
 - [ ] Automated unit tests pass (`npm test`)
+- [ ] Documentation gate passes (`npm run docs:check`) and architecture docs match the change
 - [ ] Production build succeeds (`npm run build`)
 - [ ] Linter passes (`npm run lint`)
 - [ ] (If touching backend worker) Worker checks pass (`npm run worker:test`)

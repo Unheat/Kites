@@ -1,10 +1,9 @@
-# Testing & Verification Guide 🧪
-
+# Testing & Verification Guide
 Kites enforces a strict multi-tier testing strategy to ensure that background workers, neural models, spatial clustering algorithms, and browser overlays remain robust across Chromium releases.
 
 ---
 
-## 🏗️ Testing Strategy Overview
+## Testing Strategy Overview
 
 ```mermaid
 graph TD
@@ -33,9 +32,9 @@ graph TD
 
 ---
 
-## ⚡ Tier 1: Automated Unit Tests (`npm test`)
+## Tier 1: Automated Unit Tests (`npm test`)
 
-Unit tests run via **Vitest** under `src/`. The local-main merge check on 2026-10-28 reported 104 files / 1,122 passing tests; duration depends on hardware and parallel workers. These checks do not establish visual parity:
+Unit tests run via **Vitest** under `src/`. Measured 2026-11-15 with Vitest 4.1.10: `126` files / `1,484` passing tests; duration depends on hardware and parallel workers. These checks do not establish visual parity:
 
 ```bash
 npm test
@@ -62,7 +61,7 @@ Use the supported `npm test` command. Bare `npx vitest run` also discovers archi
 
 ---
 
-## 🌐 Tier 2: Interactive End-to-End Tests (`npm run test:e2e`)
+## Tier 2: Interactive End-to-End Tests (`npm run test:e2e`)
 
 To verify real extension integration in a real Chromium browser instance:
 
@@ -83,7 +82,7 @@ npm run test:e2e
 
 ---
 
-## 🎨 Tier 3: Real-Model Visual Verification (Manual Visual Gate)
+## Tier 3: Real-Model Visual Verification (Manual Visual Gate)
 
 > **Rule:** Real-model visual tests remain separate from `npm test`. Requirements vary: native Node ONNX runners can run on CPU; browser neural tests may need WebGPU/model caches; cloud/custom API runners require appropriate credentials. The pipeline smoke workflow runs selected checks, but does not supply an automatic visual-acceptance gate. Do not infer image quality from a successful exit.
 
@@ -134,9 +133,9 @@ Before claiming equivalence:
 4. Compare font size, lines, positioned coordinates, route, accepted/rejected geometry, and skip flags. Then open and inspect the rendered output; preserve comparable artifacts with settings/revision metadata.
 5. Separately exercise Studio initial-open preservation, font changes, resize/move/rotation, local/global mode switches, reset, undo/redo, save/reload, and export.
 
-The 2026-10-28 investigation reproduced and repaired font syntax, but did not complete this controlled matrix. See [Devlog 078](../dev-history/devlog/078_phase78_koharu_typesetting_visual_parity_browser_canvas_discrepancy.md). Neither 1,122 passing unit tests nor a screenshot with different words proves exact parity.
+The 2026-10-28 investigation reproduced and repaired font syntax, but did not complete this controlled matrix. See [Devlog 078](../dev-history/devlog/078_phase78_koharu_typesetting_visual_parity_browser_canvas_discrepancy.md). A green unit suite or a screenshot with different words does not prove exact parity.
 
-## 🔍 Code Linting & Static Checks
+## Code Linting & Static Checks
 
 ```bash
 npm run lint

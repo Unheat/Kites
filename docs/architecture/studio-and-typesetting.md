@@ -1,5 +1,4 @@
-# Studio Editor & Typesetting Architecture 🎨
-
+# Studio Editor & Typesetting Architecture
 The **Kites Studio** (`src/studio/Studio.tsx`, hosted by `src/App.tsx`) and **Typesetting Engine** (`src/offscreen/utils/canvasTypesetting.ts`, `typesetLayout.ts`, `cotransDefaultRenderer.ts`) provide an interactive desktop environment for reviewing comic translations, editing dialogue, adjusting typography, and exporting publication-ready comic pages.
 
 ---
@@ -12,7 +11,7 @@ Audited cumulative `origin/main..main` through `656d720` against current code. T
 - `src/studio/canvas/TextRenderer.ts` paints **Canvas 2D**, not SVG. Furniture is also Canvas; the inline textarea is a DOM editing surface, not the final renderer.
 - Backend strategy dispatch and Studio edit dispatch are related but not identical. Stored contour visibility is not evidence that the baked solver used that contour.
 
-## 🏗️ Architectural Topology
+## Architectural Topology
 
 ```mermaid
 flowchart TD
@@ -54,7 +53,7 @@ flowchart TD
 
 ---
 
-## 🧩 Clean Plate Storage & Non-Destructive Editing
+## Clean Plate Storage & Non-Destructive Editing
 
 Traditional translation tools destructively burn translated text into the image, making it impossible to fix typos or adjust layout after the pipeline completes.
 
@@ -87,7 +86,7 @@ Kites adopts a **Clean Plate Architecture**:
 
 ---
 
-## 📐 Interactive Bounding Box Manipulation & Gesture State Machine
+## Interactive Bounding Box Manipulation & Gesture State Machine
 
 In Kites Studio, each speech balloon is represented as an interactive bounding box overlay managed through a robust gesture state machine:
 
@@ -139,7 +138,7 @@ A fixed contour takes priority in `TypesetStrategyFactory.resolve()`, even with 
 
 ---
 
-## 🔤 Typography & Font Preset System (`renderFontPresets.ts`)
+## Typography & Font Preset System (`renderFontPresets.ts`)
 
 Kites includes an extensible font registry tailored for manga and comics lettering:
 
@@ -156,7 +155,7 @@ Kites includes an extensible font registry tailored for manga and comics letteri
 
 Preset families come from `src/shared/renderFontPresets.ts`; downloadable choices come from `src/shared/fontCatalog.ts`, not duplicated UI literals. Comic presets now lead with `"CC Wild Words"` and `"Anime Ace"`; bundled `@font-face` rules also include Patrick Hand SC. The on-demand library supports catalog downloads with pinned SHA-256 verification and user imports; Dexie schema v6 adds a `fonts` table containing raw bytes and family metadata.
 
-`font:<family>` selections resolve to a sanitized library family. Each document must register persisted bytes through `ensureFontsRegistered()` / `FontFace.load()` / `document.fonts.add()`. The live bake explicitly loads named selected families before `document.fonts.ready`, because readiness alone does not request every declared face. Studio starts library registration asynchronously; failures can still use browser fallback. Its Canvas renderer is not a font-readiness or pixel-parity guarantee. See the detailed [font resolution/measurement/draw flow](../development/cotrans_renderer_spec.md#2-font-resolution-measurement--draw-lifecycle).
+`font:<family>` selections resolve to a sanitized library family. Each document must register persisted bytes through `ensureFontsRegistered()` / `FontFace.load()` / `document.fonts.add()`. The live bake explicitly loads named selected families before `document.fonts.ready`, because readiness alone does not request every declared face. Studio starts library registration asynchronously; failures can still use browser fallback. Its Canvas renderer is not a font-readiness or pixel-parity guarantee. See the detailed [font resolution/measurement/draw flow](cotrans-default-renderer.md#2-font-resolution-measurement--draw-lifecycle).
 
 ### Color & Outline Routes
 
@@ -198,7 +197,7 @@ flowchart TD
 
 ---
 
-## ✍️ Direct Inline Dialogue Editing & Live AI Inpaint Brush
+## Direct Inline Dialogue Editing & Live AI Inpaint Brush
 
 Studio V2 provides direct on-canvas dialogue editing and interactive inpainting:
 
@@ -233,7 +232,7 @@ Studio V2 provides direct on-canvas dialogue editing and interactive inpainting:
 
 ---
 
-## 📤 High-Resolution Lossless Export & Canvas Untaint
+## High-Resolution Lossless Export & Canvas Untaint
 
 Kites Studio renders directly onto a hidden full-resolution `OffscreenCanvas`:
 1. **Canvas Untaint Guard:** Ensures all source images (clean plate blobs and background layers) are loaded as same-origin Blobs or authenticated Data URLs. Prevents browser security exceptions (`SecurityError: The operation is insecure`) when invoking `toDataURL()` or `toBlob()`.

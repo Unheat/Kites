@@ -2,7 +2,7 @@
 
 Scope: marketing site + interactive demo (`site/`), extension popup
 (`src/popup`, tokens in `src/index.css`), Edit Studio (`src/studio`,
-`src/App.tsx`). Usability findings are separate — see `docs/ux-audit.md`.
+`src/App.tsx`). Usability findings are separate — see `docs/dev-history/audits/ux-audit.md`.
 
 Method: Impeccable `audit` (technical quality: contrast, tokens, responsive) and
 `critique` (hierarchy, noise, competing focal points), with `quieter` as the

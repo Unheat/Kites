@@ -41,4 +41,4 @@ Completed checkpoints:
 - Output capabilities: Groq (`gpt-oss-120b`, `qwen3.8-27b`, `gpt-oss-20b`), Google Gemma 4 (`26b-a4b-it`, `31b-it`), and Cloudflare Workers AI (`@cf/meta/llama-3.2-1b-instruct`) verified and configured with `json-schema` structured output support.
 - Published release: GitHub Release tag `v1.3.2` on commit `1ebb3d7` with `kites-v1.3.2.zip` attached.
 
-See [audit checklist](../../development/community-pool-audit.md), [backend architecture](../../architecture/backend-worker.md), and [ADR-011](../../decisions/ADR-011-community-pool-validation-and-health-routing.md).
+See [audit checklist](../audits/community-pool-audit.md), [backend architecture](../../architecture/backend-worker.md), and [ADR-011](../../decisions/ADR-011-community-pool-validation-and-health-routing.md).

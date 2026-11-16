@@ -29,8 +29,9 @@ extension, not by per-symbol docs.
 
 ## Background worker (`src/background/`)
 
-- **Responsibility**: job queue, deduplication, concurrency limits, auth, and routing between content
-  script and offscreen document.
+- **Responsibility**: job queue, deduplication, queue-capacity limits, auth, and routing between content
+  script and offscreen document. One pipeline runs at a time; the popup's `concurrency` value sets how
+  many jobs may wait in the queue.
 - **Data flow**: receives runtime messages → validates the route (`target`, `source`, `request`) →
   forwards to offscreen → relays completion back to the tab.
 - **Entry point**: `index.ts`; message contracts in `src/shared/types.ts`.

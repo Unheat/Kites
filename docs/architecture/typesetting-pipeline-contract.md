@@ -10,7 +10,7 @@ Kites ports contour-based line profiling, dynamic-programming line selection, re
 
 Full end-to-end visual equivalence to Koharu or `pipelineVisualKoharuExactTest.ts` has **not been established**. Earlier claims of complete parity are superseded by this assessment. The browser investigation reproduced an application font-string bug and produced inspected images, but used different text, OCR output, style, and orchestration from the Node runner. A successful unit suite or browser script exit is not a pixel-parity gate.
 
-See [Devlog 078](../dev-history/devlog/078_phase78_koharu_typesetting_visual_parity_browser_canvas_discrepancy.md), [font library specification](font_library_spec.md), and [testing guide](testing.md).
+See [Devlog 078](../dev-history/devlog/078_phase78_koharu_typesetting_visual_parity_browser_canvas_discrepancy.md), [font library](font-library.md), and [testing guide](../development/testing.md).
 
 ## 2. End-to-end mapping
 
@@ -128,7 +128,7 @@ Active canonical persisted/editing modes are `contour`, `balloon`, and `simple`.
 
 `TypesetStrategyFactory.resolve()` gives supplied contours priority for fixed layouts, even when a mode field says `simple`. This explains why a saved Caption Box label and a contour-shaped initial layout can coexist. `getByMode()` serves explicit strategy lookup; it is not interchangeable with inferred resolution.
 
-See the [Auto Balloon](auto_balloon_typesetting_spec.md), [Simple Rect](simple_rect_typesetting_spec.md), and [renderer](cotrans_renderer_spec.md) specifications for route-specific behavior.
+See [Auto Balloon](auto-balloon-typesetting.md), [Simple Rect](simple-rect-typesetting.md), and [renderer](cotrans-default-renderer.md) for route-specific behavior.
 
 ## 5. Font measurement and painting
 

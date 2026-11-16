@@ -57,4 +57,4 @@ Date: 2026-10-31. Scope: worker source, extension translation contracts, existin
 
 Do not convert a missing test into a passed claim. Invalid local API credentials prove neither production failure nor model unavailability. Unit simulations do not establish real-world model quality or throughput.
 
-See [ADR-011](../decisions/ADR-011-community-pool-validation-and-health-routing.md) and [CI/CD](ci-cd.md).
+See [ADR-011](../../decisions/ADR-011-community-pool-validation-and-health-routing.md) and [CI/CD](../../development/ci-cd.md).

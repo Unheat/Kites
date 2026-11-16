@@ -43,4 +43,4 @@ Rejected: native canvas parsing, direct font registration, manual geometry, and 
 - Studio OCR still uses hardcoded comic-family precomputation and unconditional geometry acceptance. It is not equivalent to the selected-font live pipeline.
 - Koharu uses horizontal bubble width or vertical bubble height as its automatic maximum; its 24px default is for nonbubble text. Kites custom caps must not be cited as exact donor logic.
 
-See [current specification](../development/koharu_typesetting_pipeline_spec.md), [testing guide](../development/testing.md), and [Devlog 078](../dev-history/devlog/078_phase78_koharu_typesetting_visual_parity_browser_canvas_discrepancy.md).
+See [current specification](../architecture/typesetting-pipeline-contract.md), [testing guide](../development/testing.md), and [Devlog 078](../dev-history/devlog/078_phase78_koharu_typesetting_visual_parity_browser_canvas_discrepancy.md).

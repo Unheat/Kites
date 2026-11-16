@@ -1,14 +1,15 @@
-# System Architecture Overview 🏛️
-
+# System Architecture Overview
 Kites is built as a **Chrome Manifest V3 (MV3)** extension designed to process and translate comic images with spatial awareness while keeping computation local, private, and fast.
 
 This document outlines the multi-tier extension architecture, runtime boundaries, communication contracts, storage schema, and supporting backend services.
 
 **Current-code audit (2026-10-28):** cumulative `origin/main..main` through `656d720`; current typesetting/storage notes supersede the former dual-mode summary. Shared algorithms and visual test runners are not evidence of end-to-end pixel parity.
 
+**Re-verified 2026-11-15 against the working tree:** job queueing is serialized (one pipeline at a time) with the popup value acting as queue capacity; quota constants read from `worker/src/durable/quotaService.ts`; per-family model cache names; ZIP 256 MiB vs session-pool 128 MiB budgets; reading-shortcut modifiers.
+
 ---
 
-## 🏗️ Architectural Topology
+## Architectural Topology
 
 Chrome Manifest V3 enforces strict security boundaries: service workers are ephemeral, background contexts cannot access DOM or WebGPU adapters reliably, and page scripts cannot execute untrusted code.
 
@@ -25,7 +26,7 @@ graph TB
 
     subgraph ExtensionServiceWorker["2. Background Service Worker"]
         Hub["Message Dispatcher<br/>& Explicit RPC Router"]
-        Queue["Concurrency Queue<br/>(1–5 Parallel Tasks)"]
+        Queue["Serialized Job Queue<br/>(one pipeline at a time)"]
         OAuth["Google OAuth Manager<br/>(chrome.identity)"]
     end
 
@@ -83,7 +84,7 @@ graph TB
 
 ---
 
-## 🧩 Core Subsystems & Runtime Contracts
+## Core Subsystems & Runtime Contracts
 
 ### 1. Webpage Content Script (`src/content/`)
 - **Universal Media Discovery (`MediaTarget`):** Scans the DOM for comic panels (minimum dimension `150 × 150 px`). Resolves complex layout wrappers:
@@ -96,8 +97,8 @@ graph TB
   - Converts large Base64 strings to same-origin Blob URLs (`URL.createObjectURL(blob)`) to avoid DOM bloat and CSP rejections.
   - Intercepts SPA re-renders and re-applies the translated image.
 - **Screen Crop Translation (`ScreenCropManager`):** For protected canvas elements, WebGL viewers, or complex panels, users can draw a screen-pinned crop box (Xnip-style `position: fixed` viewport overlay) to translate arbitrary screen areas.
-- **Distraction-Free Chapter Reader Modal (`ChapterReaderModal.tsx`):** Provides fullscreen reading with webtoon vertical scroll and double-page spreads, live streaming page updates, canonical chapter scope resolution (`getChapterScopeId`), and ordered ZIP export bounded by a 128 MiB session budget.
-- **Reading Shortcuts:** Built-in `Alt+Shift+Z` (translate), `Alt+Shift+X` (screen crop), and `F` (peek original) hotkeys with cross-platform keydown fallbacks.
+- **Distraction-Free Chapter Reader Modal (`ChapterReaderModal.tsx`):** Provides fullscreen reading with webtoon vertical scroll and double-page spreads, live streaming page updates, canonical chapter scope resolution (`getChapterScopeId`), and ordered ZIP export bounded by a 256 MiB ZIP budget, with a separate 128 MiB cap on the content-side session asset pool.
+- **Reading Shortcuts:** `Ctrl+Shift+Z` / `Alt+Shift+Z` (translate), `Ctrl+Shift+X` / `Alt+Shift+X` (screen crop), `Ctrl+Shift+M` / `Alt+Shift+M` (chapter reader), and unmodified `F` (toggle original) with editable-target and modifier guards in `readingShortcuts.ts`.
 
 👉 *Detailed guide: [`docs/architecture/content-script-and-media.md`](content-script-and-media.md)*
 
@@ -105,12 +106,12 @@ graph TB
 
 ### 2. Background Service Worker (`src/background/`)
 - **Ephemeral Event Hub:** Mediates all messaging between content scripts, the popup UI, and the offscreen document.
-- **Job Deduplication & Concurrency Queue:** Manages translation tasks, deduplicates redundant requests on the same image, and enforces configurable concurrency (1 to 5 jobs).
+- **Job Deduplication & Serialized Queue:** Manages translation tasks and deduplicates redundant requests on the same image. Exactly one image pipeline runs in the offscreen document at a time — WebGPU and ONNX Runtime Web JSEP reject recursive kernel invocation — so the `concurrency` setting (1–5 in the popup, labelled _Max Queue Capacity_) is a **queue-capacity** limit, not a parallelism limit. Batch scanning uses a fixed capacity of 100.
 - **Explicit RPC Routing Contract:** Chromium broadcasts extension messages to all active contexts. To prevent cross-talk and ghost execution, every message carries explicit routing markers:
   - `target: 'background' | 'offscreen'`
   - `source: 'popup' | 'content' | 'background' | 'offscreen'`
   - `request: true`
-- **Google OAuth Manager (`src/background/auth/`):** Manages `chrome.identity.getAuthToken` flows for users connecting to the Cloudflare Shared Pool.
+- **Google OAuth Manager (`src/background/auth/`):** Manages the `chrome.identity.launchWebAuthFlow` flow (with `prompt=select_account`) for users connecting to the Cloudflare Shared Pool, falling back to `chrome.identity.getAuthToken`.
 
 ---
 
@@ -138,7 +139,7 @@ graph TB
 
 ### 5. Cloudflare Zero-Cost Worker Backend (`worker/`)
 - **API Gateway (`api.12094852.xyz`):** An edge-hosted translation proxy enabling shared community AI access without requiring users to purchase API keys.
-- **Durable Objects with SQLite:** Enforces daily user quotas (e.g. 50 pages/day) and sliding-window rate limits per Google account.
+- **Durable Objects with SQLite:** Enforces per-Google-account allowances (`MAX_USER_QUOTA = 100`, `MAX_USER_DAILY_ATTEMPTS = 250`), a conservative global daily cap of 10,000 attempts, and sliding-window rate limits. Read the live values from `worker/src/durable/quotaService.ts` and `worker/src/security/rate-limiter.ts`; deployment state must be verified separately.
 - **Resilient Multi-Provider Waterfall:**
   $$\text{Groq} \longrightarrow \text{Mistral} \longrightarrow \text{Google AI Studio} \longrightarrow \text{Cloudflare Workers AI}$$
   If one provider experiences downtime or rate limits (HTTP 429), the Worker automatically cascades to the next provider within milliseconds.
@@ -161,7 +162,7 @@ graph TB
 
 ---
 
-## 🔒 Security & Privacy Architecture
+## Security & Privacy Architecture
 
 - **100% Local Inference Option:** When using WebLLM and local inpainting, no image or text data leaves the user's browser.
 - **Zero Image Uploads to Cloud:** Even when using cloud translation, only plain extracted text strings are sent to the translation API — image blobs are never transmitted externally.
