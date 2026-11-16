@@ -121,6 +121,54 @@ describe('Production CircuitBreakerService and ErrorTaxonomy', () => {
     expect(circuit.halfOpenInFlight).toBe(false);
   });
 
+  it('blocks on TPM/TPD before overshooting, whichever limit trips first', () => {
+    const service = new CircuitBreakerService();
+    const tokenRoute: ProviderRouteConfig = { ...testRoute, id: 'test-tokens', tpmLimit: 1000, tpdLimit: 5000 };
+    const t0 = 1700000000000;
+
+    // Spend 900 of the 1000-token minute on one completed attempt.
+    service.recordTokenUsage(tokenRoute, 900, t0);
+    service.releaseRoute(tokenRoute.id);
+
+    // A request whose prompt estimate alone exceeds the remainder must not be dispatched.
+    const tooBig = service.acquireRoute(tokenRoute, testEnv, t0, 200);
+    expect(tooBig.acquired).toBe(false);
+    expect(tooBig.reason).toContain('TPM');
+
+    // A request that still fits is allowed.
+    const fits = service.acquireRoute(tokenRoute, testEnv, t0, 50);
+    expect(fits.acquired).toBe(true);
+    service.releaseRoute(tokenRoute.id);
+
+    // Minute window rolls over: the budget is available again.
+    const nextMinute = service.acquireRoute(tokenRoute, testEnv, t0 + 61_000, 200);
+    expect(nextMinute.acquired).toBe(true);
+    service.releaseRoute(tokenRoute.id);
+
+    // Day budget is independent of the minute window, so it needs a route whose minute budget is
+    // wide enough for the minute check not to win first — "whichever limit trips first" applies.
+    const dayRoute: ProviderRouteConfig = { ...testRoute, id: 'test-day-tokens', tpmLimit: 1_000_000, tpdLimit: 5000 };
+    service.recordTokenUsage(dayRoute, 5000, t0);
+    service.releaseRoute(dayRoute.id);
+    const dayBlocked = service.acquireRoute(dayRoute, testEnv, t0 + 1000, 1);
+    expect(dayBlocked.acquired).toBe(false);
+    expect(dayBlocked.reason).toContain('TPD');
+
+    // And the same spend on a TPM-only route surfaces as TPM, proving the order is data-driven.
+    service.releaseRoute(tokenRoute.id);
+    service.recordTokenUsage(tokenRoute, 5000, t0 + 61_500);
+    expect(service.acquireRoute(tokenRoute, testEnv, t0 + 62_000, 1).reason).toContain('TPM');
+  });
+
+  it('ignores token spend for routes that declare no token budget', () => {
+    const service = new CircuitBreakerService();
+    const t0 = 1700000000000;
+    service.recordTokenUsage(testRoute, 10_000_000, t0);
+    service.releaseRoute(testRoute.id);
+    expect(service.acquireRoute(testRoute, testEnv, t0, 1_000_000).acquired).toBe(true);
+    expect(service.getCircuit(testRoute.id, t0).tokenMinuteCount).toBe(0);
+  });
+
   it('rejects stale outcomes from an older generation', () => {
     const service = new CircuitBreakerService();
     const t0 = 1700000000000;

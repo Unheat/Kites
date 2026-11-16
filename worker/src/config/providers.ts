@@ -72,6 +72,10 @@ export interface ProviderRouteConfig {
   rpsLimit?: number;
   /** Requests per minute guard (unverified configured guard) */
   rpmLimit?: number;
+  /** Tokens per minute guard, provider-documented where available; whichever limit trips first wins. */
+  tpmLimit?: number;
+  /** Tokens per day guard, provider-documented where available. */
+  tpdLimit?: number;
   /** Requests per day guard (unverified configured guard) */
   rpdLimit?: number;
   /** Maximum concurrent in-flight requests permitted for this route */
@@ -103,6 +107,8 @@ export const PROVIDER_ROUTES: ProviderRouteConfig[] = [
     apiKeyEnvVar: 'GROQ_API_KEY',
     rpmLimit: 30,
     rpdLimit: 1000,
+    tpmLimit: 8000,
+    tpdLimit: 200000,
     maxInflight: 3,
     defaultTimeoutMs: 3500,
     outputCapability: 'json-schema',
@@ -123,6 +129,8 @@ export const PROVIDER_ROUTES: ProviderRouteConfig[] = [
     apiKeyEnvVar: 'GROQ_API_KEY',
     rpmLimit: 30,
     rpdLimit: 1000,
+    tpmLimit: 8000,
+    tpdLimit: 200000,
     maxInflight: 3,
     defaultTimeoutMs: 3000,
     outputCapability: 'json-schema',
@@ -143,6 +151,8 @@ export const PROVIDER_ROUTES: ProviderRouteConfig[] = [
     apiKeyEnvVar: 'GROQ_API_KEY',
     rpmLimit: 30,
     rpdLimit: 1000,
+    tpmLimit: 8000,
+    tpdLimit: 200000,
     maxInflight: 3,
     defaultTimeoutMs: 3000,
     outputCapability: 'json-schema',
@@ -150,29 +160,7 @@ export const PROVIDER_ROUTES: ProviderRouteConfig[] = [
     verificationEvidence: 'documented',
   },
 
-  // 4. Groq Qwen 3.6 27B (DISABLED: a live probe answers HTTP 404 for this model id on this
-  // account, so the route only burns a waterfall slot. Re-enable with a confirmed live model id
-  // and re-probe before restoring its priority.)
-  {
-    id: 'groq-qwen-3.6',
-    name: 'Groq Qwen 3.6 27B',
-    enabled: false,
-    priority: 4,
-    qualityTier: 'medium',
-    type: 'openai-compatible',
-    baseUrl: 'https://api.groq.com/openai/v1',
-    modelName: 'qwen/qwen3.6-27b',
-    apiKeyEnvVar: 'GROQ_API_KEY',
-    rpmLimit: 30,
-    rpdLimit: 1000,
-    maxInflight: 3,
-    defaultTimeoutMs: 3500,
-    outputCapability: 'json-object',
-    requestOptions: { reasoningFormat: 'parsed' },
-    verificationEvidence: 'probed',
-  },
-
-  // 5. OpenTyphoon Typhoon 2.5 30B A3B (Thai-first free tier; documented limit 5 req/s, 200 req/m)
+  // 4. OpenTyphoon Typhoon 2.5 30B A3B (Thai-first free tier; documented limit 5 req/s, 200 req/m)
   // Live probe 2026-11: the endpoint ACCEPTS `response_format` but does not enforce it. A
   // deliberately contradictory strict schema (keys alpha/beta, enum ["ZZZ-ONLY"]), a nested
   // array-of-object schema, and even a malformed schema all returned the prompt-driven
@@ -185,7 +173,7 @@ export const PROVIDER_ROUTES: ProviderRouteConfig[] = [
     id: 'typhoon-30b-a3b',
     name: 'Typhoon 2.5 30B A3B',
     enabled: true,
-    priority: 5,
+    priority: 4,
     qualityTier: 'medium',
     type: 'openai-compatible',
     baseUrl: 'https://api.opentyphoon.ai/v1',
@@ -199,18 +187,19 @@ export const PROVIDER_ROUTES: ProviderRouteConfig[] = [
     verificationEvidence: 'probed',
   },
 
-  // 6. Google AI Studio Gemma 4 26B (14.4k RPD guard, 30 RPM guard, Structured JSON Schema)
+  // 5. Google AI Studio Gemma 4 26B (14.4k RPD guard, 30 RPM guard, Structured JSON Schema)
   {
     id: 'gemma-4-26b',
     name: 'Google Gemma 4 26B',
     enabled: true,
-    priority: 6,
+    priority: 5,
     qualityTier: 'high',
     type: 'gemini',
     modelName: 'gemma-4-26b-a4b-it',
     apiKeyEnvVar: 'GEMINI_API_KEY',
     rpmLimit: 30,
     rpdLimit: 14400,
+    tpmLimit: 15000,
     maxInflight: 4,
     defaultTimeoutMs: 4000,
     outputCapability: 'json-schema',
@@ -218,18 +207,19 @@ export const PROVIDER_ROUTES: ProviderRouteConfig[] = [
     verificationEvidence: 'documented',
   },
 
-  // 7. Google AI Studio Gemma 4 31B (14.4k RPD guard, 30 RPM guard, Structured JSON Schema)
+  // 6. Google AI Studio Gemma 4 31B (14.4k RPD guard, 30 RPM guard, Structured JSON Schema)
   {
     id: 'gemma-4-31b',
     name: 'Google Gemma 4 31B',
     enabled: true,
-    priority: 7,
+    priority: 6,
     qualityTier: 'high',
     type: 'gemini',
     modelName: 'gemma-4-31b-it',
     apiKeyEnvVar: 'GEMINI_API_KEY',
     rpmLimit: 30,
     rpdLimit: 14400,
+    tpmLimit: 15000,
     maxInflight: 4,
     defaultTimeoutMs: 4000,
     outputCapability: 'json-schema',
@@ -237,12 +227,15 @@ export const PROVIDER_ROUTES: ProviderRouteConfig[] = [
     verificationEvidence: 'documented',
   },
 
-  // 8. OpenRouter Free Tier (20 RPM guard, 1,000 RPD guard, JSON Object feature-routed)
+  // 7. OpenRouter Free Tier (20 RPM, 1,000 RPD; strict schema + require_parameters verified live.
+  // The router picks a backend per request, and a reasoning-heavy free backend can spend the whole
+  // completion budget thinking and answer `content:"null"` with finish_reason=length — which the
+  // probe correctly reports as invalid_output rather than a dead key.)
   {
     id: 'openrouter-free',
     name: 'OpenRouter Free Model',
     enabled: true,
-    priority: 8,
+    priority: 7,
     qualityTier: 'medium',
     type: 'openai-compatible',
     baseUrl: 'https://openrouter.ai/api/v1',
@@ -256,30 +249,31 @@ export const PROVIDER_ROUTES: ProviderRouteConfig[] = [
     rpdLimit: 1000,
     maxInflight: 2,
     defaultTimeoutMs: 4500,
-    outputCapability: 'json-object',
+    outputCapability: 'json-schema',
     requestOptions: { requireParameters: true },
-    verificationEvidence: 'documented',
+    verificationEvidence: 'probed',
   },
 
-  // 9. Mistral AI (Enabled with json-object mode; live probe unverified)
+  // 8. Mistral AI (free Experiment plan: 1 req/s, 500K tokens/minute; live probe ok)
   {
     id: 'mistral-3b',
     name: 'Mistral Ministral 3B',
     enabled: true,
-    priority: 9,
+    priority: 8,
     qualityTier: 'medium',
     type: 'openai-compatible',
     baseUrl: 'https://api.mistral.ai/v1',
     modelName: 'ministral-3b-2512',
     apiKeyEnvVar: 'MISTRAL_API_KEY',
-    rpsLimit: 10,
+    rpsLimit: 1,
+    tpmLimit: 500000,
     maxInflight: 2,
     defaultTimeoutMs: 3500,
     outputCapability: 'json-object',
     verificationEvidence: 'documented',
   },
 
-  // 10. Cloudflare Native Workers AI (Emergency last fallback, lowest token cost against 10k daily neurons guard)
+  // 9. Cloudflare Native Workers AI (Emergency last fallback, lowest token cost against 10k daily neurons guard)
   // Live probe 2026-11: `json_object` returns a usable keyed translation, while
   // `response_format.type = 'json_schema'` answers HTTP 500 in both envelope shapes tried, so this
   // route declares json-object. Declaring json-schema here silently killed the route in
@@ -288,7 +282,7 @@ export const PROVIDER_ROUTES: ProviderRouteConfig[] = [
     id: 'cf-llama-3.2-1b',
     name: 'Cloudflare Workers AI Llama 3.2 1B',
     enabled: true,
-    priority: 10,
+    priority: 9,
     qualityTier: 'emergency',
     type: 'workers-ai',
     modelName: '@cf/meta/llama-3.2-1b-instruct',

@@ -41,6 +41,10 @@ export class CircuitBreakerService {
         minuteCount: 0,
         currentDayWindow: new Date(now).toISOString().slice(0, 10),
         dayCount: 0,
+        tokenMinuteWindow: Math.floor(now / 60000),
+        tokenMinuteCount: 0,
+        tokenDayWindow: new Date(now).toISOString().slice(0, 10),
+        tokenDayCount: 0,
       };
       this.circuits.set(routeId, circuit);
     }
@@ -61,15 +65,19 @@ export class CircuitBreakerService {
     }
 
     const min = Math.floor(now / 60000);
-    if (circuit.currentMinuteWindow !== min) {
+    if (circuit.currentMinuteWindow !== min || circuit.tokenMinuteWindow !== min) {
       circuit.currentMinuteWindow = min;
       circuit.minuteCount = 0;
+      circuit.tokenMinuteWindow = min;
+      circuit.tokenMinuteCount = 0;
     }
 
     const day = new Date(now).toISOString().slice(0, 10);
-    if (circuit.currentDayWindow !== day) {
+    if (circuit.currentDayWindow !== day || circuit.tokenDayWindow !== day) {
       circuit.currentDayWindow = day;
       circuit.dayCount = 0;
+      circuit.tokenDayWindow = day;
+      circuit.tokenDayCount = 0;
     }
   }
 
@@ -86,7 +94,8 @@ export class CircuitBreakerService {
   acquireRoute(
     route: ProviderRouteConfig,
     env: Env,
-    now = Date.now()
+    now = Date.now(),
+    estimatedTokens = 0
   ): { acquired: boolean; generation: number; reason?: string } {
     if (!route.enabled) {
       return { acquired: false, generation: 0, reason: 'Route disabled' };
@@ -150,6 +159,18 @@ export class CircuitBreakerService {
     if (route.rpdLimit && circuit.dayCount >= route.rpdLimit) {
       if (circuit.state === 'HALF-OPEN') circuit.halfOpenInFlight = false;
       return { acquired: false, generation: circuit.generation, reason: 'RPD limit reached' };
+    }
+
+    // Token budgets are checked against consumed tokens PLUS this request's estimate, so a route
+    // cannot overshoot TPM/TPD by dispatching a request whose prompt already eats the remainder.
+    if (route.tpmLimit && circuit.tokenMinuteCount + estimatedTokens > route.tpmLimit) {
+      if (circuit.state === 'HALF-OPEN') circuit.halfOpenInFlight = false;
+      return { acquired: false, generation: circuit.generation, reason: 'TPM limit reached' };
+    }
+
+    if (route.tpdLimit && circuit.tokenDayCount + estimatedTokens > route.tpdLimit) {
+      if (circuit.state === 'HALF-OPEN') circuit.halfOpenInFlight = false;
+      return { acquired: false, generation: circuit.generation, reason: 'TPD limit reached' };
     }
 
     // Acquire in-flight reservation
@@ -227,6 +248,25 @@ export class CircuitBreakerService {
     circuit.state = 'OPEN';
     circuit.cooldownUntil = now + cooldownMs;
     circuit.generation += 1;
+  }
+
+  /**
+   * Records tokens a completed attempt actually consumed (upstream `usage.total_tokens`).
+   *
+   * Separate from `recordOutcome` on purpose: token spend is provider budget, not provider health,
+   * and a truncated or schema-invalid answer still burned budget.
+   *
+   * @param route - Target provider route.
+   * @param tokensUsed - Tokens reported by the provider for this attempt.
+   * @param now - Current timestamp.
+   */
+  recordTokenUsage(route: ProviderRouteConfig, tokensUsed: number, now = Date.now()): void {
+    if (!route.tpmLimit && !route.tpdLimit) return;
+    if (!Number.isFinite(tokensUsed) || tokensUsed <= 0) return;
+    const circuit = this.getCircuit(route.id, now);
+    this.rotateWindows(circuit, now);
+    circuit.tokenMinuteCount += tokensUsed;
+    circuit.tokenDayCount += tokensUsed;
   }
 
   /**

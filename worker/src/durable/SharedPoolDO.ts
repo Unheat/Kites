@@ -93,7 +93,7 @@ export class SharedPoolDO extends DurableObject<Env> {
         const remainingBudget = waterfallDeadline - Date.now();
         if (remainingBudget < MIN_TIMEOUT_MS) break;
 
-        const predispatch = this.circuitBreaker.acquireRoute(route, this.env, Date.now());
+        const predispatch = this.circuitBreaker.acquireRoute(route, this.env, Date.now(), estimatedTokens);
         if (!predispatch.acquired) continue;
 
         const timeoutMs = Math.min(this.latencyTracker.calculateTimeout(route, estimatedTokens, Date.now()), remainingBudget);
@@ -105,6 +105,10 @@ export class SharedPoolDO extends DurableObject<Env> {
         } finally {
           this.circuitBreaker.releaseRoute(route.id);
         }
+
+        // Token budget is provider spend, not provider health: charge it even when the answer is
+        // truncated or schema-invalid, because the upstream billed those tokens anyway.
+        this.circuitBreaker.recordTokenUsage(route, result.data?.usage?.total_tokens ?? 0);
 
         const elapsed = Date.now() - startTime;
         console.log(JSON.stringify({

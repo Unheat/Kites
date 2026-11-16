@@ -81,6 +81,12 @@ export interface ProviderCircuitState {
   minuteCount: number;
   currentDayWindow: string;
   dayCount: number;
+  /** Minute window and consumed tokens for TPM accounting. */
+  tokenMinuteWindow: number;
+  tokenMinuteCount: number;
+  /** Day window and consumed tokens for TPD accounting. */
+  tokenDayWindow: string;
+  tokenDayCount: number;
 }
 
 export interface RouteLatencyStats {

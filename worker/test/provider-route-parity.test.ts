@@ -65,15 +65,12 @@ describe('real provider catalog request parity', () => {
     }
   );
 
-  it.each(['groq-qwen-3.8', 'groq-qwen-3.6'])(
-    'keeps parsed reasoning format for %s',
-    async (routeId) => {
-      const body = await payloadFor(routeId);
-      expect(body.reasoning_format).toBe('parsed');
-      expect(body.include_reasoning).toBeUndefined();
-      expect(body.reasoning_effort).toBeUndefined();
-    }
-  );
+  it('keeps parsed reasoning format for groq-qwen-3.8', async () => {
+    const body = await payloadFor('groq-qwen-3.8');
+    expect(body.reasoning_format).toBe('parsed');
+    expect(body.include_reasoning).toBeUndefined();
+    expect(body.reasoning_effort).toBeUndefined();
+  });
 
   it('keeps OpenRouter feature routing parameters', async () => {
     const body = await payloadFor('openrouter-free');
