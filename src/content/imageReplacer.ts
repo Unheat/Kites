@@ -326,8 +326,16 @@ export function toggleImageDisplay(target: MediaTarget, showOriginal: boolean, r
 
       if (targetImg) {
         targetImg.setAttribute('data-kites-show-original', 'true');
-        const origSrc = targetImg.getAttribute('data-kites-orig-src') || target.srcUrl;
-        const origSrcset = targetImg.getAttribute('data-kites-orig-srcset');
+        // The restored <img> may be a backing element that never received the backup attrs;
+        // fall through the source element and the archived record before the live src (which
+        // may already be the translated blob). This is what made a rapid eye toggle freeze on
+        // the translated image while its button state kept changing.
+        const origSrc = targetImg.getAttribute('data-kites-orig-src')
+          || sourceElement.getAttribute('data-kites-orig-src')
+          || record?.originalUrl
+          || target.srcUrl;
+        const origSrcset = targetImg.getAttribute('data-kites-orig-srcset')
+          || sourceElement.getAttribute('data-kites-orig-srcset');
         targetImg.src = origSrc;
         if (origSrcset) {
           targetImg.srcset = origSrcset;

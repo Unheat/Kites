@@ -41,6 +41,31 @@ class QuietObserver {
   takeRecords(): MutationRecord[] { return []; }
 }
 
+/** Intersection observer that reports every observed surface immediately. */
+class VisibleIntersectionObserver {
+  private readonly callback: IntersectionObserverCallback;
+  /** Stores the callback used to report visibility. */
+  constructor(callback: IntersectionObserverCallback) {
+    this.callback = callback;
+  }
+  /** Reports one visible target; returns nothing. */
+  observe(target: Element): void {
+    this.callback([{ isIntersecting: true, target } as IntersectionObserverEntry], this as unknown as IntersectionObserver);
+  }
+  /** No-op teardown for the fixture. */
+  disconnect(): void {}
+  /** No-op unobserving for the fixture. */
+  unobserve(): void {}
+  /** Returns no queued records. */
+  takeRecords(): IntersectionObserverEntry[] { return []; }
+  /** Root bounds are not used by the auto queue. */
+  readonly root = null;
+  /** Root margin is not used by the auto queue. */
+  readonly rootMargin = '0px';
+  /** Thresholds are not used by the auto queue. */
+  readonly thresholds = [0];
+}
+
 /** Creates a connected media fixture; returns its target with deterministic geometry. */
 function image(url: string): MediaTarget {
   const element = document.createElement('img');
@@ -66,6 +91,14 @@ async function deliver(message: unknown): Promise<void> {
 /** Moves the pointer over media; returns nothing. */
 function move(): void {
   document.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 80, clientY: 90 }));
+}
+
+/** Fires the boundary event that starts hover-mode tracking on one media surface. */
+async function hover(target: MediaTarget): Promise<void> {
+  await act(async () => {
+    target.surfaceElement.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, clientX: 80, clientY: 90 }));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+  });
 }
 
 /** Seeds a finished image and presentation; returns nothing. */
@@ -207,6 +240,92 @@ describe('real content reading shortcut wiring', () => {
     expect(target.imgElement!.src).toBe(target.srcUrl);
     expect(target.sourceElement.getAttribute('data-kites-show-original')).toBe('true');
     expect(toggleBtn?.getAttribute('aria-label')).toBe('Show Translated Image');
+  });
+
+  it('shows a pinned spinner for an auto-translated visible image', async () => {
+    const target = image('https://example.com/auto.png');
+    media.targets = [target];
+    state.isAuto = true;
+    vi.stubGlobal('IntersectionObserver', VisibleIntersectionObserver);
+    await mount('hover');
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+
+    expect(sendMessage).toHaveBeenCalledWith({ type: 'TRANSLATE_IMAGE', url: target.srcUrl }, expect.any(Function));
+    const control = document.querySelector<HTMLElement>('[data-kites-translate-control]');
+    expect(control).not.toBeNull();
+    expect(control?.dataset.kitesSrcUrl).toBe(target.srcUrl);
+    expect(control?.querySelector('button')?.disabled).toBe(true);
+  });
+
+  it('keeps a pending spinner pinned to its image while the pointer hovers another', async () => {
+    const first = image('https://example.com/first.png');
+    const second = image('https://example.com/second.png');
+    media.targets = [first, second];
+    media.underPointer = first;
+    await mount('hover');
+    await hover(first);
+
+    await act(async () => {
+      document.querySelector<HTMLButtonElement>('[data-kites-translate-button]')!.click();
+    });
+    expect(sendMessage).toHaveBeenCalledWith({ type: 'TRANSLATE_IMAGE', url: first.srcUrl }, expect.any(Function));
+    expect(document.querySelectorAll('[data-kites-translate-control]')).toHaveLength(1);
+
+    media.underPointer = second;
+    await hover(second);
+    const controls = [...document.querySelectorAll<HTMLElement>('[data-kites-translate-control]')];
+    expect(controls).toHaveLength(2);
+    const firstControl = controls.find((control) => control.dataset.kitesSrcUrl === first.srcUrl)!;
+    const secondControl = controls.find((control) => control.dataset.kitesSrcUrl === second.srcUrl)!;
+    expect(firstControl.querySelector('button')?.disabled).toBe(true);
+    expect(secondControl.querySelector('button')?.disabled).toBe(false);
+
+    await deliver({ type: 'IMAGE_TRANSLATED', payload: { originalUrl: first.srcUrl, bakedBase64: 'data:image/png;base64,AA==', jobId: 8 } });
+    // Finished first image is no longer hovered: its control leaves; second stays hovered.
+    expect(document.querySelectorAll('[data-kites-translate-control]')).toHaveLength(1);
+    expect(document.querySelector<HTMLElement>('[data-kites-translate-control]')?.dataset.kitesSrcUrl).toBe(second.srcUrl);
+  });
+
+  it('keeps one spinner per queued image when several are started together', async () => {
+    const targets = Array.from({ length: 5 }, (_, index) => image(`https://example.com/page-${index}.png`));
+    media.targets = targets;
+    await mount('persistent');
+    expect(document.querySelectorAll('[data-kites-translate-control]')).toHaveLength(5);
+
+    const buttons = [...document.querySelectorAll<HTMLButtonElement>('[data-kites-translate-button]')];
+    await act(async () => { for (const button of buttons) button.click(); });
+
+    expect(sendMessage).toHaveBeenCalledTimes(5);
+    expect(document.querySelectorAll('[data-kites-translate-control]')).toHaveLength(5);
+    for (const control of document.querySelectorAll<HTMLElement>('[data-kites-translate-control]')) {
+      expect(control.querySelector('button')?.disabled).toBe(true);
+    }
+  });
+
+  it('keeps the eye toggle working after leaving and re-entering a translated image', async () => {
+    const first = image('https://example.com/first.png');
+    const second = image('https://example.com/second.png');
+    media.targets = [first, second];
+    media.underPointer = first;
+    await mount('hover');
+    finish(first);
+    await deliver({ type: 'IMAGE_TRANSLATED', payload: { originalUrl: first.srcUrl, bakedBase64: 'data:image/png;base64,AA==', jobId: 9 } });
+    await hover(first);
+
+    const toggle = (): HTMLButtonElement | null => document.querySelector<HTMLButtonElement>('[data-kites-toggle-btn]');
+    await act(async () => { toggle()!.click(); });
+    expect(first.imgElement!.src).toBe(first.srcUrl);
+
+    media.underPointer = second;
+    await hover(second);
+    media.underPointer = first;
+    await hover(first);
+
+    // First click after re-entry shows the translated image; the second must return to original.
+    await act(async () => { toggle()!.click(); });
+    expect(first.imgElement!.src).toBe('blob:translated');
+    await act(async () => { toggle()!.click(); });
+    expect(first.imgElement!.src).toBe(first.srcUrl);
   });
 
   it('clears persistent target when the pointer leaves the document', async () => {

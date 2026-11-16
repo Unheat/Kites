@@ -139,6 +139,27 @@ When users move their cursor rapidly across panel boundaries, mouseleave events 
 - Kites attaches a **3px pointer tolerance halo** around the surface bounds.
 - If the cursor remains within the halo or on button descendants, dismissal timers are cancelled, producing smooth, reliable hover transitions.
 
+### 4. Per-Image Control State (Hover, Pending, and Automatic)
+
+A hovered image is not the only image that can own a control. `GlobalOverlay` keeps a
+`pendingImages` map keyed by the stable original URL, and renders one `TranslateButton` per
+surface from the union of:
+
+- the active hover target,
+- every pending translation target,
+- every discovered target in Persistent mode.
+
+The active target wins when an entry appears in both sets. A job therefore keeps its spinner
+anchored to its own image after the pointer moves to the next page; five queued images produce
+five independent spinners. Automatic translation uses the same pending map, so viewport-queued
+pages are visibly busy instead of appearing ignored. When a job finishes or fails, the pending
+entry is removed; the hovered target keeps its finished actions (eye, download, Studio), while
+an un-hovered finished target returns to hover-only controls.
+
+The image's registry identity is its `data-kites-orig-src`, not the live `img.src`; after a
+translation the live source is a blob. The control also receives the target captured when it was
+mounted, so the eye toggle never re-resolves a recycled backing image by URL.
+
 ---
 
 ## 📖 Distraction-Free Chapter Reader & Streaming Mode (`ChapterReaderModal.tsx`)

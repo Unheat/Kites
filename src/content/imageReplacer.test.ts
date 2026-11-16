@@ -96,6 +96,17 @@ describe('imageReplacer toggleImageDisplay', () => {
     }
   });
 
+  it('falls back to the archived original when the translated img lost its backup attrs', () => {
+    // Rapid toggling can resolve a backing/recycled img whose src is already the translated
+    // blob and whose data-kites-orig-src was cleared. The record still knows the original.
+    img.removeAttribute('data-kites-orig-src');
+    target.srcUrl = 'blob:https://example.com/translated-uuid';
+    toggleImageDisplay(target, true, record);
+    expect(img.src).toBe('https://example.com/original.jpg');
+    toggleImageDisplay(target, false, record);
+    expect(img.src).toBe('blob:https://example.com/translated-uuid');
+  });
+
   it('clears srcset when restoring translated view and restores origSrcset when showing original', () => {
     img.setAttribute('data-kites-orig-srcset', 'https://example.com/original.jpg 1x, https://example.com/high.jpg 2x');
 

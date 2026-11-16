@@ -1,5 +1,5 @@
 import { createRoot } from 'react-dom/client';
-import { useEffect, useRef, useState, useCallback, useId } from 'react';
+import { useEffect, useRef, useState, useCallback, useId, useMemo } from 'react';
 import './content.css';
 import { Languages, Eye, EyeOff, ExternalLink, X, Crop, RotateCcw, Download } from 'lucide-react';
 import type { PopupState, CropOverlayItem, ViewportSelection, SiteSelectorRule } from '../shared/types';
@@ -28,7 +28,6 @@ import {
 import { observeAnchorRect, placeControl } from './overlayPlacement';
 import {
   collectQueryRoots,
-  createMediaTarget,
   createStyleRevealedTarget,
   discoverAddedMediaTargets,
   discoverMediaTargets,
@@ -332,11 +331,13 @@ function getOverlayId(element: HTMLElement): string {
  * @returns Floating translate button.
  */
 function TranslateButton({
+  target: image,
   srcUrl,
   anchorElement,
   isTranslating,
   onTranslate,
 }: {
+  target: OverlayImage;
   srcUrl: string;
   anchorElement: HTMLElement;
   isTranslating: boolean;
@@ -354,10 +355,15 @@ function TranslateButton({
   // looked like nothing happened. The button shows the failure briefly, then returns to
   // its idle look so the next click reads as a retry.
   const [hasFailed, setHasFailed] = useState(false);
+  // The translated <img> carries a blob src; the backup attr is the durable registry key.
+  // Using the live src here lost the record after hover re-resolution and made the eye button
+  // toggle its local state while the image stayed translated.
+  const registryUrl = image.sourceElement.getAttribute('data-kites-orig-src') || srcUrl;
+  const activeTranslating = isTranslating || localTranslating;
 
   const isElementTranslated = useCallback(() => {
     // 1. Direct registry check (primary ground truth for current session)
-    const reg = translatedRegistry.get(srcUrl);
+    const reg = translatedRegistry.get(registryUrl);
     if (reg?.translatedUrl) {
       return true;
     }
@@ -373,7 +379,7 @@ function TranslateButton({
     }
 
     // 3. MediaTarget resolution fallback
-    const target = resolveTargetMedia(srcUrl);
+    const target = resolveTargetMedia(registryUrl);
     if (
       target?.sourceElement?.getAttribute('data-kites-translated') === 'true' ||
       target?.surfaceElement?.getAttribute('data-kites-translated') === 'true'
@@ -382,17 +388,17 @@ function TranslateButton({
     }
 
     return false;
-  }, [anchorElement, srcUrl]);
+  }, [anchorElement, srcUrl, registryUrl]);
 
   const [isTranslated, setIsTranslated] = useState(isElementTranslated);
   const [showOriginal, setShowOriginal] = useState(() => {
     return Boolean(
-      translatedRegistry.get(srcUrl)?.showOriginal ||
+      translatedRegistry.get(registryUrl)?.showOriginal ||
       anchorElement.getAttribute('data-kites-show-original') === 'true'
     );
   });
   const [jobId, setJobId] = useState<number | null>(() => {
-    const reg = translatedRegistry.get(srcUrl)?.jobId;
+    const reg = translatedRegistry.get(registryUrl)?.jobId;
     if (reg) return reg;
     const attr = anchorElement.getAttribute('data-kites-job-id');
     return attr ? Number(attr) : null;
@@ -420,16 +426,27 @@ function TranslateButton({
     };
   }, []);
 
-  const activeTranslating = isTranslating || localTranslating;
+  /**
+   * Resolves the target captured when this control was mounted. Re-resolving by URL after
+   * translation can return a different/recycled element whose original backup is missing;
+   * the mounted target is the one whose hover state and eye toggle the user is looking at.
+   *
+   * @returns Live target for this control, or a URL fallback when it detached.
+   */
+  const resolveLiveTarget = useCallback((): OverlayImage | null => {
+    if (image.sourceElement?.isConnected && image.surfaceElement?.isConnected) return image;
+    const fallback = resolveTargetMedia(srcUrl);
+    return fallback ? { ...fallback, overlayId: getOverlayId(fallback.surfaceElement) } : null;
+  }, [image, srcUrl]);
 
   useEffect(() => {
     const update = () => {
-      const reg = translatedRegistry.get(srcUrl);
+      const reg = translatedRegistry.get(registryUrl);
       if (reg?.translatedUrl && !reg.showOriginal && anchorElement.getAttribute('data-kites-show-original') !== 'true') {
         const isDomApplied = anchorElement.getAttribute('data-kites-translated') === 'true' ||
           (anchorElement instanceof HTMLImageElement ? anchorElement.getAttribute('data-kites-translated') === 'true' : anchorElement.querySelector('img')?.getAttribute('data-kites-translated') === 'true');
         if (!isDomApplied) {
-          const target = resolveTargetMedia(srcUrl);
+          const target = resolveLiveTarget();
           if (target) {
             replaceImageWithTranslation(target, reg);
           }
@@ -462,7 +479,7 @@ function TranslateButton({
     }
 
     return () => observer.disconnect();
-  }, [srcUrl, anchorElement, isElementTranslated]);
+  }, [srcUrl, registryUrl, anchorElement, isElementTranslated, resolveLiveTarget]);
 
   useEffect(() => {
     /**
@@ -474,14 +491,15 @@ function TranslateButton({
       const detail = (event as CustomEvent<{ srcUrl: string; showOriginal: boolean }>).detail;
       if (
         detail?.srcUrl === srcUrl ||
-        (detail?.srcUrl && normalizeMediaUrl(detail.srcUrl) === normalizeMediaUrl(srcUrl))
+        detail?.srcUrl === registryUrl ||
+        (detail?.srcUrl && normalizeMediaUrl(detail.srcUrl) === normalizeMediaUrl(registryUrl))
       ) {
         setShowOriginal(detail.showOriginal);
       }
     };
     document.addEventListener(IMAGE_DISPLAY_CHANGED_EVENT, handleDisplayChange);
     return () => document.removeEventListener(IMAGE_DISPLAY_CHANGED_EVENT, handleDisplayChange);
-  }, [srcUrl]);
+  }, [srcUrl, registryUrl]);
 
   const handleToggleOriginal = useCallback((e?: React.MouseEvent) => {
     if (e) {
@@ -489,27 +507,26 @@ function TranslateButton({
       e.stopPropagation();
     }
     const nextShowOriginal = !showOriginal;
-    const record = translatedRegistry.get(srcUrl);
+    const target = resolveLiveTarget();
+    // Never flip the icon when the DOM target is gone: that was the visible half of the
+    // freeze bug (button state changed, image did not). The control will remount when the
+    // image comes back.
+    if (!target) return;
+    const record = translatedRegistry.get(registryUrl) || translatedRegistry.get(target.srcUrl);
     if (record) {
       record.showOriginal = nextShowOriginal;
     }
     setShowOriginal(nextShowOriginal);
-    const target = resolveTargetMedia(srcUrl) ||
-      (anchorElement instanceof HTMLImageElement
-        ? createMediaTarget(anchorElement)
-        : (anchorElement.querySelector('img') ? createMediaTarget(anchorElement.querySelector('img')!) : null));
-    if (target) {
-      toggleImageDisplay(target, nextShowOriginal, record);
-    }
-  }, [showOriginal, srcUrl, anchorElement]);
+    toggleImageDisplay(target, nextShowOriginal, record);
+  }, [showOriginal, registryUrl, resolveLiveTarget]);
 
   const handleDownload = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    const target = resolveTargetMedia(srcUrl);
+    const target = resolveLiveTarget();
     const downloadUrl =
       target?.sourceElement.getAttribute('data-kites-applied-src') ||
-      translatedRegistry.get(srcUrl)?.translatedUrl;
+      translatedRegistry.get(registryUrl)?.translatedUrl;
     if (!downloadUrl) return;
 
     const link = document.createElement('a');
@@ -518,15 +535,15 @@ function TranslateButton({
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-  }, [srcUrl]);
+  }, [registryUrl, resolveLiveTarget]);
 
   const handleEditInStudio = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    const target = resolveTargetMedia(srcUrl);
+    const target = resolveLiveTarget();
     const targetJobId =
       jobId ||
-      translatedRegistry.get(srcUrl)?.jobId ||
+      translatedRegistry.get(registryUrl)?.jobId ||
       (target ? Number(target.sourceElement.getAttribute('data-kites-job-id')) : null);
 
     try {
@@ -543,7 +560,7 @@ function TranslateButton({
         : chrome.runtime.getURL('index.html');
       window.open(studioUrl, '_blank');
     }
-  }, [jobId, srcUrl]);
+  }, [jobId, registryUrl, resolveLiveTarget]);
 
   // WORKAROUND: [Overlay shells beat CSS anchor positioning] -> anchor() offsets go stale inside
   // an intermediate scroll container and can resolve against the wrong coordinate space when the
@@ -660,6 +677,7 @@ function TranslateButton({
       ref={buttonRef}
       className="kites-translate-control"
       data-kites-translate-control="true"
+      data-kites-src-url={registryUrl}
       style={{
         position: 'fixed',
         zIndex: 999999,
@@ -685,7 +703,7 @@ function TranslateButton({
             setHasFailed(false);
           }
           setLocalTranslating(true);
-          onTranslate(srcUrl);
+          onTranslate(registryUrl);
         }}
         disabled={activeTranslating}
         className={`kites-translate-btn ${activeTranslating ? 'kites-anim-spin' : ''}`}
@@ -1169,6 +1187,10 @@ function GlobalOverlay() {
   // concurrent jobs from clobbering each other's UI state: with a single value, finishing
   // job B cleared the spinner that a still-queued job A was showing.
   const [translatingUrls, setTranslatingUrls] = useState<Set<string>>(new Set());
+  // One mounted control per queued image. Hover mode used to expose only the currently
+  // hovered image, so moving the pointer off a job removed its spinner while the job kept
+  // running. The map keeps each pending control pinned to its own target until completion.
+  const [pendingImages, setPendingImages] = useState<Map<string, OverlayImage>>(() => new Map());
   const [isSnipping, setIsSnipping] = useState<boolean>(false);
   const [crops, setCrops] = useState<CropOverlayItem[]>([]);
   const [isReaderOpen, setIsReaderOpen] = useState<boolean>(false);
@@ -1347,14 +1369,35 @@ function GlobalOverlay() {
    * @param srcUrl - Original image URL whose pending job ended.
    * @returns Nothing.
    */
-  const clearTranslatingUrl = (srcUrl: string): void => {
+  const forgetPendingImage = useCallback((srcUrl: string): void => {
+    setPendingImages((current) => {
+      if (!current.has(srcUrl)) return current;
+      const next = new Map(current);
+      next.delete(srcUrl);
+      return next;
+    });
+  }, []);
+
+  const rememberPendingImage = useCallback((srcUrl: string, target: MediaTarget): void => {
+    setPendingImages((current) => {
+      const existing = current.get(srcUrl);
+      const overlayId = getOverlayId(target.surfaceElement);
+      if (existing?.overlayId === overlayId && existing.sourceElement === target.sourceElement) return current;
+      const next = new Map(current);
+      next.set(srcUrl, { ...target, overlayId });
+      return next;
+    });
+  }, []);
+
+  const clearTranslatingUrl = useCallback((srcUrl: string): void => {
     setTranslatingUrls((current) => {
       if (!current.has(srcUrl)) return current;
       const next = new Set(current);
       next.delete(srcUrl);
       return next;
     });
-  };
+    forgetPendingImage(srcUrl);
+  }, [forgetPendingImage]);
 
   /**
    * Sends an image to the background queue and keeps its overlay visible until completion.
@@ -1367,6 +1410,7 @@ function GlobalOverlay() {
     if (!srcUrl || translatingUrlsRef.current.has(srcUrl)) return;
 
     const target = image ?? resolveTargetMedia(srcUrl);
+    const overlayImage = image ?? (target ? { ...target, overlayId: getOverlayId(target.surfaceElement) } : undefined);
     const cachedRecord = translatedRegistry.get(srcUrl);
     // If translation was already completed in this session and cached in registry, but the host site
     // just loaded or refreshed the raw image (e.g. single-page reader navigated back), re-apply instantly!
@@ -1379,17 +1423,18 @@ function GlobalOverlay() {
       targetEl.getAttribute('data-kites-translated') !== 'true'
     ) {
       console.log('[Content Script] Re-applying existing translation from memory for:', srcUrl);
-      if (image) {
-        setActiveImg(image);
-        registerMediaTarget(image);
+      if (overlayImage) {
+        setActiveImg(overlayImage);
+        registerMediaTarget(overlayImage);
       }
       replaceImageWithTranslation(target, cachedRecord);
       return;
     }
 
-    if (image) {
-      setActiveImg(image);
-      registerMediaTarget(image);
+    if (overlayImage) {
+      setActiveImg(overlayImage);
+      registerMediaTarget(overlayImage);
+      rememberPendingImage(srcUrl, overlayImage);
     }
     // Lock queue-time document context: after SPA navigation the target may detach before completion.
     rememberChapterRequest(srcUrl, target);
@@ -1703,6 +1748,7 @@ function GlobalOverlay() {
     setActiveImg(null);
     setConsistentImages([]);
     setTranslatingUrls(new Set());
+    setPendingImages(new Map());
   }, [isEnabled]);
 
   // Receive terminal job events, restore the image, and allow Hover mode to disappear again.
@@ -1833,11 +1879,22 @@ function GlobalOverlay() {
       // Lock queue-time position before auto-translate fires; the reader may navigate before completion.
       rememberChapterRequest(srcUrl, target);
       queuedUrls.add(srcUrl);
+      // Auto-translate uses the same per-image pending controls as a manual click. Without
+      // this, scrolling queued pages had no visible spinner and looked ignored.
+      rememberPendingImage(srcUrl, target);
+      setTranslatingUrls((current) => new Set(current).add(srcUrl));
       console.log('[Content Script] Auto-Translating visible image:', srcUrl);
       chrome.runtime.sendMessage({ type: 'TRANSLATE_IMAGE', url: srcUrl }, (response) => {
         if (chrome.runtime.lastError || response?.status === 'error') {
           translatedRegistry.forget(srcUrl);
           queuedUrls.delete(srcUrl);
+          setTranslatingUrls((current) => {
+            if (!current.has(srcUrl)) return current;
+            const next = new Set(current);
+            next.delete(srcUrl);
+            return next;
+          });
+          forgetPendingImage(srcUrl);
           console.error('[Content Script] Auto-Translate message failed:', chrome.runtime.lastError?.message || response?.error);
         }
       });
@@ -1970,7 +2027,7 @@ function GlobalOverlay() {
       if (rescanTimeoutId !== null) window.clearTimeout(rescanTimeoutId);
       if (flushTimeoutId !== null) window.clearTimeout(flushTimeoutId);
     };
-  }, [isEnabled, autoTranslate]);
+  }, [isEnabled, autoTranslate, rememberPendingImage, forgetPendingImage]);
 
   // Persistent mode creates a manual button for every valid image.
   useEffect(() => {
@@ -2026,10 +2083,11 @@ function GlobalOverlay() {
       }
     };
     const scheduleHide = () => {
-      if (hideTimeoutId === null && translatingUrlsRef.current.size === 0) {
+      // Pending jobs keep their own pinned control in `overlayImages`, so a hovered control
+      // with no local job may hide even while another image is translating.
+      if (hideTimeoutId === null) {
         hideTimeoutId = window.setTimeout(() => {
           hideTimeoutId = null;
-          if (translatingUrlsRef.current.size > 0) return;
           // WORKAROUND: [Event-ordering lottery on fast cursor exits] -> whether the button
           // hides depends on which coalesced mouseover/mouseout/mousemove events Chrome
           // delivers, not on where the cursor actually is (fast exits can skip the re-show,
@@ -2193,6 +2251,22 @@ function GlobalOverlay() {
     };
   }, [isEnabled, mode]);
 
+  /**
+   * One control per surface: all images in Persistent mode, the hovered image in Hover mode,
+   * plus every pending job so a spinner stays pinned to the image it belongs to while the
+   * pointer moves elsewhere. Active wins over a duplicate pending entry because it carries
+   * the freshest target.
+   */
+  const overlayImages = useMemo(() => {
+    const byId = new Map<string, OverlayImage>();
+    if (mode === 'persistent') {
+      for (const image of consistentImages) byId.set(image.overlayId, image);
+    }
+    for (const image of pendingImages.values()) byId.set(image.overlayId, image);
+    if (activeImg) byId.set(activeImg.overlayId, activeImg);
+    return [...byId.values()];
+  }, [mode, consistentImages, pendingImages, activeImg]);
+
   if (!isEnabled) return null;
 
   return (
@@ -2216,24 +2290,16 @@ function GlobalOverlay() {
         />
       ))}
 
-      {mode === 'persistent' && consistentImages.map((image) => (
+      {overlayImages.map((image) => (
         <TranslateButton
           key={image.overlayId}
+          target={image}
           srcUrl={image.srcUrl}
           anchorElement={image.surfaceElement}
           isTranslating={translatingUrls.has(image.srcUrl)}
           onTranslate={(srcUrl) => requestTranslation(srcUrl, image)}
         />
       ))}
-
-      {mode === 'hover' && activeImg && (
-        <TranslateButton
-          srcUrl={activeImg.srcUrl}
-          anchorElement={activeImg.surfaceElement}
-          isTranslating={translatingUrls.has(activeImg.srcUrl)}
-          onTranslate={(srcUrl) => requestTranslation(srcUrl, activeImg)}
-        />
-      )}
 
       {/* Full-Screen Distraction-Free Chapter Reader Modal */}
       <ChapterReaderModal

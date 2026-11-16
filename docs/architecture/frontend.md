@@ -17,8 +17,11 @@ extension, not by per-symbol docs.
 
 - **Responsibility**: discover translatable media on the host page, show the per-image translate
   control, request translation, and swap the result in without breaking the page.
-- **Data flow**: `MediaTarget` discovery → `TRANSLATE_IMAGE` message with the image URL → background
-  queues the job → offscreen returns a baked data URL → same-origin blob swap with a reversion shield.
+- **Data flow**: `MediaTarget` discovery → per-image control state (idle, pending, translated) →
+  `TRANSLATE_IMAGE` message with the stable original image URL → background queues the job →
+  offscreen returns a baked data URL → same-origin blob swap with a reversion shield. Pending
+  controls stay pinned to their own image while the pointer moves; hover and automatic queues
+  share the same state.
 - **Entry point**: `index.tsx`; media discovery in `mediaTargets.ts`, overlay placement in
   `overlayPlacement.ts`.
 - **Known constraints**: clear `srcset` on swap; treat its own mutations as self-mutating; never run
