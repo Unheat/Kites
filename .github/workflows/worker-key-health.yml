@@ -5,7 +5,7 @@
 # it. `GET /internal/provider-health` does exactly that and returns verdicts only — never key
 # material — and it answers 404 unless PROVIDER_HEALTH_TOKEN is configured.
 #
-# This job consumes one small request per catalog route (16 output tokens) per run.
+# This job consumes one small request per catalog route (≤64 output tokens each) per run.
 
 name: Worker Provider Key Health
 
@@ -45,14 +45,14 @@ jobs:
       - name: Print report
         run: |
           set -euo pipefail
-          jq -r '"total=\(.summary.total) healthy=\(.summary.healthy) broken=\(.summary.broken) config=\(.summary.configIssue) unknown=\(.summary.unknown)"' report.json
-          jq -r '.results[] | "\(.verdict)\t\(.id)\tstatus=\(.statusCode)\t\(.latencyMs)ms"' report.json
+          jq -r '"total=\(.summary.total) healthy=\(.summary.healthy) broken=\(.summary.broken) config=\(.summary.configIssue) unusable=\(.summary.unusable) unknown=\(.summary.unknown)"' report.json
+          jq -r '.results[] | "\(.verdict)\t\(.id)\tstatus=\(.statusCode)\tdetail=\(.detail // "-")\t\(.latencyMs)ms"' report.json
           {
             echo "### Provider key health"
             echo
-            echo "| verdict | route | status | latency |"
-            echo "|---|---|---|---|"
-            jq -r '.results[] | "| \(.verdict) | \(.id) | \(.statusCode) | \(.latencyMs) ms |"' report.json
+            echo "| verdict | route | status | detail | latency |"
+            echo "|---|---|---|---|---|"
+            jq -r '.results[] | "| \(.verdict) | \(.id) | \(.statusCode) | \(.detail // "-") | \(.latencyMs) ms |"' report.json
           } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Gate on credential failures
@@ -60,6 +60,7 @@ jobs:
           set -euo pipefail
           broken=$(jq '.summary.broken' report.json)
           config=$(jq '.summary.configIssue' report.json)
+          unusable=$(jq '.summary.unusable' report.json)
           unknown=$(jq '.summary.unknown' report.json)
           if [ "${broken}" -gt 0 ]; then
             echo "::error::${broken} provider credential(s) rejected. Obtain a new key and run 'npx wrangler secret put <NAME>' in worker/."
@@ -67,6 +68,9 @@ jobs:
           fi
           if [ "${config}" -gt 0 ]; then
             echo "::warning::${config} route(s) rejected the request shape or model name. Fix worker/src/config/providers.ts."
+          fi
+          if [ "${unusable}" -gt 0 ]; then
+            echo "::warning::${unusable} route(s) authenticated but did not return a usable keyed translation. Read the detail column: a retired free tier or a renamed model answers 200 and produces prose."
           fi
           if [ "${unknown}" -gt 0 ]; then
             echo "::warning::${unknown} route(s) returned an unexpected upstream error (timeout, 5xx, or quota)."

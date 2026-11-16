@@ -57,7 +57,9 @@ Runs `node scripts/validate-model-urls.mjs`, which extracts every external model
 
 Worker secrets are write-only, so the only proof a provider key is alive is letting the Worker use it. The job calls `GET /internal/provider-health` (404 unless `PROVIDER_HEALTH_TOKEN` is configured) and reports verdicts only — never key material.
 
-- **Gate semantics:** a rejected credential (`broken > 0`) fails the run. `request_rejected` (`configIssue`) and `unknown` (timeouts, 5xx, quota) are warnings — they mean the catalog shape or upstream state needs attention, not that the key is dead.
+- **What the probe measures:** every route gets the real two-slot keyed-JSON translation request (`{"b0":…,"b1":…}`, ≤64 output tokens), not a liveness ping, and a 2xx answer is then validated against the same keyed-JSON contract production expects. A retired free tier, a renamed model alias, or a truncated generation all answer 200 and return prose; only content validation catches that. `detail` reports an enumerated reason (`no_content`, `finish_length`, `finish_other`, `not_keyed_json`, `safety_refusal`) and never the model's text.
+- **Single route:** `?route=<route-id>` probes exactly one route, so a suspect provider costs one upstream call instead of a full catalog sweep. An unknown id answers 400 without probing anything.
+- **Gate semantics:** a rejected credential (`broken > 0`) fails the run. `request_rejected` (`configIssue`), `invalid_output` (`unusable`) and `unknown` (timeouts, 5xx, quota) are warnings — they mean the catalog shape or upstream state needs attention, not that the key is dead. `unusable` is the one to read when a provider silently degrades: it authenticated, it answered 2xx, and the answer still is not a translation.
 - **Repository secret:** `PROVIDER_HEALTH_TOKEN` in GitHub Actions must hold the **same** value as the Worker secret of that name. Both are write-only, so a rotation means generating one value and setting it twice:
   ```bash
   openssl rand -hex 32 | npx wrangler versions secret put PROVIDER_HEALTH_TOKEN --cwd worker

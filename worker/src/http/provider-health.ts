@@ -19,6 +19,8 @@ import { dispatchAdapter } from '../adapters/dispatch';
 import type { Env, OpenAIChatRequest } from '../types';
 import { errorResponse, jsonResponse } from './response';
 import { ipRateLimiter } from '../security/rate-limiter';
+import { buildSchema } from '../../../src/shared/translation/keyedJson';
+import { deriveExpectedKeys, validateCompletion } from '../routing/validation';
 
 /**
  * Per-route probe budget. Generous on purpose: cold-start reasoning models on free tiers
@@ -29,37 +31,66 @@ const PROBE_TIMEOUT_MS = 12_000;
 
 /**
  * Output token budget for a probe. One token is rejected by some providers as an invalid
- * generation config, which would make a healthy key look broken. Sixteen is the smallest
- * budget that every catalog provider accepts.
+ * generation config, which would make a healthy key look broken. The probe asks for a real
+ * two-slot keyed translation, whose JSON envelope alone is ~20 tokens, so a 16-token ceiling
+ * would truncate a correct answer and report a healthy route as unusable.
  */
-const PROBE_MAX_OUTPUT_TOKENS = 16;
+const PROBE_MAX_OUTPUT_TOKENS = 64;
 
-/** Minimal prompt: validity of the credential, not model quality, is what we are measuring. */
-// The literal word JSON is required: several providers reject json_object response mode
-// with HTTP 400 unless the prompt itself mentions JSON (Groq documents this explicitly).
+/** Expected probe slots; also the keys the returned object must contain. */
+const PROBE_SLOTS = 2;
+
+/** Synthetic source used to prove a route still produces a usable keyed translation. */
+const PROBE_SOURCE: Record<string, string> = { b0: 'こんにちは。', b1: '谢谢你！' };
+
+/**
+ * Probe prompt. Asks for the real keyed-JSON translation instead of a liveness ping, so a route
+ * that authenticates but no longer serves usable output cannot pass as healthy.
+ *
+ * Spelling out JSON matters: several providers reject `json_object` response mode with HTTP 400
+ * unless the prompt itself mentions JSON (Groq documents this explicitly).
+ */
 const PROBE_MESSAGES: OpenAIChatRequest['messages'] = [
-  { role: 'system', content: 'Reply with JSON only, no prose: {"ok":true}' },
-  { role: 'user', content: 'Reply with JSON.' },
+  { role: 'system', content: 'Translate each SOURCE value into English. Reply with one JSON object using the same keys. No prose.' },
+  { role: 'user', content: `Translate SOURCE into English.\n\nSOURCE:\n${JSON.stringify(PROBE_SOURCE)}` },
 ];
 
-/** Minimal prompt: validity of the credential, not model quality, is what we are measuring. */
+/** Probe request: credential and output-shape validity, not translation quality. */
 const PROBE_REQUEST: OpenAIChatRequest = {
   model: 'kites-translation',
   messages: PROBE_MESSAGES,
   temperature: 0,
   max_tokens: PROBE_MAX_OUTPUT_TOKENS,
   stream: false,
+  response_format: {
+    type: 'json_schema',
+    json_schema: { name: 'translation_response', strict: true, schema: buildSchema(PROBE_SLOTS) },
+  },
 };
 
-/** Health verdict for one credential, derived from the upstream status code. */
+/** Health verdict for one route: upstream status plus whether the answer was usable. */
 export type KeyVerdict =
   | 'ok'
   | 'invalid_key'
   | 'rate_limited'
   | 'request_rejected'
+  | 'invalid_output'
   | 'budget_exhausted'
   | 'upstream_error'
   | 'missing_secret';
+
+/**
+ * Sanitized reason for an `invalid_output` verdict.
+ *
+ * Enumerated codes only. A probe answer can carry a provider's internal prose as easily as a
+ * translation, so the model's text never reaches the report.
+ */
+export type KeyDetail =
+  | 'no_content'
+  | 'finish_length'
+  | 'finish_other'
+  | 'not_keyed_json'
+  | 'safety_refusal';
 
 /** One row of the diagnostic report. Deliberately contains no secret material. */
 export interface KeyProbeResult {
@@ -69,6 +100,7 @@ export interface KeyProbeResult {
   secretName: string | null;
   secretPresent: boolean;
   verdict: KeyVerdict;
+  detail?: KeyDetail;
   statusCode: number | null;
   latencyMs: number;
 }
@@ -92,6 +124,40 @@ export function classifyVerdict(statusCode: number | null): KeyVerdict {
   if (statusCode === 402) return 'budget_exhausted';
   if (statusCode === 400 || statusCode === 404 || statusCode === 422) return 'request_rejected';
   return 'upstream_error';
+}
+
+/**
+ * Decide whether a 2xx probe answer is actually usable.
+ *
+ * A credential can authenticate while the route no longer serves translations: a retired model
+ * alias may answer 200 with prose, an exhausted plan may answer 200 with an error sentence, and
+ * a truncated generation answers 200 with half an object. Status alone cannot tell those apart
+ * from a working route, so the probe validates the same keyed-JSON contract production expects.
+ *
+ * @param choice - First completion choice from the probe response, if any.
+ * @returns `ok`, or `invalid_output` with an enumerated reason code.
+ */
+export function classifyProbeContent(
+  choice: { finish_reason?: string; message?: { content?: unknown } } | undefined
+): { verdict: 'ok' | 'invalid_output'; detail?: KeyDetail } {
+  const content = choice?.message?.content;
+  if (typeof content !== 'string' || content.trim() === '') {
+    return { verdict: 'invalid_output', detail: 'no_content' };
+  }
+  if (choice?.finish_reason === 'length') {
+    return { verdict: 'invalid_output', detail: 'finish_length' };
+  }
+  if (choice?.finish_reason !== 'stop') {
+    return { verdict: 'invalid_output', detail: 'finish_other' };
+  }
+
+  const expectedKeys = deriveExpectedKeys(PROBE_REQUEST);
+  const validation = validateCompletion(content, expectedKeys);
+  if (validation.valid) return { verdict: 'ok' };
+  return {
+    verdict: 'invalid_output',
+    detail: validation.isTerminalRefusal ? 'safety_refusal' : 'not_keyed_json',
+  };
 }
 
 /**
@@ -120,19 +186,22 @@ async function probeRoute(route: ProviderRouteConfig, env: Env): Promise<KeyProb
   const startedAt = Date.now();
   try {
     const result = await dispatchAdapter(route, PROBE_REQUEST, env, PROBE_TIMEOUT_MS);
+    const latencyMs = Date.now() - startedAt;
 
-    const verdict = result.success ? 'ok' : classifyVerdict(result.statusCode ?? null);
-    if (verdict !== 'ok') {
+    if (!result.success) {
+      const verdict = classifyVerdict(result.statusCode ?? null);
       // Server-side only: wrangler tail shows the diagnostic, the HTTP report never does.
       console.error(`[provider-health] ${route.id} verdict=${verdict} status=${result.statusCode} error=${result.error ?? 'none'}`);
+      return { ...base, verdict, statusCode: result.statusCode ?? null, latencyMs };
     }
 
-    return {
-      ...base,
-      verdict,
-      statusCode: result.statusCode ?? null,
-      latencyMs: Date.now() - startedAt,
-    };
+    const content = result.isTerminalRefusal
+      ? { verdict: 'invalid_output' as const, detail: 'safety_refusal' as const }
+      : classifyProbeContent(result.data?.choices?.[0]);
+    if (content.verdict !== 'ok') {
+      console.error(`[provider-health] ${route.id} verdict=${content.verdict} detail=${content.detail} status=${result.statusCode}`);
+    }
+    return { ...base, ...content, statusCode: result.statusCode ?? null, latencyMs };
   } catch {
     // Only a thrown transport error reaches here; the adapter already handles HTTP failures.
     return { ...base, verdict: 'upstream_error', statusCode: null, latencyMs: Date.now() - startedAt };
@@ -162,6 +231,7 @@ async function tokenMatches(provided: string, expected: string): Promise<boolean
  * Handle GET /internal/provider-health.
  *
  * Inert unless PROVIDER_HEALTH_TOKEN is set. Callers pass the token in `x-provider-health-token`.
+ * Pass `?route=<route-id>` to probe exactly one route instead of the whole catalog.
  *
  * @param request - Incoming diagnostic request.
  * @param env - Worker environment bindings and secrets.
@@ -208,7 +278,21 @@ export async function handleProviderHealth(
     return jsonResponse({ error: { message: 'Unauthorized', code: 'invalid_token' } }, 401, headers);
   }
 
-  const results = await Promise.all(PROVIDER_ROUTES.map((route) => probeRoute(route, env)));
+  // Optional single-route targeting: `?route=mistral-3b` spends exactly one upstream call, which
+  // is what you want when checking one suspect route without touching every other provider.
+  const requestedRoute = new URL(request.url).searchParams.get('route');
+  const selected = requestedRoute
+    ? PROVIDER_ROUTES.filter((route) => route.id === requestedRoute)
+    : PROVIDER_ROUTES;
+  if (selected.length === 0) {
+    return jsonResponse(
+      { error: { message: `Unknown route: ${String(requestedRoute).slice(0, 64)}. See worker/src/config/providers.ts.` } },
+      400,
+      headers
+    );
+  }
+
+  const results = await Promise.all(selected.map((route) => probeRoute(route, env)));
   return jsonResponse(
     {
       checkedAt: new Date().toISOString(),
@@ -220,6 +304,8 @@ export async function handleProviderHealth(
         broken: results.filter((row) => row.verdict === 'invalid_key' || row.verdict === 'missing_secret').length,
         // Key worked but the configured model/request was rejected: fix the catalog entry.
         configIssue: results.filter((row) => row.verdict === 'request_rejected').length,
+        // Key and model answered 2xx, but the answer was not a usable keyed translation.
+        unusable: results.filter((row) => row.verdict === 'invalid_output').length,
         unknown: results.filter((row) => row.verdict === 'upstream_error' || row.verdict === 'budget_exhausted').length,
       },
       results,
