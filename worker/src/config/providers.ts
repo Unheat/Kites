@@ -170,12 +170,39 @@ export const PROVIDER_ROUTES: ProviderRouteConfig[] = [
     verificationEvidence: 'documented',
   },
 
-  // 5. Google AI Studio Gemma 4 26B (14.4k RPD guard, 30 RPM guard, Structured JSON Schema)
+  // 5. OpenTyphoon Typhoon 2.5 30B A3B (Thai-first free tier; documented limit 5 req/s, 200 req/m)
+  // Live probe 2026-11: the endpoint ACCEPTS `response_format` but does not enforce it. A
+  // deliberately contradictory strict schema (keys alpha/beta, enum ["ZZZ-ONLY"]), a nested
+  // array-of-object schema, and even a malformed schema all returned the prompt-driven
+  // {"b0","b1"} with HTTP 200. HTTP 200 is therefore not evidence of schema enforcement here, so
+  // this route stays `prompt-only`: keys are prompt-enforced and validated after the fact.
+  // The same probe confirmed `max_tokens` > 16384 is rejected and 16384 is accepted, while the
+  // docs claim an 8192 shared ceiling; the shared MAX_POOL_OUTPUT_TOKENS ceiling stays far below
+  // either number, so the stale doc figure never binds.
+  {
+    id: 'typhoon-30b-a3b',
+    name: 'Typhoon 2.5 30B A3B',
+    enabled: true,
+    priority: 5,
+    qualityTier: 'medium',
+    type: 'openai-compatible',
+    baseUrl: 'https://api.opentyphoon.ai/v1',
+    modelName: 'typhoon-v2.5-30b-a3b-instruct',
+    apiKeyEnvVar: 'TYPHOON_API_KEY',
+    rpsLimit: 5,
+    rpmLimit: 200,
+    maxInflight: 2,
+    defaultTimeoutMs: 4000,
+    outputCapability: 'prompt-only',
+    verificationEvidence: 'probed',
+  },
+
+  // 6. Google AI Studio Gemma 4 26B (14.4k RPD guard, 30 RPM guard, Structured JSON Schema)
   {
     id: 'gemma-4-26b',
     name: 'Google Gemma 4 26B',
     enabled: true,
-    priority: 5,
+    priority: 6,
     qualityTier: 'high',
     type: 'gemini',
     modelName: 'gemma-4-26b-a4b-it',
@@ -189,12 +216,12 @@ export const PROVIDER_ROUTES: ProviderRouteConfig[] = [
     verificationEvidence: 'documented',
   },
 
-  // 6. Google AI Studio Gemma 4 31B (14.4k RPD guard, 30 RPM guard, Structured JSON Schema)
+  // 7. Google AI Studio Gemma 4 31B (14.4k RPD guard, 30 RPM guard, Structured JSON Schema)
   {
     id: 'gemma-4-31b',
     name: 'Google Gemma 4 31B',
     enabled: true,
-    priority: 6,
+    priority: 7,
     qualityTier: 'high',
     type: 'gemini',
     modelName: 'gemma-4-31b-it',
@@ -208,12 +235,12 @@ export const PROVIDER_ROUTES: ProviderRouteConfig[] = [
     verificationEvidence: 'documented',
   },
 
-  // 7. OpenRouter Free Tier (20 RPM guard, 1,000 RPD guard, JSON Object feature-routed)
+  // 8. OpenRouter Free Tier (20 RPM guard, 1,000 RPD guard, JSON Object feature-routed)
   {
     id: 'openrouter-free',
     name: 'OpenRouter Free Model',
     enabled: true,
-    priority: 7,
+    priority: 8,
     qualityTier: 'medium',
     type: 'openai-compatible',
     baseUrl: 'https://openrouter.ai/api/v1',
@@ -232,12 +259,12 @@ export const PROVIDER_ROUTES: ProviderRouteConfig[] = [
     verificationEvidence: 'documented',
   },
 
-  // 8. Mistral AI (Enabled with json-object mode; live probe unverified)
+  // 9. Mistral AI (Enabled with json-object mode; live probe unverified)
   {
     id: 'mistral-3b',
     name: 'Mistral Ministral 3B',
     enabled: true,
-    priority: 8,
+    priority: 9,
     qualityTier: 'medium',
     type: 'openai-compatible',
     baseUrl: 'https://api.mistral.ai/v1',
@@ -250,12 +277,12 @@ export const PROVIDER_ROUTES: ProviderRouteConfig[] = [
     verificationEvidence: 'documented',
   },
 
-  // 9. Cloudflare Native Workers AI (Emergency last fallback, lowest token cost against 10k daily neurons guard)
+  // 10. Cloudflare Native Workers AI (Emergency last fallback, lowest token cost against 10k daily neurons guard)
   {
     id: 'cf-llama-3.2-1b',
     name: 'Cloudflare Workers AI Llama 3.2 1B',
     enabled: true,
-    priority: 9,
+    priority: 10,
     qualityTier: 'emergency',
     type: 'workers-ai',
     modelName: '@cf/meta/llama-3.2-1b-instruct',
