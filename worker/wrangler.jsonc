@@ -40,7 +40,13 @@
     "enabled": true
   },
 
-  "preview_urls": true,
+  // Security: the custom domain is the only supported production entrypoint, so zone WAF rate
+  // limiting and custom rules cannot be bypassed through a second hostname. A worker with an
+  // unset `workers_dev` is reachable at <name>.<account>.workers.dev by default, and
+  // `preview_urls` adds public per-version URLs that share production bindings. Both stay off
+  // here; preview verification happens through staging instead.
+  "workers_dev": false,
+  "preview_urls": false,
 
   // Staging is a separate Worker and Durable Object namespace. Production version
   // previews can share production bindings; never use them for destructive QA.
@@ -48,6 +54,7 @@
     "staging": {
       "name": "kites-translate-pool-staging",
       "workers_dev": true,
+      "preview_urls": true,
       "routes": [],
       "durable_objects": {
         "bindings": [

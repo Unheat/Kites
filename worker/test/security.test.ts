@@ -3,7 +3,7 @@ import { IpRateLimiter } from '../src/security/rate-limiter';
 import { readBoundedJsonBody } from '../src/security/body-parser';
 import { validateChatCompletionRequest } from '../src/security/request-validator';
 import { PayloadTooLargeError, InvalidJsonError, InvalidRequestError } from '../src/security/errors';
-import { MAX_POOL_MESSAGE_CHARS, MAX_POOL_REQUEST_BYTES } from '../../src/shared/translation/poolContract';
+import { MAX_POOL_MESSAGE_CHARS, MAX_POOL_OUTPUT_TOKENS, MAX_POOL_REQUEST_BYTES } from '../../src/shared/translation/poolContract';
 
 describe('Edge Security & Anti-Abuse Controls', () => {
   let limiter: IpRateLimiter;
@@ -290,6 +290,25 @@ describe('Edge Security & Anti-Abuse Controls', () => {
           max_tokens: 100.5,
         })
       ).toThrow('max_tokens must be an integer');
+    });
+
+    it('rejects max_tokens above the shared pool output cap', () => {
+      // A caller bypassing the extension must not be able to buy a provider's full output budget.
+      expect(() =>
+        validateChatCompletionRequest({
+          model: 'kites-translation',
+          messages: validMessages,
+          max_tokens: MAX_POOL_OUTPUT_TOKENS + 1,
+        })
+      ).toThrow(`max_tokens must be an integer between 1 and ${MAX_POOL_OUTPUT_TOKENS}`);
+
+      expect(
+        validateChatCompletionRequest({
+          model: 'kites-translation',
+          messages: validMessages,
+          max_tokens: MAX_POOL_OUTPUT_TOKENS,
+        }).max_tokens
+      ).toBe(MAX_POOL_OUTPUT_TOKENS);
     });
 
     it('rejects messages when total characters exceed MAX_POOL_MESSAGE_CHARS (2048)', () => {

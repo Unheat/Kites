@@ -19,6 +19,17 @@ export const MAX_POOL_MESSAGE_CHARS = 2048;
 export const MAX_POOL_REQUEST_BYTES = 32768;
 
 /**
+ * Maximum completion tokens any translation request may buy.
+ *
+ * A batch carries at most {@link MAX_POOL_MESSAGE_CHARS} characters of source text, so a faithful
+ * keyed-JSON translation of it never needs more than this. The client batch budget
+ * (`maxTokensForBatch`) and the worker request validator both read this one constant, so a caller
+ * that bypasses the extension and hits the Worker directly gets the same ceiling instead of the
+ * upstream model's full 16K (or 128K context) allowance.
+ */
+export const MAX_POOL_OUTPUT_TOKENS = 1024;
+
+/**
  * Standard JSON schema response format matching OpenAI and Cloudflare Worker structured outputs.
  */
 export interface JsonSchemaResponseFormat {

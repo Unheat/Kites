@@ -31,7 +31,7 @@ Cloudflare Free includes **1 Rate Limiting Rule**.
      * Duration: `10 seconds` (or custom response: `HTTP 429 Too Many Requests`)
 4. Click **Deploy**.
 
-After the custom-domain endpoint passes an authenticated legacy-client translation test, verify and disable alternate production and preview `workers.dev` exposure under **Workers & Pages** $\to$ **kites-translate-pool** $\to$ **Domains**. Leaving an alternate production URL enabled permits bypass of this zone-level rule. Record the live dashboard state; source configuration alone does not establish whether that URL is enabled. Do not disable staging access accidentally: staging is a separate Worker, with separate bindings and controlled access.
+After the custom-domain endpoint passes an authenticated legacy-client translation test, verify and disable alternate production and preview `workers.dev` exposure under **Workers & Pages** $\to$ **kites-translate-pool** $\to$ **Domains**. Leaving an alternate production URL enabled permits bypass of this zone-level rule. Record the live dashboard state; source configuration alone does not establish whether that URL is enabled. `wrangler.jsonc` now sets `workers_dev: false` and `preview_urls: false` for production (staging keeps both), so those URLs disappear on the next deploy of that config — confirm the dashboard agrees afterwards, because a previously enabled URL is only removed by a deploy that carries the new settings. Do not disable staging access accidentally: staging is a separate Worker, with separate bindings and controlled access.
 
 The threshold above is an operational starting point, not a mathematically equivalent sliding-window guarantee. Verify current Cloudflare plan features before applying dashboard settings. Worker in-memory limits are isolate-local best-effort protection, not a global per-IP counter. Authentication and Durable Object admission limits remain necessary.
 
@@ -81,6 +81,7 @@ npx wrangler secret put OPENROUTER_API_KEY
 npx wrangler secret put GEMINI_API_KEY
 npx wrangler secret put GROQ_API_KEY
 npx wrangler secret put MISTRAL_API_KEY
+npx wrangler secret put TYPHOON_API_KEY
 
 # Enables the live credential health probe (route answers 404 while unset)
 npx wrangler secret put PROVIDER_HEALTH_TOKEN

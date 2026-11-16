@@ -11,6 +11,7 @@ import {
   DEFAULT_LLM_MAX_INPUT_TOKENS,
   type LlmChatMessage,
 } from './BaseLlmTranslationEngine';
+import { MAX_POOL_OUTPUT_TOKENS } from '../../../shared/translation/poolContract';
 
 class MockLlmEngine extends BaseLlmTranslationEngine {
   public mockResponse: string = '';
@@ -72,11 +73,11 @@ describe('maxTokensForBatch and countCodePoints', () => {
   it('calculates dynamic token safety cap bounded within bounds', () => {
     const tokensSmall = maxTokensForBatch(['Hi']);
     expect(tokensSmall).toBeGreaterThanOrEqual(64);
-    expect(tokensSmall).toBeLessThanOrEqual(1024);
+    expect(tokensSmall).toBeLessThanOrEqual(MAX_POOL_OUTPUT_TOKENS);
 
     const longBatch = new Array(6).fill('This is a longer manga text bubble with many words.');
     const tokensLong = maxTokensForBatch(longBatch);
-    expect(tokensLong).toBeLessThanOrEqual(1024);
+    expect(tokensLong).toBeLessThanOrEqual(MAX_POOL_OUTPUT_TOKENS);
   });
 
   it('estimates token counts appropriately for CJK, Latin, Vietnamese, and other scripts', () => {

@@ -6,7 +6,7 @@
  * substitution discarding raw client schema ($ref/URLs). Zero error reflection.
  */
 
-import { MAX_POOL_MESSAGE_CHARS } from '../../../src/shared/translation/poolContract';
+import { MAX_POOL_MESSAGE_CHARS, MAX_POOL_OUTPUT_TOKENS } from '../../../src/shared/translation/poolContract';
 import { buildSchema, extractSourceObject } from '../../../src/shared/translation/keyedJson';
 import { OpenAIChatRequest, OpenAIMessage, ResponseFormat, ResponseFormatJsonSchema } from '../types';
 import { InvalidRequestError, PayloadTooLargeError } from './errors';
@@ -14,7 +14,7 @@ import { InvalidRequestError, PayloadTooLargeError } from './errors';
 const VALID_ROLES = new Set(['system', 'user', 'assistant']);
 const MAX_MESSAGES_COUNT = 20;
 const MIN_MESSAGES_COUNT = 1;
-const MAX_TOKENS_LIMIT = 4096;
+const MAX_TOKENS_LIMIT = MAX_POOL_OUTPUT_TOKENS;
 const ALLOWED_MODELS = new Set([
   'kites-translation',
   'kites-translation-community',

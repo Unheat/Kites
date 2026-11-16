@@ -17,7 +17,8 @@ import type { ProviderRouteConfig } from '../config/providers';
 import { PROVIDER_ROUTES } from '../config/providers';
 import { dispatchAdapter } from '../adapters/dispatch';
 import type { Env, OpenAIChatRequest } from '../types';
-import { jsonResponse } from './response';
+import { errorResponse, jsonResponse } from './response';
+import { ipRateLimiter } from '../security/rate-limiter';
 
 /**
  * Per-route probe budget. Generous on purpose: cold-start reasoning models on free tiers
@@ -183,6 +184,26 @@ export async function handleProviderHealth(
   }
 
   const provided = request.headers.get('x-provider-health-token') ?? '';
+
+  // One call fans out to every catalog route, so a leaked diagnostic token could otherwise burn
+  // upstream provider quota at N-invocations-per-request. Reuse the same edge limiter as the
+  // translation routes instead of minting a second counter.
+  const clientIp = request.headers.get('cf-connecting-ip') || 'unknown';
+  const rate = ipRateLimiter.checkRateLimit(clientIp);
+  if (!rate.allowed) {
+    const limited = errorResponse(
+      rate.reason || 'Rate limit exceeded.',
+      rate.statusCode || 429,
+      'ip_rate_limited',
+      'rate_limit_error',
+      {
+        ...headers,
+        ...(rate.retryAfterSeconds ? { 'Retry-After': String(rate.retryAfterSeconds) } : {}),
+      }
+    );
+    return limited;
+  }
+
   if (!(await tokenMatches(provided, expected))) {
     return jsonResponse({ error: { message: 'Unauthorized', code: 'invalid_token' } }, 401, headers);
   }

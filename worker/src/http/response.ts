@@ -25,6 +25,8 @@ export function jsonResponse(
     status,
     headers: {
       'Content-Type': 'application/json',
+      // JSON-only API: never let a browser sniff a different type from the body.
+      'X-Content-Type-Options': 'nosniff',
       ...headers,
     },
   });

@@ -41,6 +41,9 @@ export const STRUCTURED_OUTPUT_HOST_MODES: ReadonlyArray<{ host: string; mode: S
   { host: 'api.novita.ai', mode: 'json-object' },
   { host: 'api.hyperbolic.xyz', mode: 'json-object' },
   { host: 'api.lepton.ai', mode: 'json-object' },
+  // `api.opentyphoon.ai` is intentionally absent: a live probe showed it accepts `response_format`
+  // but ignores it entirely, so it must stay on the `prompt-only` fallback. Do not add it here
+  // based on a 200 response alone.
 ];
 
 /**
