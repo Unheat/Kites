@@ -109,6 +109,11 @@ export async function executeWorkersAI(
 
       const outputPlan = resolveOutputPlan(route, request);
       if (outputPlan.kind === 'json-schema') {
+        // WORKAROUND NOTE: @cf/meta/llama-3.2-1b-instruct answers HTTP 500 to a probing request
+        // that carries `response_format.type = 'json_schema'` in BOTH shapes tried so far: this
+        // bare `json_schema: <schema>` form and OpenAI's `{name, strict, schema}` envelope.
+        // `json_object` works. No route may declare the json-schema capability for Cloudflare
+        // Workers AI until one of these shapes is verified against the live binding.
         runOptions.response_format = {
           type: 'json_schema',
           json_schema: outputPlan.schema,

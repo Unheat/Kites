@@ -46,13 +46,13 @@ jobs:
         run: |
           set -euo pipefail
           jq -r '"total=\(.summary.total) healthy=\(.summary.healthy) broken=\(.summary.broken) config=\(.summary.configIssue) unusable=\(.summary.unusable) unknown=\(.summary.unknown)"' report.json
-          jq -r '.results[] | "\(.verdict)\t\(.id)\tstatus=\(.statusCode)\tdetail=\(.detail // "-")\t\(.latencyMs)ms"' report.json
+          jq -r '.results[] | "\(.verdict)\t\(.id)\t\(.mode)\tstatus=\(.statusCode)\tdetail=\(.detail // "-")\t\(.latencyMs)ms"' report.json
           {
             echo "### Provider key health"
             echo
-            echo "| verdict | route | status | detail | latency |"
-            echo "|---|---|---|---|---|"
-            jq -r '.results[] | "| \(.verdict) | \(.id) | \(.statusCode) | \(.detail // "-") | \(.latencyMs) ms |"' report.json
+            echo "| verdict | route | mode | status | detail | latency |"
+            echo "|---|---|---|---|---|---|"
+            jq -r '.results[] | "| \(.verdict) | \(.id) | \(.mode) | \(.statusCode) | \(.detail // "-") | \(.latencyMs) ms |"' report.json
           } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Gate on credential failures

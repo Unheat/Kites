@@ -150,11 +150,13 @@ export const PROVIDER_ROUTES: ProviderRouteConfig[] = [
     verificationEvidence: 'documented',
   },
 
-  // 4. Groq Qwen 3.6 27B (Verified in Groq official model card; generic json-object mode)
+  // 4. Groq Qwen 3.6 27B (DISABLED: a live probe answers HTTP 404 for this model id on this
+  // account, so the route only burns a waterfall slot. Re-enable with a confirmed live model id
+  // and re-probe before restoring its priority.)
   {
     id: 'groq-qwen-3.6',
     name: 'Groq Qwen 3.6 27B',
-    enabled: true,
+    enabled: false,
     priority: 4,
     qualityTier: 'medium',
     type: 'openai-compatible',
@@ -167,7 +169,7 @@ export const PROVIDER_ROUTES: ProviderRouteConfig[] = [
     defaultTimeoutMs: 3500,
     outputCapability: 'json-object',
     requestOptions: { reasoningFormat: 'parsed' },
-    verificationEvidence: 'documented',
+    verificationEvidence: 'probed',
   },
 
   // 5. OpenTyphoon Typhoon 2.5 30B A3B (Thai-first free tier; documented limit 5 req/s, 200 req/m)
@@ -278,6 +280,10 @@ export const PROVIDER_ROUTES: ProviderRouteConfig[] = [
   },
 
   // 10. Cloudflare Native Workers AI (Emergency last fallback, lowest token cost against 10k daily neurons guard)
+  // Live probe 2026-11: `json_object` returns a usable keyed translation, while
+  // `response_format.type = 'json_schema'` answers HTTP 500 in both envelope shapes tried, so this
+  // route declares json-object. Declaring json-schema here silently killed the route in
+  // production, because the Durable Object always attaches a schema to its request.
   {
     id: 'cf-llama-3.2-1b',
     name: 'Cloudflare Workers AI Llama 3.2 1B',
@@ -289,7 +295,7 @@ export const PROVIDER_ROUTES: ProviderRouteConfig[] = [
     rpdLimit: 4500,
     maxInflight: 2,
     defaultTimeoutMs: 3000,
-    outputCapability: 'json-schema',
+    outputCapability: 'json-object',
     verificationEvidence: 'documented',
   },
 ];

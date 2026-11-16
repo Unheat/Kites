@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { classifyProbeContent, classifyVerdict, handleProviderHealth } from '../src/http/provider-health';
+import { PROVIDER_ROUTES } from '../src/config/providers';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -124,6 +125,49 @@ describe('provider health verdicts', () => {
         .every((row: any) => row.verdict === 'ok')
     ).toBe(true);
     expect(body.summary.unusable).toBe(0);
+  });
+
+  it('sends a real translation in the wire mode each route declares', async () => {
+    // This is the catalog-driven contract: a new provider needs a route entry and a secret, and
+    // this test plus the probe automatically demand the matching mode and a usable answer.
+    const sentByModel: Record<string, any> = {};
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init: { body?: string }) => {
+      const sent = JSON.parse(init.body ?? '{}');
+      sentByModel[sent.model] = sent;
+      return new Response(
+        JSON.stringify({
+          choices: [{ index: 0, message: { role: 'assistant', content: '{"b0":"Hello.","b1":"Thank you!"}' }, finish_reason: 'stop' }],
+        }),
+        { status: 200 }
+      );
+    }) as unknown as typeof fetch);
+
+    const body = await (
+      await handleProviderHealth(makeRequest('diag-token', '203.0.113.30'), makeEnv(), 'req-modes', {})
+    ).json() as any;
+
+    const chatRoutes = PROVIDER_ROUTES.filter((route) => route.type === 'openai-compatible' && route.enabled);
+    expect(chatRoutes.length).toBeGreaterThan(0);
+    for (const route of chatRoutes) {
+      const sent = sentByModel[route.modelName];
+      expect(sent, `no probe request was sent for ${route.id}`).toBeDefined();
+      // Every probe asks for an actual translation of the synthetic SOURCE, not "say hi".
+      expect(JSON.stringify(sent.messages)).toContain('SOURCE');
+
+      if (route.outputCapability === 'json-schema') {
+        expect(sent.response_format.type).toBe('json_schema');
+        expect(sent.response_format.json_schema.schema.properties).toHaveProperty('b0');
+        expect(sent.response_format.json_schema.schema.properties).toHaveProperty('b1');
+      } else if (route.outputCapability === 'json-object') {
+        expect(sent.response_format).toEqual({ type: 'json_object' });
+      } else {
+        expect(sent.response_format).toBeUndefined();
+      }
+
+      // The report names the mode it exercised so a weekly run is auditable at a glance.
+      const row = body.results.find((candidate: any) => candidate.id === route.id);
+      expect(row.mode).toBe(route.outputCapability);
+    }
   });
 
   it('probes a single route when one is named', async () => {

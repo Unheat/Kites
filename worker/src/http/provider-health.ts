@@ -17,6 +17,7 @@ import type { ProviderRouteConfig } from '../config/providers';
 import { PROVIDER_ROUTES } from '../config/providers';
 import { dispatchAdapter } from '../adapters/dispatch';
 import type { Env, OpenAIChatRequest } from '../types';
+import { resolveOutputPlan } from '../adapters/outputMode';
 import { errorResponse, jsonResponse } from './response';
 import { ipRateLimiter } from '../security/rate-limiter';
 import { buildSchema } from '../../../src/shared/translation/keyedJson';
@@ -32,10 +33,12 @@ const PROBE_TIMEOUT_MS = 12_000;
 /**
  * Output token budget for a probe. One token is rejected by some providers as an invalid
  * generation config, which would make a healthy key look broken. The probe asks for a real
- * two-slot keyed translation, whose JSON envelope alone is ~20 tokens, so a 16-token ceiling
- * would truncate a correct answer and report a healthy route as unusable.
+ * two-slot keyed translation, whose JSON envelope alone is ~20 tokens, so a tiny ceiling would
+ * truncate a correct answer and report a healthy route as unusable. Reasoning models also spend
+ * completion budget before they emit anything, so this has to leave room for that even though the
+ * answer itself is short.
  */
-const PROBE_MAX_OUTPUT_TOKENS = 64;
+const PROBE_MAX_OUTPUT_TOKENS = 256;
 
 /** Expected probe slots; also the keys the returned object must contain. */
 const PROBE_SLOTS = 2;
@@ -99,10 +102,32 @@ export interface KeyProbeResult {
   enabled: boolean;
   secretName: string | null;
   secretPresent: boolean;
+  /** Wire mode the route's declared capability resolves to for this probe request. */
+  mode: ProbeMode;
   verdict: KeyVerdict;
   detail?: KeyDetail;
   statusCode: number | null;
   latencyMs: number;
+}
+
+/**
+ * Wire mode a probe actually sends, named with the catalog's own tier ids.
+ *
+ * Derived from `resolveOutputPlan` rather than restated, so adding a provider to the catalog needs
+ * no probe change: its declared `outputCapability` decides whether the probe sends a strict schema,
+ * bare JSON mode, or no `response_format` at all.
+ */
+export type ProbeMode = 'json-schema' | 'json-object' | 'prompt-only';
+
+/**
+ * Resolves the wire mode a route will exercise during a probe.
+ *
+ * @param route - Catalog route under test.
+ * @returns Catalog tier id matching the plan the adapter will send.
+ */
+export function resolveProbeMode(route: ProviderRouteConfig): ProbeMode {
+  const plan = resolveOutputPlan(route, PROBE_REQUEST);
+  return plan.kind === 'none' ? 'prompt-only' : plan.kind;
 }
 
 /**
@@ -177,6 +202,7 @@ async function probeRoute(route: ProviderRouteConfig, env: Env): Promise<KeyProb
     enabled: route.enabled,
     secretName,
     secretPresent: route.type === 'workers-ai' ? Boolean(env.AI) : Boolean(secret),
+    mode: resolveProbeMode(route),
   };
 
   if (route.type !== 'workers-ai' && !secret) {
