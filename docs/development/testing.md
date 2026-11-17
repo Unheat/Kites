@@ -140,22 +140,6 @@ A hotter first pass copies more, not less, so `WEBLLM_TEMPERATURE` stays at 0. T
 spent on the recovery request (`WEBLLM_RECOVERY_TEMPERATURE`), which only runs after a page has
 already failed — where 0.3 recovered 6/6 slots that 0 had echoed.
 
-### 1d. Live custom-API structured-output modes
-
-```bash
-OPENROUTER_TEST_KEY=... node scripts/benchmark-custom-api-modes.mjs
-```
-
-Drives the real `CustomApiEngine` once per tier (`json-schema`, `json-object`, `prompt-only`) against a
-live endpoint and reports both the translations and the exact request each tier produced — prompt
-size, `response_format` type, and whether the key contract was in the prompt. The key is read from the
-environment only, and the throwaway harness file is deleted after the run, so it never joins the test
-suite.
-
-Measured on `nvidia/nemotron-3.5-super-vl:free` (OpenRouter), reported page + a 3-line Japanese page:
-every tier returned 0 kept slots, 0 CJK residue, 0 blanks, with prompts of 499 / 605 / 690 chars and
-`response_format` of `json_schema` / `json_object` / `none` respectively.
-
 ### 2. Cloudflare Shared Pool Pipeline
 ```bash
 npm run test:visual:cloudflare
