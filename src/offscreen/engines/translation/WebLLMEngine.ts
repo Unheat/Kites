@@ -31,6 +31,35 @@ const WEBLLM_TEMPERATURE = 0;
  */
 export const WEBLLM_RECOVERY_TEMPERATURE = 0.3;
 
+/**
+ * Temperature added per further recovery attempt.
+ *
+ * A second retry must not re-sample the same neighbourhood as the first, or it repeats the answer it
+ * already knows to be wrong. Bounded so later attempts stay translations rather than drifting.
+ */
+const WEBLLM_RECOVERY_TEMPERATURE_STEP = 0.2;
+
+/** Ceiling for recovery sampling, so an increasing retry budget cannot turn into free association. */
+const WEBLLM_TEMPERATURE_CEILING = 0.7;
+
+/**
+ * Sampling temperature for one attempt of a page.
+ *
+ * Derived from the attempt index, not from the source language: the first pass is greedy for every
+ * language, and each recovery attempt samples further out. A future change to `MAX_RETRY_REQUESTS`
+ * therefore needs no matching change here.
+ *
+ * @param hints - Request hints; `recoveryAttempt` is 1 for the first recovery, 2 for the next, and
+ *                absent for the first pass.
+ * @returns Temperature to sample this attempt at.
+ */
+export function temperatureForAttempt(hints?: { recovery?: boolean; recoveryAttempt?: number }): number {
+  const attempt = hints?.recoveryAttempt ?? (hints?.recovery ? 1 : 0);
+  if (attempt <= 0) return WEBLLM_TEMPERATURE;
+  const temperature = WEBLLM_RECOVERY_TEMPERATURE + (attempt - 1) * WEBLLM_RECOVERY_TEMPERATURE_STEP;
+  return Math.min(temperature, WEBLLM_TEMPERATURE_CEILING);
+}
+
 export const WEBLLM_RETRY_BATCH_SPLIT = 3;
 
 /**
@@ -239,7 +268,7 @@ export class WebLLMEngine extends BaseLlmTranslationEngine {
     schema?: Record<string, unknown>,
     signal?: AbortSignal,
     maxTokens?: number,
-    hints?: { recovery?: boolean }
+    hints?: { recovery?: boolean; recoveryAttempt?: number }
   ): Promise<string> {
     if (!this.engine) {
       throw new Error('WebLLMEngine is not initialized. Call init() first.');
@@ -259,7 +288,7 @@ export class WebLLMEngine extends BaseLlmTranslationEngine {
 
     const completionOptions: any = {
       messages: payloadMessages,
-      temperature: hints?.recovery ? WEBLLM_RECOVERY_TEMPERATURE : WEBLLM_TEMPERATURE,
+      temperature: temperatureForAttempt(hints),
       top_p: 1,
       repetition_penalty: 1,
       max_tokens: dynamicMaxTokens,

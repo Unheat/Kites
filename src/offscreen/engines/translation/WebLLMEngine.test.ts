@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { WebLLMEngine, WEBLLM_IDLE_DEADLINE_MS, WEBLLM_MAX_GENERATION_MS, WEBLLM_RECOVERY_TEMPERATURE } from './WebLLMEngine';
+import { WebLLMEngine, WEBLLM_IDLE_DEADLINE_MS, WEBLLM_MAX_GENERATION_MS, WEBLLM_RECOVERY_TEMPERATURE, temperatureForAttempt } from './WebLLMEngine';
 
 // 1. Mock the @mlc-ai/web-llm module
 const mockCreate = vi.fn();
@@ -287,5 +287,26 @@ describe('WebLLMEngine Keyed JSON Protocol', () => {
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining('exceeds 80-token local ceiling')
     );
+  });
+});
+
+describe('temperatureForAttempt', () => {
+  it('keeps the first pass greedy and every retry outside the greedy attractor', () => {
+    expect(temperatureForAttempt()).toBe(0);
+    expect(temperatureForAttempt({ recovery: false })).toBe(0);
+    expect(temperatureForAttempt({ recovery: true, recoveryAttempt: 1 })).toBe(WEBLLM_RECOVERY_TEMPERATURE);
+  });
+
+  it('samples further out on each further attempt so a raised retry budget needs no other change', () => {
+    const first = temperatureForAttempt({ recoveryAttempt: 1 });
+    const second = temperatureForAttempt({ recoveryAttempt: 2 });
+    const third = temperatureForAttempt({ recoveryAttempt: 3 });
+
+    expect(second).toBeGreaterThan(first);
+    expect(third).toBeGreaterThan(second);
+  });
+
+  it('stops climbing before sampling turns into free association', () => {
+    expect(temperatureForAttempt({ recoveryAttempt: 99 })).toBeLessThanOrEqual(0.7);
   });
 });

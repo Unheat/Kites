@@ -90,15 +90,19 @@ interface ChunkPromptContext {
   dynamicOverhead: number;
   sourceLangId: string;
   recovery?: boolean;
+  recoveryAttempt?: number;
 }
 
 /**
  * Extra instruction for one model request that is not part of the prompt.
  *
  * @property recovery - True when this request re-asks for slots an earlier pass failed to translate.
+ * @property recoveryAttempt - Which recovery attempt this is, counting from 1. Engines use it to
+ *   sample each retry differently, so raising the retry budget needs no change at the call site.
  */
 export interface LlmRequestHints {
   recovery?: boolean;
+  recoveryAttempt?: number;
 }
 
 /** Parsed values for one chunk plus the keys the model actually answered. */
@@ -266,7 +270,11 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
           // page. The first pass is already complete and valid.
           let recovered: ChunkResult;
           try {
-            recovered = await this.requestChunk(retryChunk, retryGlossary, { ...promptContext, recovery: true });
+            recovered = await this.requestChunk(retryChunk, retryGlossary, {
+              ...promptContext,
+              recovery: true,
+              recoveryAttempt: MAX_RETRY_REQUESTS - retryBudget,
+            });
           } catch (error) {
             console.warn(
               `[BaseLlmTranslationEngine] Recovery attempt failed (${error instanceof Error ? error.message : 'unknown error'}); keeping the first pass.`
@@ -353,6 +361,7 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
 
     const rawOutput = await this.requestLlm(prompt, messages, schema, undefined, maxTokens, {
       recovery: context.recovery,
+      recoveryAttempt: context.recoveryAttempt,
     });
     const { translations, parsedKeys } = this.parseKeyedOutputWithMetadata(rawOutput, chunk);
     this.lastParsedKeys = new Set(parsedKeys);
