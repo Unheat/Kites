@@ -35,7 +35,7 @@ export const WEBLLM_IDLE_DEADLINE_MS = 15_000;
  * Absolute ceiling for one generation, so a model that keeps trickling tokens cannot hold the GPU
  * indefinitely. Sized for the largest batch the 1024-token context window allows on slow hardware.
  */
-export const WEBLLM_MAX_GENERATION_MS = 180_000;
+export const WEBLLM_MAX_GENERATION_MS = 120_000;
 
 /** What one completion produced, whether it arrived streamed or in a single reply. */
 interface CollectedCompletion {
