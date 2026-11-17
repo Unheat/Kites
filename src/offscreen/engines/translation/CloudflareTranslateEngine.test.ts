@@ -41,6 +41,24 @@ describe('CloudflareTranslateEngine Keyed JSON Protocol', () => {
     expect(result).toEqual(['Hello world', 'Good morning']);
   });
 
+  it('keeps the defensive prompt even though the wire always asks for a schema', async () => {
+    // The pool picks a provider route per attempt, ordered by latency, and a route may be
+    // prompt-only (it accepts response_format and ignores it). The schema can therefore vanish
+    // mid-request while the prompt cannot change, so the prompt must never assume the decoder
+    // enforces the keys. Trimming it to the json-schema wording would break exactly that fallback.
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(JSON.stringify({ choices: [{ message: { content: '{"b0":"Hello"}' } }] }), { status: 200 })
+    );
+
+    await engine.translate(['Bonjour'], 'fr', 'en');
+
+    const body = JSON.parse(fetchSpy.mock.calls[0][1]?.body as string);
+    const systemPrompt = body.messages[0].content as string;
+    expect(body.response_format.type).toBe('json_schema');
+    expect(systemPrompt).toContain('exact same keys as SOURCE');
+    expect(systemPrompt).toContain('Output raw JSON only');
+  });
+
   it('strips markdown asterisks from model translation', async () => {
     const mockResponse = {
       choices: [
