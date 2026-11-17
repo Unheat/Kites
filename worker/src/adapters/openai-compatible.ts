@@ -8,7 +8,7 @@
 
 import { ProviderRouteConfig } from '../config/providers';
 import { OpenAIChatRequest, OpenAIChatResponse } from '../types';
-import { createJsonSchemaResponseFormat } from '../../../src/shared/translation/poolContract';
+import { createJsonSchemaResponseFormat, MAX_POOL_OUTPUT_TOKENS } from '../../../src/shared/translation/poolContract';
 import { resolveOutputPlan } from './outputMode';
 import { readUpstreamBody, MAX_UPSTREAM_RESPONSE_BYTES } from './responseBody';
 
@@ -62,7 +62,7 @@ function buildRequestBody(route: ProviderRouteConfig, request: OpenAIChatRequest
     model: route.modelName,
     messages: request.messages,
     temperature: request.temperature ?? 0.1,
-    max_tokens: request.max_tokens ?? 1024,
+    max_tokens: request.max_tokens ?? MAX_POOL_OUTPUT_TOKENS,
     stream: false,
   };
 

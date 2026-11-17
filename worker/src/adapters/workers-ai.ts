@@ -7,6 +7,7 @@
  */
 
 import { ProviderRouteConfig } from '../config/providers';
+import { MAX_POOL_OUTPUT_TOKENS } from '../../../src/shared/translation/poolContract';
 import { OpenAIChatRequest, OpenAIChatResponse } from '../types';
 import { AdapterExecutionResult } from './openai-compatible';
 import { resolveOutputPlan } from './outputMode';
@@ -103,7 +104,7 @@ export async function executeWorkersAI(
       // models use standard conversational messages format.
       const runOptions: Record<string, unknown> = {
         messages: request.messages,
-        max_tokens: request.max_tokens ?? 1024,
+        max_tokens: request.max_tokens ?? MAX_POOL_OUTPUT_TOKENS,
         temperature: request.temperature ?? 0.1,
       };
 

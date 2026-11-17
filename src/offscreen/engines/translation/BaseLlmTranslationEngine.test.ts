@@ -11,7 +11,7 @@ import {
   DEFAULT_LLM_MAX_INPUT_TOKENS,
   type LlmChatMessage,
 } from './BaseLlmTranslationEngine';
-import { MAX_POOL_OUTPUT_TOKENS } from '../../../shared/translation/poolContract';
+import { MAX_POOL_ANSWER_TOKENS } from '../../../shared/translation/poolContract';
 
 class MockLlmEngine extends BaseLlmTranslationEngine {
   public mockResponse: string = '';
@@ -73,13 +73,13 @@ describe('maxTokensForBatch and countCodePoints', () => {
   it('calculates dynamic token safety cap bounded within bounds', () => {
     const tokensSmall = maxTokensForBatch(['Hi']);
     expect(tokensSmall).toBeGreaterThanOrEqual(64);
-    expect(tokensSmall).toBeLessThanOrEqual(MAX_POOL_OUTPUT_TOKENS);
+    expect(tokensSmall).toBeLessThanOrEqual(MAX_POOL_ANSWER_TOKENS);
 
     // Six bubbles of 100 code points ask for 32 + 96 + ceil(2.5 * 600) = 1628 tokens unclamped, so
     // this input is what makes the assertion a clamp test rather than a restatement of the formula.
     // A smaller batch can never exceed the cap and would still pass with the clamp removed.
     const capBustingBatch = new Array(6).fill('x'.repeat(100));
-    expect(maxTokensForBatch(capBustingBatch)).toBe(MAX_POOL_OUTPUT_TOKENS);
+    expect(maxTokensForBatch(capBustingBatch)).toBe(MAX_POOL_ANSWER_TOKENS);
   });
 
   it('estimates token counts appropriately for CJK, Latin, Vietnamese, and other scripts', () => {

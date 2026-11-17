@@ -5,7 +5,7 @@
  * Platform-independent: no Chrome or DOM dependencies.
  */
 
-import { MAX_POOL_OUTPUT_TOKENS } from './poolContract';
+import { MAX_POOL_ANSWER_TOKENS } from './poolContract';
 
 /**
  * Detects whether a text string consists entirely of punctuation, ellipses, symbols, or whitespace
@@ -104,7 +104,7 @@ export function estimateTokenCount(text: string): number {
 /**
  * Computes dynamic token safety bound for a batch of source strings based on
  * number of bubbles and total Unicode code points.
- * Formula: Math.min(MAX_POOL_OUTPUT_TOKENS, Math.max(64, 32 + 16 * N + Math.ceil(2.5 * C)))
+ * Formula: Math.min(MAX_POOL_ANSWER_TOKENS, Math.max(64, 32 + 16 * N + Math.ceil(2.5 * C)))
  *
  * @param sources - Array of source texts in the batch.
  * @returns Maximum completion tokens.
@@ -112,7 +112,7 @@ export function estimateTokenCount(text: string): number {
 export function maxTokensForBatch(sources: string[]): number {
   const n = sources.length;
   const c = sources.reduce((sum, s) => sum + countCodePoints(s.trim()), 0);
-  return Math.min(MAX_POOL_OUTPUT_TOKENS, Math.max(64, 32 + 16 * n + Math.ceil(2.5 * c)));
+  return Math.min(MAX_POOL_ANSWER_TOKENS, Math.max(64, 32 + 16 * n + Math.ceil(2.5 * c)));
 }
 
 /**

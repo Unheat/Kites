@@ -31,14 +31,16 @@ import { deriveExpectedKeys, validateCompletion } from '../routing/validation';
 const PROBE_TIMEOUT_MS = 12_000;
 
 /**
- * Output token budget for a probe. One token is rejected by some providers as an invalid
- * generation config, which would make a healthy key look broken. The probe asks for a real
- * two-slot keyed translation, whose JSON envelope alone is ~20 tokens, so a tiny ceiling would
- * truncate a correct answer and report a healthy route as unusable. Reasoning models also spend
- * completion budget before they emit anything, so this has to leave room for that even though the
- * answer itself is short.
+ * Output token budget for a probe.
+ *
+ * The probe asks for a real two-slot keyed translation, whose JSON envelope alone is ~20 tokens;
+ * one token is rejected by some providers as an invalid generation config. The answer itself is
+ * ~25-60 tokens, so this is not sized for the answer but for the private reasoning some backends
+ * spend before emitting anything: a router like `openrouter/free` answers the same probe with
+ * `content: "null"` and `finish_reason: length` when a reasoning-heavy backend wins the pick.
+ * Unused room is free, since providers bill generated tokens rather than the ceiling.
  */
-const PROBE_MAX_OUTPUT_TOKENS = 256;
+const PROBE_MAX_OUTPUT_TOKENS = 512;
 
 /** Expected probe slots; also the keys the returned object must contain. */
 const PROBE_SLOTS = 2;

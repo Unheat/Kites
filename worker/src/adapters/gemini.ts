@@ -8,6 +8,7 @@
 
 import { ProviderRouteConfig } from '../config/providers';
 import { OpenAIChatRequest, OpenAIChatResponse } from '../types';
+import { MAX_POOL_OUTPUT_TOKENS } from '../../../src/shared/translation/poolContract';
 import { AdapterExecutionResult, parseRetryAfter } from './openai-compatible';
 import { resolveOutputPlan } from './outputMode';
 import { readUpstreamBody, MAX_UPSTREAM_RESPONSE_BYTES } from './responseBody';
@@ -70,7 +71,7 @@ export async function executeGemini(
 
   const generationConfig: Record<string, unknown> = {
     temperature: request.temperature ?? 0.1,
-    maxOutputTokens: request.max_tokens ?? 1024,
+    maxOutputTokens: request.max_tokens ?? MAX_POOL_OUTPUT_TOKENS,
   };
 
   // One capability plan decides the JSON mode; exactly one schema field is sent.

@@ -32,7 +32,10 @@ export type QualityTier = (typeof QUALITY_TIERS)[number]['id'];
  * Keep these in the catalog so adapters never branch on provider ids.
  */
 export interface ProviderRequestOptions {
-  /** Send `include_reasoning` (Groq GPT-OSS routes disable hidden reasoning). */
+  /**
+   * Send `include_reasoning`. This only controls whether the reasoning text is returned; the tokens
+   * are still generated and billed, so it is not a way to turn thinking off.
+   */
   includeReasoning?: boolean;
   /** Send `reasoning_effort` when the upstream accepts a reasoning budget. */
   reasoningEffort?: 'low' | 'medium' | 'high';
@@ -82,6 +85,17 @@ export interface ProviderRouteConfig {
   maxInflight?: number;
   /** Baseline timeout in milliseconds */
   defaultTimeoutMs?: number;
+  /**
+   * Whether this model can spend completion tokens on private reasoning.
+   *
+   * Reasoning is charged to the same `max_tokens` box as the answer, so a thinking model given only
+   * the answer budget can spend it all thinking and return an empty or truncated object. Routes that
+   * set this receive {@link REASONING_OUTPUT_HEADROOM} on top. Kept separate from
+   * `requestOptions.reasoningEffort` on purpose: that field says what we send on the wire, this one
+   * says what the model actually does, and a proxy route (`openrouter/free`) does the latter without
+   * the former.
+   */
+  thinking?: boolean;
   /** Structured output mode capability supported by this provider */
   outputCapability: OutputModeCapability;
   /** Verification status of model capability and endpoint */
@@ -113,6 +127,7 @@ export const PROVIDER_ROUTES: ProviderRouteConfig[] = [
     defaultTimeoutMs: 3500,
     outputCapability: 'json-schema',
     requestOptions: { includeReasoning: false, reasoningEffort: 'low' },
+    thinking: true,
     verificationEvidence: 'documented',
   },
 
@@ -135,6 +150,7 @@ export const PROVIDER_ROUTES: ProviderRouteConfig[] = [
     defaultTimeoutMs: 3000,
     outputCapability: 'json-schema',
     requestOptions: { reasoningFormat: 'parsed' },
+    thinking: true,
     verificationEvidence: 'documented',
   },
 
@@ -157,6 +173,7 @@ export const PROVIDER_ROUTES: ProviderRouteConfig[] = [
     defaultTimeoutMs: 3000,
     outputCapability: 'json-schema',
     requestOptions: { includeReasoning: false, reasoningEffort: 'low' },
+    thinking: true,
     verificationEvidence: 'documented',
   },
 
@@ -251,6 +268,9 @@ export const PROVIDER_ROUTES: ProviderRouteConfig[] = [
     defaultTimeoutMs: 4500,
     outputCapability: 'json-schema',
     requestOptions: { requireParameters: true },
+    // A router, not a model: it can pick a reasoning backend at random, which is why the probe saw
+    // `content: "null"` with finish_reason=length before the budget grew.
+    thinking: true,
     verificationEvidence: 'probed',
   },
 

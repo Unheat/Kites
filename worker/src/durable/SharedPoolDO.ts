@@ -19,6 +19,7 @@ import { CircuitBreakerService } from '../routing/circuitBreaker';
 import { LatencyHealthTracker, MIN_TIMEOUT_MS } from '../routing/latencyHealth';
 import { deriveExpectedKeys, ensureRequestResponseFormat, validateCompletion } from '../routing/validation';
 import { estimateTokenCount } from '../../../src/shared/translation/tokenEstimation';
+import { outputBudgetForRoute } from '../../../src/shared/translation/poolContract';
 
 const MAX_TOTAL_WATERFALL_MS = 12_500;
 
@@ -101,7 +102,14 @@ export class SharedPoolDO extends DurableObject<Env> {
         let result: AdapterExecutionResult;
 
         try {
-          result = await dispatchAdapter(route, structuredRequest, this.env, timeoutMs);
+          // Reasoning is charged to the same output budget as the answer, so the route decides the
+          // budget: a thinking model gets headroom, a plain one gets the answer estimate. Resolved
+          // here because this is the only place that knows which route is about to be called.
+          const attemptRequest: OpenAIChatRequest = {
+            ...structuredRequest,
+            max_tokens: outputBudgetForRoute(structuredRequest.max_tokens, route.thinking),
+          };
+          result = await dispatchAdapter(route, attemptRequest, this.env, timeoutMs);
         } finally {
           this.circuitBreaker.releaseRoute(route.id);
         }

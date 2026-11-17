@@ -170,6 +170,26 @@ describe('provider health verdicts', () => {
     }
   });
 
+  it('gives the probe enough output budget for a reasoning backend', async () => {
+    // A router can pick a backend that spends the whole completion budget thinking; 256 tokens
+    // produced content "null" with finish_reason=length on openrouter/free. The probe therefore asks
+    // for more than the ~60 tokens the answer needs.
+    let sentMaxTokens = 0;
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init: { body?: string }) => {
+      sentMaxTokens = JSON.parse(init.body ?? '{}').max_tokens;
+      return new Response(
+        JSON.stringify({
+          choices: [{ index: 0, message: { role: 'assistant', content: '{"b0":"Hello.","b1":"Thank you!"}' }, finish_reason: 'stop' }],
+        }),
+        { status: 200 }
+      );
+    }) as unknown as typeof fetch);
+
+    await handleProviderHealth(makeRequest('diag-token', '203.0.113.44', '?route=mistral-3b'), makeEnv(), 'req-budget', {});
+
+    expect(sentMaxTokens).toBeGreaterThanOrEqual(512);
+  });
+
   it('retries once when a 200 answer is unusable, so one unlucky backend is not a broken route', async () => {
     let call = 0;
     vi.stubGlobal('fetch', vi.fn(async () => {
