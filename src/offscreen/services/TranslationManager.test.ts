@@ -24,6 +24,8 @@ const mocks = vi.hoisted(() => ({
   initProgressCallbacks: [] as Array<unknown>,
   translateArguments: [] as Array<[string[], string, string, unknown?]>,
   customTranslateReturn: null as string[] | null,
+  echoFirstEngine: false,
+  echoAllEngines: false,
 }));
 
 const mockChromeSendMessage = vi.spyOn(chrome.runtime, 'sendMessage');
@@ -69,6 +71,10 @@ function createMockEngine(id: string) {
       await mocks.translateGates.get(id);
       if (mocks.failAllTranslate) throw new Error('Fatal API Error');
       if (mocks.failFirstTranslate && instanceNumber === 1) throw new Error('Crash');
+      // A model can answer successfully and still translate nothing, which is the failure the
+      // waterfall has to recognise: the caller would otherwise paint the source text back.
+      if (mocks.echoAllEngines) return [...texts];
+      if (mocks.echoFirstEngine && instanceNumber === 1) return [...texts];
       return instanceNumber === 1
         ? (mocks.customTranslateReturn ?? ['Mock translated text'])
         : ['Mock translated from fallback'];
@@ -147,6 +153,8 @@ describe('TranslationManager Waterfall Logic', () => {
     mocks.initProgressCallbacks = [];
     mocks.translateArguments = [];
     mocks.customTranslateReturn = null;
+    mocks.echoFirstEngine = false;
+    mocks.echoAllEngines = false;
   });
 
   /**
@@ -191,6 +199,32 @@ describe('TranslationManager Waterfall Logic', () => {
 
     await expect(manager.processTranslation(['Hello'])).resolves.toEqual(['Mock translated from fallback']);
     expect(mocks.instantiatedIds).toEqual(['SmolLM2-135M-Instruct-q0f16-MLC', 'gg-translate']);
+  });
+
+  it('treats a page that came back untranslated as an engine failure and falls back', async () => {
+    respondWith('SmolLM2-135M-Instruct-q0f16-MLC', ['gg-translate']);
+    mocks.echoFirstEngine = true;
+
+    await expect(manager.processTranslation(['こんにちは'], 'ja', 'en'))
+      .resolves.toEqual(['Mock translated from fallback']);
+    expect(mocks.instantiatedIds).toEqual(['SmolLM2-135M-Instruct-q0f16-MLC', 'gg-translate']);
+  });
+
+  it('reports failure when every engine returns the page untranslated', async () => {
+    respondWith('gg-translate', []);
+    mocks.echoAllEngines = true;
+
+    await expect(manager.processTranslation(['こんにちは'], 'ja', 'en'))
+      .rejects.toThrow(/untranslated/);
+  });
+
+  it('accepts an answer that leaves only non-source-script text alone', async () => {
+    respondWith('gg-translate', []);
+    mocks.echoAllEngines = true;
+
+    // Latin text on a Japanese page needs no translation, so echoing it is a real answer.
+    await expect(manager.processTranslation(['Custom Angle'], 'ja', 'en'))
+      .resolves.toEqual(['Custom Angle']);
   });
 
   it('reports failure when every retained engine fails', async () => {

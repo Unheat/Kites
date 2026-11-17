@@ -1,6 +1,7 @@
 import type { ITranslationEngine, TranslationOptions } from '../engines/translation/BaseEngine';
 import { getEnabledGlossary } from '../../shared/glossary';
 import { normalizeSourceCasingForMt, normalizeTargetCasing } from '../../shared/utils/casingNormalization';
+import { hasNativeScriptForLang } from '../../shared/utils/textCleaning';
 import { WebLLMEngine } from '../engines/translation/WebLLMEngine';
 import { GoogleTranslateEngine } from '../engines/translation/GoogleTranslateEngine';
 import { CustomApiEngine } from '../engines/translation/CustomApiEngine';
@@ -13,6 +14,41 @@ type EngineLease = {
   engine: ITranslationEngine;
   release: () => void;
 };
+
+/**
+ * Whether an engine answered with the source text for every line that needed translating.
+ *
+ * An engine that "succeeds" while translating nothing is the failure users actually see: a local
+ * model that copies the page back returns no error, so the waterfall used to report success and the
+ * pipeline painted the original text as if it were the translation. Lines already written in a
+ * script the source language does not use (Latin debris on a Japanese page) are not evidence of
+ * failure - they never needed translating - so they are ignored when making the call.
+ *
+ * @param texts - Lines handed to the engine.
+ * @param results - Lines the engine returned, index-aligned with `texts`.
+ * @param sourceLang - Source language the request declared, or 'auto'.
+ * @returns True when every translatable line came back unchanged.
+ */
+export function returnedPageUntranslated(
+  texts: readonly string[],
+  results: readonly string[],
+  sourceLang: string
+): boolean {
+  const sourceIsKnown = Boolean(sourceLang) && sourceLang !== 'auto';
+  let translatable = 0;
+  let unchanged = 0;
+
+  for (let index = 0; index < texts.length; index += 1) {
+    const text = texts[index] ?? '';
+    if (!text.trim()) continue;
+    if (sourceIsKnown && !hasNativeScriptForLang(text, sourceLang)) continue;
+
+    translatable += 1;
+    if ((results[index] ?? '').trim() === text.trim()) unchanged += 1;
+  }
+
+  return translatable > 0 && unchanged === translatable;
+}
 
 export class TranslationManager {
   private activeEngine: ITranslationEngine | null = null;
@@ -126,6 +162,12 @@ export class TranslationManager {
         const rawResults = await lease.engine.translate(normalizedTexts, sourceLang, targetLang, options);
         // Post-MT normalization: heal any Frankenstein casing produced by NMT casing transfer.
         const results = rawResults.map((result) => normalizeTargetCasing(result, targetLang));
+
+        // An engine that hands the page back unchanged has failed, however cleanly it responded:
+        // letting that through skips the fallback chain and paints the source text as a translation.
+        if (returnedPageUntranslated(normalizedTexts, results, sourceLang)) {
+          throw new Error(`Engine ${engineId} returned every line untranslated`);
+        }
         if (import.meta.env.DEV) {
           const inferMs = performance.now() - inferStart;
           console.log(
