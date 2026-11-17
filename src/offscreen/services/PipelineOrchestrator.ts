@@ -338,18 +338,46 @@ export class PipelineOrchestrator {
       let baseImageForInpaint: ArrayBuffer = imageBuffer;
       let cleanedImageBuffer: ArrayBuffer = imageBuffer;
 
-      const executeTranslation = () => this.services.translationManager
-        .processTranslation(ocrResult.texts, sourceLang, targetLang, makeLifecycle('translation', activeTranslationEngineId), popupState)
-        .then((r) => {
-          if (import.meta.env.DEV) {
-            console.log(`[PipelineOrchestrator] Translation branch finished in ${(performance.now() - stage2Start).toFixed(2)}ms.`);
-          }
-          return r || ocrResult.texts;
-        })
-        .catch((err) => {
-          console.warn(`[PipelineOrchestrator] Translation branch failed; preserving original source texts so pipeline does not stop:`, err);
-          return ocrResult.texts;
-        });
+      // 'preserve' keeps sound effects as artwork; 'translate-plainly' erases and renders them.
+      // Fragments are never language, so they are always left alone; sound effects and display
+      // lettering follow the user's policy. Resolved before translation because those blocks are
+      // never painted, so translating them spends tokens on text the renderer discards.
+      const artworkStrategy = resolveSfxPolicyStrategy(popupState?.sfxPolicy ?? DEFAULT_SFX_POLICY);
+      const preservedArtwork = new Set(
+        (ocrResult.artwork ?? [])
+          .filter((item) => item.kind === 'fragment' || artworkStrategy.preservesArtwork)
+          .map((item) => item.index),
+      );
+
+      const executeTranslation = () => {
+        // Translate only the blocks that will be painted, then put the result back in OCR order so
+        // every downstream index (masks, colours, persistence) keeps its meaning.
+        const translatableIndices = ocrResult.texts
+          .map((_text, index) => index)
+          .filter((index) => !preservedArtwork.has(index));
+        const translatableTexts = translatableIndices.map((index) => ocrResult.texts[index]);
+
+        if (translatableTexts.length === 0) {
+          return Promise.resolve([...ocrResult.texts]);
+        }
+
+        return this.services.translationManager
+          .processTranslation(translatableTexts, sourceLang, targetLang, makeLifecycle('translation', activeTranslationEngineId), popupState)
+          .then((r) => {
+            if (import.meta.env.DEV) {
+              console.log(`[PipelineOrchestrator] Translation branch finished in ${(performance.now() - stage2Start).toFixed(2)}ms.`);
+            }
+            const merged = [...ocrResult.texts];
+            translatableIndices.forEach((index, position) => {
+              merged[index] = r?.[position] ?? ocrResult.texts[index];
+            });
+            return merged;
+          })
+          .catch((err) => {
+            console.warn(`[PipelineOrchestrator] Translation branch failed; preserving original source texts so pipeline does not stop:`, err);
+            return ocrResult.texts;
+          });
+      };
 
       const executeColorization = async (): Promise<ArrayBuffer> => {
         if (colorTier === 'none') {
@@ -476,15 +504,6 @@ export class PipelineOrchestrator {
       // original OCR index of every item so render results can be mapped back for DB persistence.
       const textBlockItems: TextBlockItem[] = [];
       const itemOcrIndices: number[] = [];
-      // 'preserve' keeps sound effects as artwork; 'translate-plainly' erases and renders them.
-      // Fragments are never language, so they are always left alone; sound effects and display
-      // lettering follow the user's policy.
-      const artworkStrategy = resolveSfxPolicyStrategy(popupState?.sfxPolicy ?? DEFAULT_SFX_POLICY);
-      const preservedArtwork = new Set(
-        (ocrResult.artwork ?? [])
-          .filter((item) => item.kind === 'fragment' || artworkStrategy.preservesArtwork)
-          .map((item) => item.index),
-      );
       for (let i = 0; i < translatedTexts.length; i++) {
         // Sound effects stay as drawn under the default 'preserve' policy: no inpaint (OcrManager
         // already dropped their masks) and no overlay, because erasing brush lettering is
