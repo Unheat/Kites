@@ -54,11 +54,63 @@ export const MIN_CHUNK_SIZE_FOR_DROP_TOLERANCE = 6;
 export const DEFAULT_LLM_BATCH_SIZE = 15;
 
 /**
+ * Maximum segments re-sent in one recovery request.
+ *
+ * Recovery exists for the handful of slots a model skips or echoes, not for re-translating a page.
+ * A small follow-up keeps the prompt cheap, keeps local models inside their watchdog budget, and
+ * makes the failure mode specific ("this one line") rather than "the batch again".
+ */
+export const MAX_RETRY_SEGMENTS = 8;
+
+/**
+ * Maximum recovery requests per `translate()` call, across all chunks of the page.
+ *
+ * One only. The expensive-follow-up policy this file already encodes (see
+ * `MAX_UNTRANSLATED_TOLERANCE_RATIO`) exists because a model that drops many lines will drop them
+ * again; recovery is for the one or two accidental losses that make a page look untranslated.
+ */
+export const MAX_RETRY_REQUESTS = 1;
+
+/**
+ * Largest number of lost slots on a page that is worth one recovery request.
+ *
+ * Measured on a real 16-page run, losses clustered at one to four slots; beyond that the model is
+ * failing broadly and the second pass would cost tokens without recovering the page.
+ */
+export const MAX_RECOVERY_SLOTS = 3;
+
+/**
  * Default maximum estimated input tokens per translation prompt.
  * Remote APIs (Cloudflare, OpenAI, Claude) use a generous budget (4000).
  * WebLLM overrides this to 550 to protect its strict 1024 context window.
  */
 export const DEFAULT_LLM_MAX_INPUT_TOKENS = 4000;
+
+/**
+ * Extra system rule appended to a recovery request.
+ *
+ * Recovery only carries the slots that failed, so restating the whole prompt is unnecessary; what
+ * the model needs to hear is that this pass is about completion, not style.
+ */
+const RECOVERY_INSTRUCTION =
+  '- This is a correction pass for lines that were skipped or repeated earlier: return a translation for every key, and never repeat the source text back.';
+
+/** Prompt assembly inputs shared by the first attempt and by every recovery attempt of a page. */
+interface ChunkPromptContext {
+  sourceLang: string;
+  targetLang: string;
+  customPrompt?: string;
+  dynamicOverhead: number;
+  sourceLangId: string;
+  recovery?: boolean;
+}
+
+/** Parsed values for one chunk plus the keys the model actually answered. */
+interface ChunkResult {
+  values: string[];
+  failed: number[];
+  keys: string[];
+}
 
 /**
  * Abstract base class for all LLM-based translation engines (WebLLM, CustomApi, Cloudflare).
@@ -184,62 +236,151 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
       customPrompt,
     });
 
+    // Recovery is a property of the page, not of one chunk: a model that fails on the first chunk
+    // tends to fail on the rest, so the budget is spent once per translate() call.
+    let retryBudget = MAX_RETRY_REQUESTS;
+
     for (const chunk of chunks) {
-      // Per-chunk glossary filtering for maximum token efficiency
       const chunkGlossary = filterRelevantGlossary(activeGlossary, chunk.map((s) => s.text));
-      const prompt = this.buildPrompt(chunk, sourceLang, targetLang, chunkGlossary, customPrompt);
-      const messages = this.buildJsonMessages(chunk, sourceLang, targetLang, chunkGlossary, customPrompt);
-      const schema = buildSchema(chunk.length);
+      const promptContext = {
+        sourceLang,
+        targetLang,
+        customPrompt,
+        dynamicOverhead,
+        sourceLangId,
+      };
 
-      // Clamp completion budget so input + output <= maxContextWindow
-      const chunkTextTokens = chunk.reduce((sum, s) => sum + estimateTokenCount(s.text) + 6, 0);
-      const chunkInputTokens = dynamicOverhead + chunkTextTokens;
-      const maxAvailableOutput = Math.max(64, this.maxContextWindow - chunkInputTokens - 16);
-      const rawMaxTokens = maxTokensForBatch(chunk.map((s) => s.text));
-      const maxTokens = Math.min(rawMaxTokens, maxAvailableOutput);
+      const first = await this.requestChunk(chunk, chunkGlossary, promptContext);
+      const values = first.values;
+      const unrecovered = [...first.failed];
 
-      this.lastCompletionTruncated = false;
+      if (unrecovered.length > 0 && unrecovered.length <= MAX_RECOVERY_SLOTS && retryBudget > 0) {
+        // Re-asking for a slot that holds no source-script text buys a hallucination, not a
+        // translation: the probe turned Latin OCR noise into "shiru iyano". Under a known source
+        // language those slots are simply left as they are; under 'auto' no script can be assumed,
+        // so every failure is eligible (`hasNativeScriptForLang` returns true for an unknown code).
+        const canJudgeScript = Boolean(sourceLangId) && sourceLangId !== 'auto';
+        const eligible = canJudgeScript
+          ? unrecovered.filter((index) => hasNativeScriptForLang(chunk[index].text, sourceLangId))
+          : unrecovered;
 
-      const rawOutput = await this.requestLlm(prompt, messages, schema, undefined, maxTokens);
-      const { translations: parsedChunk, parsedKeys } = this.parseKeyedOutputWithMetadata(rawOutput, chunk);
-      this.lastParsedKeys = new Set(parsedKeys);
+        for (let offset = 0; offset < eligible.length && retryBudget > 0; offset += MAX_RETRY_SEGMENTS) {
+          const group = eligible.slice(offset, offset + MAX_RETRY_SEGMENTS);
+          const retryChunk = group.map((index) => chunk[index]);
+          const retryGlossary = filterRelevantGlossary(activeGlossary, retryChunk.map((s) => s.text));
 
-      // Report slot loss honestly: an omitted key is data loss, while a verbatim echo is the model
-      // copying a line it judged untranslatable (which the system prompt explicitly permits).
-      const missingKeys: string[] = [];
-      const echoedKeys: string[] = [];
-      for (let idx = 0; idx < chunk.length; idx++) {
-        const key = `b${idx}`;
-        if (!parsedKeys.has(key)) {
-          missingKeys.push(key);
-          continue;
-        }
-        // Identical to source AND carrying the source script means the line was not translated.
-        // Slots that legitimately need no translation (already-target-language, symbols) fail the
-        // native-script test and are therefore never counted here.
-        if (parsedChunk[idx] === chunk[idx].text && hasNativeScriptForLang(chunk[idx].text, sourceLangId)) {
-          echoedKeys.push(key);
+          retryBudget -= 1;
+          // Recovery is best-effort: a strict engine throws when the answer's key count disagrees
+          // with the ask, and that must degrade to "this line keeps its source", never to a failed
+          // page. The first pass is already complete and valid.
+          let recovered: ChunkResult;
+          try {
+            recovered = await this.requestChunk(retryChunk, retryGlossary, { ...promptContext, recovery: true });
+          } catch (error) {
+            console.warn(
+              `[BaseLlmTranslationEngine] Recovery attempt failed (${error instanceof Error ? error.message : 'unknown error'}); keeping the first pass.`
+            );
+            continue;
+          }
+
+          // A recovery answer that does not match the ask (missing or extra keys) is a stale or
+          // cached reply: assigning positionally would put one line's text on another line.
+          const expectedKeys = new Set(group.map((_, position) => `b${position}`));
+          const wellFormed = recovered.keys.length === expectedKeys.size
+            && recovered.keys.every((key) => expectedKeys.has(key));
+
+          group.forEach((chunkIndex, position) => {
+            const value = recovered.values[position];
+            const stillFailed = !wellFormed || recovered.failed.includes(position);
+            if (!stillFailed && value && value.trim()) {
+              values[chunkIndex] = value;
+              const remaining = unrecovered.indexOf(chunkIndex);
+              if (remaining !== -1) unrecovered.splice(remaining, 1);
+            }
+          });
         }
       }
+
       for (let j = 0; j < chunk.length; j++) {
-        const cleaned = cleanTranslatedLine(parsedChunk[j] || '');
+        const cleaned = cleanTranslatedLine(values[j] || '');
         results[chunk[j].originalIndex] = cleaned;
       }
+
+      const missingKeys = unrecovered.filter((index) => !values[index]).map((index) => `b${index}`);
+      const echoedKeys = unrecovered
+        .filter((index) => values[index] && values[index] === chunk[index].text)
+        .map((index) => `b${index}`);
+
+      const recoveryNote = retryBudget < MAX_RETRY_REQUESTS
+        ? ` after ${MAX_RETRY_REQUESTS - retryBudget} recovery request(s)`
+        : '';
       if (missingKeys.length > 0) {
         console.warn(
           `[BaseLlmTranslationEngine] Model omitted ${missingKeys.length}/${chunk.length} slots ` +
-          `(${missingKeys.join(', ')}); those lines keep their source text.`
+          `(${missingKeys.join(', ')})${recoveryNote}; those lines keep their source text.`
         );
       }
       if (echoedKeys.length > 0) {
         console.warn(
           `[BaseLlmTranslationEngine] Model echoed ${echoedKeys.length}/${chunk.length} slots back ` +
-          `unchanged (${echoedKeys.join(', ')}); those lines keep their source text.`
+          `unchanged (${echoedKeys.join(', ')})${recoveryNote}; those lines keep their source text.`
         );
       }
     }
 
     return results;
+  }
+
+  /**
+   * Requests one batch and reports which slots did not come back translated.
+   *
+   * @param chunk - Segments to translate; the batch is re-keyed `b0..bN` for the prompt.
+   * @param glossary - Glossary entries relevant to this batch only.
+   * @param context - Resolved languages, prompt context, and whether this is a recovery attempt.
+   * @returns Parsed values per slot plus the indices that were omitted, blank, or echoed.
+   */
+  private async requestChunk(
+    chunk: LlmTranslationSegment[],
+    glossary: readonly GlossaryEntry[],
+    context: ChunkPromptContext
+  ): Promise<ChunkResult> {
+    const prompt = this.buildPrompt(chunk, context.sourceLang, context.targetLang, glossary, context.customPrompt);
+    const messages = this.buildJsonMessages(chunk, context.sourceLang, context.targetLang, glossary, context.customPrompt);
+    if (context.recovery && messages[0]) {
+      messages[0] = { role: messages[0].role, content: `${messages[0].content}\n${RECOVERY_INSTRUCTION}` };
+    }
+    const schema = buildSchema(chunk.length);
+
+    // Clamp completion budget so input + output <= maxContextWindow
+    const chunkTextTokens = chunk.reduce((sum, s) => sum + estimateTokenCount(s.text) + 6, 0);
+    const chunkInputTokens = context.dynamicOverhead + chunkTextTokens;
+    const maxAvailableOutput = Math.max(64, this.maxContextWindow - chunkInputTokens - 16);
+    const rawMaxTokens = maxTokensForBatch(chunk.map((s) => s.text));
+    const maxTokens = Math.min(rawMaxTokens, maxAvailableOutput);
+
+    this.lastCompletionTruncated = false;
+
+    const rawOutput = await this.requestLlm(prompt, messages, schema, undefined, maxTokens);
+    const { translations, parsedKeys } = this.parseKeyedOutputWithMetadata(rawOutput, chunk);
+    this.lastParsedKeys = new Set(parsedKeys);
+
+    const values: string[] = [];
+    const failed: number[] = [];
+    for (let idx = 0; idx < chunk.length; idx += 1) {
+      const value = translations[idx] ?? '';
+      values[idx] = value;
+      // An omitted key or a blank answer is data loss; a verbatim echo carrying source script means
+      // the line was never translated, while an echo of punctuation or Latin debris is legitimate.
+      if (!parsedKeys.has(`b${idx}`) || !value.trim()) {
+        failed.push(idx);
+        continue;
+      }
+      if (value === chunk[idx].text && hasNativeScriptForLang(chunk[idx].text, context.sourceLangId)) {
+        failed.push(idx);
+      }
+    }
+
+    return { values, failed, keys: [...parsedKeys] };
   }
 
   /**
