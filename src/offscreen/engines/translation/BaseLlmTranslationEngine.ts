@@ -523,7 +523,8 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
       `- Write translations using natural sentence capitalization (capitalize only sentence starts and proper nouns).\n` +
       `- Keep every key from SOURCE unchanged; do not add, omit, merge, or rename keys.\n` +
       `- Use surrounding values for dialogue context, natural tone, and pronouns.\n` +
-      `- If a value is empty, punctuation-only, an ellipsis, or cannot be usefully translated, copy it unchanged.\n` +
+      `- Copy a value unchanged only when it is empty, punctuation-only, an ellipsis, already written in ${targetLang}, or illegible OCR debris with no readable words.\n` +
+      `- Never copy ${sourceLang} dialogue back as the answer: every line that carries readable words must come back translated.\n` +
       `- Output raw JSON only. Do not add markdown code fences, explanations, or commentary.`;
 
     if (customPrompt?.trim()) {
