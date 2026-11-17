@@ -95,6 +95,27 @@ npm run test:visual:webllm
 - Tests on-device WebLLM inference using `@mlc-ai/web-llm` and local ONNX PaddleOCR.
 - Outputs rendered images to `result/pipeline_webllm/` for manual visual inspection.
 
+### 1b. Real browser, real local model, text-in / text-out
+
+```bash
+npm run build
+npm run test:webllm:local -- --pages '[["こんにちは","猫が好き"]]' --label ja-smoke --src ja
+npm run test:webllm:local:analyze -- ja-smoke
+```
+
+- Loads the built extension into a Chromium that can load unpacked extensions, writes the popup
+  state directly, and calls the real `TranslationManager` in the offscreen page. Console output
+  from the extension is captured, so engine warnings (`Model echoed 5/6 slots back unchanged`,
+  `interrupting a stuck generation`) show up next to the translations.
+- Writes `kites-<label>-result.json` and `kites-<label>-console.log` to `/tmp` (`--out-dir` to change).
+- `--src`/`--target` mirror the popup settings and matter more than any prompt wording: a Japanese
+  page declared as Chinese (or the reverse) is a common cause of a page that "was not translated".
+- When a model fails, compare builds with the analyzer rather than reading one run:
+  `npm run test:webllm:local:analyze -- before after` prints slots unchanged, source-script
+  leftovers, per-page timings and how many losses the engine reported after recovery.
+- Chrome stable ignores `--load-extension`; the script prefers the Playwright-managed Chromium.
+  Pass `--chrome <path>` to use another build.
+
 ### 2. Cloudflare Shared Pool Pipeline
 ```bash
 npm run test:visual:cloudflare

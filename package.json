@@ -19,6 +19,8 @@
     "test:e2e": "node scripts/test-extension.js",
     "test:e2e:color": "node scripts/test-color-e2e.js",
     "test:webllm": "node scripts/test-webllm-user-flow.js",
+    "test:webllm:local": "node scripts/webllm-local-run.mjs",
+    "test:webllm:local:analyze": "node scripts/webllm-local-analyze.mjs",
     "test:visual:custom-api": "tsx src/test/pipelineVisualTestCustomApi.ts",
     "test:visual:cloudflare": "tsx src/test/pipelineVisualTestCloudflare.ts",
     "test:visual:webllm": "npm run build:dev && tsx src/test/pipelineVisualTestWebLlm.ts",
