@@ -164,6 +164,55 @@ export function hasNativeScriptForLang(text: string, lang?: string): boolean {
   return true;
 }
 
+/** Share of a line's letters that must still be CJK before an answer counts as source text, not a translation. */
+export const SOURCE_SCRIPT_SHARE_FOR_UNTRANSLATED = 0.5;
+
+/** CJK letters, including kana and hangul, used to measure how much of an answer is still source text. */
+const CJK_LETTER_RE = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af]/;
+
+/** Latin letters: the evidence that a CJK line was actually rendered into a Latin-script target. */
+const LATIN_LETTER_RE = /[a-z]/i;
+
+/** Target languages written in CJK, where a CJK answer is a translation rather than an echo. */
+const CJK_TARGET_PREFIXES = ['zh', 'ja', 'ko'];
+
+/**
+ * Whether an engine answered with the source text wearing cosmetic changes.
+ *
+ * Verbatim comparison misses the echo that actually reaches users: measured with Qwen3.5-0.8B under
+ * an `auto` source language, a garbled Chinese bubble came back as `殷想题以限C的人啊` against a
+ * source of `殷想題以限C的人啊` - one glyph normalized, still Chinese, and every exact-match check
+ * called it translated. Comparing writing systems catches it where string equality cannot: an
+ * English answer cannot be half CJK letters.
+ *
+ * @param source - Source line handed to the engine.
+ * @param value - Line the engine returned.
+ * @param targetLangId - Declared target language; a CJK target legitimately answers in CJK.
+ * @returns True when the answer is the source text, verbatim or in substance.
+ */
+export function isUntranslatedEcho(source: string, value: string, targetLangId?: string): boolean {
+  const from = source.trim();
+  const to = value.trim();
+  if (from === to) return true;
+  if (!from || !to) return false;
+
+  const target = (targetLangId || 'en').trim().toLowerCase();
+  if (CJK_TARGET_PREFIXES.some((prefix) => target.startsWith(prefix))) return false;
+  // Only a CJK source can be echoed this way; other scripts keep the verbatim comparison above.
+  if (!CJK_LETTER_RE.test(from)) return false;
+
+  let cjk = 0;
+  let latin = 0;
+  for (const char of to) {
+    if (CJK_LETTER_RE.test(char)) cjk += 1;
+    else if (LATIN_LETTER_RE.test(char)) latin += 1;
+  }
+
+  const letters = cjk + latin;
+  if (letters === 0) return false;
+  return cjk / letters >= SOURCE_SCRIPT_SHARE_FOR_UNTRANSLATED;
+}
+
 /** Minimum character count before a line can claim to be dialogue rather than artwork lettering. */
 export const MIN_NATIVE_DIALOGUE_CHARS = 2;
 

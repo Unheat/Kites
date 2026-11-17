@@ -1,21 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import {
-  sanitizeTypesetText,
-  compactSpecialSymbols,
-  isScanlatorWatermark,
-  isThoughtBubbleTailOrnament,
-  isStandaloneDigitOrOrnamentNoise,
-  isStandaloneDigitOrParticleNoise,
-  cleanStrayOcrArtifacts,
-  isOnomatopoeiaOrShout,
-  isNonLatinSource,
-  hasNativeScriptForLang,
-  stripTrailingWatermarkDebris,
-  isStandaloneNoiseStroke,
-  isComicLetteringFont,
-  formatComicLetteringCasing,
-  CJK_SCRIPT_REGEX,
-} from './textCleaning';
+import { sanitizeTypesetText, compactSpecialSymbols, isScanlatorWatermark, isThoughtBubbleTailOrnament, isStandaloneDigitOrOrnamentNoise, isStandaloneDigitOrParticleNoise, cleanStrayOcrArtifacts, isOnomatopoeiaOrShout, isNonLatinSource, hasNativeScriptForLang, stripTrailingWatermarkDebris, isStandaloneNoiseStroke, isComicLetteringFont, formatComicLetteringCasing, CJK_SCRIPT_REGEX, isUntranslatedEcho } from './textCleaning';
 
 describe('textCleaning', () => {
   describe('isOnomatopoeiaOrShout (text_clean.rs:148 port)', () => {
@@ -278,5 +262,30 @@ describe('textCleaning', () => {
       // Acronyms keep crossbar I
       expect(formatComicLetteringCasing('FBI and CIA agents with AI', true)).toBe('FBI AND CIA AGENTS WiTH AI');
     });
+  });
+});
+
+describe('isUntranslatedEcho', () => {
+  it('counts a verbatim copy as untranslated', () => {
+    expect(isUntranslatedEcho('殷想題以限C的人啊', '殷想題以限C的人啊', 'en')).toBe(true);
+  });
+
+  it('catches the near-echo that string equality missed', () => {
+    // Measured under an auto source language: one glyph normalized, still Chinese, "translated" to
+    // every exact-match check.
+    expect(isUntranslatedEcho('殷想題以限C的人啊', '殷想题以限C的人啊', 'en')).toBe(true);
+  });
+
+  it('accepts a real translation', () => {
+    expect(isUntranslatedEcho('殷想題以限C的人啊', 'I was thinking to limit the person they caught', 'en')).toBe(false);
+  });
+
+  it('accepts Latin or already-English source lines left alone', () => {
+    expect(isUntranslatedEcho('OK', 'OK', 'en')).toBe(true);
+    expect(isUntranslatedEcho('Chapter 12', 'Chapter 12', 'en')).toBe(true);
+  });
+
+  it('does not flag a CJK answer when the target language is CJK', () => {
+    expect(isUntranslatedEcho('殷想題以限C的人啊', '殷想题以限C的人啊', 'zh')).toBe(false);
   });
 });

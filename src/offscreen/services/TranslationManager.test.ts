@@ -210,12 +210,16 @@ describe('TranslationManager Waterfall Logic', () => {
     expect(mocks.instantiatedIds).toEqual(['SmolLM2-135M-Instruct-q0f16-MLC', 'gg-translate']);
   });
 
-  it('reports failure when every engine returns the page untranslated', async () => {
+  it('keeps the untranslated page rather than erroring when no engine is left', async () => {
     respondWith('gg-translate', []);
     mocks.echoAllEngines = true;
 
-    await expect(manager.processTranslation(['こんにちは'], 'ja', 'en'))
-      .rejects.toThrow(/untranslated/);
+    // The waterfall exists to try another engine; once none is left, an honest untranslated page
+    // beats a hard error, and the console says which engine gave up.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await expect(manager.processTranslation(['こんにちは'], 'ja', 'en')).resolves.toEqual(['こんにちは']);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('no engine is left to try'));
+    warn.mockRestore();
   });
 
   it('accepts an answer that leaves only non-source-script text alone', async () => {

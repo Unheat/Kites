@@ -1,7 +1,7 @@
 import type { ITranslationEngine, TranslationOptions } from '../engines/translation/BaseEngine';
 import { getEnabledGlossary } from '../../shared/glossary';
 import { normalizeSourceCasingForMt, normalizeTargetCasing } from '../../shared/utils/casingNormalization';
-import { hasNativeScriptForLang } from '../../shared/utils/textCleaning';
+import { hasNativeScriptForLang, isUntranslatedEcho } from '../../shared/utils/textCleaning';
 import { WebLLMEngine } from '../engines/translation/WebLLMEngine';
 import { GoogleTranslateEngine } from '../engines/translation/GoogleTranslateEngine';
 import { CustomApiEngine } from '../engines/translation/CustomApiEngine';
@@ -27,12 +27,14 @@ type EngineLease = {
  * @param texts - Lines handed to the engine.
  * @param results - Lines the engine returned, index-aligned with `texts`.
  * @param sourceLang - Source language the request declared, or 'auto'.
+ * @param targetLang - Target language the request declared.
  * @returns True when every translatable line came back unchanged.
  */
 export function returnedPageUntranslated(
   texts: readonly string[],
   results: readonly string[],
-  sourceLang: string
+  sourceLang: string,
+  targetLang = 'en'
 ): boolean {
   const sourceIsKnown = Boolean(sourceLang) && sourceLang !== 'auto';
   let translatable = 0;
@@ -44,7 +46,7 @@ export function returnedPageUntranslated(
     if (sourceIsKnown && !hasNativeScriptForLang(text, sourceLang)) continue;
 
     translatable += 1;
-    if ((results[index] ?? '').trim() === text.trim()) unchanged += 1;
+    if (isUntranslatedEcho(text, results[index] ?? '', targetLang)) unchanged += 1;
   }
 
   return translatable > 0 && unchanged === translatable;
@@ -142,6 +144,7 @@ export class TranslationManager {
 
     for (let i = 0; i < engineSequence.length; i++) {
       const engineId = engineSequence[i];
+      const isLastEngine = i === engineSequence.length - 1;
       let lease: EngineLease | null = null;
       try {
         console.log(`[TranslationManager] Attempting translation with engine: ${engineId} (Attempt ${i + 1}/${engineSequence.length})`);
@@ -165,8 +168,16 @@ export class TranslationManager {
 
         // An engine that hands the page back unchanged has failed, however cleanly it responded:
         // letting that through skips the fallback chain and paints the source text as a translation.
-        if (returnedPageUntranslated(normalizedTexts, results, sourceLang)) {
-          throw new Error(`Engine ${engineId} returned every line untranslated`);
+        // With nowhere left to fall, an untranslated page beats an error, so the last engine keeps
+        // its result and says so.
+        if (returnedPageUntranslated(normalizedTexts, results, sourceLang, targetLang)) {
+          if (isLastEngine) {
+            console.warn(
+              `[TranslationManager] Engine ${engineId} returned the page untranslated and no engine is left to try; keeping it.`
+            );
+          } else {
+            throw new Error(`Engine ${engineId} returned every line untranslated`);
+          }
         }
         if (import.meta.env.DEV) {
           const inferMs = performance.now() - inferStart;

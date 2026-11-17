@@ -1,7 +1,10 @@
 import type { ITranslationEngine, TranslationOptions } from './BaseEngine';
 import { buildGlossaryPrompt, GLOSSARY_PROMPT_RULES, getEnabledGlossary, filterRelevantGlossary, type GlossaryEntry } from '../../../shared/glossary';
 import { getLanguageName } from '../../../shared/utils/LanguageRegistry';
-import { hasNativeScriptForLang } from '../../../shared/utils/textCleaning';
+import { hasNativeScriptForLang, isUntranslatedEcho } from '../../../shared/utils/textCleaning';
+
+/** Source-language name shown to the model when the request is in 'auto' mode. */
+export const AUTO_SOURCE_NAME = 'the detected source language';
 import { buildSchema } from '../../../shared/translation/keyedJson';
 import {
   isDeterministicPassthrough,
@@ -89,6 +92,7 @@ interface ChunkPromptContext {
   customPrompt?: string;
   dynamicOverhead: number;
   sourceLangId: string;
+  targetLangId: string;
   recovery?: boolean;
   recoveryAttempt?: number;
 }
@@ -241,6 +245,7 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
         customPrompt,
         dynamicOverhead,
         sourceLangId,
+        targetLangId,
       };
 
       const first = await this.requestChunk(chunk, chunkGlossary, promptContext);
@@ -377,7 +382,9 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
         failed.push(idx);
         continue;
       }
-      if (value === chunk[idx].text && hasNativeScriptForLang(chunk[idx].text, context.sourceLangId)) {
+      // Writing-system comparison, not string equality: a model that normalizes one glyph
+      // (題 -> 题) still handed back Chinese, and exact equality called that translated.
+      if (isUntranslatedEcho(chunk[idx].text, value, context.targetLangId)) {
         failed.push(idx);
       }
     }
@@ -414,7 +421,7 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
    */
   protected resolveLanguage(lang: string | undefined, role: 'source' | 'target'): string {
     if (!lang || lang === 'auto') {
-      return role === 'source' ? 'the detected source language' : 'English';
+      return role === 'source' ? AUTO_SOURCE_NAME : 'English';
     }
     const mapped = getLanguageName(lang);
     return mapped || lang;
