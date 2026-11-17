@@ -220,7 +220,8 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
 
     // 3. Compute dynamic prompt overhead (system prompt + user template + matched glossary + ChatML tokens)
     const emptySystemPrompt = this.buildSystemPrompt(sourceLang, targetLang, activeGlossary, customPrompt);
-    const emptyUserPrompt = `Translate SOURCE from ${sourceLang} to ${targetLang}.\n\nSOURCE:\n{}` + buildGlossaryPrompt(activeGlossary);
+    const emptyUserPrompt =
+      `${this.buildUserInstruction(sourceLang, targetLang)}\n\nSOURCE:\n{}` + buildGlossaryPrompt(activeGlossary);
     const CHATML_FRAMING_TOKENS = 16;
     const dynamicOverhead = estimateTokenCount(emptySystemPrompt) + estimateTokenCount(emptyUserPrompt) + CHATML_FRAMING_TOKENS;
 
@@ -428,6 +429,22 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
   }
 
   /**
+   * Renders the user-turn instruction naming the translation direction.
+   *
+   * The same sentence reaches the model through three paths - the structured request, the legacy
+   * flat prompt, and the token-budget estimate built before any chunk exists. They are rendered by
+   * one function so a wording change cannot leave the estimate describing a prompt that is not sent,
+   * which would silently mis-size every batch against the model context limit.
+   *
+   * @param sourceLang - Resolved source language name.
+   * @param targetLang - Resolved target language name.
+   * @returns One instruction line, without the SOURCE payload or glossary block.
+   */
+  protected buildUserInstruction(sourceLang: string, targetLang: string): string {
+    return `Translate SOURCE from ${sourceLang} to ${targetLang}.`;
+  }
+
+  /**
    * Constructs the legacy flat prompt string fallback.
    *
    * @param chunk - The current chunk of segments to translate.
@@ -450,7 +467,7 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
     });
 
     return (
-      `Translate SOURCE from ${sourceLang} to ${targetLang}.\n\n` +
+      `${this.buildUserInstruction(sourceLang, targetLang)}\n\n` +
       `Return only one JSON object with the exact same keys as SOURCE, mapping each key to its translated text.` +
       (customPrompt?.trim() ? `\n\nAdditional translation guidelines:\n${customPrompt.trim()}` : '') +
       (glossary.length > 0 ? GLOSSARY_PROMPT_RULES : '') + '\n\n' +
@@ -580,7 +597,7 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
       {
         role: 'user',
         content:
-          `Translate SOURCE from ${sourceLang} to ${targetLang}.\n\n` +
+          `${this.buildUserInstruction(sourceLang, targetLang)}\n\n` +
           `SOURCE:\n${JSON.stringify(sourceObj)}` + buildGlossaryPrompt(glossary),
       },
     ];

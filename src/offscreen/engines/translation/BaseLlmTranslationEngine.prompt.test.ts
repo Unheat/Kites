@@ -15,6 +15,32 @@ class PromptOnlyEngine extends BaseLlmTranslationEngine {
   public promptFor(sourceLang: string, targetLang: string): string {
     return this.buildSystemPrompt(sourceLang, targetLang, [], undefined);
   }
+
+  /**
+   * @param sourceLang - Source language name handed to the prompt.
+   * @param targetLang - Target language name handed to the prompt.
+   * @param texts - Segment texts to encode into the SOURCE payload.
+   * @returns The user turn a real request would carry.
+   */
+  public userTurnFor(sourceLang: string, targetLang: string, texts: string[]): string {
+    const messages = this.buildJsonMessages(
+      texts.map((text) => ({ text })) as never,
+      sourceLang,
+      targetLang,
+      [],
+      undefined
+    );
+    return messages[1].content;
+  }
+
+  /**
+   * @param sourceLang - Source language name handed to the prompt.
+   * @param targetLang - Target language name handed to the prompt.
+   * @returns The instruction line used by the batch-sizing estimate.
+   */
+  public estimateInstructionFor(sourceLang: string, targetLang: string): string {
+    return this.buildUserInstruction(sourceLang, targetLang);
+  }
 }
 
 describe('copy rule in the system prompt', () => {
@@ -48,5 +74,24 @@ describe('copy rule in the system prompt', () => {
 
     // isDeterministicPassthrough resolves empty/punctuation/ellipsis before the model is called.
     expect(prompt).not.toContain('punctuation-only');
+  });
+});
+
+describe('user instruction', () => {
+  it('names the resolved direction and carries the SOURCE payload', () => {
+    const userTurn = new PromptOnlyEngine().userTurnFor('Japanese', 'Vietnamese', ['こんにちは']);
+
+    expect(userTurn).toBe('Translate SOURCE from Japanese to Vietnamese.\n\nSOURCE:\n{"b0":"こんにちは"}');
+  });
+
+  it('renders the same instruction the batch-size estimate is computed from', () => {
+    const engine = new PromptOnlyEngine();
+    const instruction = engine.estimateInstructionFor('Chinese', 'Thai');
+    const userTurn = engine.userTurnFor('Chinese', 'Thai', ['你好']);
+
+    // A drifted estimate describes a prompt that is never sent, so every batch is sized against
+    // the wrong context budget. Exact prefix equality is the contract.
+    expect(userTurn.startsWith(`${instruction}\n\nSOURCE:`)).toBe(true);
+    expect(instruction).toBe('Translate SOURCE from Chinese to Thai.');
   });
 });
