@@ -54,8 +54,9 @@ describe('copy rule in the system prompt', () => {
 describe('format rules follow the structured-output tier', () => {
   /** Engine pinned to one structured-output tier, so the prompt can be inspected per tier. */
   class TieredPromptEngine extends BaseLlmTranslationEngine {
-    /** Tier this instance pretends to negotiate. */
-    public tier: 'prompt-only' | 'json-object' | 'json-schema' = 'prompt-only';
+    public constructor(private readonly tier: 'prompt-only' | 'json-object' | 'json-schema') {
+      super();
+    }
 
     protected override promptOutputMode(): 'prompt-only' | 'json-object' | 'json-schema' {
       return this.tier;
@@ -63,15 +64,6 @@ describe('format rules follow the structured-output tier', () => {
 
     protected async requestLlm(): Promise<string> {
       return '{}';
-    }
-
-    /**
-     * @param tier - Structured-output tier to pin this instance to.
-     * @returns This instance, for a one-expression test setup.
-     */
-    public withTier(tier: 'prompt-only' | 'json-object' | 'json-schema'): this {
-      this.tier = tier;
-      return this;
     }
 
     /**
@@ -83,21 +75,21 @@ describe('format rules follow the structured-output tier', () => {
   }
 
   it('keeps both format lines when nothing constrains the output', () => {
-    const prompt = new TieredPromptEngine().withTier('prompt-only').prompt();
+    const prompt = new TieredPromptEngine('prompt-only').prompt();
 
     expect(prompt).toContain('exact same keys as SOURCE');
     expect(prompt).toContain('Output raw JSON only');
   });
 
   it('drops only the raw-JSON guard when the host guarantees JSON syntax', () => {
-    const prompt = new TieredPromptEngine().withTier('json-object').prompt();
+    const prompt = new TieredPromptEngine('json-object').prompt();
 
     expect(prompt).toContain('exact same keys as SOURCE');
     expect(prompt).not.toContain('Output raw JSON only');
   });
 
   it('drops both format lines when decoding constrains the keys', () => {
-    const prompt = new TieredPromptEngine().withTier('json-schema').prompt();
+    const prompt = new TieredPromptEngine('json-schema').prompt();
 
     expect(prompt).not.toContain('exact same keys as SOURCE');
     expect(prompt).not.toContain('Output raw JSON only');
