@@ -96,6 +96,41 @@ describe('CustomApiEngine', () => {
     });
   });
 
+  it('writes the prompt for the tier it will actually request, and still maps the answer', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse(validOpenAiReply));
+    const engine = await createEngine();
+
+    await expect(engine.translate(['hello', 'world'], 'en', 'fr')).resolves.toEqual(['bonjour', 'monde']);
+
+    // Decoding constrains the keys, so the prompt must not spend tokens restating them.
+    const body = JSON.parse(fetchMock.mock.calls[0][1]?.body as string);
+    const systemPrompt = body.messages[0].content as string;
+    expect(body.response_format.type).toBe('json_schema');
+    expect(systemPrompt).not.toContain('exact same keys as SOURCE');
+    expect(systemPrompt).not.toContain('Output raw JSON only');
+    // Content rules are tier-independent and must survive.
+    expect(systemPrompt).toContain('Translate every value.');
+  });
+
+  it('restores the full format rules once a host has degraded to prompt-only', async () => {
+    // Groq answers 400 to json_schema on this model, so the engine retries without response_format.
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(jsonResponse({ error: { message: 'This response_format type is unavailable now' } }, 400))
+      .mockResolvedValueOnce(jsonResponse(validOpenAiReply));
+    const engine = new CustomApiEngine({ ...openAiConfig, provider: 'openai-compatible', baseUrl: 'https://api.groq.com/openai/v1' });
+    await engine.init();
+
+    await expect(engine.translate(['hello', 'world'], 'en', 'fr')).resolves.toEqual(['bonjour', 'monde']);
+
+    const degradedBody = JSON.parse(fetchMock.mock.calls[1][1]?.body as string);
+    const degradedPrompt = degradedBody.messages[0].content as string;
+    expect(degradedBody).not.toHaveProperty('response_format');
+    // Nothing constrains the output now, so the key contract and the raw-JSON guard come back.
+    expect(degradedPrompt).toContain('exact same keys as SOURCE');
+    expect(degradedPrompt).toContain('Output raw JSON only');
+  });
+
   it.each([
     ['openai', validOpenAiReply], ['openai-compatible', validOpenAiReply],
     ['gemini', validGeminiReply], ['claude', validClaudeReply],

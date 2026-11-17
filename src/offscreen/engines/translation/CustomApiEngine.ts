@@ -3,6 +3,7 @@ import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import type { CustomApiConfig } from '../../../shared/types';
 import { resolveStructuredOutputMode, type StructuredOutputModeId } from '../../../shared/customApi';
+import { formatRulesFor } from '../../../shared/translation/outputModes';
 import type { TranslationOptions } from './BaseEngine';
 import { BaseLlmTranslationEngine, type LlmChatMessage } from './BaseLlmTranslationEngine';
 import {
@@ -169,6 +170,19 @@ export class CustomApiEngine extends BaseLlmTranslationEngine {
   }
 
   /**
+   * Prompt events must match what this request will actually send.
+   *
+   * A host on the `json-schema` tier cannot emit a different key or markdown, so carrying those
+   * format rules asks the model to obey instructions the decoder already enforces. The degraded
+   * `prompt-only` path flips back automatically, because it reads the same live tier.
+   *
+   * @returns Tier this request will use.
+   */
+  protected override promptOutputMode(): StructuredOutputModeId {
+    return this.resolveOutputMode();
+  }
+
+  /**
    * Implements the abstract requestLlm method with retry logic for transient errors.
    *
    * @param prompt - The assembled batch prompt string fallback.
@@ -297,11 +311,15 @@ export class CustomApiEngine extends BaseLlmTranslationEngine {
       }
     }
 
+    // The prompt was written for the tier that just failed, so the degraded retry must carry the
+    // rules that tier no longer enforces; otherwise it asks for bare JSON while nothing guarantees it.
+    const degradedMessages = this.withPromptOnlyFormatRules(chatMessages);
+
     const reply = await requestStructuredChatCompletion({
       root,
       apiKey: this.config.apiKey,
       model: this.config.modelName,
-      messages: chatMessages,
+      messages: degradedMessages,
       mode: 'prompt-only',
       schema: schema ?? this.buildEmptySchema(),
       // The rejection may have been caused by the token ceiling parameter itself (reasoning
@@ -312,6 +330,25 @@ export class CustomApiEngine extends BaseLlmTranslationEngine {
     });
     this.logFinishReason(reply.finishReason, undefined);
     return reply.text;
+  }
+
+  /**
+   * Restores the format rules a degraded request needs.
+   *
+   * A schema-tier prompt omits the key contract and the raw-JSON guard because the decoder enforced
+   * them. Once the endpoint has rejected structured output, nothing enforces them any more, so the
+   * rules go back onto the system turn for the retry.
+   *
+   * @param messages - Messages assembled for the tier that failed.
+   * @returns Messages carrying the prompt-only format rules exactly once.
+   */
+  private withPromptOnlyFormatRules(messages: LlmChatMessage[]): LlmChatMessage[] {
+    const [system, ...rest] = messages;
+    if (!system || system.role !== 'system') return messages;
+    if (system.content.includes('exact same keys as SOURCE')) return messages;
+
+    const rules = formatRulesFor('prompt-only').join('\n\n');
+    return [{ role: 'system', content: `${system.content}\n\n${rules}` }, ...rest];
   }
 
   /**

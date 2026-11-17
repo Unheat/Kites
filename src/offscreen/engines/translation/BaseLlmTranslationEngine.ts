@@ -6,6 +6,7 @@ import { hasNativeScriptForLang, isUntranslatedEcho } from '../../../shared/util
 /** Source-language name shown to the model when the request is in 'auto' mode. */
 export const AUTO_SOURCE_NAME = 'the detected source language';
 import { buildSchema } from '../../../shared/translation/keyedJson';
+import { formatRulesFor, type StructuredOutputModeId } from '../../../shared/translation/outputModes';
 import {
   isDeterministicPassthrough,
   countCodePoints,
@@ -413,6 +414,19 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
   ): Promise<string>;
 
   /**
+   * Structured-output tier this engine's prompts are written for.
+   *
+   * Base engines send no structured-output options of their own, so they assume nothing is
+   * guaranteed and keep the full format scaffolding. Engines that negotiate a tier override this
+   * with the tier they will actually request.
+   *
+   * @returns Tier the prompt should be written for.
+   */
+  protected promptOutputMode(): StructuredOutputModeId {
+    return 'prompt-only';
+  }
+
+  /**
    * Resolves language identifiers or codes to human-readable names for LLM prompting.
    *
    * @param lang - Language code or name.
@@ -449,10 +463,14 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
       sourceObj[`b${index}`] = item.text;
     });
 
+    // The flat-string fallback carries the same tier-dependent format rules as the message form.
+    const formatRules = formatRulesFor(this.promptOutputMode());
+    const formatBlock = formatRules.length > 0 ? `${formatRules.join('\n\n')}\n\n` : '';
+
     return (
       `Translate SOURCE from ${sourceLang} to ${targetLang}.\n\n` +
-      `Return only one JSON object with the exact same keys as SOURCE, mapping each key to its translated text.` +
-      (customPrompt?.trim() ? `\n\nAdditional translation guidelines:\n${customPrompt.trim()}` : '') +
+      formatBlock +
+      (customPrompt?.trim() ? `Additional translation guidelines:\n${customPrompt.trim()}\n\n` : '') +
       (glossary.length > 0 ? GLOSSARY_PROMPT_RULES : '') + '\n\n' +
       `SOURCE:\n${JSON.stringify(sourceObj)}` + buildGlossaryPrompt(glossary)
     );
@@ -527,15 +545,18 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
     glossary: readonly GlossaryEntry[] = [],
     customPrompt?: string
   ): string {
+    // Only the output-format scaffolding depends on the tier; the content rules never do.
+    const formatRules = formatRulesFor(this.promptOutputMode());
+    const formatBlock = formatRules.length > 0 ? `${formatRules.join('\n\n')}\n\n` : '';
+
     let prompt =
       `You translate manga/comic OCR text from ${sourceLang} into natural ${targetLang}.\n\n` +
-      `Return only one JSON object with the exact same keys as SOURCE, mapping each key to its translated text.\n\n` +
+      formatBlock +
       `Rules:\n` +
       `- Write translations using natural sentence capitalization (capitalize only sentence starts and proper nouns).\n` +
       `- Keep every key from SOURCE unchanged; do not add, omit, merge, or rename keys.\n` +
       `- Use surrounding values for dialogue context, natural tone, and pronouns.\n` +
-      `- Translate every value. Only return a value unchanged when it has no words at all or is already in ${targetLang}; translate damaged or garbled text as best you can.\n` +
-      `- Output raw JSON only. Do not add markdown code fences, explanations, or commentary.`;
+      `- Translate every value. Only return a value unchanged when it has no words at all or is already in ${targetLang}; translate damaged or garbled text as best you can.`;
 
     if (customPrompt?.trim()) {
       prompt += `\n\nAdditional translation guidelines:\n${customPrompt.trim()}`;
