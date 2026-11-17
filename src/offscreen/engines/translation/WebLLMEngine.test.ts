@@ -114,22 +114,27 @@ describe('WebLLMEngine Keyed JSON Protocol', () => {
     expect(JSON.parse(payload.response_format.schema).required).toEqual(['b0']);
   });
 
-  it('gracefully yields model output with original text fallback when a local model drops a translation line', async () => {
+  it('recovers a dropped line with one follow-up, and keeps source text only if that also fails', async () => {
     const inputs = ['Text 1', 'Text 2'];
 
-    // Missing b1
-    mockCreate.mockResolvedValue({
-      choices: [
-        {
-          message: {
-            content: JSON.stringify({ b0: 'Translated 1' }),
-          },
-        },
-      ],
-    });
+    // First pass drops b1; the follow-up (which carries only b1, re-keyed as b0) answers it.
+    mockCreate
+      .mockResolvedValueOnce({ choices: [{ message: { content: JSON.stringify({ b0: 'Translated 1' }) } }] })
+      .mockResolvedValueOnce({ choices: [{ message: { content: JSON.stringify({ b0: 'Translated 2' }) } }] });
 
-    const results = await engine.translate(inputs);
-    expect(results).toEqual(['Translated 1', 'Text 2']);
+    const recovered = await engine.translate(inputs);
+    expect(recovered).toEqual(['Translated 1', 'Translated 2']);
+    expect(mockCreate).toHaveBeenCalledTimes(2);
+
+    // A follow-up that echoes the requested line leaves the source intact rather than inventing text.
+    mockCreate.mockReset();
+    mockCreate
+      .mockResolvedValueOnce({ choices: [{ message: { content: JSON.stringify({ b0: 'Translated 1' }) } }] })
+      .mockResolvedValue({ choices: [{ message: { content: JSON.stringify({ b0: 'Text 2' }) } }] });
+    const unrecovered = await engine.translate(inputs);
+    expect(unrecovered).toEqual(['Translated 1', 'Text 2']);
+    // mockReset cleared the counter: one first pass plus one follow-up.
+    expect(mockCreate).toHaveBeenCalledTimes(2);
   });
 
   it('gracefully preserves original text for missing slots in large batches without throwing', async () => {
@@ -151,7 +156,7 @@ describe('WebLLMEngine Keyed JSON Protocol', () => {
     expect(mockCreate).not.toHaveBeenCalled();
   });
 
-  it('handles finish_reason: length cleanly and falls back to original text for missing slots', async () => {
+  it('handles finish_reason: length cleanly, recovering the truncated slot or keeping its source', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     mockCreate.mockResolvedValueOnce({
       choices: [
@@ -161,9 +166,13 @@ describe('WebLLMEngine Keyed JSON Protocol', () => {
         },
       ],
     });
+    // The recovery pass is not truncated: the slot that the cut-off swallowed comes back.
+    mockCreate.mockResolvedValueOnce({
+      choices: [{ message: { content: JSON.stringify({ b0: 'and the second' }) }, finish_reason: 'stop' }],
+    });
 
     const results = await engine.translate(['First text', 'Second text']);
-    expect(results).toEqual(['translated', 'Second text']);
+    expect(results).toEqual(['translated', 'and the second']);
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining('hit max_tokens limit')
     );

@@ -21,8 +21,15 @@ import {
 class ScriptedEngine extends BaseLlmTranslationEngine {
   public readonly requests: { messages: LlmChatMessage[] | undefined; maxTokens: number | undefined }[] = [];
 
-  constructor(private readonly script: string[], batchSize = 15) {
+  private readonly script: string[];
+
+  /**
+   * @param script - Canned completion payloads, consumed in call order.
+   * @param batchSize - Segments per request; kept small so tests stage one chunk per case.
+   */
+  constructor(script: string[], batchSize = 15) {
     super();
+    this.script = script;
     this.batchSize = batchSize;
   }
 
@@ -79,8 +86,12 @@ describe('recovery of slots the model skipped or echoed', () => {
     expect(sourceOf(engine, 1)).toEqual({ b0: 'この野郎' });
   });
 
-  it('spends at most one retry per translate call when the model keeps failing', async () => {
-    const engine = new ScriptedEngine(['{"b0":"I like cats."}', '{"b0":"still wrong"}'], 2);
+  it('stops after one recovery request when the model repeats the same failure', async () => {
+    // The retry echoes the source again: nothing was recovered, and asking a third time would not help.
+    const engine = new ScriptedEngine([
+      '{"b0":"I like cats.","b1":"犬が好き"}',
+      '{"b0":"犬が好き"}',
+    ], 2);
 
     const out = await engine.translate(['猫が好き', '犬が好き'], 'ja', 'en');
 
@@ -97,19 +108,30 @@ describe('recovery of slots the model skipped or echoed', () => {
     expect(engine.requests).toHaveLength(1);
   });
 
-  it('caps the retry budget so a systematically bad model cannot multiply the page cost', async () => {
-    // Every slot fails; 20 slots would need three follow-ups at MAX_RETRY_SEGMENTS each.
+  it('skips recovery entirely when a page lost more slots than the budget allows', async () => {
+    // 20 lost slots is a broken model, not an accident: the established policy is to tolerate the
+    // loss rather than pay for a second pass that would fail the same way.
     const sources = Array.from({ length: 20 }, (_, i) => `台詞${i}`);
-    const engine = new ScriptedEngine(['{}', '{}', '{}', '{}'], 20);
+    const echoAll = (texts: string[]) =>
+      JSON.stringify(Object.fromEntries(texts.map((text, i) => [`b${i}`, text])));
+    const engine = new ScriptedEngine([echoAll(sources)], 20);
 
     const out = await engine.translate(sources, 'ja', 'en');
 
-    expect(engine.requests.length).toBeLessThanOrEqual(1 + MAX_RETRY_REQUESTS);
+    expect(engine.requests).toHaveLength(1);
     expect(out).toEqual(sources);
-    // Never ask for more than the segment cap in one follow-up.
-    for (let i = 1; i < engine.requests.length; i += 1) {
-      expect(Object.keys(sourceOf(engine, i)).length).toBeLessThanOrEqual(MAX_RETRY_SEGMENTS);
-    }
+  });
+
+  it('spends exactly one follow-up, capped in size, when the loss is small', async () => {
+    const sources = Array.from({ length: 3 }, (_, i) => `台詞${i}`);
+    const engine = new ScriptedEngine(['{"b0":"first"}', '{"b0":"second","b1":"third"}'], 3);
+
+    const out = await engine.translate(sources, 'ja', 'en');
+
+    expect(engine.requests).toHaveLength(1 + MAX_RETRY_REQUESTS);
+    expect(Object.keys(sourceOf(engine, 1))).toHaveLength(2);
+    expect(Object.keys(sourceOf(engine, 1)).length).toBeLessThanOrEqual(MAX_RETRY_SEGMENTS);
+    expect(out).toEqual(['first', 'second', 'third']);
   });
 
   it('does not spend a retry on a slot that holds no source-language text', async () => {
