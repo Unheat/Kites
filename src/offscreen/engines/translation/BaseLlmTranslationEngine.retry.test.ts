@@ -22,15 +22,18 @@ class ScriptedEngine extends BaseLlmTranslationEngine {
   public readonly requests: { messages: LlmChatMessage[] | undefined; maxTokens: number | undefined }[] = [];
 
   private readonly script: string[];
+  private readonly responder?: (call: number) => string | undefined;
 
   /**
    * @param script - Canned completion payloads, consumed in call order.
    * @param batchSize - Segments per request; kept small so tests stage one chunk per case.
+   * @param responder - Optional per-call override, for cases that need the call number.
    */
-  constructor(script: string[], batchSize = 15) {
+  constructor(script: string[], batchSize = 15, responder?: (call: number) => string | undefined) {
     super();
     this.script = script;
     this.batchSize = batchSize;
+    this.responder = responder;
   }
 
   protected async requestLlm(
@@ -41,7 +44,8 @@ class ScriptedEngine extends BaseLlmTranslationEngine {
     maxTokens?: number
   ): Promise<string> {
     this.requests.push({ messages, maxTokens });
-    return this.script.shift() ?? '{}';
+    const override = this.responder?.(this.requests.length);
+    return override ?? this.script.shift() ?? '{}';
   }
 }
 
@@ -108,9 +112,9 @@ describe('recovery of slots the model skipped or echoed', () => {
     expect(engine.requests).toHaveLength(1);
   });
 
-  it('skips recovery entirely when a page lost more slots than the budget allows', async () => {
-    // 20 lost slots is a broken model, not an accident: the established policy is to tolerate the
-    // loss rather than pay for a second pass that would fail the same way.
+  it('skips recovery entirely when a page lost most of its slots', async () => {
+    // Every slot lost is a broken model, not an accident: the established policy is to tolerate
+    // the loss rather than pay for a second pass that would fail the same way.
     const sources = Array.from({ length: 20 }, (_, i) => `台詞${i}`);
     const echoAll = (texts: string[]) =>
       JSON.stringify(Object.fromEntries(texts.map((text, i) => [`b${i}`, text])));
@@ -122,16 +126,33 @@ describe('recovery of slots the model skipped or echoed', () => {
     expect(out).toEqual(sources);
   });
 
-  it('spends exactly one follow-up, capped in size, when the loss is small', async () => {
-    const sources = Array.from({ length: 3 }, (_, i) => `台詞${i}`);
-    const engine = new ScriptedEngine(['{"b0":"first"}', '{"b0":"second","b1":"third"}'], 3);
+  it('spends exactly one follow-up, capped in size, when the loss is a minority of the page', async () => {
+    const sources = Array.from({ length: 4 }, (_, i) => `台詞${i}`);
+    const engine = new ScriptedEngine(['{"b0":"first","b1":"second","b2":"third"}', '{"b0":"fourth"}'], 4);
 
     const out = await engine.translate(sources, 'ja', 'en');
 
     expect(engine.requests).toHaveLength(1 + MAX_RETRY_REQUESTS);
-    expect(Object.keys(sourceOf(engine, 1))).toHaveLength(2);
+    expect(Object.keys(sourceOf(engine, 1))).toHaveLength(1);
     expect(Object.keys(sourceOf(engine, 1)).length).toBeLessThanOrEqual(MAX_RETRY_SEGMENTS);
-    expect(out).toEqual(['first', 'second', 'third']);
+    expect(out).toEqual(['first', 'second', 'third', 'fourth']);
+  });
+
+  it('recovers a whole tail chunk, the shape a real local model produced', async () => {
+    // A 0.8B model translated eight of twelve lines and echoed the four-line tail chunk back
+    // unchanged (measured). Four of twelve is a minority, so it must be worth one follow-up.
+    const sources = Array.from({ length: 12 }, (_, i) => `台詞${i}`);
+    const firstPass = Object.fromEntries(sources.slice(0, 8).map((_, i) => [`b${i}`, `line ${i}`]));
+    const engine = new ScriptedEngine([JSON.stringify(firstPass), ''], 12, (call) => {
+      // The second page-less call answers the four lost slots.
+      if (call === 2) return JSON.stringify({ b0: 'run!', b1: 'damn', b2: 'well done', b3: 'not next time' });
+      return undefined;
+    });
+
+    const out = await engine.translate(sources, 'ja', 'en');
+
+    expect(Object.keys(sourceOf(engine, 1))).toHaveLength(4);
+    expect(out.slice(8)).toEqual(['run!', 'damn', 'well done', 'not next time']);
   });
 
   it('does not spend a retry on a slot that holds no source-language text', async () => {
