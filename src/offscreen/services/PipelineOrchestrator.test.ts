@@ -438,6 +438,41 @@ describe('PipelineOrchestrator', () => {
     bitmapSpy.mockRestore(); blobSpy.mockRestore(); renderSpy.mockRestore();
   });
 
+  it('never sends preserved artwork or fragments to the translator', async () => {
+    ((db.images as any).first as any).mockResolvedValue({ id: 78, jobId: 7800,
+      rawImageBlob: new Blob(['fake image data'], { type: 'image/png' }) });
+    vi.spyOn(chrome.runtime, 'sendMessage').mockImplementation((_message: any, callback: any) => {
+      callback?.({ activeInpaintId: 'none', bubbleMode: 'off', targetLang: 'en' });
+    });
+    const bitmapSpy = vi.spyOn(global, 'createImageBitmap').mockResolvedValue(createCanvas(200, 200) as any);
+    withOwnership({
+      texts: ['ドン', 'テスト', '断片'],
+      boxes: [{ x: 10, y: 10, w: 60, h: 60 }, { x: 10, y: 90, w: 60, h: 60 }, { x: 10, y: 170, w: 60, h: 20 }],
+      polygons: [
+        [{ x: 10, y: 10 }, { x: 70, y: 10 }, { x: 70, y: 70 }, { x: 10, y: 70 }],
+        [{ x: 10, y: 90 }, { x: 70, y: 90 }, { x: 70, y: 150 }, { x: 10, y: 150 }],
+        [{ x: 10, y: 170 }, { x: 70, y: 170 }, { x: 70, y: 190 }, { x: 10, y: 190 }],
+      ],
+      // Index 0 is a sound effect kept as artwork, index 2 an OCR fragment: neither carries dialogue.
+      artwork: [{ index: 0, kind: 'sound-effect' }, { index: 2, kind: 'fragment' }],
+    });
+    const processTranslation = vi.fn().mockResolvedValue(['Hello']);
+    (pipelineOrchestrator.getTranslationManager().processTranslation as any) = processTranslation;
+    const blobSpy = vi.spyOn(pipelineOrchestrator as any, 'blobToArrayBuffer').mockResolvedValue(new ArrayBuffer(8));
+    const renderSpy = vi.spyOn(canvasTypesetting, 'renderTextBlocksBatch');
+
+    await pipelineOrchestrator.runPipeline(7800);
+
+    // Only the dialogue line is translated; paying tokens for brush lettering buys nothing
+    //, because the result is discarded at render time.
+    expect(processTranslation.mock.calls[0][0]).toEqual(['テスト']);
+    const saved = vi.mocked(db.textBlocks.bulkAdd).mock.calls[0][0] as any[];
+    expect(saved.map((block) => block.originalText)).toEqual(['ドン', 'テスト', '断片']);
+    expect(saved.map((block) => block.isArtwork)).toEqual([true, false, true]);
+    expect((renderSpy.mock.calls[0][1] as any[]).map((item) => item.originalText)).toEqual(['テスト']);
+    bitmapSpy.mockRestore(); blobSpy.mockRestore(); renderSpy.mockRestore();
+  });
+
   it('maps actual render metadata by OCR index and retains fallback only for skipped blocks', async () => {
     ((db.images as any).first as any).mockResolvedValue({ id: 8, jobId: 800,
       rawImageBlob: new Blob(['fake image data'], { type: 'image/png' }) });
