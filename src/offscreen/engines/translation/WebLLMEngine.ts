@@ -1,4 +1,5 @@
 import { MLCEngine, CreateMLCEngine } from '@mlc-ai/web-llm';
+import { ProgressWatchdog } from './ProgressWatchdog';
 import {
   BaseLlmTranslationEngine,
   maxTokensForBatch,
@@ -22,11 +23,66 @@ const WEBLLM_TEMPERATURE = 0;
 
 export const WEBLLM_RETRY_BATCH_SPLIT = 3;
 
-/** Maximum watchdog timer in milliseconds to prevent runaway GPU loops (30s for full page batches) */
-const MAX_WATCHDOG_DEADLINE_MS = 30000;
+/**
+ * Longest silence tolerated between two streamed tokens before the generation is interrupted.
+ *
+ * A working local model emits a token well within a second; five seconds of silence means the
+ * kernel or the device is stuck, independent of how long the whole answer is allowed to be.
+ */
+export const WEBLLM_IDLE_DEADLINE_MS = 15_000;
 
-/** Minimum watchdog timer in milliseconds for small batches to enable fast error recovery */
-const MIN_WATCHDOG_DEADLINE_MS = 10000;
+/**
+ * Absolute ceiling for one generation, so a model that keeps trickling tokens cannot hold the GPU
+ * indefinitely. Sized for the largest batch the 1024-token context window allows on slow hardware.
+ */
+export const WEBLLM_MAX_GENERATION_MS = 180_000;
+
+/** What one completion produced, whether it arrived streamed or in a single reply. */
+interface CollectedCompletion {
+  content: string;
+  finishReason: string | undefined;
+  completionTokens: number | undefined;
+}
+
+/**
+ * Reads a completion to the end, signalling each streamed token to the watchdog.
+ *
+ * The runtime returns an async iterable when streaming is requested; a single reply object is still
+ * accepted so tests, older weights, and any non-streaming build keep working. Without a stream the
+ * watchdog only sees the finished answer, which is why streaming is requested in the first place.
+ *
+ * @param reply - Async iterable of completion chunks, or one complete completion.
+ * @param watchdog - Watchdog to re-arm whenever tokens arrive.
+ * @returns Accumulated content, finish reason, and reported token usage.
+ */
+async function collectCompletion(
+  reply: unknown,
+  watchdog: ProgressWatchdog
+): Promise<CollectedCompletion> {
+  if (reply !== null && typeof reply === 'object' && Symbol.asyncIterator in reply) {
+    let content = '';
+    let finishReason: string | undefined;
+    let completionTokens: number | undefined;
+
+    for await (const chunk of reply as AsyncIterable<any>) {
+      watchdog.touch();
+      const choice = chunk.choices?.[0];
+      const delta = choice?.delta?.content;
+      if (typeof delta === 'string') content += delta;
+      if (choice?.finish_reason) finishReason = choice.finish_reason;
+      if (chunk.usage?.completion_tokens !== undefined) completionTokens = chunk.usage.completion_tokens;
+    }
+
+    return { content, finishReason, completionTokens };
+  }
+
+  const choice = (reply as any)?.choices?.[0];
+  return {
+    content: choice?.message?.content || '',
+    finishReason: choice?.finish_reason,
+    completionTokens: (reply as any)?.usage?.completion_tokens,
+  };
+}
 
 export class WebLLMEngine extends BaseLlmTranslationEngine {
   private engine: MLCEngine | null = null;
@@ -205,17 +261,16 @@ export class WebLLMEngine extends BaseLlmTranslationEngine {
       };
     }
 
-    // Dynamic watchdog timer: interrupt runaway GPU generation if deadline exceeded
-    const dynamicDeadlineMs = Math.min(
-      MAX_WATCHDOG_DEADLINE_MS,
-      Math.max(MIN_WATCHDOG_DEADLINE_MS, 4000 + dynamicMaxTokens * 30)
-    );
-    const runawayTimer = setTimeout(() => {
-      if (this.engine) {
-        console.warn(`[WebLLMEngine] Watchdog deadline (${dynamicDeadlineMs}ms) exceeded; interrupting generation.`);
-        void this.engine.interruptGenerate();
-      }
-    }, dynamicDeadlineMs);
+    // Progress-based watchdog: interrupt when the model stops producing tokens, not when the
+    // answer merely takes longer than a guessed token rate would allow.
+    const watchdog = new ProgressWatchdog(WEBLLM_IDLE_DEADLINE_MS, WEBLLM_MAX_GENERATION_MS, (reason) => {
+      console.warn(
+        reason === 'idle'
+          ? `[WebLLMEngine] No token for ${WEBLLM_IDLE_DEADLINE_MS}ms; interrupting a stuck generation.`
+          : `[WebLLMEngine] Generation exceeded the ${WEBLLM_MAX_GENERATION_MS}ms ceiling; interrupting.`
+      );
+      if (this.engine) void this.engine.interruptGenerate();
+    }).start();
 
     const handleAbort = () => {
       if (this.engine) void this.engine.interruptGenerate();
@@ -231,21 +286,20 @@ export class WebLLMEngine extends BaseLlmTranslationEngine {
 
     const chunkStart = import.meta.env.DEV ? performance.now() : 0;
     try {
-      const reply = await this.engine.chat.completions.create(completionOptions);
-      clearTimeout(runawayTimer);
+      // Streaming is what makes a progress watchdog possible: without it the only observable
+      // event is the finished answer, which is exactly the moment the watchdog is too late.
+      const reply = await this.engine.chat.completions.create({ ...completionOptions, stream: true });
+      const { content: rawOutput, finishReason, completionTokens } = await collectCompletion(reply, watchdog);
+      watchdog.stop();
 
-      const choice = reply.choices[0];
-      const finishReason = choice?.finish_reason;
       if (finishReason === 'length') {
         console.warn(
           `[WebLLMEngine] Generation hit max_tokens limit (${dynamicMaxTokens}). Output may be truncated.`
         );
       }
 
-      const rawOutput = choice?.message?.content || '';
       if (import.meta.env.DEV) {
         const chunkMs = performance.now() - chunkStart;
-        const completionTokens = (reply as any).usage?.completion_tokens;
         const tokPerSec = completionTokens ? (completionTokens / (chunkMs / 1000)).toFixed(1) : 'n/a';
         console.log(
           `[WebLLMEngine] Batch in ${chunkMs.toFixed(2)}ms (${completionTokens ?? '?'} completion tokens, ${tokPerSec} tok/s).\n` +
@@ -255,7 +309,7 @@ export class WebLLMEngine extends BaseLlmTranslationEngine {
 
       return rawOutput;
     } catch (err) {
-      clearTimeout(runawayTimer);
+      watchdog.stop();
       console.error('[WebLLMEngine] Completion request failed:', err);
       throw err;
     } finally {

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { WebLLMEngine } from './WebLLMEngine';
+import { WebLLMEngine, WEBLLM_IDLE_DEADLINE_MS, WEBLLM_MAX_GENERATION_MS } from './WebLLMEngine';
 
 // 1. Mock the @mlc-ai/web-llm module
 const mockCreate = vi.fn();
@@ -178,7 +178,62 @@ describe('WebLLMEngine Keyed JSON Protocol', () => {
     );
   });
 
-  it('configures bounded batch size, strict input token budget, and 1024 context window for WebGPU', () => {
+  it('streams tokens through the watchdog instead of interrupting a slow but progressing batch', async () => {
+    vi.useFakeTimers();
+    const interruptGenerate = vi.fn();
+    (engine as any).engine.interruptGenerate = interruptGenerate;
+
+    // 100 tokens, one every 50ms: 5s of generation, far past the old 30ms-per-token deadline for
+    // a small batch (4.24s) but never silent for longer than the idle window.
+    mockCreate.mockImplementation(async () => {
+      async function* tokens() {
+        for (let i = 0; i < 100; i += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          yield { choices: [{ delta: { content: 'x' }, finish_reason: i === 99 ? 'stop' : null }] };
+        }
+      }
+      return tokens();
+    });
+
+    const pending = engine.translate(['台詞'], 'ja', 'en');
+    await vi.advanceTimersByTimeAsync(6_000);
+    await expect(pending).resolves.toHaveLength(1);
+
+    expect(interruptGenerate).not.toHaveBeenCalled();
+    expect(WEBLLM_IDLE_DEADLINE_MS).toBeLessThan(WEBLLM_MAX_GENERATION_MS);
+    // The streamed answer is what the keyed parser receives, not an empty string.
+    expect(mockCreate.mock.calls[0][0]).toMatchObject({ stream: true });
+    vi.useRealTimers();
+  });
+
+  it('interrupts a generation that stops producing tokens', async () => {
+    vi.useFakeTimers();
+    // Real WebLLM fails the in-flight stream when interrupted; the stub does the same so the
+    // test observes the interruption instead of hanging on a frozen generator.
+    let interrupted = false;
+    (engine as any).engine.interruptGenerate = vi.fn(() => { interrupted = true; });
+
+    mockCreate.mockImplementation(async () => {
+      async function* stuck() {
+        yield { choices: [{ delta: { content: '{' }, finish_reason: null }] };
+        while (true) {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          if (interrupted) throw new Error('Generation interrupted');
+        }
+      }
+      return stuck();
+    });
+
+    const pending = engine.translate(['台詞'], 'ja', 'en');
+    const expectation = expect(pending).rejects.toThrow();
+    await vi.advanceTimersByTimeAsync(WEBLLM_IDLE_DEADLINE_MS + 2000);
+    await expectation;
+
+    expect(interrupted).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it('configures bounded batch size, strict input token budget, and 1024 context window for WebGPU', async () => {
     expect((engine as any).batchSize).toBe(8);
     expect((engine as any).maxInputTokens).toBe(550);
     expect((engine as any).maxContextWindow).toBe(1024);
