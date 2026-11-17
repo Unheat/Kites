@@ -38,9 +38,6 @@ class MockLlmEngine extends BaseLlmTranslationEngine {
     return this.mockResponse;
   }
 
-  public setAllowPartialMissingLines(value: boolean): void {
-    this.allowPartialMissingLines = value;
-  }
 }
 
 describe('isDeterministicPassthrough', () => {
@@ -304,7 +301,6 @@ describe('BaseLlmTranslationEngine Keyed JSON Protocol', () => {
 
   it('yields model output with source fallback rather than rejecting when missing lines occur', async () => {
     const engine = new MockLlmEngine(15, false);
-    engine.setAllowPartialMissingLines(false);
     engine.mockResponse = JSON.stringify({ b0: 'Deliver the best', b1: 'Haha, top' }); // missing b2
 
     const result = await engine.translate(['日本語1', '日本語2', '日本語3'], 'ja', 'en');
@@ -313,7 +309,6 @@ describe('BaseLlmTranslationEngine Keyed JSON Protocol', () => {
 
   it('does not treat Latin source text as a dropped line when translated to English verbatim', async () => {
     const engine = new MockLlmEngine(15, false);
-    engine.setAllowPartialMissingLines(false);
     // English source text retained verbatim by the LLM
     engine.mockResponse = JSON.stringify({ b0: 'Custom Angle', b1: 'Rotate Down' });
 
@@ -329,7 +324,6 @@ describe('BaseLlmTranslationEngine Keyed JSON Protocol', () => {
 
   it('accepts batches meeting ~90% accuracy without throwing expensive split-retry errors', async () => {
     const engine = new MockLlmEngine(15, false);
-    engine.setAllowPartialMissingLines(false);
     // 10 items: 9 translated, 1 dropped (b9 missing) -> 90% accuracy (drop ratio = 0.10 <= 0.15)
     const mockRes: Record<string, string> = {};
     for (let i = 0; i < 9; i++) {
@@ -367,7 +361,6 @@ describe('BaseLlmTranslationEngine Keyed JSON Protocol', () => {
 
   it('gracefully yields model output with original source fallback when dropped lines exceed tolerance (>15%)', async () => {
     const engine = new MockLlmEngine(15, false);
-    engine.setAllowPartialMissingLines(false);
     // 10 items: 7 translated, 3 dropped -> 70% accuracy (drop ratio = 0.30 > 0.15)
     const mockRes: Record<string, string> = {};
     for (let i = 0; i < 7; i++) {

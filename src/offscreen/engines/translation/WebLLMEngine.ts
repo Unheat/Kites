@@ -111,7 +111,6 @@ export class WebLLMEngine extends BaseLlmTranslationEngine {
     this.maxInputTokens = DEFAULT_WEBLLM_MAX_INPUT_TOKENS;
     this.maxContextWindow = 1024;
     this.throwOnCountMismatch = false;
-    this.allowPartialMissingLines = true;
   }
 
   /**

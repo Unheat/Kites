@@ -37,13 +37,6 @@ export interface LlmChatMessage {
   content: string;
 }
 
-/**
- * Maximum acceptable ratio of dropped lines before failing a strict batch (15% drop = 85-90% accuracy).
- * Allows real-time translation to proceed swiftly when the vast majority of lines succeeded,
- * avoiding expensive full-page re-inference loops.
- */
-export const MAX_UNTRANSLATED_TOLERANCE_RATIO = 0.15;
-
 /** Minimum chunk size to apply drop tolerance; smaller batches (1-5) require 100% key survival */
 export const MIN_CHUNK_SIZE_FOR_DROP_TOLERANCE = 6;
 
@@ -67,9 +60,8 @@ export const MAX_RETRY_SEGMENTS = 8;
 /**
  * Maximum recovery requests per `translate()` call, across all chunks of the page.
  *
- * One only. The expensive-follow-up policy this file already encodes (see
- * `MAX_UNTRANSLATED_TOLERANCE_RATIO`) exists because a model that drops many lines will drop them
- * again; recovery is for the one or two accidental losses that make a page look untranslated.
+ * One only, and it samples differently from the first pass (`LlmRequestHints.recovery`), because a
+ * model that echoed a line once will echo it again when asked the same way.
  */
 export const MAX_RETRY_REQUESTS = 1;
 
@@ -144,13 +136,6 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
    * without incurring costly resend overhead or aborting the full translation.
    */
   protected throwOnCountMismatch = false;
-
-  /**
-   * Whether a model is allowed to preserve dropped slots when every translation survived.
-   * Defaults to true so remote APIs or general engines fall back gracefully to source text for missing keys.
-   * WebLLM overrides this to false to trigger split-retry logic on dropped lines.
-   */
-  protected allowPartialMissingLines = true;
 
   /**
    * Whether strict keyed parsing policy is enforced.
