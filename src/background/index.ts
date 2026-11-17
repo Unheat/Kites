@@ -25,16 +25,10 @@ registerReadingCommands();
  * How long a job may stay in an in-flight status ('processing'/'downloading') before the
  * queue assumes its owning offscreen document died and reclaims the concurrency slot.
  *
- * Sized at 2 minutes (twice SINGLE_JOB_TIMEOUT_MS of 60s) to guard against dead slots
+ * Sized at 2 minutes (twice JOB_STALL_TIMEOUT_MS of 60s) to guard against dead slots
  * when an offscreen task is terminated or crashes.
  */
 const STALE_JOB_TIMEOUT_MS = 2 * 60 * 1000;
-
-/**
- * Maximum time in milliseconds to wait for a single translation job to complete
- * before timing out and releasing the concurrency queue slot.
- */
-const SINGLE_JOB_TIMEOUT_MS = 60 * 1000;
 
 /**
  * Interval in milliseconds between retries when waiting for the offscreen document
@@ -54,6 +48,68 @@ const OFFSCREEN_HEALTH_CHECK_TIMEOUT_MS = 3 * 1000;
  * Chrome has settled the teardown before the replacement document is created.
  */
 const OFFSCREEN_RECREATE_DELAY_MS = 500;
+
+/**
+ * Silence tolerated while waiting for a job before the wait is abandoned.
+ *
+ * A first-run job spends minutes fetching model weights, so "the job is taking a while" and
+ * "the job is dead" cannot be told apart by elapsed time alone. The offscreen document already
+ * broadcasts download and initialization progress; as long as those keep arriving, the job is
+ * alive and its wait is extended. This window bounds how long the extension will believe that.
+ */
+export const JOB_STALL_TIMEOUT_MS = 60 * 1000;
+
+/**
+ * Absolute ceiling for a single job wait, no matter how much progress it reports.
+ *
+ * Bounded on purpose: a wedged download that keeps emitting progress events still cannot hold a
+ * queue slot forever.
+ */
+export const MAX_JOB_WAIT_MS = 15 * 60 * 1000;
+
+/**
+ * Length of one progress check while waiting on a job.
+ */
+const JOB_PROGRESS_SLICE_MS = 5000;
+
+/**
+ * Timestamp of the last progress event received from the offscreen document.
+ *
+ * Kept in memory rather than in the database: it is read on every wait slice and its only job is
+ * to answer "is this document still doing something?".
+ */
+let lastOffscreenActivityAt = Date.now();
+
+/**
+ * Records that the offscreen document reported observable progress.
+ *
+ * @param at - Timestamp of the event; defaults to now.
+ */
+export function noteOffscreenActivity(at: number = Date.now()): void {
+  lastOffscreenActivityAt = at;
+}
+
+/**
+ * Reads when the offscreen document last reported progress.
+ *
+ * @returns The timestamp recorded by the most recent progress event.
+ */
+export function offscreenActivityAt(): number {
+  return lastOffscreenActivityAt;
+}
+
+/**
+ * Describes how long a job wait may be extended by reported progress.
+ *
+ * @property stallTimeoutMs - Silence tolerated before the wait is abandoned.
+ * @property maxTotalMs - Absolute ceiling for the whole wait.
+ * @property readActivityAt - Returns the timestamp of the last observed progress.
+ */
+export interface JobProgressBudget {
+  stallTimeoutMs: number;
+  maxTotalMs: number;
+  readActivityAt: () => number;
+}
 
 /**
  * Removes translation engines that are no longer supported from stored popup settings
@@ -231,6 +287,12 @@ chrome.contextMenus.onClicked.addListener(async (info: chrome.contextMenus.OnCli
 
 // Forward messages from content script or offscreen to popup
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  // Model download and initialization events are the only liveness signal a first-run job has:
+  // they keep its wait alive instead of failing it for taking longer than a normal page.
+  if (message?.source === 'offscreen') {
+    noteOffscreenActivity();
+  }
+
   if (
     message.type === 'MODEL_INITIALIZATION' &&
     message.target === 'background' &&
@@ -756,6 +818,80 @@ export async function recreateOffscreenDocument(): Promise<void> {
   console.log('[Background] Offscreen document recreated after unresponsive state.');
 }
 
+/** Outcome of one `chrome.runtime.sendMessage` call, safe to await more than once. */
+type SendOutcome = { status: 'ok'; value: any } | { status: 'error'; error: Error };
+
+/**
+ * Sends one message to the offscreen document, resolving to its outcome.
+ *
+ * Never rejects: the caller decides whether an error is retryable, and awaiting the same promise
+ * from several wait slices must not produce unhandled rejections.
+ *
+ * @param message - The message object to send to the offscreen document.
+ * @returns The response, or the error that prevented one.
+ */
+function sendOffscreenOnce(message: any): Promise<SendOutcome> {
+  return new Promise<SendOutcome>((resolve) => {
+    chrome.runtime.sendMessage({ ...message, target: 'offscreen', source: 'background', request: true }, (res) => {
+      if (chrome.runtime.lastError) {
+        resolve({ status: 'error', error: new Error(chrome.runtime.lastError.message) });
+      } else if (res === undefined) {
+        resolve({ status: 'error', error: new Error(`Offscreen returned no response for ${message.type}`) });
+      } else {
+        resolve({ status: 'ok', value: res });
+      }
+    });
+  });
+}
+
+/**
+ * Waits for an offscreen job response for as long as the job keeps reporting progress.
+ *
+ * Elapsed time alone cannot separate "a first-run job is fetching model weights" from "the job is
+ * dead", so the wait is extended while progress events keep arriving, abandoned after
+ * `stallTimeoutMs` of silence, and capped at `maxTotalMs` regardless.
+ *
+ * @param message - The job message to send to the offscreen document.
+ * @param budget - Progress and ceiling rules for this wait.
+ * @returns The offscreen response.
+ * @throws Error when the job stalls, exceeds the ceiling, or fails.
+ */
+async function awaitJobResponse(message: any, budget: JobProgressBudget): Promise<any> {
+  const startedAt = Date.now();
+  let pending = sendOffscreenOnce(message);
+
+  for (;;) {
+    const outcome = await Promise.race<SendOutcome | null>([
+      pending,
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), JOB_PROGRESS_SLICE_MS)),
+    ]);
+
+    if (outcome) {
+      if (outcome.status === 'ok') return outcome.value;
+      // The document may still be evaluating its bundle; give it the boot window like the
+      // non-progress path does rather than failing the job on a cold start.
+      if (outcome.error.message.includes('Receiving end does not exist')) {
+        await new Promise((resolve) => setTimeout(resolve, OFFSCREEN_RETRY_INTERVAL_MS));
+        pending = sendOffscreenOnce(message);
+        continue;
+      }
+      throw outcome.error;
+    }
+
+    const idleMs = Date.now() - budget.readActivityAt();
+    if (idleMs > budget.stallTimeoutMs) {
+      throw new Error(
+        `${message.type} made no progress for ${Math.round(idleMs / 1000)}s (stall limit ${Math.round(budget.stallTimeoutMs / 1000)}s)`
+      );
+    }
+    if (Date.now() - startedAt > budget.maxTotalMs) {
+      throw new Error(
+        `${message.type} exceeded the ${Math.round(budget.maxTotalMs / 60000)} minute wait ceiling despite reporting progress`
+      );
+    }
+  }
+}
+
 /**
  * Sends a message to the offscreen document, ensuring the document exists and retrying
  * if the offscreen document is still booting and evaluating its module bundle.
@@ -766,11 +902,22 @@ export async function recreateOffscreenDocument(): Promise<void> {
  * failing against the same zombie forever.
  *
  * @param message - The message object to send to the offscreen document.
- * @param timeoutMs - Maximum milliseconds to wait for the message to be received.
+ * @param timeoutMs - Maximum milliseconds to wait for the message to be received. Not used when
+ *   `progressBudget` is supplied: that wait is bounded by the budget instead.
+ * @param progressBudget - When given, the wait follows reported job progress instead of elapsed
+ *   time, so a first-run model download is not mistaken for a hung document.
  * @returns A promise resolving to the response from the offscreen document.
  */
-export async function sendMessageToOffscreen(message: any, timeoutMs: number = 30000): Promise<any> {
+export async function sendMessageToOffscreen(
+  message: any,
+  timeoutMs: number = 30000,
+  progressBudget?: JobProgressBudget
+): Promise<any> {
   await setupOffscreenDocument('src/offscreen/offscreen.html');
+
+  if (progressBudget) {
+    return awaitJobResponse(message, progressBudget);
+  }
 
   const startTime = performance.now();
 
@@ -1159,7 +1306,11 @@ async function processImageTranslation(jobId: number, srcUrl: string, tabId?: nu
     };
     
     console.log(`[Background] Routing task ${jobId} to Offscreen Document...`);
-    const offscreenResponse = await sendMessageToOffscreen(message, SINGLE_JOB_TIMEOUT_MS);
+    const offscreenResponse = await sendMessageToOffscreen(message, JOB_STALL_TIMEOUT_MS, {
+      stallTimeoutMs: JOB_STALL_TIMEOUT_MS,
+      maxTotalMs: MAX_JOB_WAIT_MS,
+      readActivityAt: offscreenActivityAt,
+    });
     
     console.log(`[Background] Offscreen completed job ${jobId} with status:`, offscreenResponse?.status);
     
@@ -1225,8 +1376,13 @@ async function processImageTranslation(jobId: number, srcUrl: string, tabId?: nu
     // When WebGPU crashes or gets wedged mid-kernel, the Offscreen Document's WebGPU device state is
     // permanently corrupted. Automatically recreate the Offscreen Document so subsequent queued jobs
     // run against a clean, fresh GPU context rather than freezing or wedging the entire extension!
-    const isGpuOrPipelineCorruption = /recursively|MaxPool|ceil|device lost|Context Lost|OperationError|destroyed|pipeline failed|timed out/i.test(errorStr);
-    if (isGpuOrPipelineCorruption) {
+    const isGpuOrPipelineCorruption = /recursively|MaxPool|ceil|device lost|Context Lost|OperationError|destroyed|pipeline failed/i.test(errorStr);
+    // A timeout is not corruption: a first-run weight download legitimately outlives the job
+    // budget, and recreating the document there would discard the partially loaded model and
+    // restart the download from zero. Rebuild only when the document is also unresponsive.
+    const isTimeout = /timed out|made no progress/i.test(errorStr);
+    const isUnresponsive = isTimeout ? !(await isOffscreenResponsive()) : false;
+    if (isGpuOrPipelineCorruption || isUnresponsive) {
       console.warn(`[Background] Detected critical WebGPU/Offscreen corruption ("${errorStr}"). Recreating Offscreen document for clean recovery...`);
       try {
         await recreateOffscreenDocument();
