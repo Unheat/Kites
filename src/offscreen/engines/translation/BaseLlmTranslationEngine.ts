@@ -518,7 +518,7 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
       `- Write translations using natural sentence capitalization (capitalize only sentence starts and proper nouns).\n` +
       `- Keep every key from SOURCE unchanged; do not add, omit, merge, or rename keys.\n` +
       `- Use surrounding values for dialogue context, natural tone, and pronouns.\n` +
-      `- Translate every value. If a value has no words to translate, is already in ${targetLang}, or is illegible OCR debris, return it unchanged.\n` +
+      `- Translate every value. Only return a value unchanged when it has no words at all or is already in ${targetLang}; translate damaged or garbled text as best you can.\n` +
       `- Output raw JSON only. Do not add markdown code fences, explanations, or commentary.`;
 
     if (customPrompt?.trim()) {
