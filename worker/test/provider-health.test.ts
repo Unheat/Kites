@@ -210,6 +210,58 @@ describe('provider health verdicts', () => {
     expect(body.results[0].id).toBe('mistral-3b');
   });
 
+  it('keeps the first attempt evidence when the retry fails at the transport level', async () => {
+    // The row must not read `invalid_output status=503`: that pairs an output verdict with a code
+    // from an attempt that produced no output at all.
+    let call = 0;
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      call += 1;
+      if (call === 1) {
+        return new Response(
+          JSON.stringify({ choices: [{ index: 0, message: { role: 'assistant', content: '"null"' }, finish_reason: 'length' }] }),
+          { status: 200 }
+        );
+      }
+      return new Response('{"error":"upstream unavailable"}', { status: 503 });
+    }) as unknown as typeof fetch);
+
+    const body = await (
+      await handleProviderHealth(makeRequest('diag-token', '203.0.113.41', '?route=mistral-3b'), makeEnv(), 'req-retry-fail', {})
+    ).json() as any;
+
+    expect(body.results[0].verdict).toBe('invalid_output');
+    expect(body.results[0].detail).toBe('finish_length');
+    expect(body.results[0].statusCode).toBe(200);
+    expect(body.results[0].attempts).toBe(2);
+  });
+
+  it('rate limits the diagnostic endpoint so one caller cannot fan out upstream spend', async () => {
+    // Without the shared limiter this route answers every request, and each answer spends one
+    // upstream call per catalog route.
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+      JSON.stringify({
+        choices: [{ index: 0, message: { role: 'assistant', content: '{"b0":"Hello.","b1":"Thank you!"}' }, finish_reason: 'stop' }],
+      }),
+      { status: 200 }
+    )));
+
+    const statuses: number[] = [];
+    let limited: Response | null = null;
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const response = await handleProviderHealth(
+        makeRequest('diag-token', '203.0.113.99', '?route=mistral-3b'),
+        makeEnv(),
+        `req-burst-${attempt}`,
+        {}
+      );
+      statuses.push(response.status);
+      if (response.status === 429) limited = response;
+    }
+
+    expect(statuses).toContain(429);
+    expect(limited?.headers.get('Retry-After')).toBeTruthy();
+  });
+
   it('rejects an unknown route id instead of probing everything', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);

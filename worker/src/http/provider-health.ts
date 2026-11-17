@@ -215,6 +215,7 @@ async function probeRoute(route: ProviderRouteConfig, env: Env): Promise<KeyProb
   try {
     let result = await dispatchAdapter(route, PROBE_REQUEST, env, PROBE_TIMEOUT_MS);
     let attempts = 1;
+    let statusCode = result.statusCode ?? null;
 
     if (!result.success) {
       const verdict = classifyVerdict(result.statusCode ?? null);
@@ -232,16 +233,21 @@ async function probeRoute(route: ProviderRouteConfig, env: Env): Promise<KeyProb
     // broken route; a genuinely broken route fails both attempts and is still reported.
     if (content.verdict === 'invalid_output' && !result.isTerminalRefusal) {
       attempts = 2;
-      result = await dispatchAdapter(route, PROBE_REQUEST, env, PROBE_TIMEOUT_MS);
-      content = result.success
-        ? classifyProbeContent(result.data?.choices?.[0])
-        : { verdict: 'invalid_output', detail: content.detail };
+      const retried = await dispatchAdapter(route, PROBE_REQUEST, env, PROBE_TIMEOUT_MS);
+      if (retried.success) {
+        result = retried;
+        statusCode = retried.statusCode ?? null;
+        content = classifyProbeContent(retried.data?.choices?.[0]);
+      }
+      // A retry that fails at the transport level says nothing about the route's output, so the row
+      // keeps the first attempt's detail AND its 2xx status. Reporting the retry's 503 here would
+      // print `invalid_output status=503`, which reads as a contradiction.
     }
 
     if (content.verdict !== 'ok') {
-      console.error(`[provider-health] ${route.id} verdict=${content.verdict} detail=${content.detail} status=${result.statusCode} attempts=${attempts}`);
+      console.error(`[provider-health] ${route.id} verdict=${content.verdict} detail=${content.detail} status=${statusCode} attempts=${attempts}`);
     }
-    return { ...base, ...content, statusCode: result.statusCode ?? null, latencyMs: Date.now() - startedAt, attempts };
+    return { ...base, ...content, statusCode, latencyMs: Date.now() - startedAt, attempts };
   } catch {
     // Only a thrown transport error reaches here; the adapter already handles HTTP failures.
     return { ...base, verdict: 'upstream_error', statusCode: null, latencyMs: Date.now() - startedAt, attempts: 1 };
