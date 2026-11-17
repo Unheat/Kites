@@ -62,6 +62,7 @@ export const DEFAULT_LLM_BATCH_SIZE = 15;
  */
 export const MAX_RETRY_SEGMENTS = 8;
 
+
 /**
  * Maximum recovery requests per `translate()` call, across all chunks of the page.
  *
@@ -263,6 +264,8 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
         // translation: the probe turned Latin OCR noise into "shiru iyano". Under a known source
         // language those slots are simply left as they are; under 'auto' no script can be assumed,
         // so every failure is eligible (`hasNativeScriptForLang` returns true for an unknown code).
+        // Wordless values never reach this point: `isDeterministicPassthrough` resolves them before
+        // dispatch, so they can neither fail nor waste a recovery request.
         const canJudgeScript = Boolean(sourceLangId) && sourceLangId !== 'auto';
         const eligible = canJudgeScript
           ? unrecovered.filter((index) => hasNativeScriptForLang(chunk[index].text, sourceLangId))
@@ -527,8 +530,7 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
       `- Write translations using natural sentence capitalization (capitalize only sentence starts and proper nouns).\n` +
       `- Keep every key from SOURCE unchanged; do not add, omit, merge, or rename keys.\n` +
       `- Use surrounding values for dialogue context, natural tone, and pronouns.\n` +
-      `- Copy a value unchanged only when it is empty, punctuation-only, an ellipsis, already written in ${targetLang}, or illegible OCR debris with no readable words.\n` +
-      `- Never copy ${sourceLang} dialogue back as the answer: every line that carries readable words must come back translated.\n` +
+      `- Translate every value. If a value has no words to translate, is already in ${targetLang}, or is illegible OCR debris, return it unchanged.\n` +
       `- Output raw JSON only. Do not add markdown code fences, explanations, or commentary.`;
 
     if (customPrompt?.trim()) {

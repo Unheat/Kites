@@ -18,24 +18,25 @@ class PromptOnlyEngine extends BaseLlmTranslationEngine {
 }
 
 describe('copy rule in the system prompt', () => {
-  it('forbids returning source-language dialogue as the answer', () => {
+  it('asks for a translation of every value, with no escape hatch for hard lines', () => {
     const prompt = new PromptOnlyEngine().promptFor('Japanese', 'English');
 
-    expect(prompt).toMatch(/Never copy Japanese(?: text| dialogue)?/);
+    expect(prompt).toContain('Translate every value.');
+    // The blanket "cannot be usefully translated" wording is what let a model skip a line.
+    expect(prompt).not.toContain('cannot be usefully translated');
   });
 
   it('keeps the narrow cases that legitimately have no translation', () => {
     const prompt = new PromptOnlyEngine().promptFor('Japanese', 'English');
 
-    // Punctuation, empty lines and already-translated text must still pass through untouched.
-    expect(prompt).toContain('punctuation-only');
-    expect(prompt).toContain('already written in English');
+    expect(prompt).toContain('already in English');
     expect(prompt).toContain('illegible OCR debris');
   });
 
-  it('drops the blanket escape that let a model skip any line it did not want to translate', () => {
+  it('leaves punctuation to the deterministic passthrough instead of spending prompt tokens on it', () => {
     const prompt = new PromptOnlyEngine().promptFor('Japanese', 'English');
 
-    expect(prompt).not.toContain('cannot be usefully translated');
+    // isDeterministicPassthrough resolves empty/punctuation/ellipsis before the model is called.
+    expect(prompt).not.toContain('punctuation-only');
   });
 });
