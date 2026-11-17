@@ -116,6 +116,30 @@ npm run test:webllm:local:analyze -- ja-smoke
 - Chrome stable ignores `--load-extension`; the script prefers the Playwright-managed Chromium.
   Pass `--chrome <path>` to use another build.
 
+### 1c. Sampling temperature sweep
+
+```bash
+npm run test:webllm:local:bench -- --source zh --pages scripts/fixtures/webllm-bench-pages-zh.json
+```
+
+Measures the **first pass only** (the recovery pass is disabled for the sweep) across
+`0 0.1 0.2 0.3 0.5` and prints slots left untranslated, fully failed pages and average page time.
+Fixtures live in `scripts/fixtures/`.
+
+Result on Qwen3.5-0.8B, 3 Chinese pages × 2 repeats, `zh → en`:
+
+| temperature | unchanged | pages fully failed |
+| --- | --- | --- |
+| 0 | 8/42 | 0/6 |
+| 0.1 | 13/42 | 0/6 |
+| 0.2 | 8/42 | 0/6 |
+| 0.3 | 26/42 | 1/6 |
+| 0.5 | 19/42 | 1/6 |
+
+A hotter first pass copies more, not less, so `WEBLLM_TEMPERATURE` stays at 0. The hotter sample is
+spent on the recovery request (`WEBLLM_RECOVERY_TEMPERATURE`), which only runs after a page has
+already failed — where 0.3 recovered 6/6 slots that 0 had echoed.
+
 ### 2. Cloudflare Shared Pool Pipeline
 ```bash
 npm run test:visual:cloudflare

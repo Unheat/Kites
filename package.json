@@ -21,6 +21,7 @@
     "test:webllm": "node scripts/test-webllm-user-flow.js",
     "test:webllm:local": "node scripts/webllm-local-run.mjs",
     "test:webllm:local:analyze": "node scripts/webllm-local-analyze.mjs",
+    "test:webllm:local:bench": "bash scripts/benchmark-webllm-temperature.sh",
     "test:visual:custom-api": "tsx src/test/pipelineVisualTestCustomApi.ts",
     "test:visual:cloudflare": "tsx src/test/pipelineVisualTestCloudflare.ts",
     "test:visual:webllm": "npm run build:dev && tsx src/test/pipelineVisualTestWebLlm.ts",
