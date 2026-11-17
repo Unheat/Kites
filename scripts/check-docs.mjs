@@ -22,7 +22,15 @@ const COUNT_PATTERN = /does not have any documentation/;
 function measure() {
   // TypeDoc writes its warnings to stderr, so both streams are parsed.
   const run = spawnSync('npx', ['typedoc', '--validation.notDocumented'], { encoding: 'utf8' });
-  const lines = `${run.stdout ?? ''}${run.stderr ?? ''}`.split('\n').filter((line) => COUNT_PATTERN.test(line));
+  const output = `${run.stdout ?? ''}${run.stderr ?? ''}`;
+  // A TypeDoc error (a syntax it cannot parse, a broken project) produces no warnings at all, which
+  // would read as "nothing undocumented" and silently pass the gate. Fail loudly instead.
+  if (/\[error\]/.test(output)) {
+    console.error('[docs] TypeDoc reported errors, so the undocumented count is meaningless:');
+    console.error(output.split('\n').filter((line) => line.includes('[error]') || line.includes('error TS')).join('\n'));
+    process.exit(1);
+  }
+  const lines = output.split('\n').filter((line) => COUNT_PATTERN.test(line));
   const counts = { offscreen: 0, shared: 0, other: 0 };
   for (const line of lines) {
     if (line.includes('/src/offscreen/')) counts.offscreen += 1;

@@ -62,6 +62,7 @@ export const DEFAULT_LLM_BATCH_SIZE = 15;
  */
 export const MAX_RETRY_SEGMENTS = 8;
 
+
 /**
  * Maximum recovery requests per `translate()` call, across all chunks of the page.
  *
@@ -72,12 +73,14 @@ export const MAX_RETRY_SEGMENTS = 8;
 export const MAX_RETRY_REQUESTS = 1;
 
 /**
- * Largest number of lost slots on a page that is worth one recovery request.
+ * Share of a page that may be lost before recovery is considered pointless.
  *
- * Measured on a real 16-page run, losses clustered at one to four slots; beyond that the model is
- * failing broadly and the second pass would cost tokens without recovering the page.
+ * A real run on a local 0.8B model lost four of twelve lines in the tail chunk, so a fixed
+ * few-slot cap skipped exactly the case that needed help. Expressed as a share, it still refuses
+ * a model that is failing broadly (where the follow-up would fail the same way) while accepting
+ * any loss that leaves the page mostly translated.
  */
-export const MAX_RECOVERY_SLOTS = 3;
+export const MAX_RECOVERY_LOSS_RATIO = 0.5;
 
 /**
  * Default maximum estimated input tokens per translation prompt.
@@ -239,6 +242,8 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
     // Recovery is a property of the page, not of one chunk: a model that fails on the first chunk
     // tends to fail on the rest, so the budget is spent once per translate() call.
     let retryBudget = MAX_RETRY_REQUESTS;
+    const pageSlots = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+    const recoverableLoss = Math.max(1, Math.floor(pageSlots * MAX_RECOVERY_LOSS_RATIO));
 
     for (const chunk of chunks) {
       const chunkGlossary = filterRelevantGlossary(activeGlossary, chunk.map((s) => s.text));
@@ -254,11 +259,13 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
       const values = first.values;
       const unrecovered = [...first.failed];
 
-      if (unrecovered.length > 0 && unrecovered.length <= MAX_RECOVERY_SLOTS && retryBudget > 0) {
+      if (unrecovered.length > 0 && unrecovered.length <= recoverableLoss && retryBudget > 0) {
         // Re-asking for a slot that holds no source-script text buys a hallucination, not a
         // translation: the probe turned Latin OCR noise into "shiru iyano". Under a known source
         // language those slots are simply left as they are; under 'auto' no script can be assumed,
         // so every failure is eligible (`hasNativeScriptForLang` returns true for an unknown code).
+        // Wordless values never reach this point: `isDeterministicPassthrough` resolves them before
+        // dispatch, so they can neither fail nor waste a recovery request.
         const canJudgeScript = Boolean(sourceLangId) && sourceLangId !== 'auto';
         const eligible = canJudgeScript
           ? unrecovered.filter((index) => hasNativeScriptForLang(chunk[index].text, sourceLangId))
@@ -523,8 +530,7 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
       `- Write translations using natural sentence capitalization (capitalize only sentence starts and proper nouns).\n` +
       `- Keep every key from SOURCE unchanged; do not add, omit, merge, or rename keys.\n` +
       `- Use surrounding values for dialogue context, natural tone, and pronouns.\n` +
-      `- Copy a value unchanged only when it is empty, punctuation-only, an ellipsis, already written in ${targetLang}, or illegible OCR debris with no readable words.\n` +
-      `- Never copy ${sourceLang} dialogue back as the answer: every line that carries readable words must come back translated.\n` +
+      `- Translate every value. If a value has no words to translate, is already in ${targetLang}, or is illegible OCR debris, return it unchanged.\n` +
       `- Output raw JSON only. Do not add markdown code fences, explanations, or commentary.`;
 
     if (customPrompt?.trim()) {

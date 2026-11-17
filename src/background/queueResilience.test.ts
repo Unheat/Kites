@@ -14,6 +14,8 @@ const offscreenState = vi.hoisted(() => {
     pingBehavior: 'pong' as 'pong' | 'hang',
     // Number of job (non-ping) messages the stub has received.
     jobMessageCount: 0,
+    // When > 0, a job message is answered after this many milliseconds instead of never.
+    answerAfterMs: 0,
     // Mirrors chrome.offscreen's view of the document lifecycle.
     hasDocument: false,
     createdCount: 0,
@@ -23,6 +25,7 @@ const offscreenState = vi.hoisted(() => {
       state.customError = '';
       state.pingBehavior = 'pong';
       state.jobMessageCount = 0;
+      state.answerAfterMs = 0;
       state.hasDocument = false;
       state.createdCount = 0;
       state.closedCount = 0;
@@ -72,6 +75,10 @@ const offscreenState = vi.hoisted(() => {
           callback(response);
           delete (globalThis as any).chrome.runtime.lastError;
         };
+        if (behavior === 'hang' && state.answerAfterMs > 0) {
+          setTimeout(() => respond({ status: 'success', bakedBase64: 'data:image/png;base64,slow' }), state.answerAfterMs);
+          return;
+        }
         if (behavior === 'pong') {
           respond({ status: 'success', bakedBase64: 'data:image/png;base64,mock' });
           return;
@@ -114,6 +121,8 @@ import {
   reclaimStaleJobs,
   resetOrphanedInFlightJobs,
   sendMessageToOffscreen,
+  JOB_STALL_TIMEOUT_MS,
+  MAX_JOB_WAIT_MS,
   processQueue,
   queueTranslation,
   enqueueStudioJob,
@@ -214,6 +223,54 @@ describe('sendMessageToOffscreen timeout', () => {
     expect(offscreenState.closedCount).toBe(1);
     expect(offscreenState.createdCount).toBe(2); // Initial boot + recreation.
     expect(offscreenState.hasDocument).toBe(true);
+  });
+
+  it('keeps a first-run job alive while its model download reports progress', async () => {
+    vi.useFakeTimers();
+    offscreenState.sendMessageBehavior = 'hang';
+    offscreenState.answerAfterMs = 5 * 60 * 1000; // Far past the 60s job budget.
+
+    const started = Date.now();
+    const pending = sendMessageToOffscreen({ type: 'PROCESS_JOB', payload: { jobId: 1 } }, 60 * 1000, {
+      stallTimeoutMs: JOB_STALL_TIMEOUT_MS,
+      maxTotalMs: MAX_JOB_WAIT_MS,
+      // Weight downloads report progress continuously, so activity is always fresh.
+      readActivityAt: () => Date.now(),
+    });
+    const expectation = expect(pending).resolves.toMatchObject({ status: 'success' });
+
+    await vi.advanceTimersByTimeAsync(5 * 60 * 1000 + 1000);
+    await expectation;
+    expect(Date.now() - started).toBeGreaterThan(60 * 1000);
+  });
+
+  it('abandons a job that stops reporting progress', async () => {
+    vi.useFakeTimers();
+    offscreenState.sendMessageBehavior = 'hang';
+
+    const pending = sendMessageToOffscreen({ type: 'PROCESS_JOB', payload: { jobId: 1 } }, 60 * 1000, {
+      stallTimeoutMs: 30_000,
+      maxTotalMs: MAX_JOB_WAIT_MS,
+      // Nothing has reported progress since the job started.
+      readActivityAt: () => Date.now() - 60_000,
+    });
+    const expectation = expect(pending).rejects.toThrow(/made no progress/);
+    await vi.advanceTimersByTimeAsync(60_000);
+    await expectation;
+  });
+
+  it('caps the wait even while progress keeps arriving', async () => {
+    vi.useFakeTimers();
+    offscreenState.sendMessageBehavior = 'hang';
+
+    const pending = sendMessageToOffscreen({ type: 'PROCESS_JOB', payload: { jobId: 1 } }, 60 * 1000, {
+      stallTimeoutMs: 30_000,
+      maxTotalMs: 60_000,
+      readActivityAt: () => Date.now(),
+    });
+    const expectation = expect(pending).rejects.toThrow(/wait ceiling/);
+    await vi.advanceTimersByTimeAsync(120_000);
+    await expectation;
   });
 
   it('retries while the offscreen is still booting, then succeeds', async () => {
@@ -423,6 +480,28 @@ describe('WebGPU crash recovery', () => {
     expect(status2).toBe('completed');
   });
 });
+
+  it('keeps a live offscreen document when a job merely ran out of budget', async () => {
+    const mockBlob = new Blob(['mock'], { type: 'image/png' });
+    const jobId = (await db.translationJobs.add({
+      timestamp: Date.now(),
+      status: 'queued',
+      srcUrl: 'https://cdn.example.com/page_slow.webp',
+      tabId: 11,
+    })) as number;
+    await db.images.add({ jobId, rawImageBlob: mockBlob });
+
+    // The document answers its ping, so it is alive: only the wait budget was exceeded.
+    offscreenState.sendMessageBehavior = 'gpu-crash';
+    offscreenState.pingBehavior = 'pong';
+    offscreenState.customError = 'Message PROCESS_JOB to offscreen timed out after 60000ms';
+
+    await processQueue();
+    expect(await waitForJobTerminalStatus(jobId)).toBe('error');
+
+    // Tearing it down here would discard a partially downloaded model and restart the download.
+    expect(offscreenState.closedCount).toBe(0);
+  });
 
 describe('queue capacity limit', () => {
   it('rejects additional requests when the queue reaches configured maximum capacity', async () => {
