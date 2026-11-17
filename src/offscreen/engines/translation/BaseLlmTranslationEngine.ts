@@ -419,13 +419,22 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
    * @param lang - Language code or name.
    * @param role - Whether this is source or target language.
    * @returns Human-readable language name.
+   * @throws Error when the target is missing or 'auto', which only has meaning for a source.
    */
   protected resolveLanguage(lang: string | undefined, role: 'source' | 'target'): string {
-    if (!lang || lang === 'auto') {
-      return role === 'source' ? AUTO_SOURCE_NAME : 'English';
+    const isUndeclared = !lang || lang === 'auto';
+
+    if (role === 'source') {
+      return isUndeclared ? AUTO_SOURCE_NAME : getLanguageName(lang) || lang;
     }
-    const mapped = getLanguageName(lang);
-    return mapped || lang;
+
+    // A missing target cannot be answered with a guess: doing so translates the whole page into a
+    // language the user never picked. Nothing in the UI can produce 'auto' here, so failing loud
+    // costs no working path and turns a silent wrong-language render into a stack trace.
+    if (isUndeclared) {
+      throw new Error(`Target language must be a concrete language; received '${lang ?? ''}'.`);
+    }
+    return getLanguageName(lang) || lang;
   }
 
   /**

@@ -41,6 +41,15 @@ class PromptOnlyEngine extends BaseLlmTranslationEngine {
   public estimateInstructionFor(sourceLang: string, targetLang: string): string {
     return this.buildUserInstruction(sourceLang, targetLang);
   }
+
+  /**
+   * @param lang - Language code or name to resolve.
+   * @param role - Whether this is the source or the target language.
+   * @returns The name the prompt will carry.
+   */
+  public resolveFor(lang: string | undefined, role: 'source' | 'target'): string {
+    return this.resolveLanguage(lang, role);
+  }
 }
 
 describe('copy rule in the system prompt', () => {
@@ -93,5 +102,32 @@ describe('user instruction', () => {
     // the wrong context budget. Exact prefix equality is the contract.
     expect(userTurn.startsWith(`${instruction}\n\nSOURCE:`)).toBe(true);
     expect(instruction).toBe('Translate SOURCE from Chinese to Thai.');
+  });
+});
+
+describe('language resolution', () => {
+  it('names the target the user actually picked', () => {
+    const engine = new PromptOnlyEngine();
+
+    expect(engine.resolveFor('en', 'target')).toBe('English');
+    expect(engine.resolveFor('vi', 'target')).toBe('Vietnamese');
+    expect(engine.resolveFor('ja', 'target')).toBe('Japanese');
+  });
+
+  it('treats an undeclared source as auto', () => {
+    const engine = new PromptOnlyEngine();
+
+    expect(engine.resolveFor('auto', 'source')).toBe('the detected source language');
+    expect(engine.resolveFor(undefined, 'source')).toBe('the detected source language');
+  });
+
+  it('refuses an auto or missing target instead of silently picking English', () => {
+    const engine = new PromptOnlyEngine();
+
+    // 'auto' means "you decide" for a source only. Quietly answering "English" here would
+    // translate the entire page into a language nobody asked for, with no error to notice.
+    expect(() => engine.resolveFor('auto', 'target')).toThrow(/concrete language/);
+    expect(() => engine.resolveFor('', 'target')).toThrow(/concrete language/);
+    expect(() => engine.resolveFor(undefined, 'target')).toThrow(/concrete language/);
   });
 });
