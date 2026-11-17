@@ -21,6 +21,16 @@ export const MAX_WEBLLM_CUSTOM_PROMPT_TOKENS = 80;
 /** Greedy sampling temperature for deterministic translation */
 const WEBLLM_TEMPERATURE = 0;
 
+/**
+ * Sampling temperature for a recovery request.
+ *
+ * A failed slot usually failed because greedy decoding walked into the same copy attractor again:
+ * measured with Qwen3.5-0.8B, echoed Chinese lines came back identical three runs out of three at
+ * temperature 0, and translated on attempts that sampled at 0.3. Paying the variability only on the
+ * second pass keeps the first pass reproducible.
+ */
+export const WEBLLM_RECOVERY_TEMPERATURE = 0.3;
+
 export const WEBLLM_RETRY_BATCH_SPLIT = 3;
 
 /**
@@ -221,6 +231,7 @@ export class WebLLMEngine extends BaseLlmTranslationEngine {
    * @param schema - Strict JSON schema for the batch slots (b0, b1, ... bN).
    * @param signal - Optional AbortSignal.
    * @param maxTokens - Optional completion-token cap; omitted uses the engine default.
+   * @param hints - Whether this request is a recovery pass; recovery samples above zero.
    * @returns Raw string completion from the local model.
    */
   protected async requestLlm(
@@ -228,7 +239,8 @@ export class WebLLMEngine extends BaseLlmTranslationEngine {
     messages?: LlmChatMessage[],
     schema?: Record<string, unknown>,
     signal?: AbortSignal,
-    maxTokens?: number
+    maxTokens?: number,
+    hints?: { recovery?: boolean }
   ): Promise<string> {
     if (!this.engine) {
       throw new Error('WebLLMEngine is not initialized. Call init() first.');
@@ -248,7 +260,7 @@ export class WebLLMEngine extends BaseLlmTranslationEngine {
 
     const completionOptions: any = {
       messages: payloadMessages,
-      temperature: WEBLLM_TEMPERATURE,
+      temperature: hints?.recovery ? WEBLLM_RECOVERY_TEMPERATURE : WEBLLM_TEMPERATURE,
       top_p: 1,
       repetition_penalty: 1,
       max_tokens: dynamicMaxTokens,

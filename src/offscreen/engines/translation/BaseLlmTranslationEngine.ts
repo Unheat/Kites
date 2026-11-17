@@ -56,9 +56,10 @@ export const DEFAULT_LLM_BATCH_SIZE = 15;
 /**
  * Maximum segments re-sent in one recovery request.
  *
- * Recovery exists for the handful of slots a model skips or echoes, not for re-translating a page.
- * A small follow-up keeps the prompt cheap, keeps local models inside their watchdog budget, and
- * makes the failure mode specific ("this one line") rather than "the batch again".
+ * There is no loss threshold: a page that lost everything is the case recovery helps most (measured
+ * with Qwen3.5-0.8B, a Chinese page echoed 5 of 6 slots on the first pass and the differently
+ * sampled recovery translated all 6, twice). Cost stays bounded by `MAX_RETRY_REQUESTS` and by this
+ * cap, so a badly failing page pays one small request, not a re-translation.
  */
 export const MAX_RETRY_SEGMENTS = 8;
 
@@ -72,15 +73,6 @@ export const MAX_RETRY_SEGMENTS = 8;
  */
 export const MAX_RETRY_REQUESTS = 1;
 
-/**
- * Share of a page that may be lost before recovery is considered pointless.
- *
- * A real run on a local 0.8B model lost four of twelve lines in the tail chunk, so a fixed
- * few-slot cap skipped exactly the case that needed help. Expressed as a share, it still refuses
- * a model that is failing broadly (where the follow-up would fail the same way) while accepting
- * any loss that leaves the page mostly translated.
- */
-export const MAX_RECOVERY_LOSS_RATIO = 0.5;
 
 /**
  * Default maximum estimated input tokens per translation prompt.
@@ -105,6 +97,15 @@ interface ChunkPromptContext {
   customPrompt?: string;
   dynamicOverhead: number;
   sourceLangId: string;
+  recovery?: boolean;
+}
+
+/**
+ * Extra instruction for one model request that is not part of the prompt.
+ *
+ * @property recovery - True when this request re-asks for slots an earlier pass failed to translate.
+ */
+export interface LlmRequestHints {
   recovery?: boolean;
 }
 
@@ -242,8 +243,6 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
     // Recovery is a property of the page, not of one chunk: a model that fails on the first chunk
     // tends to fail on the rest, so the budget is spent once per translate() call.
     let retryBudget = MAX_RETRY_REQUESTS;
-    const pageSlots = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
-    const recoverableLoss = Math.max(1, Math.floor(pageSlots * MAX_RECOVERY_LOSS_RATIO));
 
     for (const chunk of chunks) {
       const chunkGlossary = filterRelevantGlossary(activeGlossary, chunk.map((s) => s.text));
@@ -259,7 +258,7 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
       const values = first.values;
       const unrecovered = [...first.failed];
 
-      if (unrecovered.length > 0 && unrecovered.length <= recoverableLoss && retryBudget > 0) {
+      if (unrecovered.length > 0 && retryBudget > 0) {
         // Re-asking for a slot that holds no source-script text buys a hallucination, not a
         // translation: the probe turned Latin OCR noise into "shiru iyano". Under a known source
         // language those slots are simply left as they are; under 'auto' no script can be assumed,
@@ -367,7 +366,9 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
 
     this.lastCompletionTruncated = false;
 
-    const rawOutput = await this.requestLlm(prompt, messages, schema, undefined, maxTokens);
+    const rawOutput = await this.requestLlm(prompt, messages, schema, undefined, maxTokens, {
+      recovery: context.recovery,
+    });
     const { translations, parsedKeys } = this.parseKeyedOutputWithMetadata(rawOutput, chunk);
     this.lastParsedKeys = new Set(parsedKeys);
 
@@ -398,6 +399,7 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
    * @param schema - Strict JSON schema for the batch slots (b0, b1, ... bN).
    * @param signal - Optional AbortSignal.
    * @param maxTokens - Dynamic completion tokens ceiling.
+   * @param hints - Whether this request is a recovery pass, which may sample differently.
    * @returns Raw string response from the LLM.
    */
   protected abstract requestLlm(
@@ -405,7 +407,8 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
     messages?: LlmChatMessage[],
     schema?: Record<string, unknown>,
     signal?: AbortSignal,
-    maxTokens?: number
+    maxTokens?: number,
+    hints?: LlmRequestHints
   ): Promise<string>;
 
   /**

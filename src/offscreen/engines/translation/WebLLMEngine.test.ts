@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { WebLLMEngine, WEBLLM_IDLE_DEADLINE_MS, WEBLLM_MAX_GENERATION_MS } from './WebLLMEngine';
+import { WebLLMEngine, WEBLLM_IDLE_DEADLINE_MS, WEBLLM_MAX_GENERATION_MS, WEBLLM_RECOVERY_TEMPERATURE } from './WebLLMEngine';
 
 // 1. Mock the @mlc-ai/web-llm module
 const mockCreate = vi.fn();
@@ -231,6 +231,21 @@ describe('WebLLMEngine Keyed JSON Protocol', () => {
 
     expect(interrupted).toBe(true);
     vi.useRealTimers();
+  });
+
+  it('keeps the first pass greedy and samples the recovery pass differently', async () => {
+    // Greedy decoding reproduces an echoed slot exactly; the retry needs different sampling to
+    // escape that attractor (measured: 3/3 identical echoes at temperature 0, translated at 0.3).
+    mockCreate
+      .mockResolvedValueOnce({ choices: [{ message: { content: JSON.stringify({ b0: 'Hello' }) } }] })
+      .mockResolvedValueOnce({ choices: [{ message: { content: JSON.stringify({ b0: 'Hi again' }) } }] });
+
+    const out = await engine.translate(['こんにちは', 'またね'], 'ja', 'en');
+
+    expect(out).toEqual(['Hello', 'Hi again']);
+    expect(mockCreate.mock.calls[0][0]).toMatchObject({ temperature: 0 });
+    expect(mockCreate.mock.calls[1][0]).toMatchObject({ temperature: WEBLLM_RECOVERY_TEMPERATURE });
+    expect(WEBLLM_RECOVERY_TEMPERATURE).toBeGreaterThan(0);
   });
 
   it('configures bounded batch size, strict input token budget, and 1024 context window for WebGPU', async () => {

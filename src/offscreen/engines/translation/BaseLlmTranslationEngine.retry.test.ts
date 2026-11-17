@@ -112,18 +112,29 @@ describe('recovery of slots the model skipped or echoed', () => {
     expect(engine.requests).toHaveLength(1);
   });
 
-  it('skips recovery entirely when a page lost most of its slots', async () => {
-    // Every slot lost is a broken model, not an accident: the established policy is to tolerate
-    // the loss rather than pay for a second pass that would fail the same way.
+  it('retries a page that lost every slot, because that is one bad sample and not a weak model', async () => {
+    // Measured with Qwen3.5-0.8B: a Chinese page echoed 5 of 6 slots on the first pass and the
+    // differently-sampled recovery translated all 6, on two consecutive runs.
+    const sources = ['殷想題以限C的人啊', '所说被抓住的时候还是孤身一', '不过从造成这种规模的破坏来看'];
+    const echoAll = JSON.stringify({ b0: sources[0], b1: sources[1], b2: sources[2] });
+    const engine = new ScriptedEngine([echoAll, '{"b0":"a","b1":"b","b2":"c"}'], 3);
+
+    const out = await engine.translate(sources, 'zh', 'en');
+
+    expect(engine.requests).toHaveLength(1 + MAX_RETRY_REQUESTS);
+    expect(out).toEqual(['a', 'b', 'c']);
+  });
+
+  it('never sends more than one recovery request per page, whatever the loss', async () => {
     const sources = Array.from({ length: 20 }, (_, i) => `台詞${i}`);
-    const echoAll = (texts: string[]) =>
-      JSON.stringify(Object.fromEntries(texts.map((text, i) => [`b${i}`, text])));
-    const engine = new ScriptedEngine([echoAll(sources)], 20);
+    const echoAll = JSON.stringify(Object.fromEntries(sources.map((text, i) => [`b${i}`, text])));
+    const engine = new ScriptedEngine([echoAll, echoAll, echoAll], 20);
 
-    const out = await engine.translate(sources, 'ja', 'en');
+    await engine.translate(sources, 'ja', 'en');
 
-    expect(engine.requests).toHaveLength(1);
-    expect(out).toEqual(sources);
+    expect(engine.requests).toHaveLength(1 + MAX_RETRY_REQUESTS);
+    // One request carries at most MAX_RETRY_SEGMENTS slots, so a 20-slot loss is partly recovered.
+    expect(Object.keys(sourceOf(engine, 1))).toHaveLength(MAX_RETRY_SEGMENTS);
   });
 
   it('spends exactly one follow-up, capped in size, when the loss is a minority of the page', async () => {

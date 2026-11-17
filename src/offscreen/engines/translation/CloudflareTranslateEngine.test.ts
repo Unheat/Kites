@@ -185,9 +185,13 @@ describe('CloudflareTranslateEngine Keyed JSON Protocol', () => {
   it('configures default batch size to 15 to translate standard manga pages in 1 pass', async () => {
     expect((engine as any).batchSize).toBe(15);
 
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
-      new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ b0: 't' }) } }] }), { status: 200 })
-    );
+    // Answer every key of the batch so this test measures chunking, not the recovery pass.
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url: any, init?: any) => {
+      const asked = JSON.parse(String(init?.body ?? '{}')) as { messages?: { content: string }[] };
+      const keys = Object.keys(JSON.parse(asked.messages?.at(-1)?.content?.match(/\{.*\}/s)?.[0] ?? '{}'));
+      const content = JSON.stringify(Object.fromEntries(keys.map((key) => [key, 't'])));
+      return new Response(JSON.stringify({ choices: [{ message: { content } }] }), { status: 200 });
+    });
 
     // 15 items should fit into exactly 1 batch HTTP call
     const fifteenItems = Array.from({ length: 15 }, (_, i) => `item ${i}`);
