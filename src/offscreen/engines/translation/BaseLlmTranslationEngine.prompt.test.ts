@@ -50,3 +50,51 @@ describe('copy rule in the system prompt', () => {
     expect(prompt).not.toContain('punctuation-only');
   });
 });
+
+describe('format rules follow the structured-output tier', () => {
+  /** Engine pinned to one structured-output tier, so the prompt can be inspected per tier. */
+  class TieredPromptEngine extends BaseLlmTranslationEngine {
+    public constructor(private readonly tier: 'prompt-only' | 'json-object' | 'json-schema') {
+      super();
+    }
+
+    protected override promptOutputMode(): 'prompt-only' | 'json-object' | 'json-schema' {
+      return this.tier;
+    }
+
+    protected async requestLlm(): Promise<string> {
+      return '{}';
+    }
+
+    /**
+     * @returns The system prompt this tier would send.
+     */
+    public prompt(): string {
+      return this.buildSystemPrompt('Japanese', 'English', [], undefined);
+    }
+  }
+
+  it('keeps both format lines when nothing constrains the output', () => {
+    const prompt = new TieredPromptEngine('prompt-only').prompt();
+
+    expect(prompt).toContain('exact same keys as SOURCE');
+    expect(prompt).toContain('Output raw JSON only');
+  });
+
+  it('drops only the raw-JSON guard when the host guarantees JSON syntax', () => {
+    const prompt = new TieredPromptEngine('json-object').prompt();
+
+    expect(prompt).toContain('exact same keys as SOURCE');
+    expect(prompt).not.toContain('Output raw JSON only');
+  });
+
+  it('drops both format lines when decoding constrains the keys', () => {
+    const prompt = new TieredPromptEngine('json-schema').prompt();
+
+    expect(prompt).not.toContain('exact same keys as SOURCE');
+    expect(prompt).not.toContain('Output raw JSON only');
+    // Content rules must survive: only the output-format scaffolding is tier-dependent.
+    expect(prompt).toContain('Keep every key from SOURCE unchanged');
+    expect(prompt).toContain('Translate every value.');
+  });
+});
