@@ -43,6 +43,10 @@ the whole engine waterfall.
    When every region is artwork the translator is not called at all. `isArtwork` was also added to
    the `StudioOcrResponse.textObjects` type, which the implementation had been setting while the
    contract omitted it.
+   Studio ignoring `translate-plainly` here is deliberate, not an oversight: Studio never paints an
+   artwork object, so under that policy it would translate a sound effect, throw the answer away and
+   leave the erased ink blank. Keeping the ink is the only behaviour Studio can honour, and the canvas
+   already skips these objects.
 
 Correct alignment detail: the scatter indexes by **position in `regions`**, not by `region.index`,
 because `normalizeRegions()` drops blank regions and `texts[index]` downstream is positional.
@@ -53,7 +57,7 @@ because `normalizeRegions()` drops blank regions and `texts[index]` downstream i
   `instantiatedIds = ['SmolLM2-…', 'gg-translate']`; `never sends artwork regions to the translator`
   failed with `processTranslation` receiving `['ドン','テスト']`.
 - GREEN: `npx vitest run src/offscreen/services/TranslationManager.test.ts src/offscreen/services/StudioOcr.test.ts src/shared/sfx` → 103 passed.
-- `npm test` → 129 files, 1528 tests passing (1524 before, +2 reproducers, +2 shared-predicate specs).
+- `npm test` → 129 files, 1530 tests passing (1524 before, +2 reproducers, +2 shared-predicate specs, +2 negative controls).
 - `npm run build` → built in 2.54s, no type errors. `npm run lint` → warnings only, pre-existing.
 - `npm run docs:check` → undocumented 880 (baseline 880, delta +0), docstring violations 0.
 - `npm run docs:api` → HTML generated at `./docs/api` with zero warnings; the new export gets its own
@@ -64,6 +68,10 @@ because `normalizeRegions()` drops blank regions and `texts[index]` downstream i
   while a `fragment` stays artwork. That branch (`kind === 'fragment'` with
   `preservesArtwork: false`) is otherwise unexercised, because both call sites that run it default to
   `preserve`.
+- Two negative controls were added after review: a page of real dialogue that comes back unchanged
+  under `auto` still counts as failed and still falls back (so the passthrough skip cannot widen into
+  "anything unchanged is fine"), and a Studio page whose every region is artwork never calls the
+  translator at all rather than calling it with nothing.
 - Independent review (`judge-pr`, round 1) rejected on exactly those two gaps - the missing predicate
   tests and the unrecorded `docs:api` outcome - and confirmed the two bug fixes and the diff as
   correct; both are addressed above.

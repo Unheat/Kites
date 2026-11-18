@@ -128,6 +128,25 @@ describe('Studio OCR independent optional steps', () => {
       .toEqual([['ドン', 'ドン', true], ['Test', 'テスト', false]]);
   });
 
+  it('skips the translator entirely when every region is artwork', async () => {
+    mocks.processImage.mockResolvedValue({
+      texts: ['ドン'],
+      polygons: [polygon],
+      boxes: [{ x: 0, y: 0, w: 60, h: 60 }],
+      rawPolygons: [],
+      artwork: [{ index: 0, kind: 'sound-effect' }],
+    });
+
+    const response = await runStudioOcr({ ...payload, inpaint: false }, mocks.dependencies);
+
+    // Nothing to translate means no request at all, not an empty one: a page of pure lettering must
+    // not wake a model, and the object still keeps its ink and its original text.
+    expect(mocks.processTranslation).not.toHaveBeenCalled();
+    expect(response.textObjects[0]).toMatchObject({
+      text: 'ドン', originalText: 'ドン', isArtwork: true,
+    });
+  });
+
   it('honors local engine overrides without mutating popup state', async () => {
     await runStudioOcr({ ...payload, ocrEngineId: 'v6-tiny', inpaintEngineId: 'simple', translationEngineId: 'local-custom' }, mocks.dependencies);
     expect(mocks.processImage.mock.calls[0][1]).toBe('v6-tiny');

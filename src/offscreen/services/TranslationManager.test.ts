@@ -242,6 +242,18 @@ describe('TranslationManager Waterfall Logic', () => {
     expect(mocks.instantiatedIds).toEqual(['SmolLM2-135M-Instruct-q0f16-MLC']);
   });
 
+  it('still calls a page untranslated when real text comes back unchanged under auto', async () => {
+    respondWith('SmolLM2-135M-Instruct-q0f16-MLC', ['gg-translate']);
+    mocks.echoFirstEngine = true;
+
+    // Negative control for the passthrough skip above: it must not widen into "anything that looks
+    // unchanged is acceptable". Real dialogue under an undeclared source still proves the page
+    // failed, even though punctuation alone no longer can.
+    await expect(manager.processTranslation(['こんにちは'], 'auto', 'en'))
+      .resolves.toEqual(['Mock translated from fallback']);
+    expect(mocks.instantiatedIds).toEqual(['SmolLM2-135M-Instruct-q0f16-MLC', 'gg-translate']);
+  });
+
   it('reports failure when every retained engine fails', async () => {
     respondWith('SmolLM2-135M-Instruct-q0f16-MLC', ['gg-translate']);
     mocks.failAllTranslate = true;
