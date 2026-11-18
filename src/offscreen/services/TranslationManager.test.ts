@@ -231,6 +231,17 @@ describe('TranslationManager Waterfall Logic', () => {
       .resolves.toEqual(['Custom Angle']);
   });
 
+  it('does not retry a page that holds nothing but an ellipsis', async () => {
+    respondWith('SmolLM2-135M-Instruct-q0f16-MLC', ['gg-translate']);
+    mocks.echoAllEngines = true;
+
+    // '……' is resolved deterministically before inference: it never reaches a model and comes back
+    // identical by design. Counting it as an untranslated line failed the whole page and re-ran it
+    // on every fallback engine, paying twice over for text no model ever received.
+    await expect(manager.processTranslation(['……'], 'auto', 'en')).resolves.toEqual(['……']);
+    expect(mocks.instantiatedIds).toEqual(['SmolLM2-135M-Instruct-q0f16-MLC']);
+  });
+
   it('reports failure when every retained engine fails', async () => {
     respondWith('SmolLM2-135M-Instruct-q0f16-MLC', ['gg-translate']);
     mocks.failAllTranslate = true;

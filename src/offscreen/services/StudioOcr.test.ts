@@ -109,6 +109,25 @@ describe('Studio OCR independent optional steps', () => {
     expect(response.textObjects[0]).toMatchObject({ isArtwork: true });
   });
 
+  it('never sends artwork regions to the translator', async () => {
+    mocks.processImage.mockResolvedValue({
+      texts: ['ドン', 'テスト'],
+      polygons: [polygon, polygon],
+      boxes: [{ x: 0, y: 0, w: 60, h: 60 }, { x: 0, y: 0, w: 60, h: 60 }],
+      rawPolygons: [polygon, polygon],
+      artwork: [{ index: 0, kind: 'sound-effect' }],
+    });
+    mocks.processTranslation.mockResolvedValue(['Test']);
+
+    const response = await runStudioOcr({ ...payload, inpaint: false }, mocks.dependencies);
+
+    // Studio never paints artwork, so translating the lettering buys tokens for text that is
+    // discarded. The page pipeline already excludes these blocks; Studio must agree with it.
+    expect(mocks.processTranslation.mock.calls[0][0]).toEqual(['テスト']);
+    expect(response.textObjects.map((object) => [object.text, object.originalText, object.isArtwork]))
+      .toEqual([['ドン', 'ドン', true], ['Test', 'テスト', false]]);
+  });
+
   it('honors local engine overrides without mutating popup state', async () => {
     await runStudioOcr({ ...payload, ocrEngineId: 'v6-tiny', inpaintEngineId: 'simple', translationEngineId: 'local-custom' }, mocks.dependencies);
     expect(mocks.processImage.mock.calls[0][1]).toBe('v6-tiny');
