@@ -56,6 +56,17 @@ because `normalizeRegions()` drops blank regions and `texts[index]` downstream i
 - `npm test` → 129 files, 1526 tests passing (1524 before, +2 reproducers).
 - `npm run build` → built in 2.54s, no type errors. `npm run lint` → warnings only, pre-existing.
 - `npm run docs:check` → undocumented 880 (baseline 880, delta +0), docstring violations 0.
+- `npm run docs:api` → HTML generated at `./docs/api` with zero warnings; the new export gets its own
+  page (`functions/shared_sfx_sfxPolicy.isPreservedArtwork.html`). `docs/api/` is gitignored, so the
+  generated output is not part of the commit.
+- `src/shared/sfx/sfxPolicy.test.ts` covers the shared predicate directly: every kind is preserved
+  under `preserve`; under `translate-plainly` sound-effect and display lettering are translated
+  while a `fragment` stays artwork. That branch (`kind === 'fragment'` with
+  `preservesArtwork: false`) is otherwise unexercised, because both call sites that run it default to
+  `preserve`.
+- Independent review (`judge-pr`, round 1) rejected on exactly those two gaps - the missing predicate
+  tests and the unrecorded `docs:api` outcome - and confirmed the two bug fixes and the diff as
+  correct; both are addressed above.
 - Real browser (`scripts/webllm-local-run.mjs`, WebLLM Qwen3.5-0.8B, auto→en fixture, 29 slots) runs
   recorded in the PR body; this change does not touch prompt text.
 

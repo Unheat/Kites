@@ -3,6 +3,7 @@ import {
   DEFAULT_SFX_POLICY,
   SFX_POLICIES,
   SFX_POLICY_STRATEGIES,
+  isPreservedArtwork,
   isSfxPolicyId,
   resolveSfxPolicyStrategy,
 } from './sfxPolicy';
@@ -32,5 +33,27 @@ describe('sfxPolicy catalog', () => {
     expect(isSfxPolicyId('translate')).toBe(false);
     expect(isSfxPolicyId(undefined)).toBe(false);
     expect(isSfxPolicyId(42)).toBe(false);
+  });
+});
+
+describe('isPreservedArtwork', () => {
+  const preserve = resolveSfxPolicyStrategy('preserve');
+  const translatePlainly = resolveSfxPolicyStrategy('translate-plainly');
+
+  it('keeps every artwork kind as ink under the preserve policy', () => {
+    // Under 'preserve' nothing is translated or erased, whatever the classifier called it.
+    expect(isPreservedArtwork('sound-effect', preserve)).toBe(true);
+    expect(isPreservedArtwork('display-lettering', preserve)).toBe(true);
+    expect(isPreservedArtwork('fragment', preserve)).toBe(true);
+  });
+
+  it('lets the policy decide only for real lettering', () => {
+    // 'translate-plainly' buys a translation for sound effects and display lettering...
+    expect(isPreservedArtwork('sound-effect', translatePlainly)).toBe(false);
+    expect(isPreservedArtwork('display-lettering', translatePlainly)).toBe(false);
+    // ...but a fragment is a bare glyph pulled out of the drawing, not language. Translating it
+    // returns noise, so no policy translates it, and the three consumers of this predicate must
+    // agree on that or one of them erases art the others still paint.
+    expect(isPreservedArtwork('fragment', translatePlainly)).toBe(true);
   });
 });
