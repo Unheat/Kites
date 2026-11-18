@@ -8,7 +8,7 @@ import { findBogusContainerIndices } from '../../shared/utils/regionOwnership';
 import { defaultArtworkClassifier } from '../../shared/sfx/SoundEffectClassifier';
 import { FREE_TEXT_BUCKET } from './PageBubbleOwnership';
 import type { ArtworkKind, IArtworkClassifier, OcrBlockDescriptor } from '../../shared/sfx/ArtworkClassifier';
-import { DEFAULT_SFX_POLICY, resolveSfxPolicyStrategy, type SfxPolicyId } from '../../shared/sfx/sfxPolicy';
+import { DEFAULT_SFX_POLICY, isPreservedArtwork, resolveSfxPolicyStrategy, type SfxPolicyId } from '../../shared/sfx/sfxPolicy';
 import {
   isScanlatorWatermark,
   isThoughtBubbleTailOrnament,
@@ -1313,8 +1313,8 @@ export class OcrManager {
     // the preserve-only exclusion does not apply.
     // Fragments and drawing are never erased: nothing would be rendered in their place. Sound
     // effects and display lettering follow the policy.
-    const preserveArtwork = resolveSfxPolicyStrategy(sfxPolicy).preservesArtwork;
-    const preserved = artwork.filter((a) => a.kind === 'fragment' || preserveArtwork);
+    const artworkStrategy = resolveSfxPolicyStrategy(sfxPolicy);
+    const preserved = artwork.filter((a) => isPreservedArtwork(a.kind, artworkStrategy));
     const sfxGroups = new Set(preserved.map((a) => rows[a.index]));
     for (const cand of rows) {
       if (sfxGroups.has(cand)) continue; // SFX lettering is art: never erased.

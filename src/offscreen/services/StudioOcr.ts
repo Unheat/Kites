@@ -13,6 +13,7 @@ import { resolveBubbleLayoutsDetailed, type BubbleGeometry } from './BubbleLayou
 import { precomputeStudioOcrLayouts } from './studioOcrTypeset';
 import { createPageBubbleOwnership, type PageBubbleOwnership } from './PageBubbleOwnership';
 import { analyzePageText } from './PageTextAnalysis';
+import { DEFAULT_SFX_POLICY, isPreservedArtwork, resolveSfxPolicyStrategy } from '../../shared/sfx/sfxPolicy';
 import type { BoxRect } from '../utils/bubbleExpansion';
 
 // Preserve Studio's minimum editable text-handle dimensions.
@@ -78,6 +79,8 @@ export interface StudioOcrResponse {
     color?: string;
     /** Outline color derived from the detected ink; undefined falls back to Studio defaults. */
     strokeColor?: string;
+    /** True when the region is artwork Studio keeps as ink: never painted, never translated. */
+    isArtwork?: boolean;
   }>;
 }
 
@@ -210,18 +213,36 @@ export async function runStudioOcr(
   }
 
   const originalTexts = regions.map(region => region.text);
+  // Studio never paints artwork, so its text is never needed: translating it buys tokens for a
+  // string that is discarded. The page pipeline decides the same boundary before dispatch, and both
+  // read the one rule so a policy change cannot leave one of them paying for ink.
+  const studioArtworkStrategy = resolveSfxPolicyStrategy(DEFAULT_SFX_POLICY);
+  const artworkIndices = new Set(
+    (result.artwork ?? [])
+      .filter((item) => isPreservedArtwork(item.kind, studioArtworkStrategy))
+      .map((item) => item.index),
+  );
+  const translatablePositions: number[] = [];
+  regions.forEach((region, position) => {
+    if (!artworkIndices.has(region.index)) translatablePositions.push(position);
+  });
   let texts = originalTexts;
-  if (payload.translate !== false) {
+  if (payload.translate !== false && translatablePositions.length > 0) {
     const effectiveState = payload.translationEngineId
       ? { ...popupState, activeEngineId: payload.translationEngineId }
       : popupState;
     // TranslationManager owns fallback chains. Exhausted chains must reach Studio as errors.
-    texts = await dependencies.translationManager.processTranslation(
-      originalTexts, popupState.sourceLang || 'auto', popupState.targetLang || 'en', undefined, effectiveState,
+    const translated = await dependencies.translationManager.processTranslation(
+      translatablePositions.map(position => originalTexts[position]), popupState.sourceLang || 'auto', popupState.targetLang || 'en', undefined, effectiveState,
     );
-    if (!Array.isArray(texts) || texts.length !== regions.length || texts.some(text => typeof text !== 'string' || !text.trim())) {
+    if (!Array.isArray(translated) || translated.length !== translatablePositions.length || translated.some(text => typeof text !== 'string' || !text.trim())) {
       throw new Error('Studio OCR translation returned incomplete text regions.');
     }
+    // Scatter the answer back so every downstream index stays aligned with `regions`.
+    texts = [...originalTexts];
+    translatablePositions.forEach((position, offset) => {
+      texts[position] = translated[offset];
+    });
   }
 
   let inpaintedPatchBase64 = unchangedPatch;
@@ -284,7 +305,6 @@ export async function runStudioOcr(
   }
 
   const timestamp = Date.now();
-  const artworkIndices = new Set((result.artwork ?? []).map((item) => item.index));
   const textObjects = regions.map(({ polygon, text: originalText, index: origIndex }, index) => {
     const xs = polygon.map(point => point.x);
     const ys = polygon.map(point => point.y);

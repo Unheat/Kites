@@ -2,6 +2,7 @@ import type { ITranslationEngine, TranslationOptions } from '../engines/translat
 import { getEnabledGlossary } from '../../shared/glossary';
 import { normalizeSourceCasingForMt, normalizeTargetCasing } from '../../shared/utils/casingNormalization';
 import { hasNativeScriptForLang, isUntranslatedEcho } from '../../shared/utils/textCleaning';
+import { isDeterministicPassthrough } from '../../shared/translation/tokenEstimation';
 import { WebLLMEngine } from '../engines/translation/WebLLMEngine';
 import { GoogleTranslateEngine } from '../engines/translation/GoogleTranslateEngine';
 import { CustomApiEngine } from '../engines/translation/CustomApiEngine';
@@ -22,7 +23,9 @@ type EngineLease = {
  * model that copies the page back returns no error, so the waterfall used to report success and the
  * pipeline painted the original text as if it were the translation. Lines already written in a
  * script the source language does not use (Latin debris on a Japanese page) are not evidence of
- * failure - they never needed translating - so they are ignored when making the call.
+ * failure - they never needed translating - so they are ignored when making the call. Punctuation
+ * and symbol blocks are ignored for the same reason: they are resolved as source passthroughs
+ * before dispatch, so no model was ever asked about them.
  *
  * @param texts - Lines handed to the engine.
  * @param results - Lines the engine returned, index-aligned with `texts`.
@@ -43,6 +46,10 @@ export function returnedPageUntranslated(
   for (let index = 0; index < texts.length; index += 1) {
     const text = texts[index] ?? '';
     if (!text.trim()) continue;
+    // Nothing reached a model for these, so they can neither prove a translation happened nor
+    // prove it failed. Counting them (which only happened under an undeclared source) failed the
+    // whole page and re-ran every fallback engine for text the model never received.
+    if (isDeterministicPassthrough(text)) continue;
     if (sourceIsKnown && !hasNativeScriptForLang(text, sourceLang)) continue;
 
     translatable += 1;

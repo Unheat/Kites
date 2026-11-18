@@ -7,6 +7,8 @@
  * policy is ever added without a handler.
  */
 
+import type { ArtworkKind } from './ArtworkClassifier';
+
 /** One selectable sound-effect policy, as presented to the user. */
 export interface SfxPolicy {
   /** Stable identifier persisted in `chrome.storage.local`. */
@@ -59,6 +61,23 @@ export const SFX_POLICY_STRATEGIES: Readonly<Record<SfxPolicyId, SfxPolicyStrate
  */
 export function resolveSfxPolicyStrategy(policy: SfxPolicyId): SfxPolicyStrategy {
   return SFX_POLICY_STRATEGIES[policy];
+}
+
+/**
+ * Decides whether one classified artwork block stays as drawn.
+ *
+ * Single rule for a decision that three consumers must agree on: the OCR stage (which withholds the
+ * inpaint mask), the page pipeline (which drops the block from the translation payload) and Studio
+ * (which withholds both). Two copies of `kind === 'fragment' || preservesArtwork` used to exist, and
+ * a drift between them either erases hand lettering or pays a model to translate ink nobody paints.
+ *
+ * @param kind - Artwork classification for the block.
+ * @param strategy - Strategy selected by the user's sound-effect policy.
+ * @returns True when the block keeps its original ink and is never translated.
+ */
+export function isPreservedArtwork(kind: ArtworkKind, strategy: SfxPolicyStrategy): boolean {
+  // A fragment is a bare glyph pulled out of the drawing, not language, so no policy translates it.
+  return kind === 'fragment' || strategy.preservesArtwork;
 }
 
 /**

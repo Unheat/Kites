@@ -96,4 +96,6 @@ same pair through the persisted `isArtwork` flag.
 | one sentence translated twice | `applyComponentOwnership`, shared-owner side-by-side merge | majority owner wins; 1:1 welds stay split |
 | balloon cut in the wrong direction | `flowCells` stage selection | necks first, bisectors only when the neck split is not a real partition |
 | artwork erased, or translation over untouched art | artwork classifier + preserve pair | preserved ⇒ no mask, no draw |
+| paid to translate ink nobody paints | `isPreservedArtwork` (`shared/sfx/sfxPolicy.ts`) | preserved artwork is excluded from the translation payload in both the page pipeline and Studio |
+| a page of only ellipses retries every fallback engine | `returnedPageUntranslated` + `isDeterministicPassthrough` | deterministic passthroughs are not evidence of an untranslated page |
 | erased area with no text | mask scope (`rawPolygons`) | masks come from region polygons; anything the recognizer did not polygonise is out of scope |

@@ -1,6 +1,6 @@
 import { db } from '../../db';
 import type { TypesetMode } from '../../shared/constants';
-import { DEFAULT_SFX_POLICY, resolveSfxPolicyStrategy } from '../../shared/sfx/sfxPolicy';
+import { DEFAULT_SFX_POLICY, isPreservedArtwork, resolveSfxPolicyStrategy } from '../../shared/sfx/sfxPolicy';
 import type { PopupState, ModelInitializationStage } from '../../shared/types';
 import { OcrManager, type InitializationLifecycleCallback, type OcrTier } from './OcrManager';
 import { TranslationManager, translationManager as defaultTranslationManager } from './TranslationManager';
@@ -345,7 +345,7 @@ export class PipelineOrchestrator {
       const artworkStrategy = resolveSfxPolicyStrategy(popupState?.sfxPolicy ?? DEFAULT_SFX_POLICY);
       const preservedArtwork = new Set(
         (ocrResult.artwork ?? [])
-          .filter((item) => item.kind === 'fragment' || artworkStrategy.preservesArtwork)
+          .filter((item) => isPreservedArtwork(item.kind, artworkStrategy))
           .map((item) => item.index),
       );
 
