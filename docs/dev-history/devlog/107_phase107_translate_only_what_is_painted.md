@@ -53,7 +53,7 @@ because `normalizeRegions()` drops blank regions and `texts[index]` downstream i
   `instantiatedIds = ['SmolLM2-…', 'gg-translate']`; `never sends artwork regions to the translator`
   failed with `processTranslation` receiving `['ドン','テスト']`.
 - GREEN: `npx vitest run src/offscreen/services/TranslationManager.test.ts src/offscreen/services/StudioOcr.test.ts src/shared/sfx` → 103 passed.
-- `npm test` → 129 files, 1526 tests passing (1524 before, +2 reproducers).
+- `npm test` → 129 files, 1528 tests passing (1524 before, +2 reproducers, +2 shared-predicate specs).
 - `npm run build` → built in 2.54s, no type errors. `npm run lint` → warnings only, pre-existing.
 - `npm run docs:check` → undocumented 880 (baseline 880, delta +0), docstring violations 0.
 - `npm run docs:api` → HTML generated at `./docs/api` with zero warnings; the new export gets its own
