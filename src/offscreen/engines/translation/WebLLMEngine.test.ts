@@ -1,14 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { WebLLMEngine, WEBLLM_IDLE_DEADLINE_MS, WEBLLM_MAX_GENERATION_MS, WEBLLM_RECOVERY_TEMPERATURE, WEBLLM_TEMPERATURE, WEBLLM_TEMPERATURE_CEILING, temperatureForAttempt } from './WebLLMEngine';
+import { WebLLMEngine, WEBLLM_IDLE_DEADLINE_MS, WEBLLM_MAX_GENERATION_MS, WEBLLM_PRESENCE_PENALTY, WEBLLM_RECOVERY_TEMPERATURE, WEBLLM_TEMPERATURE, WEBLLM_TEMPERATURE_CEILING, temperatureForAttempt } from './WebLLMEngine';
 
 // 1. Mock the @mlc-ai/web-llm module
 const mockCreate = vi.fn();
 const mockUnload = vi.fn();
 const mockResetChat = vi.fn();
+const mockCreateEngine = vi.hoisted(() => vi.fn());
+const mockModelList = vi.hoisted(() => [] as any[]);
 
 vi.mock('@mlc-ai/web-llm', () => {
   return {
-    CreateMLCEngine: vi.fn().mockImplementation(async () => {
+    // The engine reads the record for its preflight check, so the test controls the catalogue.
+    prebuiltAppConfig: { get model_list() { return mockModelList; } },
+    CreateMLCEngine: mockCreateEngine.mockImplementation(async () => {
       return {
         chat: {
           completions: {
@@ -23,9 +27,12 @@ vi.mock('@mlc-ai/web-llm', () => {
 });
 
 // Mock hardware check so tests can pass without real WebGPU
+const mockProbeAdapter = vi.hoisted(() => vi.fn());
+
 vi.mock('../../utils/hardware', () => {
   return {
     checkWebGPUAvailability: vi.fn().mockResolvedValue(true),
+    probeWebGPUAdapter: mockProbeAdapter,
   };
 });
 
@@ -59,6 +66,12 @@ describe('WebLLMEngine Keyed JSON Protocol', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    mockProbeAdapter.mockResolvedValue({
+      supported: true,
+      features: new Set(['shader-f16']),
+      maxStorageBufferBindingSize: 1024 * 1024 * 1024,
+    });
+    mockModelList.length = 0;
     engine = new WebLLMEngine('Qwen2.5-3B-Instruct-q4f16_1-MLC');
     await engine.init();
   });
@@ -85,8 +98,9 @@ describe('WebLLMEngine Keyed JSON Protocol', () => {
     expect(results[1]).toBe('');
     expect(results[2]).toBe('世界');
 
-    // Verify resetChat was called before generation for stateless transaction
-    expect(mockResetChat).toHaveBeenCalled();
+    // No per-batch reset: the engine resets itself when the conversation changes, inside the model
+    // lock. See the assertion in `WebLLM engine configuration` below.
+    expect(mockResetChat).not.toHaveBeenCalled();
 
     // Verify completion call parameters
     const callArg = mockCreate.mock.calls[0][0];
@@ -100,6 +114,31 @@ describe('WebLLMEngine Keyed JSON Protocol', () => {
     expect(userMsg).toContain('"b0":"Hello"');
     expect(userMsg).toContain('"b1":"World"');
     expect(userMsg).not.toContain('   ');
+  });
+
+  it('keeps a bracketed sound-effect translation instead of reading it as a JSON fragment', async () => {
+    // `[sigh]`, `[SFX]`, `[Heavy breathing]` are ordinary manga translation output. The guard that
+    // drops a protocol leftover like `{}` must not classify them as one just because they are
+    // bracketed.
+    mockCreate.mockReset();
+    mockCreate.mockResolvedValue({
+      choices: [{ message: { content: JSON.stringify({ b0: '[sigh]', b1: '[Heavy breathing]' }) }, finish_reason: 'stop' }],
+    });
+
+    const results = await engine.translate(['ため息', '荒い息']);
+
+    expect(results).toEqual(['[sigh]', '[Heavy breathing]']);
+  });
+
+  it('still refuses a bare JSON skeleton as a translation', async () => {
+    mockCreate.mockReset();
+    mockCreate.mockResolvedValue({
+      choices: [{ message: { content: JSON.stringify({ b0: '{}' }) }, finish_reason: 'stop' }],
+    });
+
+    const results = await engine.translate(['ため息']);
+
+    expect(results).toEqual(['ため息']);
   });
 
   it('forwards request-local glossary to WebLLM user data without changing keyed schema', async () => {
@@ -137,14 +176,34 @@ describe('WebLLMEngine Keyed JSON Protocol', () => {
     expect(mockCreate).toHaveBeenCalledTimes(2);
   });
 
-  it('gracefully preserves original text for missing slots in large batches without throwing', async () => {
+  it('re-asks each missing slot on its own so a large batch recovers line by line', async () => {
     const inputs = ['One', 'Two', 'Three', 'Four', 'Five', 'Six'];
+    // `beforeEach` only clears calls, so a leftover implementation from an earlier test would leak
+    // into the assertions below.
+    mockCreate.mockReset();
     mockCreate.mockResolvedValueOnce({
       choices: [{ message: { content: JSON.stringify({ b0: '1', b1: '2' }) } }],
     });
+    // Recovery asks for one line, so it answers one key. Grouping the four missing slots into one
+    // request is the shape that came back in the source language.
+    mockCreate.mockResolvedValue({ choices: [{ message: { content: JSON.stringify({ b0: 'solo' }) } }] });
 
     const result = await engine.translate(inputs);
-    expect(result).toEqual(['1', '2', 'Three', 'Four', 'Five', 'Six']);
+
+    expect(result).toEqual(['1', '2', 'solo', 'solo', 'solo', 'solo']);
+    expect(mockCreate).toHaveBeenCalledTimes(1 + 4);
+  });
+
+  it('keeps the source for a slot whose single-line recovery comes back empty', async () => {
+    mockCreate.mockReset();
+    mockCreate.mockResolvedValueOnce({
+      choices: [{ message: { content: JSON.stringify({ b0: '1' }) } }],
+    });
+    mockCreate.mockResolvedValue({ choices: [{ message: { content: '{}' } }] });
+
+    const result = await engine.translate(['One', 'Two']);
+
+    expect(result).toEqual(['1', 'Two']);
   });
 
   it('should return an array of empty strings immediately if all inputs are empty', async () => {
@@ -184,12 +243,15 @@ describe('WebLLMEngine Keyed JSON Protocol', () => {
     (engine as any).engine.interruptGenerate = interruptGenerate;
 
     // 100 tokens, one every 50ms: 5s of generation, far past the old 30ms-per-token deadline for
-    // a small batch (4.24s) but never silent for longer than the idle window.
+    // a small batch (4.24s) but never silent for longer than the idle window. The payload is a
+    // valid keyed answer streamed character by character, not 100 identical tokens: identical
+    // tokens are a repetition loop, and the engine now discards a loop instead of parsing it.
+    const streamed = JSON.stringify({ b0: 'a translated line' });
     mockCreate.mockImplementation(async () => {
       async function* tokens() {
-        for (let i = 0; i < 100; i += 1) {
+        for (let i = 0; i < streamed.length; i += 1) {
           await new Promise((resolve) => setTimeout(resolve, 50));
-          yield { choices: [{ delta: { content: 'x' }, finish_reason: i === 99 ? 'stop' : null }] };
+          yield { choices: [{ delta: { content: streamed[i] }, finish_reason: i === streamed.length - 1 ? 'stop' : null }] };
         }
       }
       return tokens();
@@ -197,7 +259,7 @@ describe('WebLLMEngine Keyed JSON Protocol', () => {
 
     const pending = engine.translate(['台詞'], 'ja', 'en');
     await vi.advanceTimersByTimeAsync(6_000);
-    await expect(pending).resolves.toHaveLength(1);
+    await expect(pending).resolves.toEqual(['a translated line']);
 
     expect(interruptGenerate).not.toHaveBeenCalled();
     expect(WEBLLM_IDLE_DEADLINE_MS).toBeLessThan(WEBLLM_MAX_GENERATION_MS);
@@ -244,7 +306,10 @@ describe('WebLLMEngine Keyed JSON Protocol', () => {
     const out = await engine.translate(['こんにちは', 'またね'], 'ja', 'en');
 
     expect(out).toEqual(['Hello', 'Hi again']);
-    expect(mockCreate.mock.calls[0][0]).toMatchObject({ temperature: WEBLLM_TEMPERATURE });
+    expect(mockCreate.mock.calls[0][0]).toMatchObject({
+      temperature: WEBLLM_TEMPERATURE,
+      presence_penalty: WEBLLM_PRESENCE_PENALTY,
+    });
     expect(mockCreate.mock.calls[1][0]).toMatchObject({ temperature: WEBLLM_RECOVERY_TEMPERATURE });
     // A retry colder than the pass that failed walks straight back into the same degradation.
     expect(WEBLLM_RECOVERY_TEMPERATURE).toBeGreaterThan(WEBLLM_TEMPERATURE);
@@ -289,6 +354,78 @@ describe('WebLLMEngine Keyed JSON Protocol', () => {
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining('exceeds 80-token local ceiling')
     );
+  });
+});
+
+describe('WEBLLM_PRESENCE_PENALTY', () => {
+  it('penalises reusing earlier tokens enough to break copy-back without shredding the line', () => {
+    // Qwen's card allows 0-2 and names 1.5 for endless repetition. Below ~1 the copy-back held
+    // (75% of slots unchanged); at 2.0 language mixing raised failures again (59%).
+    expect(WEBLLM_PRESENCE_PENALTY).toBeGreaterThanOrEqual(1);
+    expect(WEBLLM_PRESENCE_PENALTY).toBeLessThan(2);
+  });
+});
+
+describe('WebLLM engine configuration', () => {
+  let engine: WebLLMEngine;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    mockCreate.mockReset();
+    mockCreate.mockResolvedValue({
+      choices: [{ message: { content: JSON.stringify({ b0: 'translated' }) }, finish_reason: 'stop' }],
+    });
+    engine = new WebLLMEngine('Qwen2.5-3B-Instruct-q4f16_1-MLC');
+    await engine.init();
+  });
+
+  it('does not reset the chat before a batch, because the engine already does', async () => {
+    // `preparePrefillInput` resets whenever the incoming conversation differs from the one in
+    // memory, and our payloads always differ, so an explicit reset can only add risk: the engine
+    // level `resetChat` does not take the per-model generation lock.
+    await engine.translate(['台詞']);
+    expect(mockResetChat).not.toHaveBeenCalled();
+  });
+
+  it('asks for exact token usage instead of estimating it', async () => {
+    await engine.translate(['台詞']);
+    expect(mockCreate.mock.calls[0][0]).toMatchObject({ stream: true, stream_options: { include_usage: true } });
+  });
+
+  it('reserves a KV window that still leaves slack over the planner, not the model default', async () => {
+    const chatOpts = mockCreateEngine.mock.calls[0][2];
+    expect(chatOpts).toMatchObject({ context_window_size: 2048 });
+  });
+
+  it('refuses a model the adapter cannot run, before the engine is created', async () => {
+    // The library enforces `required_features` itself only after fetching the wasm and the config,
+    // and the storage-buffer requirement inside the pipeline constructor, once the weights are on
+    // disk. The preflight exists to fail this case earlier and with a reason a user can act on.
+    mockModelList.push({ model_id: 'gemma-4-E2B-it-q4f16_1-MLC', required_features: ['shader-f16'] });
+    mockProbeAdapter.mockResolvedValue({
+      supported: true,
+      features: new Set<string>(),
+      maxStorageBufferBindingSize: 1024 * 1024 * 1024,
+    });
+    mockCreateEngine.mockClear();
+
+    const limited = new WebLLMEngine('gemma-4-E2B-it-q4f16_1-MLC');
+
+    await expect(limited.init()).rejects.toThrow(/shader-f16/);
+    expect(mockCreateEngine).not.toHaveBeenCalled();
+  });
+
+  it('sends no enable_thinking flag, on any model, because it measured worse', async () => {
+    // `enable_thinking: false` is the documented remedy and the library reads it only from
+    // `extra_body`. Measured on this pipeline, two repeats per combo: turning it off on Qwen3.5
+    // pushed Japanese to English from 11.5% to 34.6% of slots handed back untranslated (whole
+    // batches echoed), and moved the Chinese combos by less than the run-to-run noise band. So no
+    // template gets the flag, including the ones that support the mechanism.
+    mockCreateEngine.mockClear();
+    const thinkingEngine = new WebLLMEngine('Qwen3.5-0.8B-q4f16_1-MLC');
+    await thinkingEngine.init();
+    await thinkingEngine.translate(['台詞']);
+    expect(mockCreate.mock.calls[0][0].extra_body).toBeUndefined();
   });
 });
 

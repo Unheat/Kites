@@ -56,7 +56,8 @@
     "contextMenus",
     "offscreen",
     "identity",
-    "declarativeNetRequestWithHostAccess"
+    "declarativeNetRequestWithHostAccess",
+    "unlimitedStorage"
   ],
   "oauth2": {
     "client_id": "13839997652-1pfe7h8arhiqlvh3dtn81tc5aibh8pnm.apps.googleusercontent.com",

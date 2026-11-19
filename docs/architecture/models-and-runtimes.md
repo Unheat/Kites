@@ -136,8 +136,13 @@ graph TD
 ```
 
 ### 1. WebLLM (On-Device WebGPU Inference)
-- **Framework:** `@mlc-ai/web-llm` (v0.2.86) running TVM/Relax compiled WebGPU shaders.
+- **Framework:** `@mlc-ai/web-llm` (v0.2.89) running TVM/Relax compiled WebGPU shaders.
 - **Privacy Guarantee:** Complete on-device execution. Model weights are cached locally in the browser's Cache API / IndexedDB.
+- **KV cache is the library's:** allocated once at load, never grown, and reset by the engine whenever the incoming conversation differs from the one in memory. Kites does **not** call `resetChat()` between batches: that call takes no per-model lock, so it could clear KV under a stream that is still unwinding, and the engine resets anyway. `maxContextWindow` here is a planning budget only; the GPU window is set at load through `WEBLLM_CHAT_OPTIONS` (2048 tokens — 4096 is the catalogue default on 53 of 59 records, and 1024 would leave no slack over an estimated input budget).
+- **Thinking models get no flag. `enable_thinking: false` is deliberately not sent, including to `Qwen3`/`Qwen3.5` templates that support the mechanism: measured on this pipeline it pushed Japanese→English from 11.5% to 34.6% of slots handed back untranslated and moved the Chinese combos inside the noise band. The runtime never checks the template, and with the flag off it prefills `\n\n` into the prompt *and* the returned content, which the keyed-JSON parser strips — so the mechanism is available if a future model measures better, but nothing depends on it.
+- **Exact usage:** requests set `stream_options: { include_usage: true }`; the runtime only emits `usage` when asked (it arrives on a terminal chunk with empty `choices`), which is what makes the dev-mode tokens-per-second line exact rather than counted.
+- **Storage:** the manifest requests `unlimitedStorage`. WebLLM's default cache backend is the Cache API, so multi-gigabyte weights live in the extension origin, which also holds Studio project data; without the permission the origin is quota-managed and eviction is whole-origin, not per-file.
+- **Preflight:** before `CreateMLCEngine`, `checkModelLoadability` compares a record's `required_features` and `buffer_size_required_bytes` with the adapter reported by `probeWebGPUAdapter`. 17 of the 59 registry entries declare one of those fields; the Qwen records declare none. There is no VRAM gate: `vram_required_MB` is a catalogue literal, and no WebGPU API reports device memory.
 - **Curated 2026 Model Registry:**
   - `Qwen2.5-1.5B-Instruct-q4f16_1-MLC` & `Qwen3-1.7B-Instruct-q4f16_1-MLC` (Leading multilingual performance for Japanese, Korean, and Chinese manga).
   - `Llama-3.2-1B-Instruct-q4f16_1-MLC` (Fast, high-quality Latin/Western dialogue).

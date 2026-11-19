@@ -6,6 +6,7 @@ import { resolvePageSourceLanguage } from '../../../shared/utils/sourceLanguageH
 
 /** Source-language name shown to the model when the request is in 'auto' mode. */
 export const AUTO_SOURCE_NAME = 'the detected source language';
+import { hasRunawayRepetition } from '../../../shared/translation/degeneration';
 import { buildSchema } from '../../../shared/translation/keyedJson';
 import {
   isDeterministicPassthrough,
@@ -51,21 +52,18 @@ export const MIN_CHUNK_SIZE_FOR_DROP_TOLERANCE = 6;
 export const DEFAULT_LLM_BATCH_SIZE = 15;
 
 /**
- * Maximum segments re-sent in one recovery request.
+ * Default maximum segments re-sent in one recovery request.
  *
- * There is no loss threshold: a page that lost everything is the case recovery helps most (measured
- * with Qwen3.5-0.8B, a Chinese page echoed 5 of 6 slots on the first pass and the differently
- * sampled recovery translated all 6, twice). Cost stays bounded by `MAX_RETRY_REQUESTS` and by this
- * cap, so a badly failing page pays one small request, not a re-translation.
+ * One request that carries the whole failing group: for a remote API the marginal cost of a request
+ * is what matters, so fewer, larger requests are the cheaper shape. Local engines override this.
  */
 export const MAX_RETRY_SEGMENTS = 8;
 
-
 /**
- * Maximum recovery requests per `translate()` call, across all chunks of the page.
+ * Default maximum recovery requests per `translate()` call, across all chunks of the page.
  *
- * One only, and it samples differently from the first pass (`LlmRequestHints.recovery`), because a
- * model that echoed a line once will echo it again when asked the same way.
+ * One, and it samples differently from the first pass (`LlmRequestHints.recovery`), because a model
+ * that echoed a line once will echo it again when asked the same way.
  */
 export const MAX_RETRY_REQUESTS = 1;
 
@@ -110,11 +108,29 @@ export interface LlmRequestHints {
   recoveryAttempt?: number;
 }
 
+/**
+ * Whether a slot value is only JSON punctuation, i.e. a leftover of the protocol.
+ *
+ * A bracketed translation is ordinary output — `[sigh]`, `[SFX]`, `[Heavy breathing]` — so the test
+ * cannot be "starts with a bracket and ends with one". It strips the structural characters and asks
+ * whether anything linguistic is left: `{}`, `[]`, `{"b0":""}` reduce to nothing, while `[sigh]`
+ * reduces to `sigh`.
+ *
+ * @param value - Trimmed slot value from the model.
+ * @returns True when the value carries no content beyond JSON structure.
+ */
+function isJsonSkeleton(value: string): boolean {
+  if (!value.startsWith('{') && !value.startsWith('[')) return false;
+  return value.replace(/[\s[\]{},:"'`]/g, '').length === 0;
+}
+
 /** Parsed values for one chunk plus the keys the model actually answered. */
 interface ChunkResult {
   values: string[];
   failed: number[];
   keys: string[];
+  /** True when the completion was truncated or looped, so its values are not translations. */
+  degenerate?: boolean;
 }
 
 /**
@@ -153,6 +169,21 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
    * When false (WebLLM), legacy fallbacks are retained for local models.
    */
   protected strictKeyedParsing = false;
+
+  /**
+   * Maximum segments one recovery request may carry.
+   *
+   * Engines override this to trade request count against request size: a remote API pays per
+   * request, a local model pays per token it has to re-read.
+   */
+  protected recoverySegmentLimit = MAX_RETRY_SEGMENTS;
+
+  /**
+   * Maximum recovery requests per `translate()` call.
+   *
+   * `recoverySegmentLimit * recoveryRequestBudget` is how many failed slots can still be re-asked.
+   */
+  protected recoveryRequestBudget = MAX_RETRY_REQUESTS;
 
   /**
    * Keys provided in the most recent model completion parse.
@@ -250,7 +281,7 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
 
     // Recovery is a property of the page, not of one chunk: a model that fails on the first chunk
     // tends to fail on the rest, so the budget is spent once per translate() call.
-    let retryBudget = MAX_RETRY_REQUESTS;
+    let retryBudget = this.recoveryRequestBudget;
 
     for (const chunk of chunks) {
       const chunkGlossary = filterRelevantGlossary(activeGlossary, chunk.map((s) => s.text));
@@ -279,8 +310,13 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
           ? unrecovered.filter((index) => hasNativeScriptForLang(chunk[index].text, effectiveSourceLangId))
           : unrecovered;
 
-        for (let offset = 0; offset < eligible.length && retryBudget > 0; offset += MAX_RETRY_SEGMENTS) {
-          const group = eligible.slice(offset, offset + MAX_RETRY_SEGMENTS);
+        // Iterate a copy: a recovered slot is spliced out of `unrecovered`, which is the same array
+        // as `eligible` when the source language is unknown, and splicing shifts every later entry.
+        // With one-line requests that silently skipped every second slot.
+        const queue = [...eligible];
+        const groupSize = this.recoverySegmentLimit;
+        for (let offset = 0; offset < queue.length && retryBudget > 0; offset += groupSize) {
+          const group = queue.slice(offset, offset + groupSize);
           const retryChunk = group.map((index) => chunk[index]);
           const retryGlossary = filterRelevantGlossary(activeGlossary, retryChunk.map((s) => s.text));
 
@@ -293,7 +329,7 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
             recovered = await this.requestChunk(retryChunk, retryGlossary, {
               ...promptContext,
               recovery: true,
-              recoveryAttempt: MAX_RETRY_REQUESTS - retryBudget,
+              recoveryAttempt: this.recoveryRequestBudget - retryBudget,
             });
           } catch (error) {
             console.warn(
@@ -330,8 +366,8 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
         .filter((index) => values[index] && values[index] === chunk[index].text)
         .map((index) => `b${index}`);
 
-      const recoveryNote = retryBudget < MAX_RETRY_REQUESTS
-        ? ` after ${MAX_RETRY_REQUESTS - retryBudget} recovery request(s)`
+      const recoveryNote = retryBudget < this.recoveryRequestBudget
+        ? ` after ${this.recoveryRequestBudget - retryBudget} recovery request(s)`
         : '';
       if (missingKeys.length > 0) {
         console.warn(
@@ -386,6 +422,28 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
     const { translations, parsedKeys } = this.parseKeyedOutputWithMetadata(rawOutput, chunk);
     this.lastParsedKeys = new Set(parsedKeys);
 
+    // A loop is one generation failure, not N failed lines: its parsed values are fragments of the
+    // loop (the browser log has a bubble filled with "squeaky" ~200 times), so they must never
+    // reach the page. Every slot goes back to its source text and the caller re-asks.
+    //
+    // Hitting the token cap is different and must not be treated the same way. There the keys that
+    // already closed hold finished translations, and discarding them measured worse: on the
+    // 20-bubble real page it turned 0 failures into 6, because the recovery pass re-translated the
+    // whole batch and handed back the source language. So truncation keeps whatever parsed and only
+    // the keys the cap cut off stay failed — that is what the parser already reports.
+    if (hasRunawayRepetition(rawOutput)) {
+      console.warn(
+        `[BaseLlmTranslationEngine] Model looped; discarding the answer for all ${chunk.length} slot(s) ` +
+        `and keeping their source text`
+      );
+      return {
+        values: chunk.map((segment) => segment.text),
+        failed: chunk.map((_, index) => index),
+        keys: [...parsedKeys],
+        degenerate: true,
+      };
+    }
+
     const values: string[] = [];
     const failed: number[] = [];
     for (let idx = 0; idx < chunk.length; idx += 1) {
@@ -394,6 +452,15 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
       // An omitted key or a blank answer is data loss; a verbatim echo carrying source script means
       // the line was never translated, while an echo of punctuation or Latin debris is legitimate.
       if (!parsedKeys.has(`b${idx}`) || !value.trim()) {
+        failed.push(idx);
+        continue;
+      }
+      // A value that is still JSON punctuation (`{}`, `[]`) is a fragment of the protocol, not a
+      // translation. Marking it failed alone is not enough: a failed slot keeps whatever the first
+      // pass returned, so the braces reached the bubble. Falling back to the source text here uses
+      // the same path as an omitted key, and recovery can still improve on it.
+      if (isJsonSkeleton(value.trim())) {
+        values[idx] = chunk[idx].text;
         failed.push(idx);
         continue;
       }

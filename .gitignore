@@ -87,3 +87,6 @@ public/ort-wasm/
 
 # Generated API reference (npm run docs:api)
 docs/api/
+
+# Local swe-workflow scratch state (plan, evidence, PR draft)
+.workflow/
