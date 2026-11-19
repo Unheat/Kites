@@ -56,7 +56,7 @@ describe('orderChangedCatalog', () => {
     expect(engines.map(engine => engine.id)).toEqual(['pending', 'downloaded-z', 'default', 'downloaded-a']);
   });
 
-  it('orders translation catalog: gg-translate -> cloudflare -> custom -> best-of-size -> other models', () => {
+  it('orders translation catalog: defaults -> installed -> best-of-size -> other models', () => {
     const engines: Engine[] = [
       { id: 'gemma-2-2b-it-q4f16_1-MLC', name: 'gemma-2-2b', type: 'local', isDownloaded: false },
       { id: 'Qwen3.5-9B-q4f16_1-MLC', name: 'Qwen3.5-9B', type: 'local', isDownloaded: false },
@@ -75,11 +75,29 @@ describe('orderChangedCatalog', () => {
       'cloudflare-translate',
       'custom-gpt',
       'Qwen3.5-0.8B-q4f16_1-MLC',
-      'Qwen3.5-2B-q4f16_1-MLC',
       'Qwen3.5-4B-q4f16_1-MLC',
+      'Qwen3.5-2B-q4f16_1-MLC',
       'Qwen3.5-9B-q4f16_1-MLC',
-      'Llama-3.1-70B-Instruct-q3f16_1-MLC',
       'gemma-2-2b-it-q4f16_1-MLC',
+      'Llama-3.1-70B-Instruct-q3f16_1-MLC',
+    ]);
+  });
+
+  it('keeps non-translation drops in default -> installed -> alphabetical order', () => {
+    const engines: Engine[] = [
+      { id: 'lama-manga', name: 'LaMa Manga', type: 'local', isDownloaded: true },
+      { id: 'aotgan', name: 'AOT-GAN', type: 'local', isDownloaded: false },
+      { id: 'none', name: 'None (Bypass)', type: 'local', isDownloaded: true },
+      { id: 'simple', name: 'Simple Fill', type: 'local', isDownloaded: true },
+      { id: 'telea', name: 'Telea Diffusion', type: 'local', isDownloaded: true },
+    ];
+
+    expect(orderChangedCatalog(engines, 'simple').map((engine) => engine.id)).toEqual([
+      'simple',
+      'lama-manga',
+      'none',
+      'telea',
+      'aotgan',
     ]);
   });
 });

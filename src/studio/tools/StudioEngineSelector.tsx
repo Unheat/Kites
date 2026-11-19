@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { ChevronDown, Check, Download, Globe, Lock } from 'lucide-react';
 import { studioStore, useStudioStore } from '../state/studioStore';
 import { INPAINT_TIER_CATALOG } from '../../shared/inpaintTiers';
 import { COLOR_TIER_CATALOG } from '../../shared/colorTiers';
+import { defaultGroupFor, orderEngines } from '../../shared/engineOrdering';
 
 export interface EngineOption {
   id: string;
@@ -57,6 +58,22 @@ export const StudioEngineSelector: React.FC<StudioEngineSelectorProps> = ({ cate
       ? selectedOcr
       : selectedColor;
   const activeOption = options.find((o) => o.id === currentEngineId) || options[0];
+
+  const defaultId =
+    category === 'inpaint' ? 'simple' : category === 'color' ? 'none' : 'v6-small';
+
+  // Same three-layer order as the popup dropdowns: default -> installed -> not installed.
+  const orderedOptions = useMemo(
+    () =>
+      orderEngines(
+        options.map((option) => ({
+          ...option,
+          isDownloaded: !option.isModel || downloadedIds.includes(option.id),
+        })),
+        defaultGroupFor(defaultId),
+      ),
+    [options, downloadedIds, defaultId],
+  );
 
   // Hydrate initial download statuses from background
   useEffect(() => {
@@ -197,7 +214,7 @@ export const StudioEngineSelector: React.FC<StudioEngineSelectorProps> = ({ cate
         {/* Dropdown Menu */}
         {isOpen && (
           <div className="absolute top-full left-0 right-0 mt-1 z-50 rounded-xl bg-[#12141c] border border-[#282d3f] shadow-2xl p-1.5 space-y-1.5 max-h-72 overflow-y-auto">
-            {options.map((opt) => {
+            {orderedOptions.map((opt) => {
               const isSelected = opt.id === currentEngineId;
               const isDownloaded = !opt.isModel || downloadedIds.includes(opt.id);
               const downloadInfo = downloads[opt.id];

@@ -340,5 +340,53 @@
     "name": "Qwen2-7B-Instruct-q4f32_1-MLC",
     "vramEstimate": "~5900 MB",
     "engine": "webllm"
+  },
+  {
+    "id": "MiniCPM5-2B-q4f16_1-MLC",
+    "name": "MiniCPM5-2B-q4f16_1-MLC",
+    "vramEstimate": "~1586 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "MiniCPM5-2B-q4f32_1-MLC",
+    "name": "MiniCPM5-2B-q4f32_1-MLC",
+    "vramEstimate": "~1941 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "SmolLM3-3B-q4f16_1-MLC",
+    "name": "SmolLM3-3B-q4f16_1-MLC",
+    "vramEstimate": "~2053 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "SmolLM3-3B-q4f32_1-MLC",
+    "name": "SmolLM3-3B-q4f32_1-MLC",
+    "vramEstimate": "~2589 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "LFM2.5-1.2B-Instruct-q4f16_1-MLC",
+    "name": "LFM2.5-1.2B-Instruct-q4f16_1-MLC",
+    "vramEstimate": "~1001 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "LFM2.5-1.2B-Instruct-q4f32_1-MLC",
+    "name": "LFM2.5-1.2B-Instruct-q4f32_1-MLC",
+    "vramEstimate": "~1172 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "LFM2.5-350M-q4f16_1-MLC",
+    "name": "LFM2.5-350M-q4f16_1-MLC",
+    "vramEstimate": "~532 MB",
+    "engine": "webllm"
+  },
+  {
+    "id": "LFM2.5-350M-q4f32_1-MLC",
+    "name": "LFM2.5-350M-q4f32_1-MLC",
+    "vramEstimate": "~632 MB",
+    "engine": "webllm"
   }
 ]

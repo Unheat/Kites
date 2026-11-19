@@ -9,7 +9,14 @@ import { normalizeRenderFontPresetId, CUSTOM_FONT_PREFIX } from '../../shared/re
 import { FontPickerDropdown, type FontSelection } from '../../shared/ui/FontPickerDropdown';
 import { INPAINT_TIER_CATALOG } from '../../shared/inpaintTiers';
 import { COLOR_TIER_CATALOG } from '../../shared/colorTiers';
+import {
+  RECOMMENDED_TRANSLATION_MODELS,
+  defaultGroupFor,
+  orderEngines,
+} from '../../shared/engineOrdering';
 import HelpTooltip from './HelpTooltip';
+
+export { RECOMMENDED_TRANSLATION_MODELS } from '../../shared/engineOrdering';
 
 export interface BubbleModeOption {
   id: BubbleDetectionMode;
@@ -57,63 +64,24 @@ export interface Engine {
 }
 
 /**
- * Canonical ordered list of the highest-performing WebLLM models by size tier (smallest to largest).
- * Selected from empirical translation benchmarks across 0.8B, 2B, 4B, 9B, and 70B scales.
- */
-export const RECOMMENDED_TRANSLATION_MODELS = [
-  'Qwen3.5-0.8B-q4f16_1-MLC',        // Sub-1B (~0.8B)
-  'Qwen3.5-2B-q4f16_1-MLC',          // 1B - 2B (~2B)
-  'Qwen3.5-4B-q4f16_1-MLC',          // 3B - 4B (~4B)
-  'Qwen3.5-9B-q4f16_1-MLC',          // 7B - 9B (~9B)
-  'Llama-3.1-70B-Instruct-q3f16_1-MLC', // 70B
-] as const;
-
-/**
  * Orders a changed model catalog without mutating React state.
- * For translation (defaultId === 'gg-translate'), enforces the canonical hierarchy:
- * Google Translate -> Cloud Shared Pool -> Custom APIs -> [Best of Each Size] -> [Other Models].
+ *
+ * Group contract (shared with every installable-engine dropdown):
+ * 1. Defaults: Google Translate + Cloud Shared Pool for translation, otherwise
+ *    the dropdown's default engine id.
+ * 2. Installed: downloaded local models and custom APIs, alphabetical.
+ * 3. Not installed: alphabetical, with the curated best-per-size translation
+ *    models pinned first. The 70B model is super-big and is not pinned.
  *
  * @param engines - Models to order after a download or custom API addition.
- * @param defaultId - The model that must remain pinned first.
+ * @param defaultId - The dropdown's default engine id.
  * @returns The ordered model list.
  */
 export function orderChangedCatalog(engines: readonly Engine[], defaultId: string): Engine[] {
-  if (defaultId === 'gg-translate') {
-    return [...engines].sort((left, right) => {
-      // 1. Google Translate always pinned first
-      if (left.id === 'gg-translate') return -1;
-      if (right.id === 'gg-translate') return 1;
-
-      // 2. Cloud Shared Pool pinned second
-      if (left.id === 'cloudflare-translate') return -1;
-      if (right.id === 'cloudflare-translate') return 1;
-
-      // 3. Custom APIs pinned third
-      if (left.type === 'custom' && right.type !== 'custom') return -1;
-      if (right.type === 'custom' && left.type !== 'custom') return 1;
-
-      // 4. Best of each size tier (smallest to largest)
-      const leftRecIdx = RECOMMENDED_TRANSLATION_MODELS.indexOf(left.id as any);
-      const rightRecIdx = RECOMMENDED_TRANSLATION_MODELS.indexOf(right.id as any);
-
-      if (leftRecIdx !== -1 && rightRecIdx !== -1) {
-        return leftRecIdx - rightRecIdx;
-      }
-      if (leftRecIdx !== -1) return -1;
-      if (rightRecIdx !== -1) return 1;
-
-      // 5. Other models: downloaded first, then lexical by name
-      const downloadDiff = Number(Boolean(right.isDownloaded)) - Number(Boolean(left.isDownloaded));
-      if (downloadDiff !== 0) return downloadDiff;
-
-      return left.name.localeCompare(right.name);
-    });
-  }
-
-  return [...engines].sort((left, right) =>
-    Number(right.id === defaultId) - Number(left.id === defaultId) ||
-    Number(Boolean(right.isDownloaded)) - Number(Boolean(left.isDownloaded)) ||
-    left.name.localeCompare(right.name)
+  return orderEngines(
+    engines,
+    defaultGroupFor(defaultId),
+    defaultId === 'gg-translate' ? RECOMMENDED_TRANSLATION_MODELS : [],
   );
 }
 
@@ -258,35 +226,43 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
   }, []);
 
   const [inpaintBaseEngines, setInpaintBaseEngines] = useState<Engine[]>(() =>
-    INPAINT_TIER_CATALOG.map((tier) => ({
-      id: tier.id,
-      name: tier.name,
-      type: 'local' as const,
-      isDownloaded: Boolean(tier.isBuiltin),
-    })),
+    orderChangedCatalog(
+      INPAINT_TIER_CATALOG.map((tier) => ({
+        id: tier.id,
+        name: tier.name,
+        type: 'local' as const,
+        isDownloaded: Boolean(tier.isBuiltin),
+      })),
+      'simple',
+    ),
   );
 
   const [colorBaseEngines, setColorBaseEngines] = useState<Engine[]>(() =>
-    COLOR_TIER_CATALOG.map((tier) => ({
-      id: tier.id,
-      name: tier.name,
-      type: 'local' as const,
-      isDownloaded: Boolean(tier.isBuiltin),
-    })),
+    orderChangedCatalog(
+      COLOR_TIER_CATALOG.map((tier) => ({
+        id: tier.id,
+        name: tier.name,
+        type: 'local' as const,
+        isDownloaded: Boolean(tier.isBuiltin),
+      })),
+      'none',
+    ),
   );
 
-  const [ocrBaseEngines, setOcrBaseEngines] = useState<Engine[]>([
-    { id: 'v6-small', name: 'PaddleOCR v6 Small (Default)', type: 'local', isDownloaded: false },
-    { id: 'v6-medium', name: 'PaddleOCR v6 Medium', type: 'local', isDownloaded: false },
-    { id: 'v6-tiny', name: 'PaddleOCR v6 Tiny', type: 'local', isDownloaded: false },
-    { id: 'v5-mobile', name: 'PaddleOCR v5 Mobile', type: 'local', isDownloaded: false },
-    { id: 'v5-server', name: 'PaddleOCR v5 Server', type: 'local', isDownloaded: false },
-    { id: 'v5-en-mobile', name: 'PaddleOCR v5 English Mobile', type: 'local', isDownloaded: false },
-    { id: 'v4-mobile', name: 'PaddleOCR v4 Mobile', type: 'local', isDownloaded: false },
-    { id: 'v4-server', name: 'PaddleOCR v4 Server', type: 'local', isDownloaded: false },
-    { id: 'v3-mobile', name: 'PaddleOCR v3 Mobile', type: 'local', isDownloaded: false },
-    { id: 'v3-japanese-mobile', name: 'PaddleOCR v3 Japanese Mobile', type: 'local', isDownloaded: false },
-  ]);
+  const [ocrBaseEngines, setOcrBaseEngines] = useState<Engine[]>(() =>
+    orderChangedCatalog([
+      { id: 'v6-small', name: 'PaddleOCR v6 Small (Default)', type: 'local', isDownloaded: false },
+      { id: 'v6-medium', name: 'PaddleOCR v6 Medium', type: 'local', isDownloaded: false },
+      { id: 'v6-tiny', name: 'PaddleOCR v6 Tiny', type: 'local', isDownloaded: false },
+      { id: 'v5-mobile', name: 'PaddleOCR v5 Mobile', type: 'local', isDownloaded: false },
+      { id: 'v5-server', name: 'PaddleOCR v5 Server', type: 'local', isDownloaded: false },
+      { id: 'v5-en-mobile', name: 'PaddleOCR v5 English Mobile', type: 'local', isDownloaded: false },
+      { id: 'v4-mobile', name: 'PaddleOCR v4 Mobile', type: 'local', isDownloaded: false },
+      { id: 'v4-server', name: 'PaddleOCR v4 Server', type: 'local', isDownloaded: false },
+      { id: 'v3-mobile', name: 'PaddleOCR v3 Mobile', type: 'local', isDownloaded: false },
+      { id: 'v3-japanese-mobile', name: 'PaddleOCR v3 Japanese Mobile', type: 'local', isDownloaded: false },
+    ], 'v6-small'),
+  );
 
   const [baseEngines, setBaseEngines] = useState<Engine[]>([]);
   const inpaintBaseEnginesRef = useRef(inpaintBaseEngines);
@@ -333,10 +309,10 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
           ...engine,
           isDownloaded: Boolean(engine.isDownloaded || readyModelIds.current.has(engine.id) || response.statuses[engine.id]),
         }));
-        const hydratedTranslation = hydrate(engines);
-        const hydratedInpaint = hydrate(inpaintBaseEnginesRef.current);
-        const hydratedColor = hydrate(colorBaseEnginesRef.current);
-        const hydratedOcr = hydrate(ocrBaseEnginesRef.current);
+        const hydratedTranslation = orderChangedCatalog(hydrate(engines), 'gg-translate');
+        const hydratedInpaint = orderChangedCatalog(hydrate(inpaintBaseEnginesRef.current), 'simple');
+        const hydratedColor = orderChangedCatalog(hydrate(colorBaseEnginesRef.current), 'none');
+        const hydratedOcr = orderChangedCatalog(hydrate(ocrBaseEnginesRef.current), 'v6-small');
         setBaseEngines(hydratedTranslation);
         setInpaintBaseEngines(hydratedInpaint);
         setColorBaseEngines(hydratedColor);
