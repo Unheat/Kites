@@ -483,4 +483,25 @@ describe('temperatureForAttempt', () => {
     expect(warn.mock.calls.flat().join(' ')).toContain('exceeds the 120-token window');
     warn.mockRestore();
   });
+
+  it('reports how many lines the page-level recovery budget left untranslated', async () => {
+    // The budget is per page, so exhausting it leaves real lines on their source text while
+    // `translate()` still returns a complete array. Without this the page looks translated.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const local = new WebLLMEngine('Qwen2.5-3B-Instruct-q4f16_1-MLC');
+    await local.init();
+    (local as any).recoveryRequestBudget = 1;
+    // Every answer echoes the source, so both slots fail and the single retry cannot save them.
+    mockCreate.mockReset();
+    mockCreate.mockImplementation(async () => ({
+      choices: [{ message: { content: JSON.stringify({ b0: 'ああ', b1: 'いい' }) }, finish_reason: 'stop' }],
+    }));
+
+    await local.translate(['ああ', 'いい'], 'ja', 'en');
+
+    const said = warn.mock.calls.flat().join(' ');
+    expect(said).toContain('Recovery budget exhausted');
+    expect(said).toContain('2 slot(s) keep their source text');
+    warn.mockRestore();
+  });
 });

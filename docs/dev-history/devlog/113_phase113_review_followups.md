@@ -53,7 +53,11 @@ excess instead of passing as a well-formed request.
 ### 5. Recovery could run out without saying so
 
 The per-page budget is finite, and running out left slots holding their source text while the page
-reported success. It now warns with the number of affected slots.
+reported success. It now warns with the number of affected slots. Reproducer:
+`WebLLMEngine.test.ts`, "reports how many lines the page-level recovery budget left untranslated" —
+two echoing slots with a one-request budget. It fails when the new `if` block is removed and passes
+with it, and it asserts the distinguishing text, not the phrase shared with the neighbouring
+`missingKeys` warning.
 
 ### 6. The measuring instrument scored protocol fragments as passes
 
@@ -78,19 +82,19 @@ The WebLLM end-to-end harness wrote and read `'popupState'` directly; it now use
 
 Real browser, rebuilt `dist/`, WebGPU, cached `Qwen3.5-0.8B-q4f16_1-MLC`, after the page-label change:
 
-| Combo | Failed/slots | Rate | Truncations |
-| --- | --- | --- | --- |
-| `auto-en-ja` | 2/26 | 7.7% | 0 |
-| `auto-vi-ja` | 1/26 | 3.8% | 0 |
-| `ja-en-ja` | 2/26 | 7.7% | 0 |
-| `auto-en-zh-real` | 1/20 | 5.0% | 0 |
-| `auto-vi-zh` | 5/18 | 27.8% | 0 |
-| `short-vi-zh` | 4/16 | 25.0% | 0 |
-| `zh-ru-zh` | 0/36 | 0.0% | 0 |
+| Combo | Repeats | Slots | Failed | Rate | Truncations |
+| --- | --- | --- | --- | --- | --- |
+| `auto-en-ja` | 1 | 26 | 2 | 7.7% | 0 |
+| `auto-vi-ja` | 1 | 26 | 1 | 3.8% | 0 |
+| `ja-en-ja` | 1 | 26 | 2 | 7.7% | 0 |
+| `auto-en-zh-real` | 1 | 20 | 1 | 5.0% | 0 |
+| `auto-vi-zh` | 1 | 18 | 5 | 27.8% | 0 |
+| `short-vi-zh` | 2 | 16 | 4 | 25.0% | 0 |
+| `zh-ru-zh` | 2 | 36 | 0 | 0.0% | 0 |
 
-Single repeats except `short-vi-zh` (2). All rates sit inside the bands already recorded for these
-pages, so the label change moved no outcome: the Chinese routing failures are the short-imperative
-echo, not a mislabel.
+`zh-dialogue` is two pages of 6 and 12 slots, so its rows read 18 slots per repeat and 36 at two
+repeats. All rates sit inside the bands already recorded for these pages, so the label change moved
+no outcome: the Chinese routing failures are the short-imperative echo, not a mislabel.
 
 Because a 1-repeat browser number cannot prove a classifier did not change, the fixtures are also
 asserted directly: every page of `zh-dialogue`, `ja-dialogue` and `zh-short-imperatives` resolves

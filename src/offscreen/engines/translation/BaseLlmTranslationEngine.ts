@@ -108,6 +108,9 @@ export interface LlmRequestHints {
   recoveryAttempt?: number;
 }
 
+/** Role framing and separators ChatML adds around the two messages the planner does not send. */
+const CHATML_FRAMING_TOKENS = 16;
+
 /**
  * Whether a slot value is only JSON punctuation, i.e. a leftover of the protocol.
  *
@@ -267,7 +270,6 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
     const emptySystemPrompt = this.buildSystemPrompt(sourceLang, targetLang, activeGlossary, customPrompt);
     const emptyUserPrompt =
       `${this.buildUserInstruction(sourceLang, targetLang)}\n\nSOURCE:\n{}` + buildGlossaryPrompt(activeGlossary);
-    const CHATML_FRAMING_TOKENS = 16;
     const dynamicOverhead = estimateTokenCount(emptySystemPrompt) + estimateTokenCount(emptyUserPrompt) + CHATML_FRAMING_TOKENS;
 
     // 4. Process remaining meaningful segments in bounded batches respecting both
@@ -420,13 +422,13 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
     // that it can only reject (`ContextWindowSizeExceededError` loses the whole page).
     const chunkTextTokens = chunk.reduce((sum, s) => sum + estimateTokenCount(s.text) + 6, 0);
     const chunkInputTokens = context.dynamicOverhead + chunkTextTokens;
-    const overflowTokens = chunkInputTokens + 16 - this.maxContextWindow;
+    const overflowTokens = chunkInputTokens + CHATML_FRAMING_TOKENS - this.maxContextWindow;
     if (overflowTokens > 0) {
       console.warn(
         `[BaseLlmTranslationEngine] Chunk input exceeds the ${this.maxContextWindow}-token window by ~${overflowTokens} estimated tokens; the engine will reject it. A single oversized segment cannot be split without changing its meaning.`
       );
     }
-    const maxAvailableOutput = Math.max(64, this.maxContextWindow - chunkInputTokens - 16);
+    const maxAvailableOutput = Math.max(64, this.maxContextWindow - chunkInputTokens - CHATML_FRAMING_TOKENS);
     const rawMaxTokens = maxTokensForBatch(chunk.map((s) => s.text));
     const maxTokens = Math.min(rawMaxTokens, maxAvailableOutput);
 
