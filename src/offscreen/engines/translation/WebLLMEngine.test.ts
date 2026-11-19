@@ -5,10 +5,11 @@ import { WebLLMEngine, WEBLLM_IDLE_DEADLINE_MS, WEBLLM_MAX_GENERATION_MS, WEBLLM
 const mockCreate = vi.fn();
 const mockUnload = vi.fn();
 const mockResetChat = vi.fn();
+const mockCreateEngine = vi.hoisted(() => vi.fn());
 
 vi.mock('@mlc-ai/web-llm', () => {
   return {
-    CreateMLCEngine: vi.fn().mockImplementation(async () => {
+    CreateMLCEngine: mockCreateEngine.mockImplementation(async () => {
       return {
         chat: {
           completions: {
@@ -325,6 +326,51 @@ describe('WEBLLM_PRESENCE_PENALTY', () => {
     // (75% of slots unchanged); at 2.0 language mixing raised failures again (59%).
     expect(WEBLLM_PRESENCE_PENALTY).toBeGreaterThanOrEqual(1);
     expect(WEBLLM_PRESENCE_PENALTY).toBeLessThan(2);
+  });
+});
+
+describe('WebLLM engine configuration', () => {
+  let engine: WebLLMEngine;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    mockCreate.mockReset();
+    mockCreate.mockResolvedValue({
+      choices: [{ message: { content: JSON.stringify({ b0: 'translated' }) }, finish_reason: 'stop' }],
+    });
+    engine = new WebLLMEngine('Qwen2.5-3B-Instruct-q4f16_1-MLC');
+    await engine.init();
+  });
+
+  it('does not reset the chat before a batch, because the engine already does', async () => {
+    // `preparePrefillInput` resets whenever the incoming conversation differs from the one in
+    // memory, and our payloads always differ, so an explicit reset can only add risk: the engine
+    // level `resetChat` does not take the per-model generation lock.
+    await engine.translate(['台詞']);
+    expect(mockResetChat).not.toHaveBeenCalled();
+  });
+
+  it('asks for exact token usage instead of estimating it', async () => {
+    await engine.translate(['台詞']);
+    expect(mockCreate.mock.calls[0][0]).toMatchObject({ stream: true, stream_options: { include_usage: true } });
+  });
+
+  it('reserves a KV window that still leaves slack over the planner, not the model default', async () => {
+    const chatOpts = mockCreateEngine.mock.calls[0][2];
+    expect(chatOpts).toMatchObject({ context_window_size: 2048 });
+  });
+
+  it('turns thinking off for a model that can emit a thinking block', async () => {
+    mockCreateEngine.mockClear();
+    const thinkingEngine = new WebLLMEngine('Qwen3.5-0.8B-q4f16_1-MLC');
+    await thinkingEngine.init();
+    await thinkingEngine.translate(['台詞']);
+    expect(mockCreate.mock.calls[0][0].extra_body).toMatchObject({ enable_thinking: false });
+  });
+
+  it('leaves a template without a thinking block untouched', async () => {
+    await engine.translate(['台詞']);
+    expect(mockCreate.mock.calls[0][0].extra_body).toBeUndefined();
   });
 });
 
