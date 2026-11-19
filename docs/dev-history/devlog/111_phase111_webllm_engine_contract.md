@@ -59,11 +59,17 @@ rather than left in the tree as dead code.
 
 ## Measurements
 
-- Registry coverage of the preflight, counted from `prebuiltAppConfig.model_list`:
-  **17 of 59** entries resolve to records carrying `required_features` or
-  `buffer_size_required_bytes` (Phi-4-mini ×2, Mistral-7B-v0.3 ×2, gemma-2 it/jpn ×9, gemma-4-E2B ×2,
-  Ministral-3-3B ×2, LFM2.5-1.2B ×2). The 19 Qwen3/Qwen3.5 records declare none, so for them the
-  gate is inert and the library's own pre-download check is the protection.
+- Registry coverage of the preflight. Method: join our 59 catalogue ids by exact `model_id` against
+  the shipped `prebuiltAppConfig.model_list` (173 records, of which 37 declare a requirement) and
+  count those whose record carries `required_features` or `buffer_size_required_bytes`.
+  **8 of our 59** qualify — **7** with `required_features: ["shader-f16"]`
+  (`Mistral-7B-Instruct-v0.3`, `gemma-2-2b-it`, `gemma-2-2b-it-1k`, `gemma-2-9b-it`,
+  `gemma-2-2b-jpn-it`, `gemma-4-E2B-it-q4f16_1`, `LFM2.5-1.2B-Instruct`) and **1** carrying only
+  `buffer_size_required_bytes` (201 326 592 B, `gemma-4-E2B-it-q4f32_1`). The 51 remaining ids — the
+  whole Qwen3/Qwen3.5 family included — declare nothing, so for them the gate is inert and the
+  library's own pre-download check is the protection. An earlier revision of this entry said
+  "17 of 59" with a per-family breakdown; that number does not reproduce against the installed
+  package and is withdrawn.
 - Thinking-capable ids in our registry: **14** (6 Qwen3 + 8 Qwen3.5). The shipped catalogue has 19
   Qwen3/Qwen3.5 ids, which is why the predicate matches prefixes rather than exact ids.
 - `enable_thinking: false`, real pipeline. Denominators differ because each state was run the number
