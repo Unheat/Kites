@@ -66,7 +66,7 @@ export const MAX_RETRY_SEGMENTS = 8;
  * One only, and it samples differently from the first pass (`LlmRequestHints.recovery`), because a
  * model that echoed a line once will echo it again when asked the same way.
  */
-export const MAX_RETRY_REQUESTS = 1;
+export const MAX_RETRY_REQUESTS = 0;
 
 
 /**
@@ -83,7 +83,7 @@ export const DEFAULT_LLM_MAX_INPUT_TOKENS = 4000;
  * the model needs to hear is that this pass is about completion, not style.
  */
 const RECOVERY_INSTRUCTION =
-  '- This is a correction pass for lines that were skipped or repeated earlier: return a translation for every key, and never repeat the source text back.';
+  '- This is a correction pass for lines that were skipped or repeated earlier: return a translation for every key.';
 
 /** Prompt assembly inputs shared by the first attempt and by every recovery attempt of a page. */
 interface ChunkPromptContext {

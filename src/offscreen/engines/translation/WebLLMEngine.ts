@@ -18,8 +18,21 @@ export const DEFAULT_WEBLLM_MAX_INPUT_TOKENS = 550;
 /** Maximum allowed custom prompt tokens on local WebGPU to prevent KV cache exhaustion */
 export const MAX_WEBLLM_CUSTOM_PROMPT_TOKENS = 80;
 
-/** Greedy sampling temperature for deterministic translation */
-const WEBLLM_TEMPERATURE = 0;
+/**
+ * Sampling temperature for the first pass.
+ *
+ * Not greedy. Qwen3-0.6B's published best practice for non-thinking mode is temperature 0.7 with
+ * top_p 0.8 and top_k 20, and warns that greedy decoding degrades into repetition; measured with
+ * Qwen3.5-0.8B on a dense Chinese page, greedy first passes echoed the source in 8 of 8 runs, while
+ * this sampling translated 7 of 8.
+ */
+const WEBLLM_TEMPERATURE = 0.7;
+
+/** Nucleus sampling cutoff paired with `WEBLLM_TEMPERATURE`; part of the model's recommended set. */
+const WEBLLM_TOP_P = 0.8;
+
+/** Top-k cutoff paired with `WEBLLM_TEMPERATURE`; part of the model's recommended set. */
+const WEBLLM_TOP_K = 20;
 
 /**
  * Sampling temperature for a recovery request.
@@ -289,7 +302,8 @@ export class WebLLMEngine extends BaseLlmTranslationEngine {
     const completionOptions: any = {
       messages: payloadMessages,
       temperature: temperatureForAttempt(hints),
-      top_p: 1,
+      top_p: WEBLLM_TOP_P,
+      top_k: WEBLLM_TOP_K,
       repetition_penalty: 1,
       max_tokens: dynamicMaxTokens,
     };
