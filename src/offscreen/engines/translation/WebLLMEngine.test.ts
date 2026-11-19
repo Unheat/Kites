@@ -116,6 +116,23 @@ describe('WebLLMEngine Keyed JSON Protocol', () => {
     expect(userMsg).not.toContain('   ');
   });
 
+  it('loads one model when two callers initialize at the same time', async () => {
+    // `init()` awaits WebGPU validation and a popup-state round-trip before it sets the in-progress
+    // flag, so a second caller arriving in that window used to pass the guard and load a second
+    // multi-gigabyte model, with its own GPU context, that nothing ever releases.
+    // A fresh engine: the shared one is already initialized by `beforeEach`, and an initialized
+    // engine returns early instead of racing.
+    const racing = new WebLLMEngine('Qwen2.5-3B-Instruct-q4f16_1-MLC');
+    mockCreateEngine.mockClear();
+
+    const first = racing.init();
+    const second = racing.init();
+    const settled = await Promise.allSettled([first, second]);
+
+    expect(mockCreateEngine).toHaveBeenCalledTimes(1);
+    expect(settled.filter((entry) => entry.status === 'rejected')).toHaveLength(1);
+  });
+
   it('keeps a bracketed sound-effect translation instead of reading it as a JSON fragment', async () => {
     // `[sigh]`, `[SFX]`, `[Heavy breathing]` are ordinary manga translation output. The guard that
     // drops a protocol leftover like `{}` must not classify them as one just because they are
