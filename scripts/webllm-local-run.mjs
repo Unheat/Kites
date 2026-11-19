@@ -166,6 +166,8 @@ async function runDeletionCheck(page, modelId) {
     return result;
   };
   const isCached = async () => Boolean((await send('CHECK_MODEL_STATUS', { modelId })).isCached);
+  // The three scope names are duplicated from WEBLLM_CACHE_SCOPES on purpose: this harness runs in
+  // plain Node and must observe the library's on-disk contract, not import the extension's bundle.
   const readCache = () => page.evaluate(async ({ prefix, lib }) => {
     const result = { modelPrefix: 0, configPrefix: 0, wasmHasLib: false, rawKeys: 0 };
     const scopes = ['webllm/model', 'webllm/config', 'webllm/wasm'];

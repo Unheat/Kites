@@ -555,10 +555,11 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                       const isUninstalledLocal = engine.type === 'local' && !engine.isDownloaded;
                       const isAuthRequired = engine.id === 'cloudflare-translate' && !state.userAccount?.signedIn;
                       const isSelectable = !isGpuDisabledForModel && !isUninstalledLocal && !isAuthRequired;
+                      // Deletion stays available when GPU acceleration is off: that is exactly when a
+                      // user wants the gigabytes back, and deleting files needs no WebGPU session.
                       const isDeletableModel = engine.type === 'local'
                         && engine.hardware === 'WebGPU'
-                        && Boolean(engine.isDownloaded)
-                        && !isGpuDisabledForModel;
+                        && Boolean(engine.isDownloaded);
                       const isActive = state.activeEngineId === engine.id && isSelectable;
                       return (
                         <div key={engine.id} className="relative">

@@ -1,4 +1,4 @@
-# Devlog 109: Deleting a downloaded WebLLM model
+# Devlog 110: Deleting a downloaded WebLLM model
 
 - **Date:** 2026-07-10
 - **Feature/Task:** Reclaim disk space from a cached on-device translation model
@@ -14,14 +14,14 @@ it.
 
 1. **No deletion path at all.** `src/offscreen/index.ts` exposed download, status and preload only, so a
    0.7–6 GB download could only be reclaimed by clearing all browser data.
-2. **The library helper is not usable.** `deleteModelAllInfoInCache()` (`@mlc-ai/web-llm`
-   `lib/index.js:14850`) composes three steps whose behaviour does not match a user-facing delete:
-   `deleteTensorCache` (`:7004-7020`) deletes the shard files but never `tensor-cache.json`, and
-   `ArtifactCache.addToCache` (`:6554-6566`) writes only when a key is missing, so the stale manifest
+2. **The library helper is not usable.** `deleteModelAllInfoInCache()` (`@mlc-ai/web-llm` 0.2.89
+   `lib/index.js:14971`) composes three steps whose behaviour does not match a user-facing delete:
+   `deleteTensorCache` (`:7121-7137`) deletes the shard files but never `tensor-cache.json`, and
+   `ArtifactCache.addToCache` (`:6671-6683`) writes only when a key is missing, so the stale manifest
    survives and a later download reuses it; when the manifest is absent (interrupted install)
    `fetchWithCache` has to fetch it, so cleanup needs the network; and `deleteModelWasmInCache`
-   (`:14894`) deletes a `model_lib` that other registry models still use.
-3. **Shared artifacts are invisible in the UI.** 11 of the 57 registry models are shared-`model_lib`
+   (`:15015`) deletes a `model_lib` that other registry models still use.
+3. **Shared artifacts are invisible in the UI.** 11 of the 59 registry models are shared-`model_lib`
    pairs, and 6 pairs (`-MLC` vs `-MLC-1k`, e.g. `gemma-2-2b-it-q4f16_1-MLC`) store the exact same
    weights and chat-config URLs, so deleting one removes the other's files.
 4. **Runtime state outlives the files.** The offscreen document keeps the engine resident
@@ -51,22 +51,22 @@ it.
 
 ## Evidence
 
-- `npx vitest run src/` — 131 files, 1,546 tests, all passing (repository baseline before this branch was
-  1,528 tests in 130 files; the difference is the 18 new assertions here).
+- `npx vitest run src/` — 131 files, 1,549 tests, all passing. This branch adds 16 test cases (11 cache
+  manager, 4 lifecycle ordering, 1 popup) to whatever the branch point carries.
 - `npx vitest run src/offscreen/services/WebLlmCacheManager.test.ts
-  src/offscreen/services/TranslationManager.test.ts src/popup/components/EngineSelectionPanel.test.tsx` — 52
+  src/offscreen/services/TranslationManager.test.ts src/popup/components/EngineSelectionPanel.test.tsx` — 55
   tests, all passing, including the wasm-shared vs wasm-unique branches, the `-1k` prefix boundary, the
   no-`fetch` assertion, unload-before-remove ordering and the popup selection reset.
 - `npm run docs:check` — 880 undocumented symbols (baseline 880, delta 0), 0 docstring shape violations.
 - `npm run docs:api` — exit 0.
 - `npm run build`, `npm run lint` — see the PR draft; lint reports only pre-existing warnings.
 - Browser check: `node scripts/webllm-local-run.mjs --delete-model Qwen2-0.5B-Instruct-q4f16_1-MLC
-  --profile ~/.kites-webllm-delete-profile` sends the same `{ target: 'background', request: true }`
-  envelope the popup sends, through `dist/`, on real WebGPU with real weights. Result: DELETE during the
-  download refused; after install `webllm/model` held 10 keys and `webllm/config` 1, delete removed 11
-  (`removedEntries: 11`), both prefix counts fell to 0, the shared `model_lib` stayed cached, a fresh
-  download reinstalled the model (`isCached: true`), and a second delete removed another 11. Evidence
-  JSON: `/tmp/kites-delete-0502b-delete.json`.
+  --profile ~/.kites-webllm-delete-profile-m089` sends the same `{ target: 'background', request: true }`
+  envelope the popup sends, through `dist/`, on real WebGPU with real weights, against
+  `@mlc-ai/web-llm` 0.2.89. Result: DELETE during the download refused; after install `webllm/model` held
+  10 keys and `webllm/config` 1, delete removed 11 (`removedEntries: 11`), both prefix counts fell to 0,
+  the shared `model_lib` stayed cached, a fresh download reinstalled the model (`isCached: true`), and a
+  second delete removed another 11. Evidence JSON: `/tmp/kites-delete-m089-delete.json`.
 
 ## Decision
 

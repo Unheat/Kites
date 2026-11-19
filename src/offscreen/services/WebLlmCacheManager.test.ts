@@ -147,6 +147,21 @@ describe('WebLlmCacheManager.deleteModel', () => {
     ]);
   });
 
+  it('sweeps the literal Hugging Face URL prefix WebLLM resolves for the model', async () => {
+    const literal = 'https://huggingface.co/mlc-ai/Qwen3-1.7B-q4f16_1-MLC/resolve/main/';
+    expect(modelPrefix(TARGET_MODEL)).toBe(literal);
+    const { stores } = installFakeCaches({
+      'webllm/model': [`${literal}tensor-cache.json`, `${literal}params_shard_0.bin`],
+      'webllm/config': [`${literal}mlc-chat-config.json`],
+      'webllm/wasm': [],
+    });
+
+    await WebLlmCacheManager.deleteModel(TARGET_MODEL);
+
+    expect(stores.get('webllm/model')).toEqual([]);
+    expect(stores.get('webllm/config')).toEqual([]);
+  });
+
   it('reports the catalog models whose files were removed because they share the same weights', async () => {
     const shared = modelPrefix(SHARED_WEIGHT_MODEL);
     installFakeCaches({
@@ -171,9 +186,9 @@ describe('WebLlmCacheManager.deleteModel', () => {
 
     await WebLlmCacheManager.deleteModel(TARGET_MODEL);
 
-    // WebLLM's own deleteModelAllInfoInCache() refetches the manifest (addToCache is cache-first,
-    // web-llm/lib/index.js:6554-6566) and never deletes it, so it needs the network after an
-    // interrupted install and leaves a stale manifest behind for the next download.
+    // WebLLM's own deleteModelAllInfoInCache() (web-llm/lib/index.js:14971) never deletes the
+    // tensor manifest, and addToCache (web-llm/lib/index.js:6671-6683) only writes missing keys, so
+    // a later download would reuse the stale one.
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 

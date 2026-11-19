@@ -529,18 +529,45 @@ describe('TranslationManager Waterfall Logic', () => {
     const removeFiles = vi.fn(async () => {
       order.push('remove');
     });
-    mocks.destroyStartedSignals.set('SmolLM2-135M-Instruct-q0f16-MLC', () => order.push('destroy'));
+    const destroyStarted = createDeferred<void>();
+    mocks.destroyStartedSignals.set('SmolLM2-135M-Instruct-q0f16-MLC', () => {
+      order.push('destroy');
+      destroyStarted.resolve(undefined);
+    });
     const deletion = manager.deleteModel('SmolLM2-135M-Instruct-q0f16-MLC', removeFiles);
 
-    // Nothing may be removed while the generation still holds the weights open.
-    await vi.waitFor(() => expect(mocks.destroyStartedSignals.size).toBeGreaterThan(0));
+    // The deletion may not touch the files while the generation still holds the weights open.
+    translateGate.resolve(undefined);
+    await translation;
+    await destroyStarted.promise;
+    await deletion;
+
+    expect(order).toEqual(['destroy', 'remove']);
+    expect(mocks.destroyedIds).toEqual(['SmolLM2-135M-Instruct-q0f16-MLC']);
+  });
+
+  it('keeps the files untouched while a translation still holds the lease', async () => {
+    respondWith('SmolLM2-135M-Instruct-q0f16-MLC');
+    const translateGate = createDeferred<void>();
+    const translateStarted = createDeferred<void>();
+    mocks.translateGates.set('SmolLM2-135M-Instruct-q0f16-MLC', translateGate.promise);
+    mocks.translateStartedSignals.set('SmolLM2-135M-Instruct-q0f16-MLC', () => translateStarted.resolve(undefined));
+    const translation = manager.processTranslation(['Hello']);
+    await translateStarted.promise;
+
+    const removeFiles = vi.fn(async () => {});
+    const deletion = manager.deleteModel('SmolLM2-135M-Instruct-q0f16-MLC', removeFiles);
+
+    // The engine lease is still held, so neither the unload nor the sweep may start.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(mocks.destroyedIds).toEqual([]);
     expect(removeFiles).not.toHaveBeenCalled();
 
     translateGate.resolve(undefined);
     await translation;
     await deletion;
 
-    expect(order).toEqual(['destroy', 'remove']);
+    expect(removeFiles).toHaveBeenCalledTimes(1);
     expect(mocks.destroyedIds).toEqual(['SmolLM2-135M-Instruct-q0f16-MLC']);
   });
 

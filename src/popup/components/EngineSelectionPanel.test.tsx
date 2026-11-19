@@ -222,7 +222,8 @@ describe('WebLLM download control', () => {
     container.remove();
   });
 
-  it('renders Layout & Bubble Fit selector and updates bubbleMode state', async () => {    const container = document.createElement('div');
+  it('renders Layout & Bubble Fit selector and updates bubbleMode state', async () => {
+    const container = document.createElement('div');
     document.body.appendChild(container);
     const root = createRoot(container);
     const updateState = vi.fn();
