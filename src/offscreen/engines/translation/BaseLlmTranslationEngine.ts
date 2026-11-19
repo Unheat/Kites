@@ -2,6 +2,7 @@ import type { ITranslationEngine, TranslationOptions } from './BaseEngine';
 import { buildGlossaryPrompt, GLOSSARY_PROMPT_RULES, getEnabledGlossary, filterRelevantGlossary, type GlossaryEntry } from '../../../shared/glossary';
 import { getLanguageName } from '../../../shared/utils/LanguageRegistry';
 import { hasNativeScriptForLang, isUntranslatedEcho } from '../../../shared/utils/textCleaning';
+import { resolvePageSourceLanguage } from '../../../shared/utils/sourceLanguageHint';
 
 /** Source-language name shown to the model when the request is in 'auto' mode. */
 export const AUTO_SOURCE_NAME = 'the detected source language';
@@ -66,7 +67,7 @@ export const MAX_RETRY_SEGMENTS = 8;
  * One only, and it samples differently from the first pass (`LlmRequestHints.recovery`), because a
  * model that echoed a line once will echo it again when asked the same way.
  */
-export const MAX_RETRY_REQUESTS = 0;
+export const MAX_RETRY_REQUESTS = 1;
 
 
 /**
@@ -208,7 +209,20 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
 
     if (toTranslate.length === 0) return results;
 
-    const sourceLang = this.resolveLanguage(sourceLangId, 'source');
+    // One page, one source language. The model must not re-decide per batch: a batch that resolves
+    // differently from its neighbours hands the source text back instead of translating it.
+    // Measured on scripts/fixtures/matrix, `auto` failed 10/18 Chinese slots while a pinned `zh`
+    // failed 0/18. Resolution uses the whole page, so a one-word bubble inherits its neighbours.
+    const undeclaredSource = !sourceLangId || sourceLangId === 'auto';
+    const pageLanguage = undeclaredSource
+      ? resolvePageSourceLanguage(toTranslate.map((segment) => segment.text))
+      : null;
+    const effectiveSourceLangId = pageLanguage?.langId ?? sourceLangId;
+    if (pageLanguage?.langId) {
+      console.log(`[BaseLlmTranslationEngine] Page source resolved: ${pageLanguage.langId} (${pageLanguage.evidence})`);
+    }
+
+    const sourceLang = this.resolveLanguage(effectiveSourceLangId, 'source');
     const targetLang = this.resolveLanguage(targetLangId, 'target');
     // Snapshot before awaiting inference so edits cannot alter later batches of this request.
     const rawGlossary = getEnabledGlossary(options);
@@ -245,7 +259,7 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
         targetLang,
         customPrompt,
         dynamicOverhead,
-        sourceLangId,
+        sourceLangId: effectiveSourceLangId,
         targetLangId,
       };
 
@@ -260,9 +274,9 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
         // so every failure is eligible (`hasNativeScriptForLang` returns true for an unknown code).
         // Wordless values never reach this point: `isDeterministicPassthrough` resolves them before
         // dispatch, so they can neither fail nor waste a recovery request.
-        const canJudgeScript = Boolean(sourceLangId) && sourceLangId !== 'auto';
+        const canJudgeScript = Boolean(effectiveSourceLangId) && effectiveSourceLangId !== 'auto';
         const eligible = canJudgeScript
-          ? unrecovered.filter((index) => hasNativeScriptForLang(chunk[index].text, sourceLangId))
+          ? unrecovered.filter((index) => hasNativeScriptForLang(chunk[index].text, effectiveSourceLangId))
           : unrecovered;
 
         for (let offset = 0; offset < eligible.length && retryBudget > 0; offset += MAX_RETRY_SEGMENTS) {
@@ -385,7 +399,14 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
       }
       // Writing-system comparison, not string equality: a model that normalizes one glyph
       // (題 -> 题) still handed back Chinese, and exact equality called that translated.
-      if (isUntranslatedEcho(chunk[idx].text, value, context.targetLangId)) {
+      // Only a line that carries the source script can prove the model copied it back. Latin debris
+      // on a Japanese page ("OK", "Chapter 12") is legitimately left alone; scoring it as an echo
+      // failed every page containing English SFX or credits, in every sampled run.
+      const sourceScriptApplies =
+        !context.sourceLangId || context.sourceLangId === 'auto'
+          ? true
+          : hasNativeScriptForLang(chunk[idx].text, context.sourceLangId);
+      if (sourceScriptApplies && isUntranslatedEcho(chunk[idx].text, value, context.targetLangId)) {
         failed.push(idx);
       }
     }
