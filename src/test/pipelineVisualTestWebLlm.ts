@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as http from 'http';
 import * as fs from 'fs';
 import { fileURLToPath } from 'url';
+import { STORAGE_KEYS } from '../shared/constants';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const EXTENSION_PATH = path.resolve(__dirname, '../../dist');
@@ -197,7 +198,7 @@ async function main(): Promise<void> {
     try {
       await configPage.goto(`chrome-extension://${extensionId}/index.html`, { waitUntil: 'load' });
       const configuredEngineId = await configPage.evaluate((modelId) => new Promise<string | undefined>((resolve) => {
-        chrome.storage.local.set({ popupState: {
+        chrome.storage.local.set({ [STORAGE_KEYS.POPUP_STATE]: {
           isExtensionEnabled: true, isAuto: false, manualMode: 'persistent', concurrency: 1,
           isDark: true, renderFontPresetId: 'standard',
           sourceLang: 'ja', targetLang: 'en', activeEngineId: modelId,
@@ -205,7 +206,8 @@ async function main(): Promise<void> {
           webgpuSupported: true, webgpuMaster: true,
           webgpuOverrides: { llm: true, inpaint: true, ocr: true },
         } }, () => {
-          chrome.storage.local.get('popupState', (data: any) => resolve(data?.popupState?.activeEngineId));
+          chrome.storage.local.get(STORAGE_KEYS.POPUP_STATE, (data: any) =>
+            resolve(data?.[STORAGE_KEYS.POPUP_STATE]?.activeEngineId));
         });
       }), WEBLLM_MODEL_ID);
       console.log('[WebLLM-E2E] Storage configured via dashboard:', configuredEngineId);

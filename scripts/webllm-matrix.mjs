@@ -56,6 +56,9 @@ const COMBOS = [
   { id: 'auto-vi-ja', fixture: 'ja-dialogue', source: 'auto', target: 'vi' },
   { id: 'zh-en-zh', fixture: 'zh-dialogue', source: 'zh', target: 'en' },
   { id: 'ja-en-ja', fixture: 'ja-dialogue', source: 'ja', target: 'en' },
+  // Non-Latin target: Cyrillic output is the check that the pipeline is not silently rewriting into
+  // a Latin target, and it is the only non-Latin target the scorer can judge without a script table.
+  { id: 'zh-ru-zh', fixture: 'zh-dialogue', source: 'zh', target: 'ru' },
   { id: 'auto-en-zh-real', fixture: 'zh-real-page', source: 'auto', target: 'en' },
   // Focused probes: one chunk by construction, so `--repeats 10` measures the echo rate for that
   // chunk instead of a page-level lottery. The page-level combos above mix several chunks, which is
@@ -118,11 +121,29 @@ function loadFixture(name) {
 }
 
 /**
+ * Whether a slot value is only JSON punctuation (`{}`, `[]`), i.e. a leftover of the protocol.
+ *
+ * Mirrors `isJsonSkeleton` in `BaseLlmTranslationEngine.ts`, which is the source of truth; this
+ * script runs standalone and cannot import TypeScript. Without this check a page that printed
+ * braces into every bubble scored as fully translated, because `{}` is neither the source text nor
+ * source script.
+ *
+ * @param value - Translated slot value.
+ * @returns True when the value carries no content beyond JSON structure.
+ */
+function isProtocolFragment(value) {
+  const trimmed = String(value ?? '').trim();
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return false;
+  return trimmed.replace(/[\s[\]{},:"'`]/g, '').length === 0;
+}
+
+/**
  * Scores one translated page.
  *
- * The two failure signals are kept apart on purpose: an echoed slot means the model handed the
- * source text back, while `stillSourceScript` means it answered in the wrong writing system
- * (a rewriting pass that never actually translated). A slot counts once, whichever fired.
+ * The failure signals are kept apart on purpose: an echoed slot means the model handed the source
+ * text back, `stillSourceScript` means it answered in the wrong writing system (a rewriting pass
+ * that never actually translated), and `protocolFragments` means it answered with JSON punctuation
+ * instead of text. A slot counts once, whichever fired.
  *
  * @param page - Page texts and the engine's answer, index-aligned.
  * @returns Counts plus the offending slot indices.
@@ -130,16 +151,19 @@ function loadFixture(name) {
 function scorePage(page) {
   const echoed = [];
   const stillSourceScript = [];
+  const protocolFragments = [];
   for (let slot = 0; slot < page.texts.length; slot += 1) {
     const output = page.translated[slot] ?? '';
     if (output === page.texts[slot]) echoed.push(slot);
     else if (SOURCE_SCRIPT_PATTERN.test(output)) stillSourceScript.push(slot);
+    else if (isProtocolFragment(output)) protocolFragments.push(slot);
   }
   return {
     slots: page.texts.length,
     echoed,
     stillSourceScript,
-    failed: new Set([...echoed, ...stillSourceScript]).size,
+    protocolFragments,
+    failed: new Set([...echoed, ...stillSourceScript, ...protocolFragments]).size,
   };
 }
 
