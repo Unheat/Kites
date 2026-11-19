@@ -108,8 +108,21 @@ export interface LlmRequestHints {
   recoveryAttempt?: number;
 }
 
-/** A value that is only a JSON object or array skeleton, never a translation. */
-const JSON_FRAGMENT_RE = /^[[{][\s\S]*[\]}],?$/;
+/**
+ * Whether a slot value is only JSON punctuation, i.e. a leftover of the protocol.
+ *
+ * A bracketed translation is ordinary output — `[sigh]`, `[SFX]`, `[Heavy breathing]` — so the test
+ * cannot be "starts with a bracket and ends with one". It strips the structural characters and asks
+ * whether anything linguistic is left: `{}`, `[]`, `{"b0":""}` reduce to nothing, while `[sigh]`
+ * reduces to `sigh`.
+ *
+ * @param value - Trimmed slot value from the model.
+ * @returns True when the value carries no content beyond JSON structure.
+ */
+function isJsonSkeleton(value: string): boolean {
+  if (!value.startsWith('{') && !value.startsWith('[')) return false;
+  return value.replace(/[\s[\]{},:"'`]/g, '').length === 0;
+}
 
 /** Parsed values for one chunk plus the keys the model actually answered. */
 interface ChunkResult {
@@ -443,8 +456,11 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
         continue;
       }
       // A value that is still JSON punctuation (`{}`, `[]`) is a fragment of the protocol, not a
-      // translation: assigning it would print braces into the bubble.
-      if (JSON_FRAGMENT_RE.test(value.trim())) {
+      // translation. Marking it failed alone is not enough: a failed slot keeps whatever the first
+      // pass returned, so the braces reached the bubble. Falling back to the source text here uses
+      // the same path as an omitted key, and recovery can still improve on it.
+      if (isJsonSkeleton(value.trim())) {
+        values[idx] = chunk[idx].text;
         failed.push(idx);
         continue;
       }
