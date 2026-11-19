@@ -57,6 +57,11 @@ const COMBOS = [
   { id: 'zh-en-zh', fixture: 'zh-dialogue', source: 'zh', target: 'en' },
   { id: 'ja-en-ja', fixture: 'ja-dialogue', source: 'ja', target: 'en' },
   { id: 'auto-en-zh-real', fixture: 'zh-real-page', source: 'auto', target: 'en' },
+  // Focused probes: one chunk by construction, so `--repeats 10` measures the echo rate for that
+  // chunk instead of a page-level lottery. The page-level combos above mix several chunks, which is
+  // what made a single echoing chunk look like a 15-point swing between runs.
+  { id: 'short-en-zh', fixture: 'zh-short-imperatives', source: 'zh', target: 'en' },
+  { id: 'short-vi-zh', fixture: 'zh-short-imperatives', source: 'zh', target: 'vi' },
 ];
 
 /**
