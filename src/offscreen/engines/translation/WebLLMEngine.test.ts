@@ -165,7 +165,6 @@ describe('WebLLMEngine Keyed JSON Protocol', () => {
 
     const result = await engine.translate(inputs);
 
-    console.log('CALLS', mockCreate.mock.calls.length, mockCreate.mock.calls.map((c:any)=>(c[0].messages?.[1]?.content||'').slice(-90).replace(/\n/g,' ')));
     expect(result).toEqual(['1', '2', 'solo', 'solo', 'solo', 'solo']);
     expect(mockCreate).toHaveBeenCalledTimes(1 + 4);
   });
