@@ -61,7 +61,10 @@ export const WEBLLM_CONTEXT_WINDOW_SIZE = 2048;
  *
  * @see WEBLLM_CONTEXT_WINDOW_SIZE
  */
-export const WEBLLM_CHAT_OPTIONS = { context_window_size: WEBLLM_CONTEXT_WINDOW_SIZE };
+export const WEBLLM_CHAT_OPTIONS = {
+  /** KV slots reserved by the compiled pipeline at load; see `WEBLLM_CONTEXT_WINDOW_SIZE`. */
+  context_window_size: WEBLLM_CONTEXT_WINDOW_SIZE,
+};
 
 /**
  * Segments per recovery request on the local model.
