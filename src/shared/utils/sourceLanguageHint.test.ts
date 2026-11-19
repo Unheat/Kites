@@ -53,4 +53,16 @@ describe('resolvePageSourceLanguage', () => {
     // The short bubble alone is undecidable; the page it belongs to is not.
     expect(resolvePageSourceLanguage(['……', '待って'])).toEqual({ langId: 'ja', evidence: 'kana' });
   });
+
+  it('does not let a stray kana word relabel a Chinese page as Japanese', () => {
+    // Katakana brand names (コーヒー) and the middle dot appear in Chinese manhua. One kana clear of
+    // the 1% share floor used to resolve the whole page to `ja`, which is the exact failure class
+    // this module exists to prevent: the model is told the source is Japanese and hands Chinese back.
+    const chinese = ['他说这话是什么意思', 'コーヒー', '我只是路过而已', '别把我卷进来', '行了都别吵了'];
+    expect(resolvePageSourceLanguage(chinese).langId).toBe('zh');
+  });
+
+  it('still resolves a katakana-only page to Japanese', () => {
+    expect(resolvePageSourceLanguage(['ドドドドド', 'ゴゴゴ']).langId).toBe('ja');
+  });
 });
