@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { KANA_SHARE_FOR_JAPANESE, resolvePageSourceLanguage } from './sourceLanguageHint';
 
 /**
@@ -64,5 +66,29 @@ describe('resolvePageSourceLanguage', () => {
 
   it('still resolves a katakana-only page to Japanese', () => {
     expect(resolvePageSourceLanguage(['ドドドドド', 'ゴゴゴ']).langId).toBe('ja');
+  });
+
+  it('resolves every matrix fixture page to the language the matrix assumes', () => {
+    // The kana rule changed, so assert the shipped fixtures directly instead of inferring it from a
+    // noisy browser run: these pages are the ones every measurement in the devlogs is scored on.
+    // `zh-real-page` resolves to `ja` and that is the honest answer for it: OCR misreads three
+    // Chinese lines into kana (`小チン`, `心まで`, `ぐうレ`), which is 5.2% kana over 128 Han
+    // characters. Both the previous rule and this one label it Japanese, and the page still
+    // translates (2/40 slots fail), so it stays as a documented example that OCR noise can move a
+    // page label rather than as a case to tune the thresholds against.
+    const cases: Array<[string, string | null]> = [
+      ['zh-dialogue', 'zh'],
+      ['ja-dialogue', 'ja'],
+      ['zh-real-page', 'ja'],
+      ['zh-short-imperatives', 'zh'],
+    ];
+    for (const [fixture, expected] of cases) {
+      const pages = JSON.parse(
+        readFileSync(join(__dirname, '../../../scripts/fixtures/matrix', `${fixture}.json`), 'utf8')
+      ) as string[][];
+      for (const page of pages) {
+        expect(resolvePageSourceLanguage(page).langId, `${fixture}: ${page[0]}`).toBe(expected);
+      }
+    }
   });
 });
