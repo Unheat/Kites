@@ -8,7 +8,6 @@ import {
 } from './BaseLlmTranslationEngine';
 import { checkWebGPUAvailability, probeWebGPUAdapter } from '../../utils/hardware';
 import { checkModelLoadability } from '../../utils/modelPreflight';
-import { isThinkingModel } from '../../../shared/translation/thinkingModels';
 import type { TranslationOptions } from './BaseEngine';
 
 /** Default segment batch size for on-device WebLLM inference (bounds keys to avoid small model attention degradation) */
@@ -375,13 +374,6 @@ export class WebLLMEngine extends BaseLlmTranslationEngine {
       // `usage` is only emitted when this is asked for; without it the completion count is a guess.
       stream_options: { include_usage: true },
     };
-
-    if (isThinkingModel(this.modelId)) {
-      // Only the `extra_body` channel is read, and only a strict false disables thinking; see
-      // `thinkingModels.ts`. Applied per model because a template without the mechanism treats the
-      // injected block as ordinary prompt text.
-      completionOptions.extra_body = { enable_thinking: false };
-    }
 
     if (schema) {
       completionOptions.response_format = {

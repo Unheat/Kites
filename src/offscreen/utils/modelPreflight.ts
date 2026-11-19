@@ -34,7 +34,17 @@ export interface AdapterCapabilities {
 }
 
 /** Outcome of a loadability check. */
-export type LoadabilityVerdict = { ok: true } | { ok: false; reason: string };
+export type LoadabilityVerdict =
+  | {
+      /** The device satisfies everything the record asks for. */
+      ok: true;
+    }
+  | {
+      /** The device cannot load this record. */
+      ok: false;
+      /** User-facing explanation naming the unmet requirement and a way out. */
+      reason: string;
+    };
 
 /**
  * Decides whether a model record can load on the described device.

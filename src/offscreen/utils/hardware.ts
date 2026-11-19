@@ -13,8 +13,11 @@ let adapterCapabilities: { features: Set<string>; maxStorageBufferBindingSize: n
 
 /** What a successful probe learned about the adapter. */
 export interface WebGpuAdapterProbe {
+  /** Whether a validated high-performance adapter created a device. */
   supported: boolean;
+  /** Features the adapter advertises; absent when the probe could not read them. */
   features?: Set<string>;
+  /** Largest storage buffer binding the device allows, in bytes; absent when unread. */
   maxStorageBufferBindingSize?: number;
 }
 

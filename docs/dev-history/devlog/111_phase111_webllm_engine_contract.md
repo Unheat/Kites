@@ -32,7 +32,8 @@ in the shipped bundle (`node_modules/@mlc-ai/web-llm/lib/index.js`), not in `doc
    reaches the GPU.
 3. **Thinking blocks spending the completion budget.** `enable_thinking` is read from exactly one
    place, `request.extra_body` (18779), and disables only on a strict `false` (12478-12486). Nothing
-   was sent, so Qwen3/Qwen3.5 templates were free to think before emitting JSON.
+   was sent, so Qwen3/Qwen3.5 templates were free to think before emitting JSON. **Tried and
+   rejected — see the measurements below: sending it made Japanese→English markedly worse.**
 4. **Usage was a guess.** `makeStreamUsageChunk` returns `undefined` unless
    `stream_options.include_usage === true` (18608-18611); the reader already handled the terminal
    chunk (which arrives with `choices: []`), but nothing asked for it.
@@ -50,7 +51,6 @@ in the shipped bundle (`node_modules/@mlc-ai/web-llm/lib/index.js`), not in `doc
 | `src/offscreen/engines/translation/WebLLMEngine.ts` | Removed the per-batch `resetChat`; added `stream_options.include_usage`; added `extra_body.enable_thinking: false` behind `isThinkingModel`; passes `WEBLLM_CHAT_OPTIONS` (`context_window_size: 2048`) as the third `CreateMLCEngine` argument; calls the preflight before construction. |
 | `src/offscreen/utils/hardware.ts` | `probeWebGPUAdapter()` reuses the validated high-performance adapter and also reports `features` and `maxStorageBufferBindingSize`; replaces `init()`'s duplicate `requestAdapter` warm-up. |
 | `src/offscreen/utils/modelPreflight.ts` | New pure `checkModelLoadability(record, capabilities)`; unverifiable capabilities are treated as loadable. |
-| `src/shared/translation/thinkingModels.ts` | Canonical prefix list for thinking-capable families. |
 | `manifest.json` | `unlimitedStorage`. |
 
 ## Measurements
@@ -62,7 +62,18 @@ in the shipped bundle (`node_modules/@mlc-ai/web-llm/lib/index.js`), not in `doc
   gate is inert and the library's own pre-download check is the protection.
 - Thinking-capable ids in our registry: **14** (6 Qwen3 + 8 Qwen3.5). The shipped catalogue has 19
   Qwen3/Qwen3.5 ids, which is why the predicate matches prefixes rather than exact ids.
-- Test suite after the change: **1576 passed, 0 failed** (was 1565 passed plus 5 red assertions and an
+- `enable_thinking: false`, two repeats per combo on the real pipeline:
+
+  | combo | flag off | no flag |
+  |---|---|---|
+  | Japanese source → English (`ja-en-ja`) | 18/52 **34.6%** | 9/78 **11.5%** |
+  | auto→en, Chinese | 2/36 5.6% | 1/36 2.8% |
+  | auto→vi, Chinese | 5/36 13.9% | 6/36 16.7% |
+
+  Whole batches echoed on the Japanese path with the flag on, which is the mode the flag is supposed
+  to prevent. Net measured harm, no measured benefit, so the flag is not sent and a regression test
+  asserts its absence with these numbers in the comment.
+- Test suite after the change: **1574 passed, 0 failed** (was 1565 passed plus 5 red assertions and an
   unresolved import).
 
 ## Rejected alternatives
@@ -87,8 +98,7 @@ in the shipped bundle (`node_modules/@mlc-ai/web-llm/lib/index.js`), not in `doc
 
 ## Known limits
 
-- Turning thinking off is wired and gated but its quantitative effect on our short, schema-constrained
-  batches is still unmeasured; the A/B is specified in `.workflow/plan.md` and belongs in the next
-  devlog once it runs.
+- The thinking flag is rejected on measurement rather than on principle; a future model or fixture
+  may measure differently, and the numbers to beat are in the table above.
 - `ContextWindowSizeExceededError` is now less likely (2× slack) but still possible on a badly
   under-estimated batch; the input estimator, not the window, is the remaining lever.
