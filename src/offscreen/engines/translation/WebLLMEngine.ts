@@ -13,7 +13,15 @@ import type { TranslationOptions } from './BaseEngine';
 /** Default segment batch size for on-device WebLLM inference (bounds keys to avoid small model attention degradation) */
 export const DEFAULT_WEBLLM_BATCH_SIZE = 8;
 
-/** Maximum input tokens reserved for WebLLM prompt within its strict 1024-token WebGPU context window */
+/**
+ * Maximum input tokens reserved for WebLLM prompt within its strict 1024-token WebGPU context window.
+ *
+ * Left at 550 after measurement: across 22 batches of the real 20-bubble page the tokenizer reported
+ * 4670 prompt tokens against 6438 estimated, so the planner's estimate already runs ~37% high. That
+ * margin is the guard against `ContextWindowSizeExceededError`, which loses a batch outright, not
+ * slack to reclaim — raising this to 800 moved no batch boundary, because `batchSize` (8) binds
+ * first on every sampled page.
+ */
 export const DEFAULT_WEBLLM_MAX_INPUT_TOKENS = 550;
 
 /** Maximum allowed custom prompt tokens on local WebGPU to prevent KV cache exhaustion */
