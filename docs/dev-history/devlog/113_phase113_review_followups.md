@@ -100,7 +100,7 @@ Because a 1-repeat browser number cannot prove a classifier did not change, the 
 asserted directly: every page of `zh-dialogue`, `ja-dialogue` and `zh-short-imperatives` resolves
 `zh`/`ja`/`zh` deterministically in a unit test.
 
-Gates: `npm test` 1586 passed / 135 files; `npm run docs:check` 880, delta +0, 0 shape violations;
+Gates: `npm test` 1587 passed / 135 files; `npm run docs:check` 880, delta +0, 0 shape violations;
 `npm run lint` 0 errors; `npm run build` clean; `npm run docs:api` generates; smoke **6/6 PASS**.
 
 ## A fixture that lies by accident
