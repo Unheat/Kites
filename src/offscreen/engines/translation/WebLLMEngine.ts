@@ -26,7 +26,7 @@ export const MAX_WEBLLM_CUSTOM_PROMPT_TOKENS = 80;
  * Qwen3.5-0.8B on a dense Chinese page, greedy first passes echoed the source in 8 of 8 runs, while
  * this sampling translated 7 of 8.
  */
-const WEBLLM_TEMPERATURE = 0.7;
+export const WEBLLM_TEMPERATURE = 0.7;
 
 /** Nucleus sampling cutoff paired with `WEBLLM_TEMPERATURE`; part of the model's recommended set. */
 const WEBLLM_TOP_P = 0.8;
@@ -42,7 +42,7 @@ const WEBLLM_TOP_K = 20;
  * temperature 0, and translated on attempts that sampled at 0.3. Paying the variability only on the
  * second pass keeps the first pass reproducible.
  */
-export const WEBLLM_RECOVERY_TEMPERATURE = 0.3;
+export const WEBLLM_RECOVERY_TEMPERATURE = 0.9;
 
 /**
  * Temperature added per further recovery attempt.
@@ -50,10 +50,10 @@ export const WEBLLM_RECOVERY_TEMPERATURE = 0.3;
  * A second retry must not re-sample the same neighbourhood as the first, or it repeats the answer it
  * already knows to be wrong. Bounded so later attempts stay translations rather than drifting.
  */
-const WEBLLM_RECOVERY_TEMPERATURE_STEP = 0.2;
+const WEBLLM_RECOVERY_TEMPERATURE_STEP = 0.1;
 
 /** Ceiling for recovery sampling, so an increasing retry budget cannot turn into free association. */
-const WEBLLM_TEMPERATURE_CEILING = 0.7;
+export const WEBLLM_TEMPERATURE_CEILING = 1.1;
 
 /**
  * Sampling temperature for one attempt of a page.

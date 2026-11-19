@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { WebLLMEngine, WEBLLM_IDLE_DEADLINE_MS, WEBLLM_MAX_GENERATION_MS, WEBLLM_RECOVERY_TEMPERATURE, temperatureForAttempt } from './WebLLMEngine';
+import { WebLLMEngine, WEBLLM_IDLE_DEADLINE_MS, WEBLLM_MAX_GENERATION_MS, WEBLLM_RECOVERY_TEMPERATURE, WEBLLM_TEMPERATURE, WEBLLM_TEMPERATURE_CEILING, temperatureForAttempt } from './WebLLMEngine';
 
 // 1. Mock the @mlc-ai/web-llm module
 const mockCreate = vi.fn();
@@ -90,7 +90,7 @@ describe('WebLLMEngine Keyed JSON Protocol', () => {
 
     // Verify completion call parameters
     const callArg = mockCreate.mock.calls[0][0];
-    expect(callArg.temperature).toBe(0);
+    expect(callArg.temperature).toBe(WEBLLM_TEMPERATURE);
     expect(callArg.stop).toBeUndefined(); // \n\n\n stop sequence must not be passed
     expect(callArg.response_format.type).toBe('json_object');
     expect(callArg.response_format.schema).toContain('"b0"');
@@ -233,9 +233,10 @@ describe('WebLLMEngine Keyed JSON Protocol', () => {
     vi.useRealTimers();
   });
 
-  it('keeps the first pass greedy and samples the recovery pass differently', async () => {
-    // Greedy decoding reproduces an echoed slot exactly; the retry needs different sampling to
-    // escape that attractor (measured: 3/3 identical echoes at temperature 0, translated at 0.3).
+  it('samples the first pass and the recovery pass differently', async () => {
+    // The first pass is sampled, not greedy: measured on a realistic page shape, 0.7 finished
+    // 6/57 slots untranslated against 10/57 at temperature 0. The recovery pass must sit outside
+    // the first pass's neighbourhood, or it re-samples the answer it already knows is wrong.
     mockCreate
       .mockResolvedValueOnce({ choices: [{ message: { content: JSON.stringify({ b0: 'Hello' }) } }] })
       .mockResolvedValueOnce({ choices: [{ message: { content: JSON.stringify({ b0: 'Hi again' }) } }] });
@@ -243,9 +244,10 @@ describe('WebLLMEngine Keyed JSON Protocol', () => {
     const out = await engine.translate(['こんにちは', 'またね'], 'ja', 'en');
 
     expect(out).toEqual(['Hello', 'Hi again']);
-    expect(mockCreate.mock.calls[0][0]).toMatchObject({ temperature: 0 });
+    expect(mockCreate.mock.calls[0][0]).toMatchObject({ temperature: WEBLLM_TEMPERATURE });
     expect(mockCreate.mock.calls[1][0]).toMatchObject({ temperature: WEBLLM_RECOVERY_TEMPERATURE });
-    expect(WEBLLM_RECOVERY_TEMPERATURE).toBeGreaterThan(0);
+    // A retry colder than the pass that failed walks straight back into the same degradation.
+    expect(WEBLLM_RECOVERY_TEMPERATURE).toBeGreaterThan(WEBLLM_TEMPERATURE);
   });
 
   it('configures bounded batch size, strict input token budget, and 1024 context window for WebGPU', async () => {
@@ -291,10 +293,11 @@ describe('WebLLMEngine Keyed JSON Protocol', () => {
 });
 
 describe('temperatureForAttempt', () => {
-  it('keeps the first pass greedy and every retry outside the greedy attractor', () => {
-    expect(temperatureForAttempt()).toBe(0);
-    expect(temperatureForAttempt({ recovery: false })).toBe(0);
+  it('samples the first pass and every retry outside it', () => {
+    expect(temperatureForAttempt()).toBe(WEBLLM_TEMPERATURE);
+    expect(temperatureForAttempt({ recovery: false })).toBe(WEBLLM_TEMPERATURE);
     expect(temperatureForAttempt({ recovery: true, recoveryAttempt: 1 })).toBe(WEBLLM_RECOVERY_TEMPERATURE);
+    expect(WEBLLM_RECOVERY_TEMPERATURE).toBeGreaterThan(WEBLLM_TEMPERATURE);
   });
 
   it('samples further out on each further attempt so a raised retry budget needs no other change', () => {
@@ -307,6 +310,8 @@ describe('temperatureForAttempt', () => {
   });
 
   it('stops climbing before sampling turns into free association', () => {
-    expect(temperatureForAttempt({ recoveryAttempt: 99 })).toBeLessThanOrEqual(0.7);
+    expect(temperatureForAttempt({ recoveryAttempt: 99 })).toBe(WEBLLM_TEMPERATURE_CEILING);
+    // Above this a translation pass drifts into free association rather than escaping the echo.
+    expect(WEBLLM_TEMPERATURE_CEILING).toBeLessThan(1.2);
   });
 });
