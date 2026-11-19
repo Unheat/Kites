@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { Download, ChevronDown, ChevronRight, Plus, Search, Check, Bold, Italic, AlignLeft, AlignCenter, AlignRight } from 'lucide-react';
+import { Download, ChevronDown, ChevronRight, Plus, Search, Check, Bold, Italic, AlignLeft, AlignCenter, AlignRight, Trash2 } from 'lucide-react';
 import type { PopupState, BubbleDetectionMode } from '../../shared/types';
 import AddApiForm from './AddApiForm';
 import MiniSearch from 'minisearch';
@@ -47,6 +47,12 @@ export const BUBBLE_MODE_OPTIONS: BubbleModeOption[] = [
 interface DownloadAcknowledgement {
   status?: 'success' | 'error';
   error?: string;
+}
+
+interface DeleteAcknowledgement {
+  status?: 'success' | 'error';
+  error?: string;
+  alsoRemoved?: string[];
 }
 
 interface EngineSelectionPanelProps {
@@ -105,6 +111,9 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
   const updateStateRef = useRef(updateState);
   updateStateRef.current = updateState;
 
+  const [deletingEngineId, setDeletingEngineId] = useState<string | null>(null);
+  const [deletionNotice, setDeletionNotice] = useState<string | null>(null);
+
   /**
    * Queues one model download through the background-owned RPC route.
    *
@@ -144,6 +153,74 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
+
+  /**
+   * Marks a model and its file-sharing siblings as uninstalled after a deletion.
+   *
+   * @param modelId - Model that was deleted.
+   * @param alsoRemoved - Registry ids that lost the same files and are therefore gone too.
+   * @returns Nothing.
+   */
+  const markModelsDeleted = (modelId: string, alsoRemoved: readonly string[]): void => {
+    const deletedIds = new Set([modelId, ...alsoRemoved]);
+    readyModelIds.current.forEach((id) => {
+      if (deletedIds.has(id)) readyModelIds.current.delete(id);
+    });
+    setBaseEngines(prev => prev.map(engine => deletedIds.has(engine.id) ? { ...engine, isDownloaded: false } : engine));
+    setDownloads(prev => {
+      const next = { ...prev };
+      deletedIds.forEach((id) => delete next[id]);
+      return next;
+    });
+    setPendingDownloadIds(prev => {
+      const next = new Set(prev);
+      deletedIds.forEach((id) => next.delete(id));
+      return next;
+    });
+    // A deleted model must not stay selected: the background preloads the active engine on the
+    // next browser start, which would silently download the gigabytes the user just freed.
+    const current = stateRef.current;
+    if (current.activeEngineId && deletedIds.has(current.activeEngineId)) {
+      updateStateRef.current({
+        activeEngineId: 'gg-translate',
+        fallbackChain: (current.fallbackChain || []).filter((id) => !deletedIds.has(id)),
+      });
+    }
+  };
+
+  /**
+   * Deletes one downloaded WebLLM model through the background-owned RPC route.
+   *
+   * @param engine - Engine row the user confirmed.
+   * @returns A promise resolved after the deletion settles.
+   */
+  const requestModelDelete = async (engine: Engine): Promise<void> => {
+    setDeletingEngineId(null);
+    setDeletionNotice(null);
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: 'DELETE_MODEL',
+        target: 'background',
+        source: 'popup',
+        request: true,
+        payload: { modelId: engine.id },
+      }) as DeleteAcknowledgement | undefined;
+      if (!response || response.status !== 'success') {
+        throw new Error(response?.error || 'Delete request was not acknowledged');
+      }
+      const alsoRemoved = response.alsoRemoved ?? [];
+      markModelsDeleted(engine.id, alsoRemoved);
+      setDeletionNotice(
+        alsoRemoved.length > 0
+          ? `Deleted ${engine.name}. ${alsoRemoved.join(', ')} also lost the same files and must be downloaded again.`
+          : `Deleted ${engine.name}. Download it again to use it.`,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[EngineSelectionPanel] Failed to delete ${engine.id}:`, error);
+      setDeletionNotice(`Delete failed: ${message}`);
+    }
+  };
 
   useEffect(() => {
     // Query active downloads on mount
@@ -219,6 +296,12 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
             status: `Failed: ${message.payload.error}`
           }
         }));
+      }
+      if (message.type === 'MODEL_DELETED' && message.payload?.modelId) {
+        // Another surface (a second popup, or the deletion that this one just requested) removed
+        // the files; the row must stop claiming the model is installed.
+        const alsoRemoved: string[] = message.payload.alsoRemoved ?? [];
+        markModelsDeleted(message.payload.modelId, alsoRemoved);
       }
     };
     chrome.runtime.onMessage.addListener(listener);
@@ -472,6 +555,11 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                       const isUninstalledLocal = engine.type === 'local' && !engine.isDownloaded;
                       const isAuthRequired = engine.id === 'cloudflare-translate' && !state.userAccount?.signedIn;
                       const isSelectable = !isGpuDisabledForModel && !isUninstalledLocal && !isAuthRequired;
+                      // Deletion stays available when GPU acceleration is off: that is exactly when a
+                      // user wants the gigabytes back, and deleting files needs no WebGPU session.
+                      const isDeletableModel = engine.type === 'local'
+                        && engine.hardware === 'WebGPU'
+                        && Boolean(engine.isDownloaded);
                       const isActive = state.activeEngineId === engine.id && isSelectable;
                       return (
                         <div key={engine.id} className="relative">
@@ -529,7 +617,47 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                               <Download size={14} />
                             </button>
                           ) : null}
+                          {/* Only locally cached WebGPU weights occupy disk; deleting them is the
+                              only way a user can reclaim a multi-gigabyte download. */}
+                          {isDeletableModel ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setDeletionNotice(null);
+                                setDeletingEngineId(engine.id);
+                              }}
+                              className="p-2 rounded hover:bg-[var(--color-vellum)] transition-colors cursor-pointer text-[var(--color-ink)]"
+                              title="Delete downloaded model"
+                              aria-label={`Delete ${engine.name}`}
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          ) : null}
                           </div>
+
+                          {deletingEngineId === engine.id ? (
+                            <div className="mt-1 p-2 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md text-xs flex flex-col gap-2">
+                              <span className="text-[var(--color-ink)]">
+                                Delete <strong>{engine.name}</strong>? It must be downloaded again to use it.
+                              </span>
+                              <div className="flex gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => void requestModelDelete(engine)}
+                                  className="px-2 py-1 rounded bg-[var(--color-editorial)] text-[var(--color-paper)] font-medium cursor-pointer"
+                                >
+                                  Delete
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setDeletingEngineId(null)}
+                                  className="px-2 py-1 rounded border border-[var(--color-dust)] cursor-pointer"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </div>
+                          ) : null}
 
                           {/* ? Help icon & tooltip for unauthenticated Cloudflare Shared Pool */}
                           {isAuthRequired && (
@@ -583,6 +711,15 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
           )}
         </div>
       </div>
+
+      {deletionNotice ? (
+        <div
+          role="status"
+          className="p-2 text-xs bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded-md text-[var(--color-ink)]"
+        >
+          {deletionNotice}
+        </div>
+      ) : null}
 
       {/* Image Cleaning Engine Selector */}
       <div className="flex flex-col gap-1.5">

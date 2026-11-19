@@ -21,6 +21,7 @@
  * KITES_LABEL, KITES_PAGES, KITES_OUT_DIR.
  */
 import { chromium } from 'playwright-core';
+import { prebuiltAppConfig } from '@mlc-ai/web-llm';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -107,7 +108,165 @@ async function extensionId(context) {
   return new URL(worker.url()).host;
 }
 
-const pages = readPages(flag('pages'));
+/** How often the deletion check re-reads cache and install state. */
+const DELETE_POLL_INTERVAL_MS = 2_000;
+/** Generous ceiling: the first run downloads real weights from Hugging Face. */
+const DELETE_TIMEOUT_MS = 20 * 60 * 1000;
+
+/**
+ * Reads one model's on-disk locations from the bundled catalog and registry.
+ *
+ * @param modelId - Model to inspect.
+ * @returns Cache-key prefix, wasm library URL, and whether another installable model shares it.
+ */
+function catalogFacts(modelId) {
+  const registry = JSON.parse(readFileSync(join(REPO_ROOT, 'src/shared/models-registry.json'), 'utf8'));
+  const installable = new Set(registry.map((entry) => entry.id));
+  const record = prebuiltAppConfig.model_list.find((entry) => entry.model_id === modelId);
+  if (!record) throw new Error(`${modelId} is not in the bundled WebLLM catalog.`);
+  const base = record.model.endsWith('/') ? record.model : `${record.model}/`;
+  const prefix = new URL(base.match(/.+\/resolve\/.+\//) ? base : `${base}resolve/main/`).href;
+  const libShared = prebuiltAppConfig.model_list.some(
+    (entry) => entry.model_id !== modelId && entry.model_lib === record.model_lib && installable.has(entry.model_id),
+  );
+  return { prefix, lib: record.model_lib, libShared };
+}
+
+/**
+ * Drives the real model-deletion path through the built extension and asserts its effects.
+ *
+ * Sends the same `{ target: 'background', request: true }` envelopes the popup sends, so the
+ * background route guard, the offscreen handler, the download refusal, the cache sweep and the
+ * stale-manifest-free re-download are all exercised on real WebGPU hardware with real weights.
+ *
+ * @param page - The offscreen extension page.
+ * @param modelId - Model to download, delete, re-download and delete again.
+ */
+async function runDeletionCheck(page, modelId) {
+  const facts = catalogFacts(modelId);
+  const sendOnce = (type, payload) => page.evaluate((message) => new Promise((resolve) => {
+    chrome.runtime.sendMessage(message, (response) => resolve(
+      response ?? { status: 'error', error: String(chrome.runtime.lastError?.message) },
+    ));
+  }), { type, target: 'background', source: 'popup', request: true, payload });
+  // MV3 closes the message port when the service worker is still waking or has just been stopped,
+  // which the popup hits as a spurious failure. Retry only that transport error.
+  const send = async (type, payload) => {
+    const startedAt = Date.now();
+    let result;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      result = await sendOnce(type, payload);
+      const transportFailure = result.status === 'error' && /message port closed|Receiving end does not exist/i.test(result.error ?? '');
+      if (!transportFailure) break;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    if (type !== 'CHECK_MODEL_STATUS') {
+      console.log(`sent ${type} (${Date.now() - startedAt}ms) -> ${JSON.stringify(result)}`);
+    }
+    return result;
+  };
+  const isCached = async () => Boolean((await send('CHECK_MODEL_STATUS', { modelId })).isCached);
+  // The three scope names are duplicated from WEBLLM_CACHE_SCOPES on purpose: this harness runs in
+  // plain Node and must observe the library's on-disk contract, not import the extension's bundle.
+  const readCache = () => page.evaluate(async ({ prefix, lib }) => {
+    const result = { modelPrefix: 0, configPrefix: 0, wasmHasLib: false, rawKeys: 0 };
+    const scopes = ['webllm/model', 'webllm/config', 'webllm/wasm'];
+    for (const scope of scopes) {
+      const cache = await caches.open(scope);
+      const keys = (await cache.keys()).map((request) => request.url);
+      result.rawKeys += keys.length;
+      if (scope === 'webllm/model') result.modelPrefix = keys.filter((url) => url.startsWith(prefix)).length;
+      if (scope === 'webllm/config') result.configPrefix = keys.filter((url) => url.startsWith(prefix)).length;
+      if (scope === 'webllm/wasm') result.wasmHasLib = keys.includes(lib);
+    }
+    return result;
+  }, { prefix: facts.prefix, lib: facts.lib });
+  const waitFor = async (label, predicate) => {
+    const deadline = Date.now() + DELETE_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      if (await predicate()) return;
+      await new Promise((resolve) => setTimeout(resolve, DELETE_POLL_INTERVAL_MS));
+    }
+    throw new Error(`Timed out waiting for ${label} (${modelId}).`);
+  };
+  const assert = (condition, message) => {
+    if (!condition) throw new Error(message);
+  };
+
+  const evidence = { modelId, prefix: facts.prefix, libShared: facts.libShared };
+
+  // A profile reused by an older build keeps that build's service worker answering, in which case
+  // this message type does not exist yet and every call fails as a closed port. Surface it instead
+  // of reporting a feature failure.
+  const probe = await send('DELETE_MODEL', { modelId: 'Kites-Delete-Probe-q4f16_1-MLC' });
+  if (probe.status === 'error' && /message port closed/i.test(probe.error ?? '')) {
+    throw new Error(
+      `The browser profile ${profile} is serving an older extension build that has no DELETE_MODEL handler. ` +
+      'Rerun with a fresh --profile directory.',
+    );
+  }
+
+  // Clean slate: an earlier run may have left the model cached.
+  if (await isCached()) {
+    const cleanup = await send('DELETE_MODEL', { modelId });
+    assert(cleanup.status === 'success', `Cleanup delete failed: ${cleanup.error}`);
+    await waitFor('cleanup', async () => !(await isCached()));
+  }
+
+  await send('START_MODEL_DOWNLOAD', { modelId, category: 'translation' });
+  await waitFor('the download to start writing files', async () => (await readCache()).modelPrefix > 0);
+
+  const refused = await send('DELETE_MODEL', { modelId });
+  evidence.deleteDuringDownload = refused;
+  assert(
+    refused.status === 'error' && /downloading|queued/i.test(refused.error ?? ''),
+    `Deleting during a download was not refused: ${JSON.stringify(refused)}`,
+  );
+
+  await waitFor('the downloaded model to report installed', isCached);
+  const before = await readCache();
+  evidence.cacheBeforeDelete = before;
+  assert(before.modelPrefix > 0 && before.configPrefix > 0, `Model files are missing before delete: ${JSON.stringify(before)}`);
+
+  const deleted = await send('DELETE_MODEL', { modelId });
+  evidence.delete = deleted;
+  assert(deleted.status === 'success', `Delete failed: ${deleted.error}`);
+  await waitFor('the model to report uninstalled', async () => !(await isCached()));
+
+  const after = await readCache();
+  evidence.cacheAfterDelete = after;
+  assert(after.modelPrefix === 0, `webllm/model still holds ${after.modelPrefix} entries for the model`);
+  assert(after.configPrefix === 0, `webllm/config still holds ${after.configPrefix} entries for the model`);
+  assert(
+    after.wasmHasLib === facts.libShared,
+    facts.libShared
+      ? 'A model_lib still needed by another registry model was deleted'
+      : 'The unshared model_lib was not reclaimed',
+  );
+
+  // The decisive stability check: a fresh download must work after the sweep, which it cannot if
+  // the stale tensor-cache.json manifest survived.
+  await send('START_MODEL_DOWNLOAD', { modelId, category: 'translation' });
+  await waitFor('the model to reinstall after deletion', isCached);
+  evidence.reinstalled = true;
+
+  const secondDelete = await send('DELETE_MODEL', { modelId });
+  evidence.secondDelete = secondDelete;
+  assert(secondDelete.status === 'success', `Second delete failed: ${secondDelete.error}`);
+  await waitFor('the model to report uninstalled after the second delete', async () => !(await isCached()));
+  assert((await readCache()).modelPrefix === 0, 'Second delete left model files behind');
+
+  const evidencePath = join(outDir, `kites-${label}-delete.json`);
+  writeFileSync(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`);
+  console.log(`model      ${modelId}`);
+  console.log(`delete     refused during download: ${refused.error}`);
+  console.log(`cache      before model=${before.modelPrefix} config=${before.configPrefix} wasm=${before.wasmHasLib}`);
+  console.log(`cache      after  model=${after.modelPrefix} config=${after.configPrefix} wasm=${after.wasmHasLib}`);
+  console.log(`reinstall  ok (no stale manifest)`);
+  console.log(`evidence   ${evidencePath}`);
+}
+
+const pages = flag('delete-model') ? [] : readPages(flag('pages'));
 const model = flag('model', DEFAULT_MODEL);
 const source = flag('src', 'auto');
 const target = flag('tgt', 'en');
@@ -144,10 +303,26 @@ function record(message) {
 context.on('console', record);
 
 const id = await extensionId(context);
+const deleteModelId = flag('delete-model');
+if (deleteModelId === 'true') throw new Error('Pass the model id to delete, e.g. --delete-model Qwen2-0.5B-Instruct-q4f16_1-MLC');
+
 const page = await context.newPage();
 page.on('console', record);
 page.on('pageerror', (error) => logs.push(`[pageerror] ${error.message}`));
-await page.goto(`chrome-extension://${id}/${OFFSCREEN_PAGE}`);
+// Deletion is driven from the popup, the surface a user clicks. It also keeps the background's own
+// offscreen document the only listener of the offscreen RPC: opening a second copy of the offscreen
+// page would answer the same forwarded message twice.
+await page.goto(`chrome-extension://${id}/${deleteModelId ? 'popup.html' : OFFSCREEN_PAGE}`);
+
+if (deleteModelId) {
+  try {
+    await runDeletionCheck(page, deleteModelId);
+  } catch (error) {
+    console.error(logs.slice(-40).join('\n'));
+    throw error;
+  }
+  await context.close();
+} else {
 
 await page.evaluate(async ({ key, state }) => {
   const current = (await chrome.storage.local.get(key))[key] ?? {};
@@ -200,3 +375,4 @@ console.log(`result     ${resultPath}`);
 console.log(`console    ${logPath}`);
 
 await context.close();
+}

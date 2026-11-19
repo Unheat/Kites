@@ -357,6 +357,28 @@ export class TranslationManager {
   }
 
   /**
+   * Deletes a model's cached files after the engine holding them has been released.
+   *
+   * Runs inside the same lifecycle queue as engine switches: an in-flight translation finishes
+   * first, a resident engine is unloaded, and only then is the caller's removal executed. If the
+   * unload rejects, nothing is removed, because deleting files under a live WebGPU engine would
+   * leave the model half-present for the rest of the session.
+   *
+   * @param modelId - Model whose cached files are being deleted.
+   * @param removeFiles - Deletion work to run once the engine is idle; its result is returned.
+   * @returns Whatever `removeFiles` resolves to.
+   */
+  async deleteModel<T>(modelId: string, removeFiles: () => Promise<T>): Promise<T> {
+    return await this.enqueueLifecycle(async () => {
+      await this.waitForIdle();
+      if (this.activeEngineId === modelId) {
+        await this.unloadCurrentEngine();
+      }
+      return await removeFiles();
+    });
+  }
+
+  /**
    * Unloads the active translation engine after callers have ensured no lease remains.
    *
    * @returns A promise that resolves when engine resources are released.

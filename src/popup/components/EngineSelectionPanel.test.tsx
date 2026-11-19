@@ -152,6 +152,76 @@ describe('WebLLM download control', () => {
     container.remove();
   });
 
+  it('deletes an installed WebGPU model and resets the selection to Google Translate', async () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const updateState = vi.fn();
+    (chrome.runtime.sendMessage as any).mockImplementation((message: any, callback?: (response: any) => void) => {
+      if (message.type === 'GET_ACTIVE_DOWNLOADS') {
+        callback?.({ status: 'success', downloads: {} });
+        return undefined;
+      }
+      if (message.type === 'GET_MODEL_STATUSES') {
+        callback?.({ status: 'success', statuses: { [WEB_LLM_MODEL_ID]: true }, downloads: {} });
+        return undefined;
+      }
+      if (message.type === 'DELETE_MODEL') {
+        return Promise.resolve({ status: 'success', removedEntries: 7, alsoRemoved: [] });
+      }
+      return undefined;
+    });
+
+    const state: PopupState = {
+      ...DEFAULT_POPUP_STATE,
+      activeEngineId: WEB_LLM_MODEL_ID,
+      fallbackChain: [WEB_LLM_MODEL_ID, 'gg-translate'],
+      webgpuSupported: true,
+      webgpuMaster: true,
+      webgpuOverrides: { ...DEFAULT_POPUP_STATE.webgpuOverrides, llm: true },
+    };
+
+    await act(async () => {
+      root.render(<EngineSelectionPanel state={state} updateState={updateState} />);
+      await Promise.resolve();
+    });
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('button')?.click();
+    });
+
+    const deleteButton = container.querySelector<HTMLButtonElement>(`button[aria-label="Delete ${WEB_LLM_MODEL_ID}"]`);
+    expect(deleteButton).not.toBeNull();
+
+    await act(async () => {
+      deleteButton?.click();
+    });
+    const confirmDelete = Array.from(container.querySelectorAll('button')).find((candidate) => candidate.textContent === 'Delete');
+    expect(confirmDelete).toBeDefined();
+
+    await act(async () => {
+      confirmDelete?.click();
+      await Promise.resolve();
+    });
+
+    const deleteCalls = (chrome.runtime.sendMessage as any).mock.calls.filter(([message]: [any]) => message.type === 'DELETE_MODEL');
+    expect(deleteCalls).toHaveLength(1);
+    expect(deleteCalls[0][0]).toEqual({
+      type: 'DELETE_MODEL',
+      target: 'background',
+      source: 'popup',
+      request: true,
+      payload: { modelId: WEB_LLM_MODEL_ID },
+    });
+    // A deleted model must not stay selected, or the next browser start would download it again.
+    expect(updateState).toHaveBeenCalledWith({ activeEngineId: 'gg-translate', fallbackChain: ['gg-translate'] });
+    expect(container.textContent).toContain('Download it again to use it.');
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
   it('renders Layout & Bubble Fit selector and updates bubbleMode state', async () => {
     const container = document.createElement('div');
     document.body.appendChild(container);

@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   translateGates: new Map<string, Promise<void>>(),
   initStartedSignals: new Map<string, () => void>(),
   translateStartedSignals: new Map<string, () => void>(),
+  destroyStartedSignals: new Map<string, () => void>(),
   instantiatedIds: [] as string[],
   destroyedIds: [] as string[],
   initProgressCallbacks: [] as Array<unknown>,
@@ -80,6 +81,7 @@ function createMockEngine(id: string) {
         : ['Mock translated from fallback'];
     }),
     destroy: vi.fn(async () => {
+      mocks.destroyStartedSignals.get(id)?.();
       mocks.destroyedIds.push(id);
       if (mocks.failDestroyIds.delete(id)) throw new Error(`Destroy failed: ${id}`);
     }),
@@ -150,6 +152,7 @@ describe('TranslationManager Waterfall Logic', () => {
     mocks.translateGates.clear();
     mocks.initStartedSignals.clear();
     mocks.translateStartedSignals.clear();
+    mocks.destroyStartedSignals.clear();
     mocks.initProgressCallbacks = [];
     mocks.translateArguments = [];
     mocks.customTranslateReturn = null;
@@ -511,6 +514,85 @@ describe('TranslationManager Waterfall Logic', () => {
     await expect(manager.processTranslation(['Hello'], 'auto', 'English', callback)).resolves.toEqual(['Mock translated text']);
     expect(events).toEqual(['started', 'finished']);
     expect(mocks.destroyedIds).toEqual([]);
+  });
+
+  it('deletes a model only after its in-flight translation releases the lease', async () => {
+    respondWith('SmolLM2-135M-Instruct-q0f16-MLC');
+    const translateGate = createDeferred<void>();
+    const translateStarted = createDeferred<void>();
+    mocks.translateGates.set('SmolLM2-135M-Instruct-q0f16-MLC', translateGate.promise);
+    mocks.translateStartedSignals.set('SmolLM2-135M-Instruct-q0f16-MLC', () => translateStarted.resolve(undefined));
+    const translation = manager.processTranslation(['Hello']);
+    await translateStarted.promise;
+
+    const order: string[] = [];
+    const removeFiles = vi.fn(async () => {
+      order.push('remove');
+    });
+    const destroyStarted = createDeferred<void>();
+    mocks.destroyStartedSignals.set('SmolLM2-135M-Instruct-q0f16-MLC', () => {
+      order.push('destroy');
+      destroyStarted.resolve(undefined);
+    });
+    const deletion = manager.deleteModel('SmolLM2-135M-Instruct-q0f16-MLC', removeFiles);
+
+    // The deletion may not touch the files while the generation still holds the weights open.
+    translateGate.resolve(undefined);
+    await translation;
+    await destroyStarted.promise;
+    await deletion;
+
+    expect(order).toEqual(['destroy', 'remove']);
+    expect(mocks.destroyedIds).toEqual(['SmolLM2-135M-Instruct-q0f16-MLC']);
+  });
+
+  it('keeps the files untouched while a translation still holds the lease', async () => {
+    respondWith('SmolLM2-135M-Instruct-q0f16-MLC');
+    const translateGate = createDeferred<void>();
+    const translateStarted = createDeferred<void>();
+    mocks.translateGates.set('SmolLM2-135M-Instruct-q0f16-MLC', translateGate.promise);
+    mocks.translateStartedSignals.set('SmolLM2-135M-Instruct-q0f16-MLC', () => translateStarted.resolve(undefined));
+    const translation = manager.processTranslation(['Hello']);
+    await translateStarted.promise;
+
+    const removeFiles = vi.fn(async () => {});
+    const deletion = manager.deleteModel('SmolLM2-135M-Instruct-q0f16-MLC', removeFiles);
+
+    // The engine lease is still held, so neither the unload nor the sweep may start.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(mocks.destroyedIds).toEqual([]);
+    expect(removeFiles).not.toHaveBeenCalled();
+
+    translateGate.resolve(undefined);
+    await translation;
+    await deletion;
+
+    expect(removeFiles).toHaveBeenCalledTimes(1);
+    expect(mocks.destroyedIds).toEqual(['SmolLM2-135M-Instruct-q0f16-MLC']);
+  });
+
+  it('leaves an unrelated active engine loaded when deleting another model', async () => {
+    respondWith('gg-translate');
+    await manager.processTranslation(['Hello']);
+
+    const removeFiles = vi.fn(async () => {});
+    await manager.deleteModel('SmolLM2-135M-Instruct-q0f16-MLC', removeFiles);
+
+    expect(removeFiles).toHaveBeenCalledTimes(1);
+    expect(mocks.destroyedIds).toEqual([]);
+  });
+
+  it('does not remove files when the active engine cannot be unloaded', async () => {
+    respondWith('SmolLM2-135M-Instruct-q0f16-MLC');
+    await manager.processTranslation(['Hello']);
+    mocks.failDestroyIds.add('SmolLM2-135M-Instruct-q0f16-MLC');
+
+    const removeFiles = vi.fn(async () => {});
+    await expect(manager.deleteModel('SmolLM2-135M-Instruct-q0f16-MLC', removeFiles)).rejects.toThrow(
+      'Destroy failed: SmolLM2-135M-Instruct-q0f16-MLC',
+    );
+    // Deleting the files under a still-resident engine would leave the model half-removed.
+    expect(removeFiles).not.toHaveBeenCalled();
   });
 
   it('detaches an engine when destroy rejects and permits a later switch retry', async () => {
