@@ -116,6 +116,31 @@ describe('WebLLMEngine Keyed JSON Protocol', () => {
     expect(userMsg).not.toContain('   ');
   });
 
+  it('keeps a bracketed sound-effect translation instead of reading it as a JSON fragment', async () => {
+    // `[sigh]`, `[SFX]`, `[Heavy breathing]` are ordinary manga translation output. The guard that
+    // drops a protocol leftover like `{}` must not classify them as one just because they are
+    // bracketed.
+    mockCreate.mockReset();
+    mockCreate.mockResolvedValue({
+      choices: [{ message: { content: JSON.stringify({ b0: '[sigh]', b1: '[Heavy breathing]' }) }, finish_reason: 'stop' }],
+    });
+
+    const results = await engine.translate(['ため息', '荒い息']);
+
+    expect(results).toEqual(['[sigh]', '[Heavy breathing]']);
+  });
+
+  it('still refuses a bare JSON skeleton as a translation', async () => {
+    mockCreate.mockReset();
+    mockCreate.mockResolvedValue({
+      choices: [{ message: { content: JSON.stringify({ b0: '{}' }) }, finish_reason: 'stop' }],
+    });
+
+    const results = await engine.translate(['ため息']);
+
+    expect(results).toEqual(['ため息']);
+  });
+
   it('forwards request-local glossary to WebLLM user data without changing keyed schema', async () => {
     mockCreate.mockResolvedValue({ choices: [{ message: { content: '{"b0":"Preferred"}' } }] });
     await engine.translate(['Name'], 'en', 'en', {
