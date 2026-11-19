@@ -257,30 +257,33 @@ export class WebLLMEngine extends BaseLlmTranslationEngine {
       throw new Error('Engine is already initializing.');
     }
 
-    const isWebGpuSupported = await checkWebGPUAvailability();
-
-    const state = await new Promise<any>((resolve) => {
-      chrome.runtime.sendMessage({ type: 'GET_POPUP_STATE' }, (response) => {
-        resolve(response || {});
-      });
-    });
-    const masterOn = state.webgpuMaster === true;
-    const llmOn = state.webgpuOverrides?.llm !== false;
-
-    if (!isWebGpuSupported) {
-      throw new Error(
-        'WebGPU is not supported on this device/browser. Please use ONNX CPU translation models instead.'
-      );
-    }
-
-    if (!masterOn || !llmOn) {
-      throw new Error(
-        'GPU Acceleration is turned OFF in Kites Settings. Please enable GPU Acceleration in Settings to use WebGPU LLM models.'
-      );
-    }
-
+    // Claimed before the first await. WebGPU validation and the popup-state round-trip both yield,
+    // so a second caller arriving in that window used to pass the guard, and the process ended up
+    // holding two loaded models and two GPU contexts, only one of which was ever released.
     this.isInitializing = true;
     try {
+      const isWebGpuSupported = await checkWebGPUAvailability();
+
+      const state = await new Promise<any>((resolve) => {
+        chrome.runtime.sendMessage({ type: 'GET_POPUP_STATE' }, (response) => {
+          resolve(response || {});
+        });
+      });
+      const masterOn = state.webgpuMaster === true;
+      const llmOn = state.webgpuOverrides?.llm !== false;
+
+      if (!isWebGpuSupported) {
+        throw new Error(
+          'WebGPU is not supported on this device/browser. Please use ONNX CPU translation models instead.'
+        );
+      }
+
+      if (!masterOn || !llmOn) {
+        throw new Error(
+          'GPU Acceleration is turned OFF in Kites Settings. Please enable GPU Acceleration in Settings to use WebGPU LLM models.'
+        );
+      }
+
       console.log(`[WebLLMEngine] Initializing WebLLM engine for model: ${this.modelId}`);
 
       const initProgressCallback = (initProgress: any) => {
