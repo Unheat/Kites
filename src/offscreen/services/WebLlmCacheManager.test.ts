@@ -19,14 +19,30 @@ function modelPrefix(modelId: string): string {
   return new URL(resolved).href;
 }
 
-/** A model whose cache files are only its own. */
+/** A model whose cache files and wasm library belong only to it. */
 const TARGET_MODEL = 'Qwen3-1.7B-q4f16_1-MLC';
+/** A model that shares its wasm library with another registry model. */
+const SHARED_LIB_MODEL = 'Qwen2-0.5B-Instruct-q4f16_1-MLC';
+/** The registry model that shares {@link SHARED_LIB_MODEL}'s wasm library. */
+const SHARED_LIB_SIBLING = 'Qwen2.5-0.5B-Instruct-q4f16_1-MLC';
 /** An unrelated model that must survive a deletion untouched. */
 const OTHER_MODEL = 'Qwen3.5-0.8B-q4f16_1-MLC';
 /** One of the six catalog ids that store the same files on disk as another id. */
 const SHARED_WEIGHT_MODEL = 'gemma-2-2b-it-q4f16_1-MLC';
 /** The id that shares {@link SHARED_WEIGHT_MODEL}'s weights and chat config. */
 const SHARED_WEIGHT_SIBLING = 'gemma-2-2b-it-q4f16_1-MLC-1k';
+
+/**
+ * Resolves a catalog record for an id the tests rely on.
+ *
+ * @param modelId - WebLLM model identifier present in the bundled catalog.
+ * @returns The catalog record, including its weights URL and wasm library URL.
+ */
+function catalogRecord(modelId: string) {
+  const record = prebuiltAppConfig.model_list.find((entry) => entry.model_id === modelId);
+  if (!record) throw new Error(`Test fixture model missing from catalog: ${modelId}`);
+  return record;
+}
 
 interface FakeCaches {
   stores: Map<string, string[]>;
@@ -86,15 +102,30 @@ describe('WebLlmCacheManager.deleteModel', () => {
         `${other}params_shard_0.bin`,
       ],
       'webllm/config': [`${target}mlc-chat-config.json`, `${other}mlc-chat-config.json`],
-      'webllm/wasm': ['https://example.test/shared-webgpu.wasm'],
+      'webllm/wasm': [catalogRecord(TARGET_MODEL).model_lib, catalogRecord(OTHER_MODEL).model_lib],
     });
 
     await WebLlmCacheManager.deleteModel(TARGET_MODEL);
 
     expect(stores.get('webllm/model')).toEqual([`${other}tensor-cache.json`, `${other}params_shard_0.bin`]);
     expect(stores.get('webllm/config')).toEqual([`${other}mlc-chat-config.json`]);
-    // The wasm library is shared by unrelated models, so per-model deletion must keep it.
-    expect(stores.get('webllm/wasm')).toEqual(['https://example.test/shared-webgpu.wasm']);
+    // This model's wasm library is used by no other registry model, so it is reclaimed with it.
+    expect(stores.get('webllm/wasm')).toEqual([catalogRecord(OTHER_MODEL).model_lib]);
+  });
+
+  it('keeps a wasm library that another installable model still needs', async () => {
+    const target = modelPrefix(SHARED_LIB_MODEL);
+    const sharedLib = catalogRecord(SHARED_LIB_MODEL).model_lib;
+    expect(catalogRecord(SHARED_LIB_SIBLING).model_lib).toBe(sharedLib);
+    const { stores } = installFakeCaches({
+      'webllm/model': [`${target}tensor-cache.json`, `${target}params_shard_0.bin`],
+      'webllm/config': [`${target}mlc-chat-config.json`],
+      'webllm/wasm': [sharedLib],
+    });
+
+    await WebLlmCacheManager.deleteModel(SHARED_LIB_MODEL);
+
+    expect(stores.get('webllm/wasm')).toEqual([sharedLib]);
   });
 
   it('does not delete a longer model URL that merely starts with the same characters', async () => {
@@ -140,7 +171,9 @@ describe('WebLlmCacheManager.deleteModel', () => {
 
     await WebLlmCacheManager.deleteModel(TARGET_MODEL);
 
-    // WebLLM's own deleteModelAllInfoInCache() re-downloads the tensor manifest first and throws offline.
+    // WebLLM's own deleteModelAllInfoInCache() refetches the manifest (addToCache is cache-first,
+    // web-llm/lib/index.js:6554-6566) and never deletes it, so it needs the network after an
+    // interrupted install and leaves a stale manifest behind for the next download.
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
@@ -162,25 +195,22 @@ describe('WebLlmCacheManager.deleteModel', () => {
   });
 });
 
-describe('WebLlmCacheManager.deleteAllModels', () => {
-  beforeEach(() => {
-    vi.restoreAllMocks();
+describe('WebLlmCacheManager.assertDeletable', () => {
+  it('refuses a model whose download is still running', () => {
+    expect(() => WebLlmCacheManager.assertDeletable({ modelId: TARGET_MODEL, isActiveDownload: true, isQueued: false })).toThrow(
+      /still downloading/i,
+    );
   });
 
-  it('removes all three WebLLM caches without enumerating models', async () => {
-    const { stores, deletedScopes } = installFakeCaches({
-      'webllm/model': ['https://huggingface.co/mlc-ai/Some-Model/resolve/main/tensor-cache.json'],
-      'webllm/config': ['https://huggingface.co/mlc-ai/Some-Model/resolve/main/mlc-chat-config.json'],
-      'webllm/wasm': ['https://example.test/shared-webgpu.wasm'],
-      'kites-ocr-models-v1': ['https://example.test/ocr.onnx'],
-    });
+  it('refuses a model that is only queued for download', () => {
+    expect(() => WebLlmCacheManager.assertDeletable({ modelId: TARGET_MODEL, isActiveDownload: false, isQueued: true })).toThrow(
+      /queued/i,
+    );
+  });
 
-    await WebLlmCacheManager.deleteAllModels();
-
-    expect(deletedScopes).toEqual(['webllm/model', 'webllm/config', 'webllm/wasm']);
-    expect(stores.has('webllm/model')).toBe(false);
-    expect(stores.has('webllm/wasm')).toBe(false);
-    // Other subsystems keep their caches.
-    expect(stores.has('kites-ocr-models-v1')).toBe(true);
+  it('allows deletion of an idle or previously failed model', () => {
+    expect(() =>
+      WebLlmCacheManager.assertDeletable({ modelId: TARGET_MODEL, isActiveDownload: false, isQueued: false }),
+    ).not.toThrow();
   });
 });
