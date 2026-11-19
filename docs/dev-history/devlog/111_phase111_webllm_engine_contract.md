@@ -78,8 +78,24 @@ rather than left in the tree as dead code.
   Whole batches echoed on the Japanese path with the flag on, which is the mode the flag is supposed
   to prevent. Net measured harm, no measured benefit, so the flag is not sent and a regression test
   asserts its absence with these numbers in the comment.
-- Test suite after the change: **1574 passed, 0 failed** (was 1565 passed plus 5 red assertions and an
-  unresolved import).
+- Shipped-before/after on the real pipeline, same harness, WebGPU. The `main` column was produced by
+  checking out `main`, rebuilding and running the same combos; repeat counts are printed because a
+  combo is a handful of chunks, so a single repeat is one coin flip per chunk:
+
+  | combo | `main` | this branch | repeats |
+  |---|---|---|---|
+  | `auto-vi-zh` | 24/54 **44.4%** | 9/36 **25.0%** | 3 vs 2 |
+  | `auto-en-zh-real` (20-bubble page) | 2/40 **5.0%** | 3/40 **7.5%** | 2 vs 2 |
+  | `ja-en-ja` | — (not run) | 4/52 **7.7%** | 2 |
+
+  These `main` figures supersede the `auto-vi-zh 2/36` baseline quoted in `.workflow/plan.md`, which
+  came from an earlier run of the same combo and was inside this combo's noise band (the same
+  configuration has produced 6%, 13.9%, 16.7%, 22% and 56% across runs in this session). The
+  `auto-en-zh-real` difference is one slot.
+- `node scripts/smoke-extension-load.mjs` on the packed extension: 5/5 — service worker registers,
+  `unlimitedStorage` granted, offscreen orchestrator boots, WebGPU visible, no fatal console output.
+- Test suite after the change: **1577 passed, 0 failed**, 135 files (was 1565 passed plus 5 red
+  assertions and an unresolved import).
 
 ## Rejected alternatives
 
