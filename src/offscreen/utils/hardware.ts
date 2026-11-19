@@ -8,6 +8,48 @@ const HIGH_PERFORMANCE_ADAPTER_OPTIONS: GPURequestAdapterOptions = { powerPrefer
 
 let webgpuSupported: boolean | null = null;
 
+/** Adapter capabilities read during a successful probe, reused for later preflight checks. */
+let adapterCapabilities: { features: Set<string>; maxStorageBufferBindingSize: number } | null = null;
+
+/** What a successful probe learned about the adapter. */
+export interface WebGpuAdapterProbe {
+  supported: boolean;
+  features?: Set<string>;
+  maxStorageBufferBindingSize?: number;
+}
+
+/**
+ * Reads adapter capabilities for a preflight check, probing only once.
+ *
+ * Shares the validated high-performance adapter with `checkWebGPUAvailability` rather than issuing a
+ * second `requestAdapter`: the offscreen document is the only allowed probe site and a second
+ * high-performance request is exactly the pattern the WORKAROUND above exists to avoid.
+ *
+ * @returns Whether WebGPU is usable, plus the adapter's features and buffer limit when it is.
+ */
+export async function probeWebGPUAdapter(): Promise<WebGpuAdapterProbe> {
+  const supported = await checkWebGPUAvailability();
+  if (!supported) return { supported: false };
+  if (adapterCapabilities) return { supported: true, ...adapterCapabilities };
+  // A device validated earlier (or on a previous session, from storage) left no capabilities
+  // cached. Reading them costs one adapter request and no device, which is cheaper than creating a
+  // second device just to ask.
+  if (!navigator.gpu) return { supported: true };
+  if (!navigator.gpu) return { supported: true };
+  try {
+    const adapter = await navigator.gpu.requestAdapter(HIGH_PERFORMANCE_ADAPTER_OPTIONS);
+    if (!adapter) return { supported: true };
+    adapterCapabilities = {
+      features: new Set(adapter.features ?? []),
+      maxStorageBufferBindingSize: Number(adapter.limits?.maxStorageBufferBindingSize ?? 0),
+    };
+    return { supported: true, ...adapterCapabilities };
+  } catch (error) {
+    console.warn('[HardwareDetector] Could not read adapter capabilities:', error);
+    return { supported: true };
+  }
+}
+
 /**
  * Checks whether this offscreen context can create and destroy a device from a
  * high-performance WebGPU adapter. Only successful probes are cached.
@@ -50,6 +92,10 @@ export async function checkWebGPUAvailability(force = false): Promise<boolean> {
     }
     const device = await adapter.requestDevice();
     device.destroy();
+    adapterCapabilities = {
+      features: new Set(adapter.features ?? []),
+      maxStorageBufferBindingSize: Number(adapter.limits?.maxStorageBufferBindingSize ?? 0),
+    };
     webgpuSupported = true;
     await saveWebGPUState();
     return true;

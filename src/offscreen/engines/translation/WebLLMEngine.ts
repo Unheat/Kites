@@ -1,4 +1,4 @@
-import { MLCEngine, CreateMLCEngine } from '@mlc-ai/web-llm';
+import { MLCEngine, CreateMLCEngine, prebuiltAppConfig } from '@mlc-ai/web-llm';
 import { ProgressWatchdog } from './ProgressWatchdog';
 import {
   BaseLlmTranslationEngine,
@@ -6,7 +6,9 @@ import {
   estimateTokenCount,
   type LlmChatMessage,
 } from './BaseLlmTranslationEngine';
-import { checkWebGPUAvailability } from '../../utils/hardware';
+import { checkWebGPUAvailability, probeWebGPUAdapter } from '../../utils/hardware';
+import { checkModelLoadability } from '../../utils/modelPreflight';
+import { isThinkingModel } from '../../../shared/translation/thinkingModels';
 import type { TranslationOptions } from './BaseEngine';
 
 /** Default segment batch size for on-device WebLLM inference (bounds keys to avoid small model attention degradation) */
@@ -41,6 +43,25 @@ export const WEBLLM_TEMPERATURE = 0.7;
  * still passes because the model believes it complied.
  */
 export const WEBLLM_PRESENCE_PENALTY = 1.5;
+
+/**
+ * KV window requested at load, in tokens.
+ *
+ * The catalogue pins 4096 on 53 of the 59 records we ship, while this engine's planner refuses to
+ * exceed `maxContextWindow = 1024`, so a default load reserves 4x the slots it can ever use. Half of
+ * that is still 2x slack over the planner: the planner's input budget is a character-weighted
+ * estimate, and the window is a hard ceiling — a prompt that crosses it throws
+ * `ContextWindowSizeExceededError`, losing the whole batch — so reserving exactly 1024 would turn
+ * an under-count into a failure.
+ */
+export const WEBLLM_CONTEXT_WINDOW_SIZE = 2048;
+
+/**
+ * Load-time options handed to `CreateMLCEngine` as its third argument.
+ *
+ * @see WEBLLM_CONTEXT_WINDOW_SIZE
+ */
+export const WEBLLM_CHAT_OPTIONS = { context_window_size: WEBLLM_CONTEXT_WINDOW_SIZE };
 
 /**
  * Segments per recovery request on the local model.
@@ -261,19 +282,26 @@ export class WebLLMEngine extends BaseLlmTranslationEngine {
         }
       };
 
-      if (typeof navigator !== 'undefined' && navigator.gpu) {
-        try {
-          await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
-        } catch (e) {
-          console.warn('[WebLLMEngine] Failed to request high-performance adapter:', e);
+      // One adapter probe serves both the capability check and the old warm-up, which used to ask
+      // for a high-performance adapter a second time.
+      const adapter = await probeWebGPUAdapter();
+      const record = prebuiltAppConfig.model_list.find((entry) => entry.model_id === this.modelId);
+      if (record) {
+        const verdict = checkModelLoadability(record, adapter);
+        if (!verdict.ok) {
+          throw new Error(verdict.reason);
         }
       }
 
-      this.engine = await CreateMLCEngine(this.modelId, {
-        initProgressCallback: (progress) => {
-          initProgressCallback(progress);
+      this.engine = await CreateMLCEngine(
+        this.modelId,
+        {
+          initProgressCallback: (progress) => {
+            initProgressCallback(progress);
+          },
         },
-      });
+        WEBLLM_CHAT_OPTIONS
+      );
 
       console.log(`[WebLLMEngine] Successfully initialized model: ${this.modelId}`);
     } catch (error) {
@@ -325,10 +353,6 @@ export class WebLLMEngine extends BaseLlmTranslationEngine {
       throw new Error('WebLLMEngine is not initialized. Call init() first.');
     }
 
-    // Reset multi-round chat history so each translation transaction is stateless.
-    // This prevents historical output leakage from contaminating subsequent batches.
-    await this.engine.resetChat();
-
     const payloadMessages =
       messages && messages.length > 0
         ? messages
@@ -345,7 +369,16 @@ export class WebLLMEngine extends BaseLlmTranslationEngine {
       repetition_penalty: 1,
       presence_penalty: WEBLLM_PRESENCE_PENALTY,
       max_tokens: dynamicMaxTokens,
+      // `usage` is only emitted when this is asked for; without it the completion count is a guess.
+      stream_options: { include_usage: true },
     };
+
+    if (isThinkingModel(this.modelId)) {
+      // Only the `extra_body` channel is read, and only a strict false disables thinking; see
+      // `thinkingModels.ts`. Applied per model because a template without the mechanism treats the
+      // injected block as ordinary prompt text.
+      completionOptions.extra_body = { enable_thinking: false };
+    }
 
     if (schema) {
       completionOptions.response_format = {

@@ -6,9 +6,12 @@ const mockCreate = vi.fn();
 const mockUnload = vi.fn();
 const mockResetChat = vi.fn();
 const mockCreateEngine = vi.hoisted(() => vi.fn());
+const mockModelList = vi.hoisted(() => [] as any[]);
 
 vi.mock('@mlc-ai/web-llm', () => {
   return {
+    // The engine reads the record for its preflight check, so the test controls the catalogue.
+    prebuiltAppConfig: { get model_list() { return mockModelList; } },
     CreateMLCEngine: mockCreateEngine.mockImplementation(async () => {
       return {
         chat: {
@@ -24,9 +27,12 @@ vi.mock('@mlc-ai/web-llm', () => {
 });
 
 // Mock hardware check so tests can pass without real WebGPU
+const mockProbeAdapter = vi.hoisted(() => vi.fn());
+
 vi.mock('../../utils/hardware', () => {
   return {
     checkWebGPUAvailability: vi.fn().mockResolvedValue(true),
+    probeWebGPUAdapter: mockProbeAdapter,
   };
 });
 
@@ -60,6 +66,12 @@ describe('WebLLMEngine Keyed JSON Protocol', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    mockProbeAdapter.mockResolvedValue({
+      supported: true,
+      features: new Set(['shader-f16']),
+      maxStorageBufferBindingSize: 1024 * 1024 * 1024,
+    });
+    mockModelList.length = 0;
     engine = new WebLLMEngine('Qwen2.5-3B-Instruct-q4f16_1-MLC');
     await engine.init();
   });
@@ -86,8 +98,9 @@ describe('WebLLMEngine Keyed JSON Protocol', () => {
     expect(results[1]).toBe('');
     expect(results[2]).toBe('世界');
 
-    // Verify resetChat was called before generation for stateless transaction
-    expect(mockResetChat).toHaveBeenCalled();
+    // No per-batch reset: the engine resets itself when the conversation changes, inside the model
+    // lock. See the assertion in `WebLLM engine configuration` below.
+    expect(mockResetChat).not.toHaveBeenCalled();
 
     // Verify completion call parameters
     const callArg = mockCreate.mock.calls[0][0];
@@ -366,6 +379,21 @@ describe('WebLLM engine configuration', () => {
     await thinkingEngine.init();
     await thinkingEngine.translate(['台詞']);
     expect(mockCreate.mock.calls[0][0].extra_body).toMatchObject({ enable_thinking: false });
+  });
+
+  it('refuses a model the adapter cannot run, before the engine is created', async () => {
+    mockModelList.push({ model_id: 'gemma-4-E2B-it-q4f16_1-MLC', required_features: ['shader-f16'] });
+    mockProbeAdapter.mockResolvedValue({
+      supported: true,
+      features: new Set<string>(),
+      maxStorageBufferBindingSize: 1024 * 1024 * 1024,
+    });
+    mockCreateEngine.mockClear();
+
+    const limited = new WebLLMEngine('gemma-4-E2B-it-q4f16_1-MLC');
+
+    await expect(limited.init()).rejects.toThrow(/shader-f16/);
+    expect(mockCreateEngine).not.toHaveBeenCalled();
   });
 
   it('leaves a template without a thinking block untouched', async () => {
