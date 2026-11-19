@@ -12,6 +12,8 @@ export type MessageType =
   | 'PROCESS_COMPLETE'   // Offscreen -> Background
   | 'PROCESS_ERROR'      // Offscreen -> Background
   | 'START_MODEL_DOWNLOAD' // Popup -> Background -> Offscreen
+  | 'DELETE_MODEL'         // Popup -> Background -> Offscreen
+  | 'MODEL_DELETED'        // Offscreen -> (Popup & Background)
   | 'MODEL_DOWNLOAD_PROGRESS' // Offscreen -> (Popup & Background)
   | 'MODEL_DOWNLOAD_ERROR' // Offscreen -> (Popup & Background)
   | 'GET_ACTIVE_DOWNLOADS' // Popup -> Background -> Offscreen
@@ -168,6 +170,30 @@ export interface CheckModelStatusMessage {
   type: 'CHECK_MODEL_STATUS';
   payload: {
     modelId: string;
+  };
+}
+
+/** Popup/Studio request to delete one downloaded local model. */
+export interface DeleteModelMessage {
+  /** Message discriminator. */
+  type: 'DELETE_MODEL';
+  /** Deletion target. */
+  payload: {
+    /** Registry id of the model to delete. */
+    modelId: string;
+  };
+}
+
+/** Offscreen broadcast reporting a completed deletion and its shared-file casualties. */
+export interface ModelDeletedMessage {
+  /** Message discriminator. */
+  type: 'MODEL_DELETED';
+  /** Deletion outcome. */
+  payload: {
+    /** Registry id of the model that was deleted. */
+    modelId: string;
+    /** Registry ids that shared the deleted model's files and are therefore gone too. */
+    alsoRemoved: string[];
   };
 }
 

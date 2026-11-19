@@ -22,6 +22,17 @@ export const STORAGE_KEYS = {
 export type StorageKey = (typeof STORAGE_KEYS)[keyof typeof STORAGE_KEYS];
 
 /**
+ * CacheStorage cache names WebLLM writes model artifacts into.
+ *
+ * The scope string is used verbatim as the cache name by WebLLM's `createScopedArtifactCache`.
+ * Single source of truth for deletion; the names are part of the library's on-disk contract.
+ */
+export const WEBLLM_CACHE_SCOPES = ['webllm/model', 'webllm/config', 'webllm/wasm'] as const;
+
+/** One of the CacheStorage cache names WebLLM owns. */
+export type WebLlmCacheScope = (typeof WEBLLM_CACHE_SCOPES)[number];
+
+/**
  * Canonical Typesetting Modes supported across pipeline and Studio.
  * Derived from Single Source of Truth as per AGENTS.md rules.
  */

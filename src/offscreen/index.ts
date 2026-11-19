@@ -30,6 +30,7 @@ import { ColorCacheManager } from './services/ColorCacheManager';
 import { OcrCacheManager } from './services/OcrCacheManager';
 import { BubbleCacheManager } from './services/BubbleCacheManager';
 import { hasModelInCache } from '@mlc-ai/web-llm';
+import { WebLlmCacheManager } from './services/WebLlmCacheManager';
 import { checkWebGPUAvailability } from './utils/hardware';
 
 // Register persisted font-library faces at boot so the bake measures with the
@@ -109,6 +110,13 @@ chrome.runtime.onMessage.addListener((message: ProcessJobMessage | any, _sender:
     }
     sendResponse({ status: 'success', downloads: registry });
     return false;
+  }
+
+  if (message.type === 'DELETE_MODEL' && message.payload?.modelId) {
+    handleDeleteModel(message.payload.modelId)
+      .then((outcome) => sendResponse({ status: 'success', ...outcome }))
+      .catch((err) => sendResponse({ status: 'error', error: err instanceof Error ? err.message : String(err) }));
+    return true;
   }
 
   if (message.type === 'CHECK_MODEL_STATUS' && message.payload?.modelId) {
@@ -477,6 +485,34 @@ async function handleStartDownload(modelId: string, category?: string) {
       status: 'ready'
     }
   }).catch(() => {});
+}
+
+/**
+ * Deletes a downloaded WebLLM model and tells every UI surface what disappeared.
+ *
+ * Refuses while the same model is being downloaded (WebLLM cannot cancel a load, so a sweep now
+ * would only be undone by the stream writing the cache again). The engine files are removed only
+ * after the manager has unloaded a resident engine and let in-flight translations finish.
+ *
+ * @param modelId - Registry model id to delete.
+ * @returns Count of removed cache entries plus sibling registry ids that shared the same files.
+ */
+async function handleDeleteModel(modelId: string): Promise<{ removedEntries: number; alsoRemoved: string[] }> {
+  WebLlmCacheManager.assertDeletable({
+    modelId,
+    isActiveDownload: activeDownloadModelId === modelId,
+    isQueued: downloadQueue.some((item) => item.modelId === modelId),
+  });
+
+  const outcome = await translationManager.deleteModel(modelId, () => WebLlmCacheManager.deleteModel(modelId));
+  delete activeDownloads[modelId];
+
+  chrome.runtime.sendMessage({
+    type: 'MODEL_DELETED',
+    payload: { modelId, alsoRemoved: outcome.alsoRemoved },
+  }).catch(() => {});
+
+  return outcome;
 }
 
 async function handleCheckStatus(modelId: string): Promise<boolean> {
