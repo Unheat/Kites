@@ -48,10 +48,14 @@ in the shipped bundle (`node_modules/@mlc-ai/web-llm/lib/index.js`), not in `doc
 
 | File | Change |
 |---|---|
-| `src/offscreen/engines/translation/WebLLMEngine.ts` | Removed the per-batch `resetChat`; added `stream_options.include_usage`; added `extra_body.enable_thinking: false` behind `isThinkingModel`; passes `WEBLLM_CHAT_OPTIONS` (`context_window_size: 2048`) as the third `CreateMLCEngine` argument; calls the preflight before construction. |
+| `src/offscreen/engines/translation/WebLLMEngine.ts` | Removed the per-batch `resetChat`; added `stream_options.include_usage`; passes `WEBLLM_CHAT_OPTIONS` (`context_window_size: 2048`) as the third `CreateMLCEngine` argument; calls the preflight before construction. **No `extra_body.enable_thinking` is sent** — see the measurement table below. |
 | `src/offscreen/utils/hardware.ts` | `probeWebGPUAdapter()` reuses the validated high-performance adapter and also reports `features` and `maxStorageBufferBindingSize`; replaces `init()`'s duplicate `requestAdapter` warm-up. |
 | `src/offscreen/utils/modelPreflight.ts` | New pure `checkModelLoadability(record, capabilities)`; unverifiable capabilities are treated as loadable. |
 | `manifest.json` | `unlimitedStorage`. |
+
+The thinking flag's per-model capability list (`src/shared/translation/thinkingModels.ts`) existed in
+an intermediate commit and was deleted with the flag when the measurement below came back negative,
+rather than left in the tree as dead code.
 
 ## Measurements
 
@@ -62,13 +66,14 @@ in the shipped bundle (`node_modules/@mlc-ai/web-llm/lib/index.js`), not in `doc
   gate is inert and the library's own pre-download check is the protection.
 - Thinking-capable ids in our registry: **14** (6 Qwen3 + 8 Qwen3.5). The shipped catalogue has 19
   Qwen3/Qwen3.5 ids, which is why the predicate matches prefixes rather than exact ids.
-- `enable_thinking: false`, two repeats per combo on the real pipeline:
+- `enable_thinking: false`, real pipeline. Denominators differ because each state was run the number
+  of repeats needed to see past the noise, and that number is in the slot count:
 
-  | combo | flag off | no flag |
+  | combo | with the flag off | with no flag |
   |---|---|---|
-  | Japanese source → English (`ja-en-ja`) | 18/52 **34.6%** | 9/78 **11.5%** |
-  | auto→en, Chinese | 2/36 5.6% | 1/36 2.8% |
-  | auto→vi, Chinese | 5/36 13.9% | 6/36 16.7% |
+  | Japanese source → English (`ja-en-ja`) | 18/52 **34.6%** (2 reps) | 9/78 **11.5%** (3 reps); 4/52 7.7% (2 reps, final build) |
+  | auto→en, Chinese | 2/36 5.6% (2 reps) | 1/36 2.8% (2 reps) |
+  | auto→vi, Chinese | 5/36 13.9% (2 reps) | 6/36 16.7% (2 reps) |
 
   Whole batches echoed on the Japanese path with the flag on, which is the mode the flag is supposed
   to prevent. Net measured harm, no measured benefit, so the flag is not sent and a regression test

@@ -38,7 +38,6 @@ export async function probeWebGPUAdapter(): Promise<WebGpuAdapterProbe> {
   // cached. Reading them costs one adapter request and no device, which is cheaper than creating a
   // second device just to ask.
   if (!navigator.gpu) return { supported: true };
-  if (!navigator.gpu) return { supported: true };
   try {
     const adapter = await navigator.gpu.requestAdapter(HIGH_PERFORMANCE_ADAPTER_OPTIONS);
     if (!adapter) return { supported: true };

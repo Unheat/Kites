@@ -57,3 +57,36 @@ describe('WebGPU hardware validation', () => {
     expect(requestAdapter).not.toHaveBeenCalled();
   });
 });
+
+describe('probeWebGPUAdapter', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.unstubAllGlobals();
+  });
+
+  it('reports the adapter features and buffer limit the preflight checks against', async () => {
+    const requestDevice = vi.fn().mockResolvedValue({ destroy: vi.fn() });
+    const requestAdapter = vi.fn().mockResolvedValue({
+      requestDevice,
+      features: new Set(['shader-f16']),
+      limits: { maxStorageBufferBindingSize: 192 * 1024 * 1024 },
+    });
+    installEnvironment(undefined, { requestAdapter });
+
+    const { probeWebGPUAdapter } = await import('./hardware');
+    const probe = await probeWebGPUAdapter();
+
+    expect(probe.supported).toBe(true);
+    expect(probe.features?.has('shader-f16')).toBe(true);
+    expect(probe.maxStorageBufferBindingSize).toBe(192 * 1024 * 1024);
+  });
+
+  it('reports unsupported without pretending to know the device', async () => {
+    installEnvironment(undefined, undefined);
+
+    const { probeWebGPUAdapter } = await import('./hardware');
+    const probe = await probeWebGPUAdapter();
+
+    expect(probe).toEqual({ supported: false });
+  });
+});

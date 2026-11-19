@@ -372,6 +372,24 @@ describe('WebLLM engine configuration', () => {
     expect(chatOpts).toMatchObject({ context_window_size: 2048 });
   });
 
+  it('refuses a model the adapter cannot run, before the engine is created', async () => {
+    // The library enforces `required_features` itself only after fetching the wasm and the config,
+    // and the storage-buffer requirement inside the pipeline constructor, once the weights are on
+    // disk. The preflight exists to fail this case earlier and with a reason a user can act on.
+    mockModelList.push({ model_id: 'gemma-4-E2B-it-q4f16_1-MLC', required_features: ['shader-f16'] });
+    mockProbeAdapter.mockResolvedValue({
+      supported: true,
+      features: new Set<string>(),
+      maxStorageBufferBindingSize: 1024 * 1024 * 1024,
+    });
+    mockCreateEngine.mockClear();
+
+    const limited = new WebLLMEngine('gemma-4-E2B-it-q4f16_1-MLC');
+
+    await expect(limited.init()).rejects.toThrow(/shader-f16/);
+    expect(mockCreateEngine).not.toHaveBeenCalled();
+  });
+
   it('sends no enable_thinking flag, on any model, because it measured worse', async () => {
     // `enable_thinking: false` is the documented remedy and the library reads it only from
     // `extra_body`. Measured on this pipeline, two repeats per combo: turning it off on Qwen3.5
