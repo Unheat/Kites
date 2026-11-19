@@ -144,11 +144,27 @@ function catalogFacts(modelId) {
  */
 async function runDeletionCheck(page, modelId) {
   const facts = catalogFacts(modelId);
-  const send = (type, payload) => page.evaluate((message) => new Promise((resolve) => {
+  const sendOnce = (type, payload) => page.evaluate((message) => new Promise((resolve) => {
     chrome.runtime.sendMessage(message, (response) => resolve(
       response ?? { status: 'error', error: String(chrome.runtime.lastError?.message) },
     ));
   }), { type, target: 'background', source: 'popup', request: true, payload });
+  // MV3 closes the message port when the service worker is still waking or has just been stopped,
+  // which the popup hits as a spurious failure. Retry only that transport error.
+  const send = async (type, payload) => {
+    const startedAt = Date.now();
+    let result;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      result = await sendOnce(type, payload);
+      const transportFailure = result.status === 'error' && /message port closed|Receiving end does not exist/i.test(result.error ?? '');
+      if (!transportFailure) break;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    if (type !== 'CHECK_MODEL_STATUS') {
+      console.log(`sent ${type} (${Date.now() - startedAt}ms) -> ${JSON.stringify(result)}`);
+    }
+    return result;
+  };
   const isCached = async () => Boolean((await send('CHECK_MODEL_STATUS', { modelId })).isCached);
   const readCache = () => page.evaluate(async ({ prefix, lib }) => {
     const result = { modelPrefix: 0, configPrefix: 0, wasmHasLib: false, rawKeys: 0 };
@@ -176,6 +192,17 @@ async function runDeletionCheck(page, modelId) {
   };
 
   const evidence = { modelId, prefix: facts.prefix, libShared: facts.libShared };
+
+  // A profile reused by an older build keeps that build's service worker answering, in which case
+  // this message type does not exist yet and every call fails as a closed port. Surface it instead
+  // of reporting a feature failure.
+  const probe = await send('DELETE_MODEL', { modelId: 'Kites-Delete-Probe-q4f16_1-MLC' });
+  if (probe.status === 'error' && /message port closed/i.test(probe.error ?? '')) {
+    throw new Error(
+      `The browser profile ${profile} is serving an older extension build that has no DELETE_MODEL handler. ` +
+      'Rerun with a fresh --profile directory.',
+    );
+  }
 
   // Clean slate: an earlier run may have left the model cached.
   if (await isCached()) {
@@ -274,10 +301,26 @@ function record(message) {
 context.on('console', record);
 
 const id = await extensionId(context);
+const deleteModelId = flag('delete-model');
+if (deleteModelId === 'true') throw new Error('Pass the model id to delete, e.g. --delete-model Qwen2-0.5B-Instruct-q4f16_1-MLC');
+
 const page = await context.newPage();
 page.on('console', record);
 page.on('pageerror', (error) => logs.push(`[pageerror] ${error.message}`));
-await page.goto(`chrome-extension://${id}/${OFFSCREEN_PAGE}`);
+// Deletion is driven from the popup, the surface a user clicks. It also keeps the background's own
+// offscreen document the only listener of the offscreen RPC: opening a second copy of the offscreen
+// page would answer the same forwarded message twice.
+await page.goto(`chrome-extension://${id}/${deleteModelId ? 'popup.html' : OFFSCREEN_PAGE}`);
+
+if (deleteModelId) {
+  try {
+    await runDeletionCheck(page, deleteModelId);
+  } catch (error) {
+    console.error(logs.slice(-40).join('\n'));
+    throw error;
+  }
+  await context.close();
+} else {
 
 await page.evaluate(async ({ key, state }) => {
   const current = (await chrome.storage.local.get(key))[key] ?? {};
@@ -296,11 +339,6 @@ await page.evaluate(async ({ key, state }) => {
 
 const ready = await page.evaluate(() => Boolean(window.__pipelineOrchestrator?.getTranslationManager));
 if (!ready) throw new Error('The offscreen page did not expose __pipelineOrchestrator; the build is stale or broken.');
-
-if (flag('delete-model')) {
-  await runDeletionCheck(page, flag('delete-model'));
-  await context.close();
-} else {
 
 const results = await page.evaluate(async ({ pageTexts, src, tgt }) => {
   const manager = window.__pipelineOrchestrator.getTranslationManager();

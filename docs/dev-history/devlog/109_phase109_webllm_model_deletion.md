@@ -60,9 +60,13 @@ it.
 - `npm run docs:check` — 880 undocumented symbols (baseline 880, delta 0), 0 docstring shape violations.
 - `npm run docs:api` — exit 0.
 - `npm run build`, `npm run lint` — see the PR draft; lint reports only pre-existing warnings.
-- Browser check: `node scripts/webllm-local-run.mjs --delete-model <id> --label delete` sends the same
-  `{ target: 'background', request: true }` envelope the popup sends through `dist/`, against real
-  WebGPU and real weights. The recorded run and its numbers are in `.workflow/evidence.md`.
+- Browser check: `node scripts/webllm-local-run.mjs --delete-model Qwen2-0.5B-Instruct-q4f16_1-MLC
+  --profile ~/.kites-webllm-delete-profile` sends the same `{ target: 'background', request: true }`
+  envelope the popup sends, through `dist/`, on real WebGPU with real weights. Result: DELETE during the
+  download refused; after install `webllm/model` held 10 keys and `webllm/config` 1, delete removed 11
+  (`removedEntries: 11`), both prefix counts fell to 0, the shared `model_lib` stayed cached, a fresh
+  download reinstalled the model (`isCached: true`), and a second delete removed another 11. Evidence
+  JSON: `/tmp/kites-delete-0502b-delete.json`.
 
 ## Decision
 
@@ -83,3 +87,11 @@ accompanied by a selection reset so the freed space cannot be silently re-spent 
   without a consumer; per-model deletion plus the browser's own storage controls cover the recovery case.
 - Cancelling an in-flight download was considered and dropped: WebLLM 0.2.86/0.2.89 offers no
   `AbortSignal` into `reload`, so the feature refuses instead of pretending to abort.
+- The first browser run failed with "The message port closed" because the harness profile had been used
+  by an older build of the extension, whose service worker was still answering and has no `DELETE_MODEL`
+  handler. The harness now probes for that and tells the caller to use a fresh `--profile`; a shared
+  profile is not a valid way to test a new message type.
+- The browser run also exposed a real race the unit tests could not: the guard refused deletion after
+  `hasModelInCache` was already true, because the active-download id is cleared only after the engine
+  finishes initializing. The guard now treats a download whose progress reached 1 as finished writing,
+  and the deletion still waits on the engine lease before touching the cache.

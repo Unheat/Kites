@@ -498,9 +498,13 @@ async function handleStartDownload(modelId: string, category?: string) {
  * @returns Count of removed cache entries plus sibling registry ids that shared the same files.
  */
 async function handleDeleteModel(modelId: string): Promise<{ removedEntries: number; alsoRemoved: string[] }> {
+  // The download id stays set until its final `.finally`, which runs after the weights are already
+  // cached and the engine is initializing. Only an unfinished write is a real conflict: at 100% the
+  // deletion can proceed (it still waits for the manager to release the engine).
+  const downloadProgress = activeDownloads[modelId]?.maxProgress ?? 0;
   WebLlmCacheManager.assertDeletable({
     modelId,
-    isActiveDownload: activeDownloadModelId === modelId,
+    isActiveDownload: activeDownloadModelId === modelId && downloadProgress < 1,
     isQueued: downloadQueue.some((item) => item.modelId === modelId),
   });
 
