@@ -12,6 +12,9 @@ extension, not by per-symbol docs.
   through the background worker (concurrent popup writes are normalized there).
 - **Entry point**: `App.tsx` → `SettingsView` panels; engine/model catalogs come from `src/shared/`
   registries, never from hardcoded lists in components.
+- **Custom APIs**: `ApiManagerPanel` lists saved entries and supports add, edit and delete. Editing
+  reuses `AddApiForm` with the saved configuration, keeps its `id`, and shows only a blank key
+  replacement field (blank means keep the stored key).
 
 ## Content script (`src/content/`)
 

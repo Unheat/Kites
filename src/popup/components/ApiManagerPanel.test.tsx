@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { act } from 'react';
 import ApiManagerPanel from './ApiManagerPanel';
 import type { CustomApiConfig, PopupState } from '../../shared/types';
+import { DEFAULT_POPUP_STATE } from '../../shared/types';
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -19,7 +20,21 @@ const SAVED_API: CustomApiConfig = {
 
 /** Builds the minimal popup state the panel reads. */
 function buildState(customApis: CustomApiConfig[]): PopupState {
-  return { customApis, activeEngineId: 'gg-translate', fallbackChain: [] } as PopupState;
+  return { ...DEFAULT_POPUP_STATE, customApis, activeEngineId: 'gg-translate' };
+}
+
+/**
+ * Writes through the native value setter so React's controlled-input tracker emits the change.
+ *
+ * @param element - The controlled input or textarea to update.
+ * @param value - The next value.
+ */
+function typeInto(element: HTMLInputElement | HTMLTextAreaElement, value: string): void {
+  const prototype = element instanceof HTMLTextAreaElement
+    ? HTMLTextAreaElement.prototype
+    : HTMLInputElement.prototype;
+  Object.getOwnPropertyDescriptor(prototype, 'value')!.set!.call(element, value);
+  element.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
 describe('ApiManagerPanel editing', () => {
@@ -83,10 +98,8 @@ describe('ApiManagerPanel editing', () => {
     expect(apiKeyInput.value).toBe('');
 
     await act(async () => {
-      modelInput.value = 'deepseek-reasoner';
-      modelInput.dispatchEvent(new Event('input', { bubbles: true }));
-      apiKeyInput.value = 'sk-replacement-secret';
-      apiKeyInput.dispatchEvent(new Event('input', { bubbles: true }));
+      typeInto(modelInput, 'deepseek-reasoner');
+      typeInto(apiKeyInput, 'sk-replacement-secret');
     });
 
     const saveButton = Array.from(container.querySelectorAll('button')).find(
@@ -133,8 +146,7 @@ describe('ApiManagerPanel editing', () => {
 
     const modelInput = container.querySelector('input[placeholder="e.g. gpt-4o or claude-3-5-sonnet"]') as HTMLInputElement;
     await act(async () => {
-      modelInput.value = 'deepseek-chat-v3';
-      modelInput.dispatchEvent(new Event('input', { bubbles: true }));
+      typeInto(modelInput, 'deepseek-chat-v3');
     });
 
     const saveButton = Array.from(container.querySelectorAll('button')).find(

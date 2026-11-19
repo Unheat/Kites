@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, Trash2, X } from 'lucide-react';
+import { Pencil, Plus, Trash2, X } from 'lucide-react';
 import type { PopupState } from '../../shared/types';
 import AddApiForm from './AddApiForm';
 
@@ -11,6 +11,7 @@ interface ApiManagerPanelProps {
 
 export default function ApiManagerPanel({ state, updateState, onClose }: ApiManagerPanelProps) {
   const [isAdding, setIsAdding] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   const handleDeleteApi = (id: string) => {
     updateState({
@@ -18,6 +19,7 @@ export default function ApiManagerPanel({ state, updateState, onClose }: ApiMana
       activeEngineId: state.activeEngineId === id ? 'gg-translate' : state.activeEngineId,
       fallbackChain: state.fallbackChain.filter(chainId => chainId !== id)
     });
+    if (editingId === id) setEditingId(null);
   };
 
   return (
@@ -25,7 +27,7 @@ export default function ApiManagerPanel({ state, updateState, onClose }: ApiMana
       <div className="flex justify-between items-center mb-3">
         <h3 className="text-sm font-bold text-[var(--color-editorial)]">Manage Custom APIs</h3>
         <div className="flex gap-2">
-          {!isAdding && (
+          {!isAdding && !editingId && (
             <button 
               onClick={() => setIsAdding(true)}
               className="p-1 text-[var(--color-muted)] hover:text-[var(--color-ink)] transition-colors cursor-pointer"
@@ -46,24 +48,50 @@ export default function ApiManagerPanel({ state, updateState, onClose }: ApiMana
 
       <div className="flex flex-col gap-2">
         {state.customApis.map((api) => (
-          <div key={api.id} className="flex items-center justify-between p-2 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded text-sm">
-            <div className="flex flex-col">
-              <span className="font-semibold text-xs uppercase text-[var(--color-muted)]">{api.provider}</span>
-              <span className="font-mono text-[var(--color-ink)] truncate max-w-[200px]" title={api.modelName}>
-                {api.modelName}
-              </span>
+          editingId === api.id ? (
+            <AddApiForm
+              key={api.id}
+              initialApi={api}
+              onSave={(updatedApi) => {
+                updateState({
+                  customApis: state.customApis.map(candidate => candidate.id === api.id ? updatedApi : candidate)
+                });
+                setEditingId(null);
+              }}
+              onCancel={() => setEditingId(null)}
+            />
+          ) : (
+            <div key={api.id} className="flex items-center justify-between p-2 bg-[var(--color-vellum)] border border-[var(--color-dust)] rounded text-sm">
+              <div className="flex flex-col">
+                <span className="font-semibold text-xs uppercase text-[var(--color-muted)]">{api.provider}</span>
+                <span className="font-mono text-[var(--color-ink)] truncate max-w-[200px]" title={api.modelName}>
+                  {api.modelName}
+                </span>
+              </div>
+              <div className="flex items-center gap-1">
+                <button 
+                  onClick={() => {
+                    setIsAdding(false);
+                    setEditingId(api.id);
+                  }}
+                  className="text-[var(--color-muted)] hover:text-[var(--color-ink)] transition-colors cursor-pointer p-1"
+                  title="Edit API"
+                >
+                  <Pencil size={16} />
+                </button>
+                <button 
+                  onClick={() => handleDeleteApi(api.id)}
+                  className="text-[var(--color-muted)] hover:text-red-500 transition-colors cursor-pointer p-1"
+                  title="Delete API"
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
             </div>
-            <button 
-              onClick={() => handleDeleteApi(api.id)}
-              className="text-[var(--color-muted)] hover:text-red-500 transition-colors cursor-pointer p-1"
-              title="Delete API"
-            >
-              <Trash2 size={16} />
-            </button>
-          </div>
+          )
         ))}
         
-        {state.customApis.length === 0 && !isAdding && (
+        {state.customApis.length === 0 && !isAdding && !editingId && (
           <div className="text-xs text-[var(--color-muted)] italic p-3 text-center border border-dashed border-[var(--color-dust)] rounded">
             No custom APIs configured.
           </div>
