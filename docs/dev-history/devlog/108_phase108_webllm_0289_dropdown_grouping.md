@@ -41,10 +41,12 @@ tests.
    entries and sort alphabetically with downloaded models.
 3. `src/studio/tools/StudioEngineSelector.tsx` — Studio dropdowns use the same `orderEngines()` with
    `downloadedIds` mapped to `isDownloaded`, so both surfaces agree.
-4. `src/shared/models-registry.json` — added the eight 0.2.89 records (q4f16_1/q4f32_1):
-   `MiniCPM5-2B`, `SmolLM3-3B`, `LFM2.5-1.2B-Instruct`, `LFM2.5-350M`.
-5. `package.json` / `manifest.json` / lockfile — `@mlc-ai/web-llm` `0.2.86` → `0.2.89`, extension
-   version `1.4.1` → `1.4.2`.
+4. `src/shared/models-registry.json` — added only the audit winner from 0.2.89 as q4f16_1/q4f32_1:
+   `LFM2.5-1.2B-Instruct` (59 curated models total). MiniCPM5-2B, SmolLM3-3B and
+   LFM2.5-350M were evaluated and deliberately left out; the registry is a curated
+   catalog, not a mirror of WebLLM's 175-model prebuilt list.
+5. `package.json` / lockfile — `@mlc-ai/web-llm` `0.2.86` → `0.2.89` (exact pin). The extension
+   version stays `1.4.1`; "bump" here means the WebLLM model catalog, not a product release.
 6. `scripts/test-webllm-user-flow.js` — uses `LFM2.5-1.2B-Instruct-q4f16_1-MLC` (a 0.2.89 model
    present in the registry), removes the body margin for the synthetic hover point, and accepts
    `blob:` baked results.
@@ -58,10 +60,10 @@ Direct translation evidence is WMT24++ (XCOMET-XXL, 55 languages) from the Qwen 
   decode speed; 8 languages including Japanese, Korean and Chinese. **Replaced Gemma 3 1B** in the
   small tier (Gemma 3 1B JMMLU 34.5, M-IFEval-ja 26.3).
 - `MiniCPM5-2B` — model card claims English/Chinese only, and independent multilingual stress tests
-  produced fabricated translations. Not pinned.
+  produced fabricated translations. Not curated.
 - `SmolLM3-3B` — six European languages (English, French, Spanish, German, Italian, Portuguese). Not
-  pinned for a manga translator.
-- `LFM2.5-350M` — added as a tiny smoke-test option, too weak to recommend for translation.
+  curated for a manga translator.
+- `LFM2.5-350M` — too weak for translation; omitted rather than shipped as dead list weight.
 
 Final pins: small = Qwen3-1.7B, LFM2.5-1.2B, Qwen3.5-0.8B; medium = Qwen3.5-4B, Qwen3-4B,
 Qwen3.5-2B; big = Qwen3.5-9B, Qwen3-8B, Qwen2.5-7B.
@@ -83,6 +85,6 @@ Qwen3.5-2B; big = Qwen3.5-9B, Qwen3-8B, Qwen2.5-7B.
 ## Decision
 
 Dropdown order is a shared contract, not component-local sorting: defaults, installed, not-installed,
-with curated picks pinned only inside the translation not-installed group. Recommendations are
-benchmark-driven and re-audited whenever the WebLLM catalog changes; a model that is new is not
-automatically recommended, and super-big models are never pinned.
+with curated picks pinned only inside the translation not-installed group. The model registry is a
+curated catalog: a model that is new is neither automatically shipped nor automatically recommended,
+and super-big models are never pinned.
