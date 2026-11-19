@@ -20,6 +20,16 @@
 /** Longest repeated block, in characters, that the detector will look for. */
 export const REPETITION_MAX_PERIOD_CHARS = 40;
 
+/**
+ * Shortest repeated span, in characters, that counts as a loop.
+ *
+ * Measured loops in the browser log run 29-200 repeats. Ordinary manga lettering repeats far fewer
+ * times — `ドドドド`, `ああああ` — and with `period = 1` the repeat count alone flags a run of four
+ * identical characters, which then discards every translation in the batch. A span floor keeps
+ * short sound effects out of the detector without losing the loops it was built for.
+ */
+export const REPETITION_MIN_LOOP_SPAN_CHARS = 12;
+
 /** How many times a block must repeat back to back before the completion counts as degenerate. */
 export const REPETITION_MIN_REPEATS = 4;
 
@@ -46,7 +56,7 @@ export function hasRunawayRepetition(
     let run = 0;
     for (let index = period; index < text.length; index += 1) {
       run = text[index] === text[index - period] ? run + 1 : 0;
-      if (run >= needed) return true;
+      if (run >= needed && run + period >= REPETITION_MIN_LOOP_SPAN_CHARS) return true;
     }
   }
   return false;
