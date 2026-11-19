@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { WebLLMEngine, WEBLLM_IDLE_DEADLINE_MS, WEBLLM_MAX_GENERATION_MS, WEBLLM_RECOVERY_TEMPERATURE, WEBLLM_TEMPERATURE, WEBLLM_TEMPERATURE_CEILING, temperatureForAttempt } from './WebLLMEngine';
+import { WebLLMEngine, WEBLLM_IDLE_DEADLINE_MS, WEBLLM_MAX_GENERATION_MS, WEBLLM_PRESENCE_PENALTY, WEBLLM_RECOVERY_TEMPERATURE, WEBLLM_TEMPERATURE, WEBLLM_TEMPERATURE_CEILING, temperatureForAttempt } from './WebLLMEngine';
 
 // 1. Mock the @mlc-ai/web-llm module
 const mockCreate = vi.fn();
@@ -137,14 +137,35 @@ describe('WebLLMEngine Keyed JSON Protocol', () => {
     expect(mockCreate).toHaveBeenCalledTimes(2);
   });
 
-  it('gracefully preserves original text for missing slots in large batches without throwing', async () => {
+  it('re-asks each missing slot on its own so a large batch recovers line by line', async () => {
     const inputs = ['One', 'Two', 'Three', 'Four', 'Five', 'Six'];
+    // `beforeEach` only clears calls, so a leftover implementation from an earlier test would leak
+    // into the assertions below.
+    mockCreate.mockReset();
     mockCreate.mockResolvedValueOnce({
       choices: [{ message: { content: JSON.stringify({ b0: '1', b1: '2' }) } }],
     });
+    // Recovery asks for one line, so it answers one key. Grouping the four missing slots into one
+    // request is the shape that came back in the source language.
+    mockCreate.mockResolvedValue({ choices: [{ message: { content: JSON.stringify({ b0: 'solo' }) } }] });
 
     const result = await engine.translate(inputs);
-    expect(result).toEqual(['1', '2', 'Three', 'Four', 'Five', 'Six']);
+
+    console.log('CALLS', mockCreate.mock.calls.length, mockCreate.mock.calls.map((c:any)=>(c[0].messages?.[1]?.content||'').slice(-90).replace(/\n/g,' ')));
+    expect(result).toEqual(['1', '2', 'solo', 'solo', 'solo', 'solo']);
+    expect(mockCreate).toHaveBeenCalledTimes(1 + 4);
+  });
+
+  it('keeps the source for a slot whose single-line recovery comes back empty', async () => {
+    mockCreate.mockReset();
+    mockCreate.mockResolvedValueOnce({
+      choices: [{ message: { content: JSON.stringify({ b0: '1' }) } }],
+    });
+    mockCreate.mockResolvedValue({ choices: [{ message: { content: '{}' } }] });
+
+    const result = await engine.translate(['One', 'Two']);
+
+    expect(result).toEqual(['1', 'Two']);
   });
 
   it('should return an array of empty strings immediately if all inputs are empty', async () => {
@@ -184,12 +205,15 @@ describe('WebLLMEngine Keyed JSON Protocol', () => {
     (engine as any).engine.interruptGenerate = interruptGenerate;
 
     // 100 tokens, one every 50ms: 5s of generation, far past the old 30ms-per-token deadline for
-    // a small batch (4.24s) but never silent for longer than the idle window.
+    // a small batch (4.24s) but never silent for longer than the idle window. The payload is a
+    // valid keyed answer streamed character by character, not 100 identical tokens: identical
+    // tokens are a repetition loop, and the engine now discards a loop instead of parsing it.
+    const streamed = JSON.stringify({ b0: 'a translated line' });
     mockCreate.mockImplementation(async () => {
       async function* tokens() {
-        for (let i = 0; i < 100; i += 1) {
+        for (let i = 0; i < streamed.length; i += 1) {
           await new Promise((resolve) => setTimeout(resolve, 50));
-          yield { choices: [{ delta: { content: 'x' }, finish_reason: i === 99 ? 'stop' : null }] };
+          yield { choices: [{ delta: { content: streamed[i] }, finish_reason: i === streamed.length - 1 ? 'stop' : null }] };
         }
       }
       return tokens();
@@ -197,7 +221,7 @@ describe('WebLLMEngine Keyed JSON Protocol', () => {
 
     const pending = engine.translate(['台詞'], 'ja', 'en');
     await vi.advanceTimersByTimeAsync(6_000);
-    await expect(pending).resolves.toHaveLength(1);
+    await expect(pending).resolves.toEqual(['a translated line']);
 
     expect(interruptGenerate).not.toHaveBeenCalled();
     expect(WEBLLM_IDLE_DEADLINE_MS).toBeLessThan(WEBLLM_MAX_GENERATION_MS);
@@ -244,7 +268,10 @@ describe('WebLLMEngine Keyed JSON Protocol', () => {
     const out = await engine.translate(['こんにちは', 'またね'], 'ja', 'en');
 
     expect(out).toEqual(['Hello', 'Hi again']);
-    expect(mockCreate.mock.calls[0][0]).toMatchObject({ temperature: WEBLLM_TEMPERATURE });
+    expect(mockCreate.mock.calls[0][0]).toMatchObject({
+      temperature: WEBLLM_TEMPERATURE,
+      presence_penalty: WEBLLM_PRESENCE_PENALTY,
+    });
     expect(mockCreate.mock.calls[1][0]).toMatchObject({ temperature: WEBLLM_RECOVERY_TEMPERATURE });
     // A retry colder than the pass that failed walks straight back into the same degradation.
     expect(WEBLLM_RECOVERY_TEMPERATURE).toBeGreaterThan(WEBLLM_TEMPERATURE);
@@ -289,6 +316,15 @@ describe('WebLLMEngine Keyed JSON Protocol', () => {
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining('exceeds 80-token local ceiling')
     );
+  });
+});
+
+describe('WEBLLM_PRESENCE_PENALTY', () => {
+  it('penalises reusing earlier tokens enough to break copy-back without shredding the line', () => {
+    // Qwen's card allows 0-2 and names 1.5 for endless repetition. Below ~1 the copy-back held
+    // (75% of slots unchanged); at 2.0 language mixing raised failures again (59%).
+    expect(WEBLLM_PRESENCE_PENALTY).toBeGreaterThanOrEqual(1);
+    expect(WEBLLM_PRESENCE_PENALTY).toBeLessThan(2);
   });
 });
 

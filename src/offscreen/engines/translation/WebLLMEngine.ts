@@ -28,6 +28,35 @@ export const MAX_WEBLLM_CUSTOM_PROMPT_TOKENS = 80;
  */
 export const WEBLLM_TEMPERATURE = 0.7;
 
+/**
+ * Presence penalty, the lever that actually suppresses handing the source back.
+ *
+ * Qwen's model card allows 0-2 and names 1.5 for endless repetition. Measured on the eight short
+ * Chinese imperatives that were the worst copy-back case in the browser log, Chinese to Vietnamese,
+ * 12 repeats of the same chunk: 0 -> 75% of slots came back unchanged, 1.0 -> 42.7%, 1.5 -> 41.7%,
+ * 2.0 -> 59.4%. So the useful range is the middle, not the maximum: 2.0 costs more than it buys,
+ * which is what the card warns about when it says high values cause language mixing.
+ *
+ * A colder retry ladder cannot do this job: recovery re-samples the same attractor, and the copy
+ * still passes because the model believes it complied.
+ */
+export const WEBLLM_PRESENCE_PENALTY = 1.5;
+
+/**
+ * Segments per recovery request on the local model.
+ *
+ * One: a single line per request, measured against an eight-line group (see the constructor).
+ */
+export const WEBLLM_RECOVERY_SEGMENT_LIMIT = 1;
+
+/**
+ * Recovery requests per `translate()` call on the local model.
+ *
+ * Enough to re-ask every slot of one full batch one at a time. Only failing slots spend it, so a
+ * page that translated cleanly pays nothing.
+ */
+export const WEBLLM_RECOVERY_REQUEST_BUDGET = 8;
+
 /** Nucleus sampling cutoff paired with `WEBLLM_TEMPERATURE`; part of the model's recommended set. */
 const WEBLLM_TOP_P = 0.8;
 
@@ -153,6 +182,15 @@ export class WebLLMEngine extends BaseLlmTranslationEngine {
     this.maxInputTokens = DEFAULT_WEBLLM_MAX_INPUT_TOKENS;
     this.maxContextWindow = 1024;
     this.throwOnCountMismatch = false;
+    // Recovery re-asks one line at a time on the local model. A batch made entirely of very short
+    // lines (站住！/不许动/快点) is the case that copies itself back, and asking for one line per
+    // request is what breaks it: measured on that eight-line chunk, Chinese to Vietnamese, the share
+    // of slots handed back unchanged went 75% (one 8-line recovery) -> 18.8% (eight single-line
+    // recoveries), and the English side of the same chunk went to 0%. Requests are free locally, so
+    // the budget covers a whole failing chunk instead of one group of it. Remote engines keep the
+    // cheaper default (one request, up to eight lines) because they pay per request.
+    this.recoverySegmentLimit = WEBLLM_RECOVERY_SEGMENT_LIMIT;
+    this.recoveryRequestBudget = WEBLLM_RECOVERY_REQUEST_BUDGET;
   }
 
   /**
@@ -305,6 +343,7 @@ export class WebLLMEngine extends BaseLlmTranslationEngine {
       top_p: WEBLLM_TOP_P,
       top_k: WEBLLM_TOP_K,
       repetition_penalty: 1,
+      presence_penalty: WEBLLM_PRESENCE_PENALTY,
       max_tokens: dynamicMaxTokens,
     };
 
