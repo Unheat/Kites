@@ -27,10 +27,10 @@ const extensionPath = path.join(__dirname, '..', 'dist');
 const userDataDir = path.join(__dirname, '..', 'test', 'model', '.chrome-profile');
 const testImagePath = path.join(__dirname, '..', 'src', 'test', 'test-img', 'image6.jpg');
 
-// Model under test -- matches the reference copy fetched into test/model/ via
-// scripts/download-webllm-model.mjs. Smallest model in the app's registry, so the
-// real download (from Hugging Face, into the browser's own cache) stays quick.
-const WEBLLM_MODEL_ID = 'SmolLM2-135M-Instruct-q0f16-MLC';
+// Model under test -- the smallest new model added in web-llm 0.2.89 that is
+// also curated in src/shared/models-registry.json, so the real download (from
+// Hugging Face, into the browser's own cache) also validates the new records.
+const WEBLLM_MODEL_ID = 'LFM2.5-1.2B-Instruct-q4f16_1-MLC';
 
 // Which translation engine to exercise. Defaults to the WebLLM model under test; pass
 // `--engine=gg-translate` to run the identical flow with the network engine instead, which
@@ -62,7 +62,7 @@ function startTestImageServer() {
       return;
     }
     res.writeHead(200, { 'Content-Type': 'text/html' });
-    res.end(`<!DOCTYPE html><html><body>
+    res.end(`<!DOCTYPE html><html><body style="margin:0">
       <img id="manga-target" src="/image6.jpg" style="max-width:800px;" />
     </body></html>`);
   });
@@ -314,8 +314,11 @@ async function main() {
     while (Date.now() < deadline) {
       resultSrc = await page.evaluate((targetSrc) => {
         const imgs = Array.from(document.querySelectorAll('img'));
-        const img = imgs.find((i) => i.src === targetSrc || i.src.startsWith('data:image'));
-        return img && img.src.startsWith('data:image/png;base64') ? img.src.slice(0, 60) + '...' : null;
+        const img = imgs.find((i) => i.src === targetSrc || i.src.startsWith('data:image') || i.src.startsWith('blob:'));
+        // The SPA replacement strategy stores the baked PNG as a same-origin blob URL
+        // (srcset cleared) rather than a data: URL, so accept both forms.
+        const isBaked = img && (img.src.startsWith('data:image/png;base64') || img.src.startsWith('blob:'));
+        return isBaked ? img.src.slice(0, 60) + '...' : null;
       }, imageSrc);
       if (resultSrc) break;
       await wait(1000);
