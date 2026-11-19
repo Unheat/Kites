@@ -19,21 +19,24 @@ const STRUCTURED_OUTPUT_REJECTION_HINT =
   ' This endpoint rejected structured output; switch Output Constraints to JSON Object or Prompt Only and retry.';
 
 interface AddApiFormProps {
+  /** Existing configuration to edit; omitted when creating a new API. */
+  initialApi?: CustomApiConfig;
   onSave: (api: CustomApiConfig) => void;
   onCancel: () => void;
 }
 
-export default function AddApiForm({ onSave, onCancel }: AddApiFormProps) {
-  const [provider, setProvider] = useState<CustomApiConfig['provider']>('openai');
-  const [newModelName, setNewModelName] = useState('');
+export default function AddApiForm({ initialApi, onSave, onCancel }: AddApiFormProps) {
+  const [provider, setProvider] = useState<CustomApiConfig['provider']>(initialApi?.provider ?? 'openai');
+  const [newModelName, setNewModelName] = useState(initialApi?.modelName ?? '');
+  // The stored key is never placed in a DOM value; blank means "keep the saved key".
   const [newApiKey, setNewApiKey] = useState('');
-  const [newBaseUrl, setNewBaseUrl] = useState('');
-  const [customPrompt, setCustomPrompt] = useState('');
-  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [newBaseUrl, setNewBaseUrl] = useState(initialApi?.baseUrl ?? '');
+  const [customPrompt, setCustomPrompt] = useState(initialApi?.customPrompt ?? '');
+  const [showAdvanced, setShowAdvanced] = useState(Boolean(initialApi?.customPrompt));
   const [validationError, setValidationError] = useState('');
   const [isValidating, setIsValidating] = useState(false);
   // null means "follow detection"; any id means the user pinned that tier for this form session.
-  const [outputModeOverride, setOutputModeOverride] = useState<StructuredOutputModeId | null>(null);
+  const [outputModeOverride, setOutputModeOverride] = useState<StructuredOutputModeId | null>(initialApi?.outputMode ?? null);
 
   const showOutputModeControl = supportsStructuredOutputSelection(provider);
   const detectedOutputMode = useMemo(
@@ -50,8 +53,11 @@ export default function AddApiForm({ onSave, onCancel }: AddApiFormProps) {
    * @returns Nothing; displays an inline error when verification fails.
    */
   const handleSave = async () => {
-    if (!newModelName.trim() || !newApiKey.trim()) {
-      setValidationError('Model name and API key are required.');
+    const effectiveApiKey = newApiKey.trim() || initialApi?.apiKey;
+    if (!newModelName.trim() || !effectiveApiKey) {
+      setValidationError(
+        initialApi ? 'Model name is required.' : 'Model name and API key are required.'
+      );
       return;
     }
 
@@ -65,10 +71,10 @@ export default function AddApiForm({ onSave, onCancel }: AddApiFormProps) {
 
     const trimmedCustomPrompt = customPrompt.trim().slice(0, 4000);
     const newApi: CustomApiConfig = {
-      id: `api_${crypto.randomUUID()}`,
+      id: initialApi?.id ?? `api_${crypto.randomUUID()}`,
       provider,
       modelName: newModelName.trim(),
-      apiKey: newApiKey.trim(),
+      apiKey: effectiveApiKey,
       ...(compatibleBaseUrl?.normalized ? { baseUrl: compatibleBaseUrl.normalized } : {}),
       ...(trimmedCustomPrompt ? { customPrompt: trimmedCustomPrompt } : {}),
       ...(showOutputModeControl ? { outputMode: effectiveOutputMode } : {}),
@@ -211,7 +217,8 @@ export default function AddApiForm({ onSave, onCancel }: AddApiFormProps) {
         <label className="text-xs font-semibold text-[var(--color-muted)] uppercase mb-1 block">API Key</label>
         <input 
           type="password" 
-          placeholder="sk-..." 
+          autoComplete="new-password"
+          placeholder={initialApi ? 'Leave blank to keep the current key' : 'sk-...'} 
           value={newApiKey}
           onChange={(e) => setNewApiKey(e.target.value)}
           disabled={isValidating}
@@ -254,7 +261,7 @@ export default function AddApiForm({ onSave, onCancel }: AddApiFormProps) {
           disabled={isValidating}
           className="flex-1 py-2 bg-[var(--color-ink)] text-[var(--color-paper)] text-sm font-bold rounded hover:bg-[var(--color-accent-fill)] transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {isValidating ? 'Testing API...' : 'Save API'}
+          {isValidating ? 'Testing API...' : initialApi ? 'Save Changes' : 'Save API'}
         </button>
         <button 
           onClick={onCancel}
