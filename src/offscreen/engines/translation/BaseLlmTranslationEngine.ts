@@ -356,6 +356,14 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
         }
       }
 
+      // The budget is per page, so running out leaves real lines holding their source text with no
+      // signal anywhere: the page still reports success because the result array is complete.
+      if (unrecovered.length > 0 && retryBudget === 0) {
+        console.warn(
+          `[BaseLlmTranslationEngine] Recovery budget exhausted (${this.recoveryRequestBudget} requests); ${unrecovered.length} slot(s) keep their source text.`
+        );
+      }
+
       for (let j = 0; j < chunk.length; j++) {
         const cleaned = cleanTranslatedLine(values[j] || '');
         results[chunk[j].originalIndex] = cleaned;
@@ -406,9 +414,18 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
     }
     const schema = buildSchema(chunk.length);
 
-    // Clamp completion budget so input + output <= maxContextWindow
+    // Clamp the completion budget so input + output fits the window. The 64-token floor is a real
+    // hole in that invariant: once the input alone overflows, the budget is no longer what keeps the
+    // request legal, so say so instead of letting the overflow reach the engine as a normal call
+    // that it can only reject (`ContextWindowSizeExceededError` loses the whole page).
     const chunkTextTokens = chunk.reduce((sum, s) => sum + estimateTokenCount(s.text) + 6, 0);
     const chunkInputTokens = context.dynamicOverhead + chunkTextTokens;
+    const overflowTokens = chunkInputTokens + 16 - this.maxContextWindow;
+    if (overflowTokens > 0) {
+      console.warn(
+        `[BaseLlmTranslationEngine] Chunk input exceeds the ${this.maxContextWindow}-token window by ~${overflowTokens} estimated tokens; the engine will reject it. A single oversized segment cannot be split without changing its meaning.`
+      );
+    }
     const maxAvailableOutput = Math.max(64, this.maxContextWindow - chunkInputTokens - 16);
     const rawMaxTokens = maxTokensForBatch(chunk.map((s) => s.text));
     const maxTokens = Math.min(rawMaxTokens, maxAvailableOutput);

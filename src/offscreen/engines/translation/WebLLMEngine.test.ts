@@ -468,4 +468,19 @@ describe('temperatureForAttempt', () => {
     // Above this a translation pass drifts into free association rather than escaping the echo.
     expect(WEBLLM_TEMPERATURE_CEILING).toBeLessThan(1.2);
   });
+
+  it('reports an input that cannot fit the window instead of sending it silently', async () => {
+    // The 64-token floor keeps `max_tokens` legal while `input + output` overflows, so the request
+    // leaves as a normal call and comes back as a context-window error that loses the whole page.
+    // A single oversized segment cannot be split, so the only honest signal is the warning.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const local = new WebLLMEngine('Qwen2.5-3B-Instruct-q4f16_1-MLC');
+    await local.init();
+    (local as any).maxContextWindow = 120;
+
+    await local.translate(['あ'.repeat(400)]);
+
+    expect(warn.mock.calls.flat().join(' ')).toContain('exceeds the 120-token window');
+    warn.mockRestore();
+  });
 });
