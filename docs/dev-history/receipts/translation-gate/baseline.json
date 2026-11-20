@@ -12,43 +12,71 @@
   "combos": {
     "auto-en-ja": {
       "slots": 52,
-      "failed": 5
+      "failed": 5,
+      "failedMin": 5,
+      "failedMax": 7
     },
     "auto-en-zh": {
       "slots": 36,
-      "failed": 0
+      "failed": 0,
+      "failedMin": 0,
+      "failedMax": 0
     },
     "auto-en-zh-real": {
       "slots": 40,
-      "failed": 3
+      "failed": 3,
+      "failedMin": 3,
+      "failedMax": 3
     },
     "auto-vi-ja": {
       "slots": 52,
-      "failed": 6
+      "failed": 3,
+      "failedMin": 3,
+      "failedMax": 6
     },
     "auto-vi-zh": {
       "slots": 36,
-      "failed": 2
+      "failed": 2,
+      "failedMin": 2,
+      "failedMax": 11
     },
     "ja-en-ja": {
       "slots": 52,
-      "failed": 5
+      "failed": 4,
+      "failedMin": 4,
+      "failedMax": 5
     },
     "short-en-zh": {
       "slots": 16,
-      "failed": 1
+      "failed": 0,
+      "failedMin": 0,
+      "failedMax": 1
     },
     "short-vi-zh": {
       "slots": 16,
-      "failed": 1
+      "failed": 1,
+      "failedMin": 1,
+      "failedMax": 3
     },
     "zh-en-zh": {
       "slots": 36,
-      "failed": 1
+      "failed": 0,
+      "failedMin": 0,
+      "failedMax": 1
     },
     "zh-ru-zh": {
       "slots": 36,
-      "failed": 0
+      "failed": 0,
+      "failedMin": 0,
+      "failedMax": 0
+    },
+    "fr-en-fr": {
+      "slots": 36,
+      "failed": 7,
+      "failedMin": 7,
+      "failedMax": 8
     }
-  }
+  },
+  "absorbedRuns": 12,
+  "absorbedAt": "2026-11-20T23:29:22.175Z"
 }

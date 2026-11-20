@@ -65,6 +65,10 @@ const COMBOS = [
   // what made a single echoing chunk look like a 15-point swing between runs.
   { id: 'short-en-zh', fixture: 'zh-short-imperatives', source: 'zh', target: 'en' },
   { id: 'short-vi-zh', fixture: 'zh-short-imperatives', source: 'zh', target: 'vi' },
+  // Latin-to-Latin. The only combo that exercises the already-target oracle: every line here is
+  // real French and must change, so it fails if the oracle starts swallowing genuine source
+  // text. On the CJK fixtures the oracle is a no-op (measured: 0 of 186 lines skipped).
+  { id: 'fr-en-fr', fixture: 'fr-dialogue', source: 'fr', target: 'en' },
 ];
 
 /**
