@@ -11,6 +11,7 @@
  * Usage:
  *   npm run build
  *   node scripts/llm-language-stress.mjs --label stress-1 --combos 12 --repeats 2
+ *   node scripts/llm-language-stress.mjs --label recheck --only ar-vi --repeats 2
  *
  * The combo order is shuffled with a fixed seed so a run is reproducible; change --seed
  * to sample a different cut.
@@ -119,7 +120,8 @@ for (let i = allCombos.length - 1; i > 0; i -= 1) {
   const j = Math.floor(random() * (i + 1));
   [allCombos[i], allCombos[j]] = [allCombos[j], allCombos[i]];
 }
-const selected = allCombos.slice(0, comboCount);
+const only = flags.get('only');
+const selected = allCombos.filter((combo) => !only || combo.id.includes(only)).slice(0, comboCount);
 
 /**
  * Finds a Chromium build that can load an unpacked MV3 extension.
