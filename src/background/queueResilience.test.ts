@@ -244,6 +244,27 @@ describe('sendMessageToOffscreen timeout', () => {
     expect(Date.now() - started).toBeGreaterThan(60 * 1000);
   });
 
+  it('does not inherit the silence before it as its own stall', async () => {
+    // The activity timestamp is global. A user who reads a page for a few minutes and then hits
+    // translate started a job whose first wait slice already measured minutes of "no progress", so
+    // it aborted in ~5s (the browser log showed 67s and 231s for jobs seconds old). Silence that
+    // happened before the wait began cannot be evidence about this job.
+    vi.useFakeTimers();
+    offscreenState.sendMessageBehavior = 'hang';
+    offscreenState.answerAfterMs = 6000;
+
+    const pending = sendMessageToOffscreen({ type: 'PROCESS_JOB', payload: { jobId: 1 } }, 60 * 1000, {
+      stallTimeoutMs: JOB_STALL_TIMEOUT_MS,
+      maxTotalMs: MAX_JOB_WAIT_MS,
+      // Nothing has spoken to the background for five minutes.
+      readActivityAt: () => Date.now() - 5 * 60 * 1000,
+    });
+    const expectation = expect(pending).resolves.toMatchObject({ status: 'success' });
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    await expectation;
+  });
+
   it('abandons a job that stops reporting progress', async () => {
     vi.useFakeTimers();
     offscreenState.sendMessageBehavior = 'hang';
