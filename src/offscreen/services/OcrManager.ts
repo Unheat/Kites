@@ -839,7 +839,8 @@ export class OcrManager {
       const area = polygonArea(poly);
       if (area < 16) continue; // Cotrans area filter (area > 16)
 
-      // 1:1 Cotrans Furigana filter: filter out tiny reading-aid lines running parallel to main kanji lines (fs < 0.45 * main_fs)
+      // Conservative furigana heuristic: small kana beside a larger Kanji-bearing base.
+      // Retain ambiguous readings rather than erase dialogue beside kana/Latin sound effects.
       const b1 = calculateBoundingBox(poly);
       const fs1 = Math.min(b1.width, b1.height);
       let isFurigana = false;
@@ -847,12 +848,12 @@ export class OcrManager {
       for (let j = 0; j < rawTexts.length; j++) {
         if (i === j) continue;
 
-        // 1:1 Cotrans Furigana definition: Furigana consists strictly of Kana reading aids (Hiragana/Katakana \u3040-\u30ff)
+        // Only kana readings are eligible for automatic removal; other annotations stay visible.
         const isKanaOnly = (str: string) => /^[\u3040-\u30ff\s\.\-‥]+$/.test(str.trim());
         const hasKanji = (str: string) => /[\u4e00-\u9faf]/.test(str);
 
-        // If line i contains Kanji (full sentence), it is NEVER Furigana
-        if (hasKanji(txt) || !isKanaOnly(txt)) continue;
+        // Kana/Latin or misrecognized bases are intentionally insufficient evidence to delete text.
+        if (hasKanji(txt) || !isKanaOnly(txt) || !hasKanji(rawTexts[j])) continue;
 
         const poly2 = rawPolygons[j];
         if (!poly2 || poly2.length < 3) continue;

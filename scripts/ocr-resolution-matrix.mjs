@@ -24,6 +24,110 @@ const label = argValue('--label', 'unlabelled');
 const imagePath = argValue('--image', '/tmp/page-under-test.png');
 const image = readFileSync(imagePath);
 
+// Local detector-only experiment: no translation, extension profile, or browser required.
+// Usage: node --import tsx scripts/ocr-resolution-matrix.mjs --image page.png --ocr-only --caps 640,960,1280,1920
+if (process.argv.includes('--ocr-only')) {
+  const { PaddleOcrEngine } = await import('../src/offscreen/engines/ocr/PaddleOcrEngine.ts');
+  const { extractPolygons } = await import('../src/offscreen/engines/ocr/extractPolygons.ts');
+  const { OcrManager } = await import('../src/offscreen/services/OcrManager.ts');
+  const manager = new OcrManager();
+  // A separately bundled candidate allows A/B filtering without editing the shipped manager.
+  const candidatePath = argValue('--candidate-manager', '');
+  const candidateManager = candidatePath
+    ? new (await import((await import('node:url')).pathToFileURL(candidatePath).href)).OcrManager()
+    : null;
+  const unclipRatio = 1.8; // Match CustomPaddleDetector's shipped expansion.
+  const { loadImage } = await import('@napi-rs/canvas');
+  const { writeFileSync, mkdirSync } = await import('node:fs');
+  const loaded = await loadImage(image);
+  const engine = new PaddleOcrEngine(argValue('--model', 'v6-small'));
+  await engine.init();
+  const service = engine.service;
+  const source = service.platform.createCanvas(loaded.width, loaded.height);
+  source.getContext('2d').drawImage(loaded, 0, 0);
+  const detector = engine.customDetector;
+  const originalRun = service.detector.session.run.bind(service.detector.session);
+  let probabilityMap;
+  let tensorShape;
+  service.detector.session.run = async (...args) => {
+    const outputs = await originalRun(...args);
+    const output = outputs[service.detector.session.outputNames[0]];
+    probabilityMap = new Float32Array(output.data);
+    tensorShape = output.dims;
+    return outputs;
+  };
+  const caps = argValue('--caps', '640,960,1280,1920').split(',').map(Number);
+  const thresholds = argValue('--thresholds', '0.3,0.2').split(',').map(Number);
+  if (!caps.every((cap) => Number.isFinite(cap) && cap > 0)
+      || !thresholds.every((value) => value > 0 && value < 1)) {
+    throw new Error('Caps must be positive; probability thresholds must be between zero and one.');
+  }
+  const results = [];
+  for (const cap of caps) {
+    service.detector.options.maxSideLength = cap;
+    service.options.detection.maxSideLength = cap;
+    const started = Date.now();
+    const detected = await detector.detectPolygons(source);
+    for (const threshold of thresholds) {
+      const scale = Math.min(1, cap / Math.max(source.width, source.height));
+      const candidates = threshold === 0.3
+        ? detected.polygons.map((points, index) => ({ points, score: detected.scores[index] }))
+        : extractPolygons(probabilityMap, tensorShape[3], tensorShape[2], source.width, source.height,
+          threshold, unclipRatio, scale);
+      const recognized = await engine.recognizeCropsFromCanvas(source, candidates.map((candidate) => candidate.points));
+      const blocks = candidates.map((candidate, index) => ({
+        polygon: candidate.points, detectionScore: candidate.score,
+        text: recognized.texts[index], recognitionScore: recognized.scores[index],
+      }));
+      const polygons = candidates.map((candidate) => candidate.points);
+      const rawResult = {
+        texts: recognized.texts, scores: recognized.scores, polygons,
+        detectionScores: candidates.map((candidate) => candidate.score),
+        boxes: polygons.map((points) => {
+          const x = Math.min(...points.map((point) => point.x));
+          const y = Math.min(...points.map((point) => point.y));
+          return { x, y, width: Math.max(...points.map((point) => point.x)) - x,
+            height: Math.max(...points.map((point) => point.y)) - y };
+        }),
+      };
+      const context = { pageWidth: source.width, pageHeight: source.height, sourceLang: argValue('--source-lang', 'auto') };
+      const merged = await manager.mergeTextBlocks(structuredClone(rawResult), context);
+      const candidateMerged = candidateManager
+        ? await candidateManager.mergeTextBlocks(structuredClone(rawResult), context) : undefined;
+      const probes = [];
+      if (process.argv.includes('--probe-furigana')) {
+        const targetIndex = blocks.findIndex((block) => block.text.includes('こっち'));
+        if (targetIndex >= 0) {
+          const target = blocks[targetIndex];
+          const bounds = (points) => ({
+            x: Math.min(...points.map((point) => point.x)), y: Math.min(...points.map((point) => point.y)),
+            w: Math.max(...points.map((point) => point.x)) - Math.min(...points.map((point) => point.x)),
+            h: Math.max(...points.map((point) => point.y)) - Math.min(...points.map((point) => point.y)),
+          });
+          const b1 = bounds(target.polygon);
+          for (let index = 0; index < blocks.length; index += 1) {
+            const b2 = bounds(blocks[index].polygon);
+            const fs2 = Math.min(b2.w, b2.h);
+            if (index === targetIndex || !(b2.h > b2.w * 1.2)
+                || !(Math.min(b1.w, b1.h) < 0.45 * fs2)
+                || !(Math.abs(b1.x - b2.x) < fs2 * 1.5)
+                || !(Math.max(0, Math.min(b1.y + b1.h, b2.y + b2.h) - Math.max(b1.y, b2.y)) > Math.min(b1.w, b1.h) * 0.5)) continue;
+            probes.push({ neighbor: blocks[index], bounds: b2 });
+          }
+        }
+      }
+      results.push({ cap, threshold, input: tensorShape, elapsedMs: Date.now() - started, blocks, probes,
+        merged: { texts: merged.texts, boxes: merged.boxes, artwork: merged.artwork },
+        candidateMerged: candidateMerged && { texts: candidateMerged.texts, boxes: candidateMerged.boxes, artwork: candidateMerged.artwork } });
+      console.log(`OCR_RESULT ${JSON.stringify(results.at(-1))}`);
+    }
+  }
+  const output = argValue('--output', 'result/ocr-resolution-matrix.json');
+  mkdirSync(join(output, '..'), { recursive: true });
+  writeFileSync(output, JSON.stringify({ imagePath, width: source.width, height: source.height, results }, null, 2));
+  process.exit(0);
+}
+
 /** Dialogue known to be on the page, used as ground truth for scoring. */
 const EXPECTED = [
   '好厉害，屁穴在紧紧咬着老公',

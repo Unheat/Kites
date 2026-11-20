@@ -93,7 +93,7 @@ Raw OCR detection contains noise from artwork cross-hatching, screentones, water
 8. **Scanlator Watermarks:** Regex filtering for scanning groups, release URLs, Discord links, and scanlation credit signatures (`colamanga`, `baozimh`, `bilibili`, `discord.gg`, `patreon`).
 9. **Trailing Watermark Debris Stripping:** Strips scanlation website suffixes appended to dialogue lines (e.g. `别吵！colamanga.com` $\to$ `别吵！`) and rescales polygon bounds proportionally.
 10. **Speedline & Action Stroke Filter:** Eliminates single-stroke CJK radicals and line art misidentified as text (`一`, `丨`, `丶`, `─`, `│`, `|`, `二`).
-11. **Furigana Reading Aid Suppression:** Suppresses ruby/furigana characters running parallel to main dialogue lines where font size is $< 0.45\times$ of the parent text.
+11. **Furigana Reading Aid Suppression:** Automatically suppresses kana-only reading aids only beside a Kanji-bearing parent, using the existing parallel/proximity checks and font-size ratio $< 0.45\times$. Kana-only, Latin, or misrecognized parents cannot authorize deletion: possible ruby stays visible rather than risking removal of dialogue beside sound effects. This conservative heuristic does not require bubble detection; it is not a universal ruby classifier.
 12. **Duplicate & Containment Deduplication:** When two detections have $\ge 50\%$ bounding box overlap, preserves the longer text slice or higher confidence read.
 13. **Low-Confidence Standalone Latin Filter:** In CJK pages, purges stray isolated Latin noise strings below confidence thresholds while preserving genuine English loanwords.
 14. **Action SFX Exemption:** Protects genuine onomatopoeia and shouts (`哒嗒啪轰`, `쾅쿵`, `ah`, `boom`) from being misfiltered by short-line rules.

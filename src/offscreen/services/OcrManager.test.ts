@@ -49,6 +49,78 @@ describe('OcrManager', () => {
     });
   });
 
+  describe('furigana parent eligibility', () => {
+    /**
+     * Runs the real merge/filter path with deterministic recognized text and polygons.
+     * @param texts - OCR strings for the supplied quadrilaterals.
+     * @param polygons - Source-image quadrilaterals in matching order.
+     * @returns Filtered OCR result, including the surviving inpaint masks.
+     */
+    const processLines = async (texts: string[], polygons: { x: number; y: number }[][]) => {
+      (PaddleOcrEngine as any).mockImplementationOnce(function () {
+        return {
+          init: vi.fn().mockResolvedValue(undefined),
+          recognize: vi.fn().mockResolvedValue({
+            texts, polygons, scores: texts.map(() => 0.99),
+            detectionScores: texts.map(() => 0.95), boxes: [],
+          }),
+          destroy: vi.fn().mockResolvedValue(undefined),
+        };
+      });
+      return ocrManager.processImage(new ArrayBuffer(1), 'v6-small');
+    };
+
+    it.each([0.5, 1, 2, 3])('preserves dialogue beside a tilted sound effect at scale %s', async (scale) => {
+      // Measured native detections: dialogue was read correctly, then erased as ruby of "Lキ".
+      const polygons = [
+        [{ x: 184, y: 1090 }, { x: 216, y: 1090 }, { x: 216, y: 1344 }, { x: 184, y: 1344 }],
+        [{ x: 243, y: 1014 }, { x: 314, y: 978 }, { x: 381, y: 1112 }, { x: 310, y: 1147 }],
+      ].map((polygon) => polygon.map(({ x, y }) => ({ x: x * scale, y: y * scale })));
+      const result = await processLines(['それじゃこっちおいで', 'Lキ'], polygons);
+      expect(result.texts.join('')).toContain('それじゃこっちおいで');
+      expect(result.rawPolygons).toContainEqual(polygons[0]);
+    });
+
+    it.each(['vertical', 'horizontal'] as const)('still removes genuine %s ruby beside Kanji', async (direction) => {
+      const polygons = direction === 'vertical' ? [
+        [{ x: 145, y: 100 }, { x: 157, y: 100 }, { x: 157, y: 200 }, { x: 145, y: 200 }],
+        [{ x: 100, y: 100 }, { x: 140, y: 100 }, { x: 140, y: 300 }, { x: 100, y: 300 }],
+      ] : [
+        [{ x: 100, y: 85 }, { x: 200, y: 85 }, { x: 200, y: 97 }, { x: 100, y: 97 }],
+        [{ x: 100, y: 100 }, { x: 300, y: 100 }, { x: 300, y: 140 }, { x: 100, y: 140 }],
+      ];
+      const result = await processLines(['にホン', '日本語'], polygons);
+      expect(result.texts).toEqual(['日本語']);
+      expect(result.rawPolygons).not.toContainEqual(polygons[0]);
+      expect(result.rawPolygons).toContainEqual(polygons[1]);
+    });
+
+    it.each(['left', 'below', 'overhanging'] as const)('keeps existing removal of %s ruby beside Kanji', async (placement) => {
+      const polygons = placement === 'below' ? [
+        [{ x: 100, y: 145 }, { x: 200, y: 145 }, { x: 200, y: 157 }, { x: 100, y: 157 }],
+        [{ x: 100, y: 100 }, { x: 300, y: 100 }, { x: 300, y: 140 }, { x: 100, y: 140 }],
+      ] : [
+        placement === 'left'
+          ? [{ x: 85, y: 100 }, { x: 97, y: 100 }, { x: 97, y: 200 }, { x: 85, y: 200 }]
+          : [{ x: 145, y: 80 }, { x: 157, y: 80 }, { x: 157, y: 340 }, { x: 145, y: 340 }],
+        [{ x: 100, y: 100 }, { x: 140, y: 100 }, { x: 140, y: 300 }, { x: 100, y: 300 }],
+      ];
+      const result = await processLines(['にホン', '日本語'], polygons);
+      expect(result.texts).toEqual(['日本語']);
+      expect(result.rawPolygons).not.toContainEqual(polygons[0]);
+    });
+
+    it.each(['かなだけ', 'ABC', ''])('does not use a non-Kanji parent "%s" to erase kana', async (parent) => {
+      const polygons = [
+        [{ x: 145, y: 100 }, { x: 157, y: 100 }, { x: 157, y: 200 }, { x: 145, y: 200 }],
+        [{ x: 100, y: 100 }, { x: 140, y: 100 }, { x: 140, y: 300 }, { x: 100, y: 300 }],
+      ];
+      const result = await processLines(['こっちおいで', parent], polygons);
+      expect(result.texts.join('')).toContain('こっちおいで');
+      expect(result.rawPolygons).toContainEqual(polygons[0]);
+    });
+  });
+
   describe('line ownership gating before merge', () => {
     /**
      * Builds a recognizer result with two adjacent vertical columns that the Cotrans merge graph
