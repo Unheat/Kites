@@ -24,6 +24,30 @@ import { ColorCacheManager } from './ColorCacheManager';
 import { colorRegistry } from '../engines/color/colorRegistry';
 import type { ColorEngineOptions } from '../engines/color/BaseColorEngine';
 
+/**
+ * Writes a completed status only if the background has not already failed the job.
+ *
+ * The pipeline keeps running after the background abandons a wait it heard nothing about for 60s,
+ * and it used to finish by writing `completed` over the `error` the background had stored — which is
+ * why a failed translation showed no error in the UI. The background owns the terminal error state.
+ *
+ * @param jobId - Job whose completion is being recorded.
+ * @param changes - Completion fields to write when the job is not already failed.
+ * @returns Nothing.
+ */
+async function completeJobUnlessFailed(
+  jobId: number,
+  changes: Record<string, unknown>
+): Promise<void> {
+  const job = await db.translationJobs.get(jobId);
+  if (job?.status === 'error') {
+    console.warn(`[PipelineOrchestrator] Job ${jobId} was failed by the background; not marking it complete.`);
+    return;
+  }
+  await db.translationJobs.update(jobId, { status: 'completed', ...changes });
+}
+
+
 export interface PipelineServices {
   ocrManager: OcrManager;
   inpaintManager: InpaintManager;
@@ -296,7 +320,7 @@ export class PipelineOrchestrator {
         });
         // Clear stale blocks from a prior run on this image (same dedup rule as the main path).
         await db.textBlocks.where({ imageId: imageRecord.id! }).delete();
-        await db.translationJobs.update(jobId, { status: 'completed' });
+        await completeJobUnlessFailed(jobId, {});
         
         // Convert to base64 to return
         return new Promise<string>((resolve) => {
@@ -739,8 +763,7 @@ export class PipelineOrchestrator {
       }
 
       const durationMs = Math.round(performance.now() - totalPipelineStart);
-      await db.translationJobs.update(jobId, {
-        status: 'completed',
+      await completeJobUnlessFailed(jobId, {
         completedAt: Date.now(),
         durationMs,
         ocrEngineId: ocrTier,
