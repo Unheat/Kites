@@ -63,6 +63,18 @@ const { processImageMock } = vi.hoisted(() => ({
   })
 }));
 
+// The audit prints one line per block; stubbed here so a test can assert the wiring without
+// depending on console formatting.
+const auditMock = vi.hoisted(() => ({
+  isEnabled: vi.fn(),
+  log: vi.fn(),
+}));
+
+vi.mock('./pipelineAudit', () => ({
+  isPipelineAuditEnabled: auditMock.isEnabled,
+  logPipelineAudit: auditMock.log,
+}));
+
 // Mock dependencies
 vi.mock('../../db', () => ({
   db: {
@@ -873,5 +885,30 @@ describe('PipelineOrchestrator', () => {
     blobSpy.mockRestore();
 
     expect(jobs.update).not.toHaveBeenCalledWith(1200, expect.objectContaining({ status: 'completed' }));
+  });
+
+  it('audits every block, naming the stage that stopped it', async () => {
+    // Which stage dropped a bubble is otherwise only answerable by reading four logs.
+    auditMock.isEnabled.mockResolvedValue(true);
+
+    ((db.translationJobs as any).get as any).mockResolvedValue({ jobId: 1200, status: 'processing' });
+    ((db.translationJobs as any).update as any).mockResolvedValue(1);
+    ((db.images as any).first as any).mockResolvedValue({
+      id: 1,
+      jobId: 1200,
+      rawImageBlob: new Blob(['fake image data'], { type: 'image/png' }),
+    });
+    vi.spyOn(pipelineOrchestrator as any, 'blobToArrayBuffer').mockResolvedValue(new ArrayBuffer(8));
+
+    await pipelineOrchestrator.runPipeline(1200);
+
+    expect(auditMock.log).toHaveBeenCalledTimes(1);
+    const [jobId, blocks] = auditMock.log.mock.calls[0];
+    expect(jobId).toBe(1200);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0]).toMatchObject({ index: 0, text: 'こんにちは', preserved: false });
+    // Every block reports what the engine answered, so "empty" versus "echoed" is visible.
+    expect(blocks[0]).toHaveProperty('translatedText');
+    auditMock.isEnabled.mockReset();
   });
 });
