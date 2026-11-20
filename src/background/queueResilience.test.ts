@@ -118,6 +118,9 @@ const offscreenState = vi.hoisted(() => {
 });
 
 import {
+  noteJobActivity,
+  jobActivityAtFor,
+  noteOffscreenActivity,
   reclaimStaleJobs,
   resetOrphanedInFlightJobs,
   sendMessageToOffscreen,
@@ -589,5 +592,49 @@ describe('queue capacity limit', () => {
       .equals('https://cdn.example.com/waiting.webp')
       .count();
     expect(count).toBe(1);
+  });
+
+  it("keeps another job's progress out of this job's wait", async () => {
+    // Progress is recorded per job. Without that, a busy job B refreshed the shared stamp and kept a
+    // dead job A alive until the overall ceiling, which is the mirror image of the false stall.
+    vi.useFakeTimers();
+    offscreenState.sendMessageBehavior = 'hang';
+    noteJobActivity(1, Date.now() - 5 * 60 * 1000);
+
+    const pending = sendMessageToOffscreen({ type: 'PROCESS_JOB', payload: { jobId: 1 } }, 60 * 1000, {
+      stallTimeoutMs: JOB_STALL_TIMEOUT_MS,
+      maxTotalMs: MAX_JOB_WAIT_MS,
+      readActivityAt: () => jobActivityAtFor(1),
+    });
+
+    // Job 2 chatters throughout, through both the per-job path and the global stamp.
+    const churn = setInterval(() => {
+      noteJobActivity(2);
+      noteOffscreenActivity();
+    }, 5000);
+
+    const expectation = expect(pending).rejects.toThrow(/made no progress/);
+    await vi.advanceTimersByTimeAsync(90_000);
+    clearInterval(churn);
+    await expectation;
+  });
+
+  it('keeps a job alive for as long as it reports its own progress', async () => {
+    vi.useFakeTimers();
+    offscreenState.sendMessageBehavior = 'hang';
+    noteJobActivity(7);
+
+    const pending = sendMessageToOffscreen({ type: 'PROCESS_JOB', payload: { jobId: 7 } }, 60 * 1000, {
+      stallTimeoutMs: JOB_STALL_TIMEOUT_MS,
+      maxTotalMs: MAX_JOB_WAIT_MS,
+      readActivityAt: () => jobActivityAtFor(7),
+    });
+
+    // What the offscreen heartbeat does every 20s while the pipeline works.
+    const heartbeat = setInterval(() => noteJobActivity(7), 20_000);
+    const expectation = expect(pending).rejects.toThrow(/wait ceiling/);
+    await vi.advanceTimersByTimeAsync(MAX_JOB_WAIT_MS + 10_000);
+    clearInterval(heartbeat);
+    await expectation;
   });
 });

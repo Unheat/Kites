@@ -1,5 +1,6 @@
 import { db, cleanupOldJobs, type TranslationJob } from '../db';
 import { respectsFinishedJob } from './finishedJobRecovery';
+import { buildJobWaitBudget } from './jobWaitBudget';
 import type { ProcessJobMessage, PopupState, PreloadActiveEngineMessage, BubbleDetectionMode, HistoryRetentionPeriod } from '../shared/types';
 import { DEFAULT_POPUP_STATE } from '../shared/types';
 import { CLOUDFLARE_QUOTA_DEFAULT_ENDPOINT, STORAGE_KEYS } from '../shared/constants';
@@ -1242,6 +1243,31 @@ export async function processQueue() {
   }
 }
 
+/**
+ * Reads a finished job's translated image out of the database as a data URL.
+ *
+ * The offscreen document normally returns this base64 in its response. When that response is lost,
+ * the image is already stored, so re-reading it is what makes the recovery visible to the user rather
+ * than merely stopping the failure. Service workers have no `FileReader`, hence the manual encoding.
+ *
+ * @param jobId - Job whose translated image should be read.
+ * @returns Data URL, or null when the job has no stored image yet.
+ */
+async function readTranslatedImageDataUrl(jobId: number): Promise<string | null> {
+  try {
+    const image = await db.images.where({ jobId }).first();
+    const blob = image?.translatedImageBlob;
+    if (!blob) return null;
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    let binary = '';
+    for (let index = 0; index < bytes.length; index += 1) binary += String.fromCharCode(bytes[index]);
+    return `data:${blob.type || 'image/png'};base64,${btoa(binary)}`;
+  } catch (error) {
+    console.warn(`[Background] Could not read the translated image for job ${jobId}:`, error);
+    return null;
+  }
+}
+
 let corsRuleCounter = 20000;
 
 /**
@@ -1349,11 +1375,11 @@ async function processImageTranslation(jobId: number, srcUrl: string, tabId?: nu
     };
     
     console.log(`[Background] Routing task ${jobId} to Offscreen Document...`);
-    const offscreenResponse = await sendMessageToOffscreen(message, JOB_STALL_TIMEOUT_MS, {
-      stallTimeoutMs: JOB_STALL_TIMEOUT_MS,
-      maxTotalMs: MAX_JOB_WAIT_MS,
-      readActivityAt: () => jobActivityAtFor(jobId),
-    }).finally(() => forgetJobActivity(jobId));
+    const offscreenResponse = await sendMessageToOffscreen(
+      message,
+      JOB_STALL_TIMEOUT_MS,
+      buildJobWaitBudget(jobId, JOB_STALL_TIMEOUT_MS, MAX_JOB_WAIT_MS, jobActivityAtFor)
+    ).finally(() => forgetJobActivity(jobId));
     
     console.log(`[Background] Offscreen completed job ${jobId} with status:`, offscreenResponse?.status);
     
@@ -1400,7 +1426,25 @@ async function processImageTranslation(jobId: number, srcUrl: string, tabId?: nu
     if (/made no progress/i.test(errorStr)) {
       const finished = await db.translationJobs.get(jobId).catch(() => undefined);
       if (respectsFinishedJob(errorStr, finished?.status)) {
-        console.warn(`[Background] Job ${jobId} finished in the offscreen document after its response was lost; keeping it completed.`);
+        console.warn(`[Background] Job ${jobId} finished in the offscreen document after its response was lost; delivering its image.`);
+        const recovered = await readTranslatedImageDataUrl(jobId);
+        if (recovered && tabId) {
+          // The job is done and its image is in the database; handing it over clears the tab's
+          // spinner the same way a normal response does.
+          chrome.tabs
+            .sendMessage(tabId, {
+              type: 'IMAGE_TRANSLATED',
+              payload: { originalUrl: srcUrl, jobId, bakedBase64: recovered },
+            })
+            .catch(() => {});
+        } else if (tabId) {
+          chrome.tabs
+            .sendMessage(tabId, {
+              type: 'TRANSLATION_ERROR',
+              payload: { originalUrl: srcUrl, error: 'Translation finished but its image could not be recovered.' },
+            })
+            .catch(() => {});
+        }
         processQueue();
         return;
       }
