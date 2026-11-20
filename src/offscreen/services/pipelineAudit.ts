@@ -1,5 +1,3 @@
-import { STORAGE_KEYS } from '../../shared/constants';
-
 /** One OCR block as it moves through the pipeline: preserved, sent, returned, drawn. */
 export interface AuditedBlock {
   /** OCR order index, the identity every downstream stage uses. */
@@ -25,24 +23,39 @@ export interface AuditedBlock {
 }
 
 /**
+ * Flag handed down with each job by the background.
+ *
+ * Module state because the pipeline reads it per page and the value only changes between jobs.
+ */
+let auditRequestedByJob = false;
+
+/**
+ * Records whether the job being processed asked for the stage audit.
+ *
+ * @param enabled - Whether the background read the debug flag as on for this job.
+ */
+export function setPipelineAuditFlag(enabled: boolean): void {
+  auditRequestedByJob = enabled;
+}
+
+/**
  * Whether the stage audit should run for this page.
  *
  * Off by default: it prints one line per OCR block, which is noise for users and the only way to see
  * why a specific bubble was skipped. Development builds always run it; a packaged build runs it when
  * `chrome.storage.local.set({ kites_debug_pipeline_audit: true })` has been set.
  *
+ * The flag arrives with the job rather than being read here: this code runs in the offscreen
+ * document, where `chrome.storage` is undefined — measured, not assumed, `chrome.storage.local`
+ * threw "Cannot read properties of undefined (reading 'local')" there while the same call worked
+ * from the popup.
+ *
  * @param devBuild - Whether this is a development build; defaults to the build mode, and is a
  *   parameter so the packaged-build branch can be exercised in tests.
  * @returns True when block-level audit lines should be printed.
  */
 export async function isPipelineAuditEnabled(devBuild: boolean = import.meta.env.DEV): Promise<boolean> {
-  if (devBuild) return true;
-  try {
-    const stored = await chrome.storage.local.get(STORAGE_KEYS.DEBUG_PIPELINE_AUDIT);
-    return stored?.[STORAGE_KEYS.DEBUG_PIPELINE_AUDIT] === true;
-  } catch {
-    return false;
-  }
+  return devBuild || auditRequestedByJob;
 }
 
 /**

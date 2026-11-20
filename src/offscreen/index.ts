@@ -17,6 +17,7 @@ import { bubbleManager } from './services/BubbleManager';
 import { STORAGE_KEYS } from '../shared/constants';
 
 import { ensureFontsRegistered } from '../shared/fontLibrary';
+import { setPipelineAuditFlag } from './services/pipelineAudit';
 import { runStudioOcr, type StudioOcrResponse } from './services/StudioOcr';
 import { CustomApiEngine } from './engines/translation/CustomApiEngine';
 import { inpaintRegistry } from './engines/inpaint/inpaintRegistry';
@@ -68,6 +69,8 @@ chrome.runtime.onMessage.addListener((message: ProcessJobMessage | any, _sender:
   if (message.type === 'PROCESS_JOB' && message.payload?.jobId) {
     const jobId = message.payload.jobId as number;
     console.log(`[Offscreen] Received project processing request for ID: ${jobId}`);
+    // The audit gate reads this in the pipeline; storage is not reachable from here.
+    setPipelineAuditFlag(message.payload.debugPipelineAudit === true);
 
     // The background abandons a job it has heard nothing about for a minute, and this pipeline can
     // legitimately run for minutes (OCR, inpainting, a first-run weight download). Until now the

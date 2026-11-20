@@ -1425,9 +1425,17 @@ async function processImageTranslation(jobId: number, srcUrl: string, tabId?: nu
     await db.translationJobs.update(jobId, { status: 'processing', timestamp: Date.now() });
     
     // Route the Job ID to the Offscreen Document to begin processing with a timeout guard
+    // The offscreen document has no `chrome.storage` (measured: undefined there), so a debug flag
+    // has to travel with the job instead of being read on the other side.
+    const auditSetting = await chrome.storage.local
+      .get(STORAGE_KEYS.DEBUG_PIPELINE_AUDIT)
+      .catch(() => ({}) as Record<string, unknown>);
     const message: ProcessJobMessage = {
       type: 'PROCESS_JOB',
-      payload: { jobId: jobId }
+      payload: {
+        jobId: jobId,
+        debugPipelineAudit: auditSetting[STORAGE_KEYS.DEBUG_PIPELINE_AUDIT] === true,
+      }
     };
     
     console.log(`[Background] Routing task ${jobId} to Offscreen Document...`);

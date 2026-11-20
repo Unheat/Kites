@@ -173,7 +173,7 @@ describe('Studio upload queue routing', () => {
     expect(await waitForJobTerminalStatus(jobId!)).toBe('completed');
     expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
       type: 'PROCESS_JOB', target: 'offscreen', source: 'background', request: true,
-      payload: { jobId },
+      payload: { jobId, debugPipelineAudit: false },
     }), expect.any(Function));
     expect(offscreenState.jobMessageCount).toBe(1);
   });

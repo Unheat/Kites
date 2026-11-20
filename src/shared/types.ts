@@ -40,6 +40,8 @@ export interface ProcessJobMessage {
   type: 'PROCESS_JOB';
   payload: {
     jobId: number;
+    /** Set when the pipeline stage audit is enabled; the offscreen document cannot read storage. */
+    debugPipelineAudit?: boolean;
   };
 }
 

@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { isPipelineAuditEnabled, logPipelineAudit } from './pipelineAudit';
+import { isPipelineAuditEnabled, logPipelineAudit, setPipelineAuditFlag } from './pipelineAudit';
 
 describe('pipelineAudit', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+    setPipelineAuditFlag(false);
   });
 
   it('classifies the stage that stopped each block', () => {
@@ -31,22 +32,17 @@ describe('pipelineAudit', () => {
     expect(body[1]).not.toContain('out=');
   });
 
-  it('stays off in a packaged build unless the storage flag is set', async () => {
-    const get = vi.fn().mockResolvedValue({});
-    vi.stubGlobal('chrome', { storage: { local: { get } } });
+  it('follows the flag the background sent with the job', async () => {
+    // The offscreen document has no chrome.storage (measured), so the flag rides on the job payload
+    // and is recorded here before the pipeline runs.
+    setPipelineAuditFlag(false);
     await expect(isPipelineAuditEnabled(false)).resolves.toBe(false);
 
-    get.mockResolvedValue({ kites_debug_pipeline_audit: true });
+    setPipelineAuditFlag(true);
     await expect(isPipelineAuditEnabled(false)).resolves.toBe(true);
 
-    // A development build always audits, whatever storage says.
+    // A development build always audits, whatever the job said.
+    setPipelineAuditFlag(false);
     await expect(isPipelineAuditEnabled(true)).resolves.toBe(true);
-  });
-
-  it('does not break the pipeline when storage is unavailable', async () => {
-    vi.stubGlobal('chrome', {
-      storage: { local: { get: vi.fn().mockRejectedValue(new Error('no storage')) } },
-    });
-    await expect(isPipelineAuditEnabled(false)).resolves.toBe(false);
   });
 });
