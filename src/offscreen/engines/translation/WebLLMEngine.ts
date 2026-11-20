@@ -105,32 +105,22 @@ const WEBLLM_TOP_K = 20;
 export const WEBLLM_RECOVERY_TEMPERATURE = 0.9;
 
 /**
- * Temperature added per further recovery attempt.
+ * Sampling temperature for one attempt at one batch.
  *
- * A second retry must not re-sample the same neighbourhood as the first, or it repeats the answer it
- * already knows to be wrong. Bounded so later attempts stay translations rather than drifting.
- */
-const WEBLLM_RECOVERY_TEMPERATURE_STEP = 0.1;
-
-/** Ceiling for recovery sampling, so an increasing retry budget cannot turn into free association. */
-export const WEBLLM_TEMPERATURE_CEILING = 1.1;
-
-/**
- * Sampling temperature for one attempt of a page.
+ * One value per pass, not a ladder. An earlier version escalated per recovery *request*, which on a
+ * page with several failures meant the first failure was retried at 0.9 and the last at 1.1 — later
+ * lines sampling hotter for reasons unrelated to themselves. Escalation is only meaningful for
+ * content that is asked again, and each slot is asked exactly once, so the recovery pass uses the
+ * one temperature that was measured to escape the echo attractor.
  *
- * Derived from the attempt index, not from the source language: the first pass is greedy for every
- * language, and each recovery attempt samples further out. A future change to `MAX_RETRY_REQUESTS`
- * therefore needs no matching change here.
- *
- * @param hints - Request hints; `recoveryAttempt` is 1 for the first recovery, 2 for the next, and
- *                absent for the first pass.
- * @returns Temperature to sample this attempt at.
+ * @param hints - Request hints; `recovery` marks the correction pass.
+ * @returns Temperature for this pass.
  */
 export function temperatureForAttempt(hints?: { recovery?: boolean; recoveryAttempt?: number }): number {
-  const attempt = hints?.recoveryAttempt ?? (hints?.recovery ? 1 : 0);
-  if (attempt <= 0) return WEBLLM_TEMPERATURE;
-  const temperature = WEBLLM_RECOVERY_TEMPERATURE + (attempt - 1) * WEBLLM_RECOVERY_TEMPERATURE_STEP;
-  return Math.min(temperature, WEBLLM_TEMPERATURE_CEILING);
+  // `recoveryAttempt` is accepted because it is the honest description of the hint that would matter
+  // if the same line were ever asked twice; today every slot is asked once, so it cannot change the
+  // answer here.
+  return hints?.recovery ? WEBLLM_RECOVERY_TEMPERATURE : WEBLLM_TEMPERATURE;
 }
 
 export const WEBLLM_RETRY_BATCH_SPLIT = 3;

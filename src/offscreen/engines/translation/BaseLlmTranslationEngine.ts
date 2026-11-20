@@ -100,8 +100,11 @@ interface ChunkPromptContext {
  * Extra instruction for one model request that is not part of the prompt.
  *
  * @property recovery - True when this request re-asks for slots an earlier pass failed to translate.
- * @property recoveryAttempt - Which recovery attempt this is, counting from 1. Engines use it to
- *   sample each retry differently, so raising the retry budget needs no change at the call site.
+ * @property recoveryAttempt - How many times this same content has been asked, counting the first
+ *   recovery as 1. Every slot is currently asked once, so this is always 1; it exists so that a
+ *   retry budget large enough to re-ask the same line can sample differently without touching the
+ *   call site. It is deliberately not the page's request count: that made a page's later failures
+ *   sample hotter than its earlier ones for no reason of their own.
  */
 export interface LlmRequestHints {
   recovery?: boolean;
@@ -331,7 +334,8 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
             recovered = await this.requestChunk(retryChunk, retryGlossary, {
               ...promptContext,
               recovery: true,
-              recoveryAttempt: this.recoveryRequestBudget - retryBudget,
+              // One request per slot, so this is the slot's first and only re-ask.
+              recoveryAttempt: 1,
             });
           } catch (error) {
             console.warn(
