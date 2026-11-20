@@ -1,6 +1,7 @@
 import { db } from '../../db';
 import type { TypesetMode } from '../../shared/constants';
 import { DEFAULT_SFX_POLICY, isPreservedArtwork, resolveSfxPolicyStrategy } from '../../shared/sfx/sfxPolicy';
+import { isPipelineAuditEnabled, logPipelineAudit } from './pipelineAudit';
 import type { PopupState, ModelInitializationStage } from '../../shared/types';
 import { OcrManager, type InitializationLifecycleCallback, type OcrTier } from './OcrManager';
 import { TranslationManager, translationManager as defaultTranslationManager } from './TranslationManager';
@@ -474,6 +475,28 @@ export class PipelineOrchestrator {
         baseImageForInpaint = await executeColorization();
         cleanedImageBuffer = await executeInpainting(baseImageForInpaint);
         translatedTexts = await translationPromise;
+      }
+
+      if (await isPipelineAuditEnabled()) {
+        // One line per block, so "which stage dropped this bubble?" is answerable from a log: a
+        // preserved block never reaches a model, an empty answer means the engine dropped it, and a
+        // translation the renderer refuses shows up in the layout logs that follow.
+        const artworkKinds = new Map((ocrResult.artwork ?? []).map((entry) => [entry.index, entry.kind]));
+        logPipelineAudit(
+          jobId,
+          ocrResult.texts.map((text, index) => ({
+            index,
+            text,
+            kind: artworkKinds.get(index),
+            preserved: preservedArtwork.has(index),
+            score: ocrResult.scores?.[index],
+            width: ocrResult.boxes?.[index]?.w,
+            height: ocrResult.boxes?.[index]?.h,
+            direction: ocrResult.directions?.[index],
+            sentText: preservedArtwork.has(index) ? undefined : text,
+            translatedText: translatedTexts[index],
+          }))
+        );
       }
 
       if (import.meta.env.DEV) {

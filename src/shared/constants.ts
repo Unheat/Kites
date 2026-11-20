@@ -17,6 +17,8 @@ export const STORAGE_KEYS = {
   AUTH_EXPIRES_AT: 'kites_oauth_token_expires_at',
   WEBGPU_SUPPORTED: 'hardware_webgpu_supported',
   ACTIVE_COLOR_ID: 'activeColorId',
+  /** Set to true to log one line per OCR block in the pipeline stage audit (debugging aid). */
+  DEBUG_PIPELINE_AUDIT: 'kites_debug_pipeline_audit',
 } as const;
 
 export type StorageKey = (typeof STORAGE_KEYS)[keyof typeof STORAGE_KEYS];
