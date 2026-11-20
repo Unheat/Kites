@@ -1,4 +1,5 @@
 import { db, cleanupOldJobs, type TranslationJob } from '../db';
+import { respectsFinishedJob } from './finishedJobRecovery';
 import type { ProcessJobMessage, PopupState, PreloadActiveEngineMessage, BubbleDetectionMode, HistoryRetentionPeriod } from '../shared/types';
 import { DEFAULT_POPUP_STATE } from '../shared/types';
 import { CLOUDFLARE_QUOTA_DEFAULT_ENDPOINT, STORAGE_KEYS } from '../shared/constants';
@@ -96,6 +97,43 @@ export function noteOffscreenActivity(at: number = Date.now()): void {
  */
 export function offscreenActivityAt(): number {
   return lastOffscreenActivityAt;
+}
+
+/**
+ * Per-job progress timestamps, so one job's chatter cannot keep another job's wait alive.
+ *
+ * The global stamp still exists for messages that carry no job id (model downloads, popup state),
+ * but a job wait must be governed by evidence about that job.
+ */
+const jobActivityAt = new Map<number, number>();
+
+/**
+ * Records that one job reported progress.
+ *
+ * @param jobId - Job the progress belongs to.
+ * @param at - Timestamp of the report; defaults to now.
+ */
+export function noteJobActivity(jobId: number, at: number = Date.now()): void {
+  jobActivityAt.set(jobId, at);
+}
+
+/**
+ * Reads when one job last reported progress, falling back to the global stamp.
+ *
+ * @param jobId - Job being waited on.
+ * @returns Timestamp of that job's last progress, or the global one when it has never reported.
+ */
+export function jobActivityAtFor(jobId: number): number {
+  return jobActivityAt.get(jobId) ?? lastOffscreenActivityAt;
+}
+
+/**
+ * Drops a finished job's progress timestamp so the map does not grow with the session.
+ *
+ * @param jobId - Job that is no longer being waited on.
+ */
+export function forgetJobActivity(jobId: number): void {
+  jobActivityAt.delete(jobId);
 }
 
 /**
@@ -291,6 +329,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   // they keep its wait alive instead of failing it for taking longer than a normal page.
   if (message?.source === 'offscreen') {
     noteOffscreenActivity();
+    const reportedJobId = message.payload?.jobId;
+    if (Number.isInteger(reportedJobId)) noteJobActivity(reportedJobId);
   }
 
   if (
@@ -878,7 +918,10 @@ async function awaitJobResponse(message: any, budget: JobProgressBudget): Promis
       throw outcome.error;
     }
 
-    const idleMs = Date.now() - budget.readActivityAt();
+    // A wait cannot be stalled by time that passed before it started. The activity stamp is shared,
+    // so a job enqueued after a quiet period used to measure that silence as its own and abort on
+    // the first slice: the browser log showed "no progress for 67s/231s" for jobs seconds old.
+    const idleMs = Date.now() - Math.max(budget.readActivityAt(), startedAt);
     if (idleMs > budget.stallTimeoutMs) {
       throw new Error(
         `${message.type} made no progress for ${Math.round(idleMs / 1000)}s (stall limit ${Math.round(budget.stallTimeoutMs / 1000)}s)`
@@ -1309,8 +1352,8 @@ async function processImageTranslation(jobId: number, srcUrl: string, tabId?: nu
     const offscreenResponse = await sendMessageToOffscreen(message, JOB_STALL_TIMEOUT_MS, {
       stallTimeoutMs: JOB_STALL_TIMEOUT_MS,
       maxTotalMs: MAX_JOB_WAIT_MS,
-      readActivityAt: offscreenActivityAt,
-    });
+      readActivityAt: () => jobActivityAtFor(jobId),
+    }).finally(() => forgetJobActivity(jobId));
     
     console.log(`[Background] Offscreen completed job ${jobId} with status:`, offscreenResponse?.status);
     
@@ -1348,10 +1391,23 @@ async function processImageTranslation(jobId: number, srcUrl: string, tabId?: nu
     processQueue();
     
   } catch (error) {
+    const errorStr = error instanceof Error ? error.message : String(error);
+
+    // A wait that ended in "no progress" is not proof the job failed: the offscreen pipeline can
+    // finish after the response channel is gone, and it writes its own terminal status. Asking the
+    // database before overwriting turns a lost response into "already done" instead of an error the
+    // UI then has to show and the user has to redo.
+    if (/made no progress/i.test(errorStr)) {
+      const finished = await db.translationJobs.get(jobId).catch(() => undefined);
+      if (respectsFinishedJob(errorStr, finished?.status)) {
+        console.warn(`[Background] Job ${jobId} finished in the offscreen document after its response was lost; keeping it completed.`);
+        processQueue();
+        return;
+      }
+    }
+
     console.error(`[Background] Failed to process image for job ${jobId}:`, error);
     await db.translationJobs.update(jobId, { status: 'error' });
-    
-    const errorStr = error instanceof Error ? error.message : String(error);
 
     // Notify tab immediately so the user interface spinner unfreezes without delay
     if (tabId) {
