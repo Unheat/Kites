@@ -74,6 +74,9 @@ vi.mock('../../db', () => ({
     },
     translationJobs: {
       update: vi.fn(),
+      // The pipeline reads the row before writing `completed`, so that a job the background already
+      // failed is not resurrected as finished. The fake models that read.
+      get: vi.fn().mockResolvedValue({ jobId: 1, status: 'processing' }),
     },
     textBlocks: {
       add: vi.fn(),
@@ -851,5 +854,24 @@ describe('PipelineOrchestrator', () => {
     expect(eraseTextMock.mock.calls[0][2]).toBe('simple');
 
     blobSpy.mockRestore();
+  });
+
+  it('does not mark a job complete after the background already failed it', async () => {
+    // The pipeline keeps running when the background abandons the wait, and it used to write
+    // `completed` over the stored `error`; the UI then had no failure to show.
+    const mockImageRecord = { id: 1, jobId: 1200, rawImageBlob: new Blob(['fake image data'], { type: 'image/png' }) };
+    ((db.images as any).first as any).mockResolvedValue(mockImageRecord);
+    vi.spyOn(chrome.runtime, 'sendMessage').mockImplementation((_message: any, callback: any) => {
+      callback({ activeInpaintId: 'simple', activeOcrId: 'v6-small', targetLang: 'en' });
+    });
+    const blobSpy = vi.spyOn(pipelineOrchestrator as any, 'blobToArrayBuffer').mockResolvedValue(new ArrayBuffer(8));
+
+    const jobs = db.translationJobs as unknown as { get: any; update: any };
+    jobs.get.mockResolvedValue({ jobId: 1200, status: 'error' });
+
+    await pipelineOrchestrator.runPipeline(1200);
+    blobSpy.mockRestore();
+
+    expect(jobs.update).not.toHaveBeenCalledWith(1200, expect.objectContaining({ status: 'completed' }));
   });
 });
