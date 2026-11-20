@@ -321,7 +321,7 @@ export class PipelineOrchestrator {
         // Clear stale blocks from a prior run on this image (same dedup rule as the main path).
         await db.textBlocks.where({ imageId: imageRecord.id! }).delete();
         await completeJobUnlessFailed(jobId, {});
-        
+
         // Convert to base64 to return
         return new Promise<string>((resolve) => {
           const reader = new FileReader();

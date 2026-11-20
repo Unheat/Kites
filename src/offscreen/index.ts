@@ -16,14 +16,6 @@ import { translationManager } from './services/TranslationManager';
 import { bubbleManager } from './services/BubbleManager';
 import { STORAGE_KEYS } from '../shared/constants';
 
-/**
- * How often a running job tells the background it is still alive.
- *
- * The background abandons a job after 60s of silence (`JOB_STALL_TIMEOUT_MS`), so this is a third of
- * that: frequent enough that a slow OCR pass or a first-run download never looks dead, rare enough
- * to stay invisible in the log.
- */
-const JOB_HEARTBEAT_INTERVAL_MS = 20_000;
 import { ensureFontsRegistered } from '../shared/fontLibrary';
 import { runStudioOcr, type StudioOcrResponse } from './services/StudioOcr';
 import { CustomApiEngine } from './engines/translation/CustomApiEngine';
@@ -41,6 +33,15 @@ import { BubbleCacheManager } from './services/BubbleCacheManager';
 import { hasModelInCache } from '@mlc-ai/web-llm';
 import { WebLlmCacheManager } from './services/WebLlmCacheManager';
 import { checkWebGPUAvailability } from './utils/hardware';
+
+/**
+ * How often a running job tells the background it is still alive.
+ *
+ * The background abandons a job after 60s of silence (`JOB_STALL_TIMEOUT_MS`), so this is a third of
+ * that: frequent enough that a slow OCR pass or a first-run download never looks dead, rare enough
+ * to stay invisible in the log.
+ */
+const JOB_HEARTBEAT_INTERVAL_MS = 20_000;
 
 // Register persisted font-library faces at boot so the bake measures with the
 // exact bytes the user's selection refers to (font metrics drive every line break).
