@@ -119,13 +119,17 @@ export function noteJobActivity(jobId: number, at: number = Date.now()): void {
 }
 
 /**
- * Reads when one job last reported progress, falling back to the global stamp.
+ * Reads when one job last reported progress.
+ *
+ * Jobs that have not reported yet return 0, which the wait treats as "no signal since the job
+ * started". Deliberately not the global stamp: falling back to it lets another job's chatter keep
+ * this one alive, which is the mirror of the false stall this whole path exists to prevent.
  *
  * @param jobId - Job being waited on.
- * @returns Timestamp of that job's last progress, or the global one when it has never reported.
+ * @returns Timestamp of that job's last progress, or 0 when it has never reported.
  */
 export function jobActivityAtFor(jobId: number): number {
-  return jobActivityAt.get(jobId) ?? lastOffscreenActivityAt;
+  return jobActivityAt.get(jobId) ?? 0;
 }
 
 /**
@@ -1244,6 +1248,48 @@ export async function processQueue() {
 }
 
 /**
+ * Hands a recovered job's page to the tab that asked for it, in the same shape as a normal reply.
+ *
+ * The capture overlay listens for `CAPTURE_TRANSLATED` and the page listener for `IMAGE_TRANSLATED`,
+ * so the message type has to match the request the job came from.
+ *
+ * @param tabId - Tab waiting for the result, if the job had one.
+ * @param jobId - Job that finished.
+ * @param srcUrl - Source URL the job was queued for.
+ */
+async function deliverRecoveredJob(
+  tabId: number | undefined,
+  jobId: number,
+  srcUrl: string
+): Promise<void> {
+  const baked = await readBakedImageDataUrl(jobId);
+  if (!tabId) return;
+  const isCapture = srcUrl.startsWith('kites-capture:');
+  if (!baked) {
+    // Without the delivered page there is nothing to hand over; say so instead of leaving the tab
+    // spinning or showing a plate with the text erased.
+    const message = {
+      type: isCapture ? 'CAPTURE_TRANSLATION_ERROR' : 'TRANSLATION_ERROR',
+      payload: isCapture
+        ? { requestId: srcUrl.replace('kites-capture:', ''), error: MISSING_BAKED_PAGE_ERROR }
+        : { originalUrl: srcUrl, error: MISSING_BAKED_PAGE_ERROR },
+    };
+    await chrome.tabs.sendMessage(tabId, message).catch(() => {});
+    return;
+  }
+  const message = isCapture
+    ? {
+        type: 'CAPTURE_TRANSLATED',
+        payload: { requestId: srcUrl.replace('kites-capture:', ''), jobId, bakedBase64: baked },
+      }
+    : {
+        type: 'IMAGE_TRANSLATED',
+        payload: { jobId, originalUrl: srcUrl, bakedBase64: baked },
+      };
+  await chrome.tabs.sendMessage(tabId, message).catch(() => {});
+}
+
+/**
  * Reads a finished job's translated image out of the database as a data URL.
  *
  * The offscreen document normally returns this base64 in its response. When that response is lost,
@@ -1253,20 +1299,29 @@ export async function processQueue() {
  * @param jobId - Job whose translated image should be read.
  * @returns Data URL, or null when the job has no stored image yet.
  */
-async function readTranslatedImageDataUrl(jobId: number): Promise<string | null> {
+async function readBakedImageDataUrl(jobId: number): Promise<string | null> {
   try {
     const image = await db.images.where({ jobId }).first();
-    const blob = image?.translatedImageBlob;
+    // `translatedImageBlob` is the inpainted plate with the text removed; handing that to the page
+    // would clear its spinner and show erased bubbles. Only the baked page is a delivery.
+    const blob = image?.bakedImageBlob;
     if (!blob) return null;
     const bytes = new Uint8Array(await blob.arrayBuffer());
     let binary = '';
-    for (let index = 0; index < bytes.length; index += 1) binary += String.fromCharCode(bytes[index]);
+    // Chunked so the argument list cannot overflow the stack on a large scan.
+    const CHUNK = 0x8000;
+    for (let index = 0; index < bytes.length; index += CHUNK) {
+      binary += String.fromCharCode(...bytes.subarray(index, index + CHUNK));
+    }
     return `data:${blob.type || 'image/png'};base64,${btoa(binary)}`;
   } catch (error) {
-    console.warn(`[Background] Could not read the translated image for job ${jobId}:`, error);
+    console.warn(`[Background] Could not read the translated page for job ${jobId}:`, error);
     return null;
   }
 }
+
+/** Reported when a job finished but the page it produced was not stored. */
+const MISSING_BAKED_PAGE_ERROR = 'Translation finished but its page could not be recovered.';
 
 let corsRuleCounter = 20000;
 
@@ -1426,25 +1481,8 @@ async function processImageTranslation(jobId: number, srcUrl: string, tabId?: nu
     if (/made no progress/i.test(errorStr)) {
       const finished = await db.translationJobs.get(jobId).catch(() => undefined);
       if (respectsFinishedJob(errorStr, finished?.status)) {
-        console.warn(`[Background] Job ${jobId} finished in the offscreen document after its response was lost; delivering its image.`);
-        const recovered = await readTranslatedImageDataUrl(jobId);
-        if (recovered && tabId) {
-          // The job is done and its image is in the database; handing it over clears the tab's
-          // spinner the same way a normal response does.
-          chrome.tabs
-            .sendMessage(tabId, {
-              type: 'IMAGE_TRANSLATED',
-              payload: { originalUrl: srcUrl, jobId, bakedBase64: recovered },
-            })
-            .catch(() => {});
-        } else if (tabId) {
-          chrome.tabs
-            .sendMessage(tabId, {
-              type: 'TRANSLATION_ERROR',
-              payload: { originalUrl: srcUrl, error: 'Translation finished but its image could not be recovered.' },
-            })
-            .catch(() => {});
-        }
+        console.warn(`[Background] Job ${jobId} finished in the offscreen document after its response was lost; delivering its page.`);
+        await deliverRecoveredJob(tabId, jobId, srcUrl);
         processQueue();
         return;
       }
