@@ -1,6 +1,6 @@
 # CI/CD & Release Pipeline
 
-**Status:** Current as of v1.4.1 (2026-11-15)
+**Status:** Current as of v1.5.0 (2026-11-19)
 **Scope:** GitHub Actions workflows, release packaging, Cloudflare Worker deployment, and Chrome Web Store distribution.
 
 ---
