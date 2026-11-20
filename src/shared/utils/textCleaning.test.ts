@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sanitizeTypesetText, compactSpecialSymbols, isScanlatorWatermark, isThoughtBubbleTailOrnament, isStandaloneDigitOrOrnamentNoise, isStandaloneDigitOrParticleNoise, cleanStrayOcrArtifacts, isOnomatopoeiaOrShout, isNonLatinSource, hasNativeScriptForLang, stripTrailingWatermarkDebris, isStandaloneNoiseStroke, isComicLetteringFont, formatComicLetteringCasing, CJK_SCRIPT_REGEX, isUntranslatedEcho } from './textCleaning';
+import { sanitizeTypesetText, compactSpecialSymbols, isScanlatorWatermark, isThoughtBubbleTailOrnament, isStandaloneDigitOrOrnamentNoise, isStandaloneDigitOrParticleNoise, cleanStrayOcrArtifacts, isOnomatopoeiaOrShout, isNonLatinSource, hasNativeScriptForLang, stripTrailingWatermarkDebris, isStandaloneNoiseStroke, isComicLetteringFont, formatComicLetteringCasing, CJK_SCRIPT_REGEX, isUntranslatedEcho, isSourceScriptEcho } from './textCleaning';
 
 describe('textCleaning', () => {
   describe('isOnomatopoeiaOrShout (text_clean.rs:148 port)', () => {
@@ -76,6 +76,12 @@ describe('textCleaning', () => {
       expect(hasNativeScriptForLang('ひらがな', 'ja')).toBe(true);
       expect(hasNativeScriptForLang('英雄', 'zh')).toBe(true);
       expect(hasNativeScriptForLang('привет', 'ru')).toBe(true);
+      expect(hasNativeScriptForLang('آسف', 'ar')).toBe(true);
+      expect(hasNativeScriptForLang('hello', 'ar')).toBe(false);
+      expect(hasNativeScriptForLang('नमस्ते', 'hi')).toBe(true);
+      expect(hasNativeScriptForLang('hello', 'hi')).toBe(false);
+      expect(hasNativeScriptForLang('שלום', 'he')).toBe(true);
+      expect(hasNativeScriptForLang('γειά', 'el')).toBe(true);
       expect(hasNativeScriptForLang('hello', 'en')).toBe(true);
       // Unknown/auto source: CJK counts as native, Latin does not
       expect(hasNativeScriptForLang('待って', undefined)).toBe(true);
@@ -287,5 +293,36 @@ describe('isUntranslatedEcho', () => {
 
   it('does not flag a CJK answer when the target language is CJK', () => {
     expect(isUntranslatedEcho('殷想題以限C的人啊', '殷想题以限C的人啊', 'zh')).toBe(false);
+  });
+});
+
+describe('isSourceScriptEcho', () => {
+  it('catches an Arabic answer to an Arabic source, which the CJK check cannot see', () => {
+    // Measured on a 0.8B model: Arabic -> Vietnamese answered 5 of 6 slots in Arabic, and every
+    // slot was accepted because no gate measured non-CJK scripts.
+    expect(isSourceScriptEcho('آسف لأنني جعلتك تنتظر', 'بلا، لأنني سأحزن', 'vi')).toBe(true);
+    expect(isSourceScriptEcho('إذن تعال إلى هنا', 'إذن تعال إلى هنا', 'vi')).toBe(true);
+  });
+
+  it('catches Cyrillic, Thai and Devanagari answers left in the source script', () => {
+    expect(isSourceScriptEcho('Прости, я опоздал', 'Прости, я опоздал', 'en')).toBe(true);
+    expect(isSourceScriptEcho('ขอโทษที่ทำให้รอ', 'ขอโทษที่ทำให้รอ', 'en')).toBe(true);
+    expect(isSourceScriptEcho('माफ़ करना', 'माफ़ करना', 'en')).toBe(true);
+  });
+
+  it('accepts a real translation into another script', () => {
+    expect(isSourceScriptEcho('آسف لأنني جعلتك تنتظر', 'Xin lỗi vì khiến bạn phải chờ', 'vi')).toBe(false);
+    expect(isSourceScriptEcho('Прости, я опоздал', 'Sorry I am late', 'en')).toBe(false);
+    // A borrowed name inside an otherwise translated answer is not an echo.
+    expect(isSourceScriptEcho('آسف', 'Xin lỗi Rio', 'vi')).toBe(false);
+  });
+
+  it('does not flag an answer when the target shares the source script', () => {
+    expect(isSourceScriptEcho('Прости, я опоздал', 'Вибач, я запізнився', 'uk')).toBe(false);
+    expect(isSourceScriptEcho('殷想題以限C的人啊', '殷想题以限C的人啊', 'ja')).toBe(false);
+  });
+
+  it('does not apply to a Latin source', () => {
+    expect(isSourceScriptEcho('Second text', 'and the second', 'en')).toBe(false);
   });
 });

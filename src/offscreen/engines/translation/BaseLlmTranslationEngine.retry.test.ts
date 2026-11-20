@@ -194,6 +194,22 @@ describe('recovery of slots the model skipped or echoed', () => {
     expect(engine.requests).toHaveLength(2);
   });
 
+  it('re-asks when a non-CJK line comes back in its own script, and keeps the source if recovery fails too', async () => {
+    // Measured on a 0.8B model: Arabic -> Vietnamese answered in Arabic. The script check only
+    // covered CJK, so the Arabic answer was accepted as Vietnamese. A recovery that also answers
+    // in Arabic must leave the Arabic source, not a reworded Arabic answer.
+    const engine = new ScriptedEngine([
+      '{"b0":"بلا، لأنني سأحزن"}',
+      '{"b0":"بلا، لأنني سأحزن"}',
+    ]);
+
+    const out = await engine.translate(['آسف لأنني جعلتك تنتظر'], 'ar', 'vi');
+
+    expect(out).toEqual(['آسف لأنني جعلتك تنتظر']);
+    expect(engine.requests).toHaveLength(2);
+    expect(sourceOf(engine, 1)).toEqual({ b0: 'آسف لأنني جعلتك تنتظر' });
+  });
+
   it('does not spend a retry on a slot that holds no source-language text', async () => {
     // Latin junk from OCR is not translatable: re-asking invites the model to invent a meaning.
     const engine = new ScriptedEngine(['{"b1":"Hi."}']);
