@@ -78,7 +78,15 @@ Real browser, packed extension, local fixture page, jobs driven through the same
 | fixed | completed, 5.97 s | yes | completed, 4.50 s |
 | fixed (repeat) | completed, 4.50 s | yes | completed, 3.52 s |
 
-This run shows the cascade does not happen; it is not proof of cause 4, which needs a lost channel.
+Then through the content script's own control (hover the image → click "Translate Image" → wait for the
+page image to become a `blob:` URL), which is the path a user takes:
+
+| Run | Job 1 | 62 s idle | Job 2 | Stall lines | Console errors |
+| --- | --- | --- | --- | --- | --- |
+| `node scripts/stall-e2e.mjs --idle-ms 62000` | translated, 4.28 s | yes | translated, 3.67 s | 0 | 0 |
+
+These runs show the cascade does not happen; they are not proof of cause 4, which needs a lost
+channel.
 
 Tests, and what each one actually pins:
 
