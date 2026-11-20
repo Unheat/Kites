@@ -18,8 +18,10 @@ enqueued seconds before, was reported as silent for **231 s**, which no wait of 
 have observed — so the stamp it read belonged to something else.
 
 The two numbers have different causes and this matters for the fix. 231 s can only be a stale stamp.
-67 s is exactly 60 s of genuine silence after the pipeline logged its last line, i.e. the lost
-response of cause 4, not the global stamp.
+67 s is the measured idle reported by the check (the limit is 60 s, sampled in 5 s slices, so any value
+from 60 s upward is "past the limit"): it is compatible with the pipeline having finished, its answer
+being lost, and the job's own last signal being the one at pipeline end — cause 4, not the global
+stamp. Both figures are consistent with the two causes; neither, on its own, separates them.
 
 ## Root causes
 
@@ -60,7 +62,11 @@ done. Nothing checked the stored status before declaring failure.
 - The offscreen document sends `JOB_PROGRESS` every 20 s (a third of the 60 s stall budget) while a
   job runs, cleared when the pipeline settles.
 - `completeJobUnlessFailed` refuses to mark a job complete once the background has failed it.
-- `respectsFinishedJob` — a stall report is dropped when the stored status is already `completed`.
+- `respectsFinishedJob` — a stall report is dropped when the stored status is already `completed`,
+  and the job's page is delivered in the same shape as a normal reply (`CAPTURE_TRANSLATED` for
+  `kites-capture:` jobs, `IMAGE_TRANSLATED` otherwise).
+- `ImageRecord.bakedImageBlob` stores the delivered page, separately from the inpainted plate the
+  dashboard shows. Reusing the plate would have delivered a page with the text removed.
 
 ## Measurements
 
@@ -76,14 +82,14 @@ This run shows the cascade does not happen; it is not proof of cause 4, which ne
 
 Tests, and what each one actually pins:
 
-| Claim | Test | Fails before the fix |
+| Claim | Test | Behaviour on the pre-fix code |
 | --- | --- | --- |
-| Cause 1: a wait cannot be aged by earlier silence | `queueResilience.test.ts` › does not inherit the silence before it as its own stall | yes — `made no progress for 300s` |
-| Cause 1: activity is per job, not shared | `queueResilience.test.ts` › keeps another job's progress out of this job's wait | yes — job B's chatter would keep job A alive until the ceiling |
-| Cause 1: a job that reports progress is not killed | `queueResilience.test.ts` › keeps a job alive for as long as it reports its own progress | yes |
-| Cause 1: the call site passes the per-job reader | `jobWaitBudget.test.ts` (3 cases) | the wiring now has one shape; a shared timestamp no longer type-checks into it |
-| Cause 3: no `completed` over a stored `error` | `PipelineOrchestrator.test.ts` › does not mark a job complete after the background already failed it | yes |
-| Cause 4: which failures defer to a finished job | `finishedJobRecovery.test.ts` (3 cases) | yes |
+| Cause 1: a wait cannot be aged by earlier silence | `queueResilience.test.ts` › does not inherit the silence before it as its own stall | fails — `made no progress for 300s` |
+| Cause 1: activity is per job, not shared | `queueResilience.test.ts` › keeps another job's progress out of this job's wait | `jobActivityAtFor` did not exist, so the test cannot even be written against the old code |
+| Cause 1: a job that reports progress is not killed | `queueResilience.test.ts` › keeps a job alive for as long as it reports its own progress | same: it pins the new per-job reader, not a defect the old code had |
+| Cause 1: the call site reads the per-job reader | `jobWaitBudget.test.ts` (3 cases) | helper + call site are both new; the test pins the helper's contract, the call site is read by eye |
+| Cause 3: no `completed` over a stored `error` | `PipelineOrchestrator.test.ts` › does not mark a job complete after the background already failed it | fails — writes `completed` |
+| Cause 4: which failures defer to a finished job | `finishedJobRecovery.test.ts` (3 cases) | module did not exist |
 
 Reviewed by reading, not by a test: the catch-path guard that calls `respectsFinishedJob` and delivers
 the stored image, the offscreen `JOB_PROGRESS` emission and its interval clearing, and the
@@ -112,9 +118,13 @@ whose pipeline had quietly finished 60 s earlier trips cause 1, and cause 3 then
   genuinely blocks for more than a minute now depends on the heartbeat, not on the wait's patience.
 - Jobs abandoned by the background are not cancelled in the offscreen document; they run to
   completion and their output is kept, which is what makes causes 3 and 4 recoverable at all.
-- A recovered job delivers its stored image and the tab's spinner clears, but the registry has to
-  treat a second `IMAGE_TRANSLATED` for the same URL as idempotent. That path is new and unexercised
-  end to end: the browser runs above never lost a response, so they never entered it.
+- A recovered job delivers its page and the tab's spinner clears, but the path is new and unexercised
+  end to end: the browser runs above never lost a response, so they never entered it. A second
+  `IMAGE_TRANSLATED` for the same URL is idempotent on the receiving side, so the only open question
+  is whether the stored page is the one the user gets — and that is why `bakedImageBlob` is persisted
+  rather than reusing `translatedImageBlob`, which has the text erased.
+- A job with no stored baked page reports a failure instead of delivering: nothing to show is better
+  than showing a plate with empty bubbles.
 - The heartbeat is cleared when the pipeline settles. A pipeline stage that never settles leaves the
   interval running, which costs one tiny message every 20 s but keeps the job visible rather than
   killing it.
