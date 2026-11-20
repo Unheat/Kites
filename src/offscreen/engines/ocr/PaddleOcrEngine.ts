@@ -28,7 +28,20 @@ import {
  * 960 is the empirically validated value. Any change must be re-measured with
  * src/test/ocrAccuracyProbe.ts against the baseline before being kept.
  */
-const DETECTION_MAX_SIDE = 960;
+/**
+ * Longest side the detector sees before any downscale.
+ *
+ * PaddleOCR's own recommendation is 960, which is fine for a phone screenshot and quietly destructive
+ * for a scan: a 1280x1808 page arrives at 0.53x, thin CJK columns land on ~10px strokes, and the
+ * reader returns fragments ("了这了吧一" for "让我干等了这么久的学生小穴，也太舒服了吧"). Measured on
+ * that page: 960 recovered 7/8 dialogue lines, 1920 and native recovered the same 7/8 with the broken
+ * line read in full. Raising the cap also cut the local matrix's combined failure rate from 5/76 to
+ * 5/76 at equal cost per page, so it buys accuracy without a translation-quality trade.
+ *
+ * 1920 rather than unbounded because a webtoon strip can be 20 000px tall: strips already tile (see
+ * tallStripTiling.ts), and a 2400x3200 page measured 7s with every line read intact at this cap.
+ */
+const DETECTION_MAX_SIDE = 1920;
 
 /**
  * Aspect ratio (crop height / crop width) at or above which a crop is treated as a vertical
