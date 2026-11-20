@@ -56,7 +56,8 @@
     "onnxruntime-web": "^1.30.0",
     "ppu-paddle-ocr": "^6.1.0",
     "react": "^19.2.7",
-    "react-dom": "^19.2.7"
+    "react-dom": "^19.2.7",
+    "wanakana": "^5.3.1"
   },
   "devDependencies": {
     "@crxjs/vite-plugin": "^2.7.1",
