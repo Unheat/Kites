@@ -1,4 +1,6 @@
 import { db, cleanupOldJobs, type TranslationJob } from '../db';
+import { respectsFinishedJob } from './finishedJobRecovery';
+import { buildJobWaitBudget } from './jobWaitBudget';
 import type { ProcessJobMessage, PopupState, PreloadActiveEngineMessage, BubbleDetectionMode, HistoryRetentionPeriod } from '../shared/types';
 import { DEFAULT_POPUP_STATE } from '../shared/types';
 import { CLOUDFLARE_QUOTA_DEFAULT_ENDPOINT, STORAGE_KEYS } from '../shared/constants';
@@ -96,6 +98,47 @@ export function noteOffscreenActivity(at: number = Date.now()): void {
  */
 export function offscreenActivityAt(): number {
   return lastOffscreenActivityAt;
+}
+
+/**
+ * Per-job progress timestamps, so one job's chatter cannot keep another job's wait alive.
+ *
+ * The global stamp still exists for messages that carry no job id (model downloads, popup state),
+ * but a job wait must be governed by evidence about that job.
+ */
+const jobActivityAt = new Map<number, number>();
+
+/**
+ * Records that one job reported progress.
+ *
+ * @param jobId - Job the progress belongs to.
+ * @param at - Timestamp of the report; defaults to now.
+ */
+export function noteJobActivity(jobId: number, at: number = Date.now()): void {
+  jobActivityAt.set(jobId, at);
+}
+
+/**
+ * Reads when one job last reported progress.
+ *
+ * Jobs that have not reported yet return 0, which the wait treats as "no signal since the job
+ * started". Deliberately not the global stamp: falling back to it lets another job's chatter keep
+ * this one alive, which is the mirror of the false stall this whole path exists to prevent.
+ *
+ * @param jobId - Job being waited on.
+ * @returns Timestamp of that job's last progress, or 0 when it has never reported.
+ */
+export function jobActivityAtFor(jobId: number): number {
+  return jobActivityAt.get(jobId) ?? 0;
+}
+
+/**
+ * Drops a finished job's progress timestamp so the map does not grow with the session.
+ *
+ * @param jobId - Job that is no longer being waited on.
+ */
+export function forgetJobActivity(jobId: number): void {
+  jobActivityAt.delete(jobId);
 }
 
 /**
@@ -291,6 +334,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   // they keep its wait alive instead of failing it for taking longer than a normal page.
   if (message?.source === 'offscreen') {
     noteOffscreenActivity();
+    const reportedJobId = message.payload?.jobId;
+    if (Number.isInteger(reportedJobId)) noteJobActivity(reportedJobId);
   }
 
   if (
@@ -878,7 +923,10 @@ async function awaitJobResponse(message: any, budget: JobProgressBudget): Promis
       throw outcome.error;
     }
 
-    const idleMs = Date.now() - budget.readActivityAt();
+    // A wait cannot be stalled by time that passed before it started. The activity stamp is shared,
+    // so a job enqueued after a quiet period used to measure that silence as its own and abort on
+    // the first slice: the browser log showed "no progress for 67s/231s" for jobs seconds old.
+    const idleMs = Date.now() - Math.max(budget.readActivityAt(), startedAt);
     if (idleMs > budget.stallTimeoutMs) {
       throw new Error(
         `${message.type} made no progress for ${Math.round(idleMs / 1000)}s (stall limit ${Math.round(budget.stallTimeoutMs / 1000)}s)`
@@ -1199,6 +1247,83 @@ export async function processQueue() {
   }
 }
 
+/**
+ * Hands a recovered job's page to the tab that asked for it, in the same shape as a normal reply.
+ *
+ * The capture overlay listens for `CAPTURE_TRANSLATED` and the page listener for `IMAGE_TRANSLATED`,
+ * so the message type has to match the request the job came from.
+ *
+ * @param tabId - Tab waiting for the result, if the job had one.
+ * @param jobId - Job that finished.
+ * @param srcUrl - Source URL the job was queued for.
+ */
+async function deliverRecoveredJob(
+  tabId: number | undefined,
+  jobId: number,
+  srcUrl: string
+): Promise<void> {
+  // Nothing to deliver and nobody to deliver to: skip reading a multi-megabyte page for nothing.
+  if (!tabId) return;
+  const baked = await readBakedImageDataUrl(jobId);
+  const isCapture = srcUrl.startsWith('kites-capture:');
+  if (!baked) {
+    // Without the delivered page there is nothing to hand over; say so instead of leaving the tab
+    // spinning or showing a plate with the text erased.
+    const message = {
+      type: isCapture ? 'CAPTURE_TRANSLATION_ERROR' : 'TRANSLATION_ERROR',
+      payload: isCapture
+        ? { requestId: srcUrl.replace('kites-capture:', ''), error: MISSING_BAKED_PAGE_ERROR }
+        : { originalUrl: srcUrl, error: MISSING_BAKED_PAGE_ERROR },
+    };
+    await chrome.tabs.sendMessage(tabId, message).catch(() => {});
+    return;
+  }
+  const message = isCapture
+    ? {
+        type: 'CAPTURE_TRANSLATED',
+        payload: { requestId: srcUrl.replace('kites-capture:', ''), jobId, bakedBase64: baked },
+      }
+    : {
+        type: 'IMAGE_TRANSLATED',
+        payload: { jobId, originalUrl: srcUrl, bakedBase64: baked },
+      };
+  await chrome.tabs.sendMessage(tabId, message).catch(() => {});
+}
+
+/**
+ * Reads a finished job's translated image out of the database as a data URL.
+ *
+ * The offscreen document normally returns this base64 in its response. When that response is lost,
+ * the image is already stored, so re-reading it is what makes the recovery visible to the user rather
+ * than merely stopping the failure. Service workers have no `FileReader`, hence the manual encoding.
+ *
+ * @param jobId - Job whose translated image should be read.
+ * @returns Data URL, or null when the job has no stored image yet.
+ */
+async function readBakedImageDataUrl(jobId: number): Promise<string | null> {
+  try {
+    const image = await db.images.where({ jobId }).first();
+    // `translatedImageBlob` is the inpainted plate with the text removed; handing that to the page
+    // would clear its spinner and show erased bubbles. Only the baked page is a delivery.
+    const blob = image?.bakedImageBlob;
+    if (!blob) return null;
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    let binary = '';
+    // Chunked so the argument list cannot overflow the stack on a large scan.
+    const CHUNK = 0x8000;
+    for (let index = 0; index < bytes.length; index += CHUNK) {
+      binary += String.fromCharCode(...bytes.subarray(index, index + CHUNK));
+    }
+    return `data:${blob.type || 'image/png'};base64,${btoa(binary)}`;
+  } catch (error) {
+    console.warn(`[Background] Could not read the translated page for job ${jobId}:`, error);
+    return null;
+  }
+}
+
+/** Reported when a job finished but the page it produced was not stored. */
+const MISSING_BAKED_PAGE_ERROR = 'Translation finished but its page could not be recovered.';
+
 let corsRuleCounter = 20000;
 
 /**
@@ -1306,11 +1431,11 @@ async function processImageTranslation(jobId: number, srcUrl: string, tabId?: nu
     };
     
     console.log(`[Background] Routing task ${jobId} to Offscreen Document...`);
-    const offscreenResponse = await sendMessageToOffscreen(message, JOB_STALL_TIMEOUT_MS, {
-      stallTimeoutMs: JOB_STALL_TIMEOUT_MS,
-      maxTotalMs: MAX_JOB_WAIT_MS,
-      readActivityAt: offscreenActivityAt,
-    });
+    const offscreenResponse = await sendMessageToOffscreen(
+      message,
+      JOB_STALL_TIMEOUT_MS,
+      buildJobWaitBudget(jobId, JOB_STALL_TIMEOUT_MS, MAX_JOB_WAIT_MS, jobActivityAtFor)
+    ).finally(() => forgetJobActivity(jobId));
     
     console.log(`[Background] Offscreen completed job ${jobId} with status:`, offscreenResponse?.status);
     
@@ -1348,10 +1473,24 @@ async function processImageTranslation(jobId: number, srcUrl: string, tabId?: nu
     processQueue();
     
   } catch (error) {
+    const errorStr = error instanceof Error ? error.message : String(error);
+
+    // A wait that ended in "no progress" is not proof the job failed: the offscreen pipeline can
+    // finish after the response channel is gone, and it writes its own terminal status. Asking the
+    // database before overwriting turns a lost response into "already done" instead of an error the
+    // UI then has to show and the user has to redo.
+    if (/made no progress/i.test(errorStr)) {
+      const finished = await db.translationJobs.get(jobId).catch(() => undefined);
+      if (respectsFinishedJob(errorStr, finished?.status)) {
+        console.warn(`[Background] Job ${jobId} finished in the offscreen document after its response was lost; delivering its page.`);
+        await deliverRecoveredJob(tabId, jobId, srcUrl);
+        processQueue();
+        return;
+      }
+    }
+
     console.error(`[Background] Failed to process image for job ${jobId}:`, error);
     await db.translationJobs.update(jobId, { status: 'error' });
-    
-    const errorStr = error instanceof Error ? error.message : String(error);
 
     // Notify tab immediately so the user interface spinner unfreezes without delay
     if (tabId) {

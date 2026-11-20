@@ -24,6 +24,30 @@ import { ColorCacheManager } from './ColorCacheManager';
 import { colorRegistry } from '../engines/color/colorRegistry';
 import type { ColorEngineOptions } from '../engines/color/BaseColorEngine';
 
+/**
+ * Writes a completed status only if the background has not already failed the job.
+ *
+ * The pipeline keeps running after the background abandons a wait it heard nothing about for 60s,
+ * and it used to finish by writing `completed` over the `error` the background had stored — which is
+ * why a failed translation showed no error in the UI. The background owns the terminal error state.
+ *
+ * @param jobId - Job whose completion is being recorded.
+ * @param changes - Completion fields to write when the job is not already failed.
+ * @returns Nothing.
+ */
+async function completeJobUnlessFailed(
+  jobId: number,
+  changes: Record<string, unknown>
+): Promise<void> {
+  const job = await db.translationJobs.get(jobId);
+  if (job?.status === 'error') {
+    console.warn(`[PipelineOrchestrator] Job ${jobId} was failed by the background; not marking it complete.`);
+    return;
+  }
+  await db.translationJobs.update(jobId, { status: 'completed', ...changes });
+}
+
+
 export interface PipelineServices {
   ocrManager: OcrManager;
   inpaintManager: InpaintManager;
@@ -292,12 +316,15 @@ export class PipelineOrchestrator {
         console.log(`[PipelineOrchestrator] No text detected in image.`);
         // If no text, we just save the image as is for translated
         await db.images.update(imageRecord.id!, {
-          translatedImageBlob: imageRecord.rawImageBlob
+          translatedImageBlob: imageRecord.rawImageBlob,
+          // Nothing was erased, so the delivered page is the source page. Persisting it keeps the
+          // recovery path in the background able to hand this job's output to its tab.
+          bakedImageBlob: imageRecord.rawImageBlob
         });
         // Clear stale blocks from a prior run on this image (same dedup rule as the main path).
         await db.textBlocks.where({ imageId: imageRecord.id! }).delete();
-        await db.translationJobs.update(jobId, { status: 'completed' });
-        
+        await completeJobUnlessFailed(jobId, {});
+
         // Convert to base64 to return
         return new Promise<string>((resolve) => {
           const reader = new FileReader();
@@ -652,7 +679,10 @@ export class PipelineOrchestrator {
       // 7. Save back to DB (Dashboard gets the RAW clean image, NOT the baked one!)
       console.log(`[PipelineOrchestrator] Saving raw clean results to database...`);
       await db.images.update(imageRecord.id!, {
-        translatedImageBlob: cleanedBlob
+        translatedImageBlob: cleanedBlob,
+        // What the content script receives, kept so a job whose response is lost can still be
+        // delivered. The dashboard keeps showing the clean plate, so this is stored separately.
+        bakedImageBlob: bakedBlob
       });
 
       // Map OCR results back to DB text blocks
@@ -739,8 +769,7 @@ export class PipelineOrchestrator {
       }
 
       const durationMs = Math.round(performance.now() - totalPipelineStart);
-      await db.translationJobs.update(jobId, {
-        status: 'completed',
+      await completeJobUnlessFailed(jobId, {
         completedAt: Date.now(),
         durationMs,
         ocrEngineId: ocrTier,

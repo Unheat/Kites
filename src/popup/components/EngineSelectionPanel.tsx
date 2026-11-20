@@ -3,6 +3,7 @@ import { Download, ChevronDown, ChevronRight, Plus, Search, Check, Bold, Italic,
 import type { PopupState, BubbleDetectionMode } from '../../shared/types';
 import AddApiForm from './AddApiForm';
 import MiniSearch from 'minisearch';
+import { formatVramEstimate } from '../../shared/utils/formatVramEstimate';
 import { ModelRegistry } from '../services/ModelRegistry';
 import { isLlmGpuAvailable } from '../../shared/utils/hardwareUtils';
 import { normalizeRenderFontPresetId, CUSTOM_FONT_PREFIX } from '../../shared/renderFontPresets';
@@ -592,7 +593,10 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                                 </span>
                               ) : engine.hardware ? (
                                 <span className={`text-[10px] font-bold uppercase tracking-wider ${isGpuDisabledForModel ? 'text-amber-500/80' : ''}`}>
-                                  [{engine.hardware}{isGpuDisabledForModel ? ' · GPU OFF' : ''}] {engine.type === 'local' ? 'Local' : ''}
+                                  {/* The estimate replaces the redundant `Local` word: the section already
+                                      says it, and how big the model is is the thing being compared here. */}
+                                  [{engine.hardware}{isGpuDisabledForModel ? ' · GPU OFF' : ''}]{' '}
+                                  {formatVramEstimate(engine.vramEstimate) || (engine.type === 'local' ? 'Local' : '')}
                                 </span>
                               ) : null}
                             </div>
@@ -995,7 +999,8 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
                         <span className="truncate pr-2 text-sm">{engine.name}</span>
                         {engine.hardware && (
                           <span className="text-[10px] font-bold uppercase tracking-wider">
-                            [{engine.hardware}] {engine.type === 'local' ? 'Local' : ''}
+                            [{engine.hardware}]{' '}
+                            {formatVramEstimate(engine.vramEstimate) || (engine.type === 'local' ? 'Local' : '')}
                           </span>
                         )}
                       </div>

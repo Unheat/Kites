@@ -52,7 +52,10 @@ export interface ImageRecord {
   id?: number;
   jobId: number;
   rawImageBlob: Blob;
+  /** Inpainted plate with the source text removed; the dashboard shows this, not the lettering. */
   translatedImageBlob?: Blob;
+  /** The page as delivered to the content script: translated text drawn in. Never rendered in the UI. */
+  bakedImageBlob?: Blob;
 }
 
 export interface TextBlock {

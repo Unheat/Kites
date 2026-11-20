@@ -87,6 +87,31 @@ try {
   check('offscreen document boots the orchestrator', granted.orchestrator);
   check('WebGPU is exposed to the offscreen document', granted.webgpu);
 
+  // The permission only matters if a write past the 10 MB default quota succeeds. Model caches and
+  // Studio pages both exceed it, and a rejected write surfaces much later as a failed translation,
+  // so this is asserted here rather than assumed from the permission being listed.
+  const overQuota = await page.evaluate(async () => {
+    const KEY = 'smoke:over-quota';
+    const payload = 'x'.repeat(1024 * 1024);
+    try {
+      for (let index = 0; index < 12; index += 1) {
+        await chrome.storage.local.set({ [`${KEY}:${index}`]: payload });
+      }
+      const written = await chrome.storage.local.getBytesInUse(null);
+      for (let index = 0; index < 12; index += 1) {
+        await chrome.storage.local.remove(`${KEY}:${index}`);
+      }
+      return { ok: true, bytes: written };
+    } catch (error) {
+      return { ok: false, bytes: 0, error: String(error) };
+    }
+  });
+  check(
+    'storage accepts a write past the 10 MB default quota',
+    overQuota.ok && overQuota.bytes > 10 * 1024 * 1024,
+    overQuota.error ?? `wrote ${overQuota.bytes} bytes`
+  );
+
   const fatal = consoleLines.filter((line) => FATAL_PATTERNS.some((pattern) => pattern.test(line)));
   check('no fatal console output', fatal.length === 0, fatal.join(' | ').slice(0, 400));
 } finally {

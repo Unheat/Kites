@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { KANA_SHARE_FOR_JAPANESE, resolvePageSourceLanguage } from './sourceLanguageHint';
 
 /**
@@ -52,5 +54,41 @@ describe('resolvePageSourceLanguage', () => {
   it('inherits page evidence for a one-word bubble', () => {
     // The short bubble alone is undecidable; the page it belongs to is not.
     expect(resolvePageSourceLanguage(['……', '待って'])).toEqual({ langId: 'ja', evidence: 'kana' });
+  });
+
+  it('does not let a stray kana word relabel a Chinese page as Japanese', () => {
+    // Katakana brand names (コーヒー) and the middle dot appear in Chinese manhua. One kana clear of
+    // the 1% share floor used to resolve the whole page to `ja`, which is the exact failure class
+    // this module exists to prevent: the model is told the source is Japanese and hands Chinese back.
+    const chinese = ['他说这话是什么意思', 'コーヒー', '我只是路过而已', '别把我卷进来', '行了都别吵了'];
+    expect(resolvePageSourceLanguage(chinese).langId).toBe('zh');
+  });
+
+  it('still resolves a katakana-only page to Japanese', () => {
+    expect(resolvePageSourceLanguage(['ドドドドド', 'ゴゴゴ']).langId).toBe('ja');
+  });
+
+  it('resolves every matrix fixture page to the language the matrix assumes', () => {
+    // The kana rule changed, so assert the shipped fixtures directly instead of inferring it from a
+    // noisy browser run: these pages are the ones every measurement in the devlogs is scored on.
+    // `zh-real-page` resolves to `ja` and that is the honest answer for it: OCR misreads three
+    // Chinese lines into kana (`小チン`, `心まで`, `ぐうレ`), which is 5.2% kana over 128 Han
+    // characters. Both the previous rule and this one label it Japanese, and the page still
+    // translates (2/40 slots fail), so it stays as a documented example that OCR noise can move a
+    // page label rather than as a case to tune the thresholds against.
+    const cases: Array<[string, string | null]> = [
+      ['zh-dialogue', 'zh'],
+      ['ja-dialogue', 'ja'],
+      ['zh-real-page', 'ja'],
+      ['zh-short-imperatives', 'zh'],
+    ];
+    for (const [fixture, expected] of cases) {
+      const pages = JSON.parse(
+        readFileSync(join(__dirname, '../../../scripts/fixtures/matrix', `${fixture}.json`), 'utf8')
+      ) as string[][];
+      for (const page of pages) {
+        expect(resolvePageSourceLanguage(page).langId, `${fixture}: ${page[0]}`).toBe(expected);
+      }
+    }
   });
 });

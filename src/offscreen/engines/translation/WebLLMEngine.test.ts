@@ -116,6 +116,23 @@ describe('WebLLMEngine Keyed JSON Protocol', () => {
     expect(userMsg).not.toContain('   ');
   });
 
+  it('loads one model when two callers initialize at the same time', async () => {
+    // `init()` awaits WebGPU validation and a popup-state round-trip before it sets the in-progress
+    // flag, so a second caller arriving in that window used to pass the guard and load a second
+    // multi-gigabyte model, with its own GPU context, that nothing ever releases.
+    // A fresh engine: the shared one is already initialized by `beforeEach`, and an initialized
+    // engine returns early instead of racing.
+    const racing = new WebLLMEngine('Qwen2.5-3B-Instruct-q4f16_1-MLC');
+    mockCreateEngine.mockClear();
+
+    const first = racing.init();
+    const second = racing.init();
+    const settled = await Promise.allSettled([first, second]);
+
+    expect(mockCreateEngine).toHaveBeenCalledTimes(1);
+    expect(settled.filter((entry) => entry.status === 'rejected')).toHaveLength(1);
+  });
+
   it('keeps a bracketed sound-effect translation instead of reading it as a JSON fragment', async () => {
     // `[sigh]`, `[SFX]`, `[Heavy breathing]` are ordinary manga translation output. The guard that
     // drops a protocol leftover like `{}` must not classify them as one just because they are
@@ -450,5 +467,41 @@ describe('temperatureForAttempt', () => {
     expect(temperatureForAttempt({ recoveryAttempt: 99 })).toBe(WEBLLM_TEMPERATURE_CEILING);
     // Above this a translation pass drifts into free association rather than escaping the echo.
     expect(WEBLLM_TEMPERATURE_CEILING).toBeLessThan(1.2);
+  });
+
+  it('reports an input that cannot fit the window instead of sending it silently', async () => {
+    // The 64-token floor keeps `max_tokens` legal while `input + output` overflows, so the request
+    // leaves as a normal call and comes back as a context-window error that loses the whole page.
+    // A single oversized segment cannot be split, so the only honest signal is the warning.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const local = new WebLLMEngine('Qwen2.5-3B-Instruct-q4f16_1-MLC');
+    await local.init();
+    (local as any).maxContextWindow = 120;
+
+    await local.translate(['あ'.repeat(400)]);
+
+    expect(warn.mock.calls.flat().join(' ')).toContain('exceeds the 120-token window');
+    warn.mockRestore();
+  });
+
+  it('reports how many lines the page-level recovery budget left untranslated', async () => {
+    // The budget is per page, so exhausting it leaves real lines on their source text while
+    // `translate()` still returns a complete array. Without this the page looks translated.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const local = new WebLLMEngine('Qwen2.5-3B-Instruct-q4f16_1-MLC');
+    await local.init();
+    (local as any).recoveryRequestBudget = 1;
+    // Every answer echoes the source, so both slots fail and the single retry cannot save them.
+    mockCreate.mockReset();
+    mockCreate.mockImplementation(async () => ({
+      choices: [{ message: { content: JSON.stringify({ b0: 'ああ', b1: 'いい' }) }, finish_reason: 'stop' }],
+    }));
+
+    await local.translate(['ああ', 'いい'], 'ja', 'en');
+
+    const said = warn.mock.calls.flat().join(' ');
+    expect(said).toContain('Recovery budget exhausted');
+    expect(said).toContain('2 slot(s) keep their source text');
+    warn.mockRestore();
   });
 });

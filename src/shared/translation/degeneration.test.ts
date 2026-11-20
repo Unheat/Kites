@@ -52,4 +52,17 @@ describe('hasRunawayRepetition', () => {
     });
     expect(hasRunawayRepetition(page)).toBe(false);
   });
+
+  it('does not call four identical sound-effect characters a loop', () => {
+    // `ドドドド`, `ああああ`, `！！！！` are ordinary manga lettering. The detector exists for loops
+    // measured at 29-200 repeats; with `minRepeats = 4` and period 1 it flagged a four-character run
+    // and then discarded every translation in the batch.
+    for (const text of ['{"b0":"ドドドド","b1":"ああああ"}', '{"b0":"！！！"}']) {
+      expect(hasRunawayRepetition(text)).toBe(false);
+    }
+  });
+
+  it('still catches a real single-character loop', () => {
+    expect(hasRunawayRepetition(`{"b0":"${'あ'.repeat(40)}"}`)).toBe(true);
+  });
 });
