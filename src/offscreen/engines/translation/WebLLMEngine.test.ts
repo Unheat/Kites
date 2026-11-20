@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { WebLLMEngine, WEBLLM_IDLE_DEADLINE_MS, WEBLLM_MAX_GENERATION_MS, WEBLLM_PRESENCE_PENALTY, WEBLLM_RECOVERY_TEMPERATURE, WEBLLM_TEMPERATURE, WEBLLM_TEMPERATURE_CEILING, temperatureForAttempt } from './WebLLMEngine';
+import { WebLLMEngine, WEBLLM_IDLE_DEADLINE_MS, WEBLLM_MAX_GENERATION_MS, WEBLLM_PRESENCE_PENALTY, WEBLLM_RECOVERY_TEMPERATURE, WEBLLM_TEMPERATURE, temperatureForAttempt } from './WebLLMEngine';
 
 // 1. Mock the @mlc-ai/web-llm module
 const mockCreate = vi.fn();
@@ -454,19 +454,14 @@ describe('temperatureForAttempt', () => {
     expect(WEBLLM_RECOVERY_TEMPERATURE).toBeGreaterThan(WEBLLM_TEMPERATURE);
   });
 
-  it('samples further out on each further attempt so a raised retry budget needs no other change', () => {
-    const first = temperatureForAttempt({ recoveryAttempt: 1 });
-    const second = temperatureForAttempt({ recoveryAttempt: 2 });
-    const third = temperatureForAttempt({ recoveryAttempt: 3 });
-
-    expect(second).toBeGreaterThan(first);
-    expect(third).toBeGreaterThan(second);
-  });
-
-  it('stops climbing before sampling turns into free association', () => {
-    expect(temperatureForAttempt({ recoveryAttempt: 99 })).toBe(WEBLLM_TEMPERATURE_CEILING);
-    // Above this a translation pass drifts into free association rather than escaping the echo.
-    expect(WEBLLM_TEMPERATURE_CEILING).toBeLessThan(1.2);
+  it('samples every recovery pass at the same temperature, however many the page has spent', () => {
+    // A page with several failures used to escalate per request, so its third failing line was
+    // retried at 1.1 while its first was retried at 0.9, and later lines drifted for reasons of their
+    // own. Escalation only means something for content that is asked again.
+    const temperatures = [1, 2, 3, 8].map((attempt) =>
+      temperatureForAttempt({ recovery: true, recoveryAttempt: attempt })
+    );
+    expect(temperatures).toEqual([WEBLLM_RECOVERY_TEMPERATURE, WEBLLM_RECOVERY_TEMPERATURE, WEBLLM_RECOVERY_TEMPERATURE, WEBLLM_RECOVERY_TEMPERATURE]);
   });
 
   it('reports an input that cannot fit the window instead of sending it silently', async () => {
@@ -502,6 +497,29 @@ describe('temperatureForAttempt', () => {
     const said = warn.mock.calls.flat().join(' ');
     expect(said).toContain('Recovery budget exhausted');
     expect(said).toContain('2 slot(s) keep their source text');
+    warn.mockRestore();
+  });
+
+  it('samples every recovery request of a page at the same temperature', async () => {
+    // Three failures used to escalate 0.9 -> 1.0 -> 1.1 because the attempt index counted the page's
+    // requests instead of how often this content had been asked. Each line is asked once, so a line's
+    // temperature must not depend on how many other lines failed before it.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const local = new WebLLMEngine('Qwen2.5-3B-Instruct-q4f16_1-MLC');
+    await local.init();
+    mockCreate.mockReset();
+    mockCreate.mockImplementation(async (request: any) => {
+      const payload = JSON.parse(String(request.messages.at(-1).content).split('SOURCE:\n')[1]);
+      // Echo every line back: all three slots fail, and every recovery request fails too.
+      return { choices: [{ message: { content: JSON.stringify(payload) }, finish_reason: 'stop' }] };
+    });
+
+    await local.translate(['ああ', 'いい', 'うう'], 'ja', 'en');
+
+    const temperatures: number[] = mockCreate.mock.calls.map((call: any) => call[0].temperature);
+    const recoveryTemperatures = temperatures.slice(1);
+    expect(recoveryTemperatures.length).toBe(3);
+    expect(new Set(recoveryTemperatures)).toEqual(new Set([WEBLLM_RECOVERY_TEMPERATURE]));
     warn.mockRestore();
   });
 });
