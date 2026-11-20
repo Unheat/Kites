@@ -166,6 +166,34 @@ describe('recovery of slots the model skipped or echoed', () => {
     expect(out.slice(8)).toEqual(['run!', 'damn', 'well done', 'not next time']);
   });
 
+  it('re-asks when the model transliterates Japanese into romaji instead of translating it', async () => {
+    // Observed from Qwen3.5-0.8B on a real page: "待たせたわね…" came back as
+    // "tsu datsu wa ne…" and was baked in, because no check measured the answer against the
+    // source's kana. A recovery pass that gets real English must replace it.
+    const engine = new ScriptedEngine([
+      '{"b0":"tsu datsu wa ne…"}',
+      '{"b0":"Sorry to keep you waiting."}',
+    ]);
+
+    const out = await engine.translate(['待たせたわね…'], 'ja', 'en');
+
+    expect(out).toEqual(['Sorry to keep you waiting.']);
+    expect(engine.requests).toHaveLength(2);
+    expect(sourceOf(engine, 1)).toEqual({ b0: '待たせたわね…' });
+  });
+
+  it('keeps the Japanese source, never the romaji, when recovery also transliterates', async () => {
+    const engine = new ScriptedEngine([
+      '{"b0":"tsu datsu wa ne…"}',
+      '{"b0":"mataseta wa ne…"}',
+    ]);
+
+    const out = await engine.translate(['待たせたわね…'], 'ja', 'en');
+
+    expect(out).toEqual(['待たせたわね…']);
+    expect(engine.requests).toHaveLength(2);
+  });
+
   it('does not spend a retry on a slot that holds no source-language text', async () => {
     // Latin junk from OCR is not translatable: re-asking invites the model to invent a meaning.
     const engine = new ScriptedEngine(['{"b1":"Hi."}']);
