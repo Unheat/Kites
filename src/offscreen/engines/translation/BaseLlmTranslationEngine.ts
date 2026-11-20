@@ -138,7 +138,24 @@ interface ChunkResult {
   keys: string[];
   /** True when the completion was truncated or looped, so its values are not translations. */
   degenerate?: boolean;
+  /** Why each failed slot failed, so the page summary names the real cause. */
+  reasons?: Map<number, SlotFailureReason>;
 }
+
+/**
+ * Why a slot did not come back translated.
+ *
+ * Kept apart because they call for different actions and read differently in a log: an omitted key
+ * is data loss, an echo is a model that copied the source, a transliteration is a model that wrote
+ * the pronunciation, and a source-script answer is a model that stayed in the source language.
+ */
+type SlotFailureReason =
+  | 'omitted'
+  | 'blank'
+  | 'protocol-fragment'
+  | 'echo'
+  | 'transliteration'
+  | 'source-script';
 
 /**
  * Abstract base class for all LLM-based translation engines (WebLLM, CustomApi, Cloudflare).
@@ -377,10 +394,20 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
         results[chunk[j].originalIndex] = cleaned;
       }
 
-      const missingKeys = unrecovered.filter((index) => !values[index]).map((index) => `b${index}`);
-      const echoedKeys = unrecovered
-        .filter((index) => values[index] && values[index] === chunk[index].text)
-        .map((index) => `b${index}`);
+      // Report by cause, not by comparing the final value with the source: the transliteration and
+      // source-script checks deliberately reset the value to the source text, and a value comparison
+      // reported those as "the model echoed", which sent the reader looking at the wrong behaviour.
+      const byReason = new Map<SlotFailureReason, number[]>();
+      for (const index of unrecovered) {
+        const reason = first.reasons?.get(index) ?? (values[index] ? 'echo' : 'omitted');
+        byReason.set(reason, [...(byReason.get(reason) ?? []), index]);
+      }
+      const keysFor = (reason: SlotFailureReason) => (byReason.get(reason) ?? []).map((index) => `b${index}`);
+      const missingKeys = keysFor('omitted').concat(keysFor('blank'));
+      const echoedKeys = keysFor('echo');
+      const transliteratedKeys = keysFor('transliteration');
+      const sourceScriptKeys = keysFor('source-script');
+      const protocolKeys = keysFor('protocol-fragment');
 
       const recoveryNote = retryBudget < this.recoveryRequestBudget
         ? ` after ${this.recoveryRequestBudget - retryBudget} recovery request(s)`
@@ -395,6 +422,25 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
         console.warn(
           `[BaseLlmTranslationEngine] Model echoed ${echoedKeys.length}/${chunk.length} slots back ` +
           `unchanged (${echoedKeys.join(', ')})${recoveryNote}; those lines keep their source text.`
+        );
+      }
+      if (transliteratedKeys.length > 0) {
+        console.warn(
+          `[BaseLlmTranslationEngine] Model transliterated ${transliteratedKeys.length}/${chunk.length} slots ` +
+          `into Latin letters instead of translating (${transliteratedKeys.join(', ')})${recoveryNote}; ` +
+          `those lines keep their source text.`
+        );
+      }
+      if (sourceScriptKeys.length > 0) {
+        console.warn(
+          `[BaseLlmTranslationEngine] Model answered ${sourceScriptKeys.length}/${chunk.length} slots in the ` +
+          `source script (${sourceScriptKeys.join(', ')})${recoveryNote}; those lines keep their source text.`
+        );
+      }
+      if (protocolKeys.length > 0) {
+        console.warn(
+          `[BaseLlmTranslationEngine] Model returned JSON punctuation for ${protocolKeys.length}/${chunk.length} ` +
+          `slots (${protocolKeys.join(', ')})${recoveryNote}; those lines keep their source text.`
         );
       }
     }
@@ -471,13 +517,20 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
 
     const values: string[] = [];
     const failed: number[] = [];
+    const reasons = new Map<number, SlotFailureReason>();
     for (let idx = 0; idx < chunk.length; idx += 1) {
       const value = translations[idx] ?? '';
       values[idx] = value;
       // An omitted key or a blank answer is data loss; a verbatim echo carrying source script means
       // the line was never translated, while an echo of punctuation or Latin debris is legitimate.
-      if (!parsedKeys.has(`b${idx}`) || !value.trim()) {
+      if (!parsedKeys.has(`b${idx}`)) {
         failed.push(idx);
+        reasons.set(idx, 'omitted');
+        continue;
+      }
+      if (!value.trim()) {
+        failed.push(idx);
+        reasons.set(idx, 'blank');
         continue;
       }
       // A value that is still JSON punctuation (`{}`, `[]`) is a fragment of the protocol, not a
@@ -487,6 +540,7 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
       if (isJsonSkeleton(value.trim())) {
         values[idx] = chunk[idx].text;
         failed.push(idx);
+        reasons.set(idx, 'protocol-fragment');
         continue;
       }
       // Writing-system comparison, not string equality: a model that normalizes one glyph
@@ -504,11 +558,13 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
       // text so a failed recovery cannot bake the reworded source back in.
       if (sourceScriptApplies && isUntranslatedEcho(chunk[idx].text, value, context.targetLangId)) {
         failed.push(idx);
+        reasons.set(idx, 'echo');
         continue;
       }
       if (sourceScriptApplies && isSourceScriptEcho(chunk[idx].text, value, context.targetLangId)) {
         values[idx] = chunk[idx].text;
         failed.push(idx);
+        reasons.set(idx, 'source-script');
         continue;
       }
       // A transliteration is the same class of failure in the opposite direction: the model read
@@ -520,10 +576,11 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
       if (isKanaTransliterationEcho(chunk[idx].text, value, context.targetLangId)) {
         values[idx] = chunk[idx].text;
         failed.push(idx);
+        reasons.set(idx, 'transliteration');
       }
     }
 
-    return { values, failed, keys: [...parsedKeys] };
+    return { values, failed, keys: [...parsedKeys], reasons };
   }
 
   /**

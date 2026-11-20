@@ -13,6 +13,10 @@
  *   node scripts/llm-language-stress.mjs --label stress-1 --combos 12 --repeats 2
  *   node scripts/llm-language-stress.mjs --label recheck --only ar-vi --repeats 2
  *
+ * Pass --auto-source to send the undeclared source ('auto') for every combo while keeping each
+ * combo's dialogue and script scoring, which is how to measure whether page-level classification
+ * is buying anything for a given language.
+ *
  * The combo order is shuffled with a fixed seed so a run is reproducible; change --seed
  * to sample a different cut.
  */
@@ -121,7 +125,9 @@ for (let i = allCombos.length - 1; i > 0; i -= 1) {
   [allCombos[i], allCombos[j]] = [allCombos[j], allCombos[i]];
 }
 const only = flags.get('only');
-const selected = allCombos.filter((combo) => !only || combo.id.includes(only)).slice(0, comboCount);
+const autoSource = flags.has('auto-source');
+const withMode = allCombos.map((combo) => ({ ...combo, automatic: true }));
+const selected = withMode.filter((combo) => !only || combo.id.includes(only)).slice(0, comboCount);
 
 /**
  * Finds a Chromium build that can load an unpacked MV3 extension.
@@ -236,7 +242,7 @@ for (const combo of selected) {
         out.push({ texts, translated, ms: Math.round(performance.now() - pageStart) });
       }
       return out;
-    }, { pageTexts: pages, source: combo.source, target: combo.target });
+    }, { pageTexts: pages, source: autoSource && combo.automatic ? 'auto' : combo.source, target: combo.target });
     const endedAt = Date.now();
 
     const windowLines = consoleLines

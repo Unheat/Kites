@@ -9,7 +9,7 @@
  * well, so these assertions only pass when the engine actually re-asks for the failed slots.
  */
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   BaseLlmTranslationEngine,
   MAX_RETRY_REQUESTS,
@@ -63,6 +63,8 @@ function sourceOf(engine: ScriptedEngine, index: number): Record<string, string>
 }
 
 describe('recovery of slots the model skipped or echoed', () => {
+  afterEach(() => vi.restoreAllMocks());
+
   it('re-asks for an omitted slot instead of leaving its source text on the page', async () => {
     const engine = new ScriptedEngine([
       '{"b0":"I like cats."}',
@@ -208,6 +210,23 @@ describe('recovery of slots the model skipped or echoed', () => {
     expect(out).toEqual(['آسف لأنني جعلتك تنتظر']);
     expect(engine.requests).toHaveLength(2);
     expect(sourceOf(engine, 1)).toEqual({ b0: 'آسف لأنني جعلتك تنتظر' });
+  });
+
+  it('names the real cause in the page summary instead of calling everything an echo', async () => {
+    // The transliteration check resets the value to the source text, so a value comparison reported
+    // it as "the model echoed" - which points the reader at the wrong behaviour. Measured need: a
+    // real page logged romaji failures as echoes.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const engine = new ScriptedEngine([
+      '{"b0":"tsu datsu wa ne…"}',
+      '{"b0":"mataseta wa ne…"}',
+    ]);
+
+    await engine.translate(['待たせたわね…'], 'ja', 'en');
+
+    const messages = warn.mock.calls.map((call) => String(call[0]));
+    expect(messages.some((text) => text.includes('transliterated 1/1 slots'))).toBe(true);
+    expect(messages.some((text) => text.includes('Model echoed'))).toBe(false);
   });
 
   it('does not spend a retry on a slot that holds no source-language text', async () => {
