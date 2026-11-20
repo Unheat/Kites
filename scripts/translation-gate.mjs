@@ -69,9 +69,19 @@ const DEFAULT_TOLERANCE = 2;
 /**
  * Minimum slots a combo needs before its comparison means anything.
  *
- * A 1-page combo has six slots, where one bad sample is 17% and reads as a cliff.
+ * Measured need: `short-vi-zh` (16 slots at two repeats) moved 1/16 to 5/16 between runs of the
+ * same build, with a pinned source the change under test could not touch — pure sampling noise.
+ * Below this many slots a combo is reported, never failed.
  */
-const MIN_SLOTS_FOR_COMPARISON = 12;
+const MIN_SLOTS_FOR_COMPARISON = 36;
+
+/**
+ * Rate increase, in failed share of slots, that a combo must also exceed to fail.
+ *
+ * Both this and `--tolerance` must be exceeded: the absolute floor stops a tiny sample from failing
+ * on one slot, and the rate floor stops a big page from failing on a difference that is rounding.
+ */
+const REGRESSION_RATE_TOLERANCE = 0.10;
 
 /**
  * Reads `--name value` pairs from argv.
@@ -265,10 +275,22 @@ function check() {
       continue;
     }
     const delta = entry.failed - reference.failed;
-    const verdict = delta > tolerance ? 'REGRESSED' : delta < 0 ? 'improved' : 'equal';
-    console.log(`  ${line}  vs baseline ${reference.failed}/${reference.slots}  delta ${delta >= 0 ? '+' : ''}${delta}  ${verdict}`);
-    if (delta > tolerance) {
-      problems.push(`${combo}: ${entry.failed}/${entry.slots} failed vs baseline ${reference.failed}/${reference.slots} (+${delta}, tolerance ${tolerance})`);
+    const rateDelta = delta / entry.slots;
+    const regressed = delta > tolerance && rateDelta > REGRESSION_RATE_TOLERANCE;
+    const verdict = regressed
+      ? 'REGRESSED'
+      : delta < 0
+        ? 'improved'
+        : 'equal';
+    const pct = `${(rateDelta * 100).toFixed(1)}%`;
+    console.log(
+      `  ${line}  vs baseline ${reference.failed}/${reference.slots}  delta ${delta >= 0 ? '+' : ''}${delta} (${pct})  ${verdict}`
+    );
+    if (regressed) {
+      problems.push(
+        `${combo}: ${entry.failed}/${entry.slots} failed vs baseline ${reference.failed}/${reference.slots} ` +
+        `(+${delta}, ${pct}; both tolerance ${tolerance} and rate ${(REGRESSION_RATE_TOLERANCE * 100).toFixed(0)}% were exceeded)`
+      );
     }
   }
 
