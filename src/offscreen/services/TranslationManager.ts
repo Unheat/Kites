@@ -1,7 +1,7 @@
 import type { ITranslationEngine, TranslationOptions } from '../engines/translation/BaseEngine';
 import { getEnabledGlossary } from '../../shared/glossary';
 import { normalizeSourceCasingForMt, normalizeTargetCasing } from '../../shared/utils/casingNormalization';
-import { hasNativeScriptForLang, isUntranslatedEcho } from '../../shared/utils/textCleaning';
+import { hasNativeScriptForLang, isSourceScriptEcho, isUntranslatedEcho } from '../../shared/utils/textCleaning';
 import { isDeterministicPassthrough } from '../../shared/translation/tokenEstimation';
 import { WebLLMEngine } from '../engines/translation/WebLLMEngine';
 import { GoogleTranslateEngine } from '../engines/translation/GoogleTranslateEngine';
@@ -53,7 +53,8 @@ export function returnedPageUntranslated(
     if (sourceIsKnown && !hasNativeScriptForLang(text, sourceLang)) continue;
 
     translatable += 1;
-    if (isUntranslatedEcho(text, results[index] ?? '', targetLang)) unchanged += 1;
+    const answer = results[index] ?? '';
+    if (isUntranslatedEcho(text, answer, targetLang) || isSourceScriptEcho(text, answer, targetLang)) unchanged += 1;
   }
 
   return translatable > 0 && unchanged === translatable;

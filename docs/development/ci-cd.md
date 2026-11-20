@@ -11,6 +11,7 @@
 | --- | --- | --- | --- |
 | **Kites CI/CD** | [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) | push/PR → `main` | Lint, unit tests, docs gate, API reference, production build, artifact upload |
 | **Pipeline Integration Smoke Test** | [`.github/workflows/pipeline-smoke.yml`](../../.github/workflows/pipeline-smoke.yml) | push/PR touching `src/offscreen/**`, `src/shared/**`, `src/test/**`; manual dispatch | CPU-tier full-pipeline smoke matrix + visual pipeline suite |
+| **Translation Gate** | [`.github/workflows/translation-gate.yml`](../../.github/workflows/translation-gate.yml) | push/PR touching `src/offscreen/**`, `src/shared/**`, the gate receipt or script; manual dispatch | Fails a pipeline change that ships without a fresh real-browser measurement, or that regresses past tolerance ([guide](translation-gate.md)) |
 | **Validate Model Registry URLs** | [`.github/workflows/validate-model-registry.yml`](../../.github/workflows/validate-model-registry.yml) | push/PR, weekly (Sun 00:00 UTC) | Headless check that every external model URL in the OCR/inpaint/bubble/color registries resolves |
 | **Worker Provider Key Health** | [`.github/workflows/worker-key-health.yml`](../../.github/workflows/worker-key-health.yml) | push to `main` touching the provider catalog/probe/workflow, weekly (Mon 03:00 UTC), manual dispatch | Probes every production provider credential through the live Worker and fails when one is rejected |
 
@@ -45,6 +46,10 @@ Runs the real offscreen pipeline headlessly on CPU:
 **Artifacts:** baked smoke/pipeline images are uploaded `if: always()` so a failed page can be inspected without a local rerun.
 
 **Scope caveat:** these are smoke tests, not visual acceptance gates. Green output proves the pipeline completes and produces baked images; it does not prove typesetting parity or inpaint quality on new pages. Visual QA on real pages remains a manual step (see [testing.md](testing.md)).
+
+## 3.1 Translation Gate (`translation-gate.yml`)
+
+Unit tests cannot see a translation-quality change, so a pipeline change must carry a measurement of the real pipeline. CI cannot produce it (no GPU/WebGPU on hosted runners), so the job verifies the committed receipt instead and fails when it is missing, stale, or worse than baseline. Rule, commands and tolerance: [translation-gate.md](translation-gate.md).
 
 ## 4. Model Registry URL Validation (`validate-model-registry.yml`)
 

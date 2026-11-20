@@ -1,8 +1,9 @@
 import type { ITranslationEngine, TranslationOptions } from './BaseEngine';
 import { buildGlossaryPrompt, GLOSSARY_PROMPT_RULES, getEnabledGlossary, filterRelevantGlossary, type GlossaryEntry } from '../../../shared/glossary';
 import { getLanguageName } from '../../../shared/utils/LanguageRegistry';
-import { hasNativeScriptForLang, isUntranslatedEcho } from '../../../shared/utils/textCleaning';
+import { hasNativeScriptForLang, isSourceScriptEcho, isUntranslatedEcho } from '../../../shared/utils/textCleaning';
 import { resolvePageSourceLanguage } from '../../../shared/utils/sourceLanguageHint';
+import { isKanaTransliterationEcho } from '../../../shared/translation/transliterationEcho';
 
 /** Source-language name shown to the model when the request is in 'auto' mode. */
 export const AUTO_SOURCE_NAME = 'the detected source language';
@@ -261,6 +262,7 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
 
     const sourceLang = this.resolveLanguage(effectiveSourceLangId, 'source');
     const targetLang = this.resolveLanguage(targetLangId, 'target');
+    console.log(`[BaseLlmTranslationEngine] Translating ${sourceLang} -> ${targetLang}`);
     // Snapshot before awaiting inference so edits cannot alter later batches of this request.
     const rawGlossary = getEnabledGlossary(options);
     const customPrompt = this.resolveCustomPrompt(options);
@@ -496,7 +498,27 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
         !context.sourceLangId || context.sourceLangId === 'auto'
           ? true
           : hasNativeScriptForLang(chunk[idx].text, context.sourceLangId);
+      // The CJK check above cannot see a non-CJK script: measured with Arabic -> Vietnamese, the
+      // model answered in Arabic and every slot was accepted. The general check covers any
+      // non-Latin family, and - like the JSON-skeleton check - the value is reset to the source
+      // text so a failed recovery cannot bake the reworded source back in.
       if (sourceScriptApplies && isUntranslatedEcho(chunk[idx].text, value, context.targetLangId)) {
+        failed.push(idx);
+        continue;
+      }
+      if (sourceScriptApplies && isSourceScriptEcho(chunk[idx].text, value, context.targetLangId)) {
+        values[idx] = chunk[idx].text;
+        failed.push(idx);
+        continue;
+      }
+      // A transliteration is the same class of failure in the opposite direction: the model read
+      // the Japanese and wrote its pronunciation in Latin letters instead of translating it
+      // (observed: "待たせたわね…" -> "tsu datsu wa ne…"). It carries no CJK, so the echo check
+      // above accepts it. Unlike the echo, the value is not the source text, so leaving it in
+      // `values` would bake romaji into the page when recovery fails; reset to the source here,
+      // on the same path the JSON-skeleton check uses.
+      if (isKanaTransliterationEcho(chunk[idx].text, value, context.targetLangId)) {
+        values[idx] = chunk[idx].text;
         failed.push(idx);
       }
     }
