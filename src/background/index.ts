@@ -1262,8 +1262,9 @@ async function deliverRecoveredJob(
   jobId: number,
   srcUrl: string
 ): Promise<void> {
-  const baked = await readBakedImageDataUrl(jobId);
+  // Nothing to deliver and nobody to deliver to: skip reading a multi-megabyte page for nothing.
   if (!tabId) return;
+  const baked = await readBakedImageDataUrl(jobId);
   const isCapture = srcUrl.startsWith('kites-capture:');
   if (!baked) {
     // Without the delivered page there is nothing to hand over; say so instead of leaving the tab

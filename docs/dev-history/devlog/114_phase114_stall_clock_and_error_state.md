@@ -91,8 +91,9 @@ Tests, and what each one actually pins:
 | Cause 3: no `completed` over a stored `error` | `PipelineOrchestrator.test.ts` › does not mark a job complete after the background already failed it | fails — writes `completed` |
 | Cause 4: which failures defer to a finished job | `finishedJobRecovery.test.ts` (3 cases) | module did not exist |
 
-Reviewed by reading, not by a test: the catch-path guard that calls `respectsFinishedJob` and delivers
-the stored image, the offscreen `JOB_PROGRESS` emission and its interval clearing, and the
+Reviewed by reading, not by a test: the catch-path guard that calls `respectsFinishedJob`,
+`deliverRecoveredJob` and `readBakedImageDataUrl` (message shapes, the encoding loop, the
+capture/no-tab branches), the offscreen `JOB_PROGRESS` emission and its interval clearing, and the
 `noteJobActivity` listener wiring. All three sit behind `chrome.runtime`/`chrome.tabs` side effects on
 a function that fetches an image first; no decision inside them is unexercised, but the plumbing is
 verified in the browser run above rather than in vitest.
@@ -119,10 +120,12 @@ whose pipeline had quietly finished 60 s earlier trips cause 1, and cause 3 then
 - Jobs abandoned by the background are not cancelled in the offscreen document; they run to
   completion and their output is kept, which is what makes causes 3 and 4 recoverable at all.
 - A recovered job delivers its page and the tab's spinner clears, but the path is new and unexercised
-  end to end: the browser runs above never lost a response, so they never entered it. A second
-  `IMAGE_TRANSLATED` for the same URL is idempotent on the receiving side, so the only open question
-  is whether the stored page is the one the user gets — and that is why `bakedImageBlob` is persisted
-  rather than reusing `translatedImageBlob`, which has the text erased.
+  end to end: the browser runs above never lost a response, so they never entered it. The receiving
+  side is expected to accept a second `IMAGE_TRANSLATED` for the same URL, but that is an assumption
+  about the registry rather than something this work exercised.
+- Every job now stores a third full-page PNG (`rawImageBlob`, `translatedImageBlob`,
+  `bakedImageBlob`), deleted only by retention cleanup. The fixture pages are ~60 KB, but a
+  full-resolution scan is megabytes each, and nothing enforces a quota on page images.
 - A job with no stored baked page reports a failure instead of delivering: nothing to show is better
   than showing a plate with empty bubbles.
 - The heartbeat is cleared when the pipeline settles. A pipeline stage that never settles leaves the
