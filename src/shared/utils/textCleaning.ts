@@ -98,6 +98,10 @@ export function cleanStrayOcrArtifacts(text: string): string {
 
 const CYRILLIC_CHAR_RE = /[\u0400-\u04ff\u0500-\u052f]/;
 const THAI_CHAR_RE = /[\u0e00-\u0e7f]/;
+const ARABIC_CHAR_RE = /[\u0600-\u06ff\u0750-\u077f]/;
+const DEVANAGARI_CHAR_RE = /[\u0900-\u097f]/;
+const HEBREW_CHAR_RE = /[\u0590-\u05ff]/;
+const GREEK_CHAR_RE = /[\u0370-\u03ff\u1f00-\u1fff]/;
 const CHINESE_CHAR_RE = /[\u4e00-\u9fff\u3400-\u4dbf]/;
 const JAPANESE_KANA_RE = /[\u3040-\u309f\u30a0-\u30ff\u31f0-\u31ff]/;
 const KOREAN_HANGUL_RE = /[\uac00-\ud7af\u1100-\u11ff\u3130-\u318f]/;
@@ -157,6 +161,13 @@ export function hasNativeScriptForLang(text: string, lang?: string): boolean {
     if (t.startsWith('zh')) return CHINESE_CHAR_RE.test(text);
     if (t.startsWith('ja')) return CHINESE_CHAR_RE.test(text) || JAPANESE_KANA_RE.test(text);
     if (t.startsWith('ko')) return CHINESE_CHAR_RE.test(text) || KOREAN_HANGUL_RE.test(text);
+    // Arabic-script languages: Arabic, Persian, Urdu. Without these an Arabic line fell through to
+    // the CJK fallback and reported no native script, which the recovery and OCR filters read as
+    // "not dialogue" (measured: Arabic -> Vietnamese answered in Arabic and was accepted).
+    if (['ar', 'fa', 'ur'].some((prefix) => t.startsWith(prefix))) return ARABIC_CHAR_RE.test(text);
+    if (['hi', 'mr', 'ne'].some((prefix) => t.startsWith(prefix))) return DEVANAGARI_CHAR_RE.test(text);
+    if (t.startsWith('he')) return HEBREW_CHAR_RE.test(text);
+    if (t.startsWith('el')) return GREEK_CHAR_RE.test(text);
     if (isCjkSource(t)) return CJK_SCRIPT_REGEX.test(text);
     return true;
   }
@@ -211,6 +222,93 @@ export function isUntranslatedEcho(source: string, value: string, targetLangId?:
   const letters = cjk + latin;
   if (letters === 0) return false;
   return cjk / letters >= SOURCE_SCRIPT_SHARE_FOR_UNTRANSLATED;
+}
+
+/** Writing-system families a line can be written in, for source-script accounting. */
+type ScriptFamily = 'cjk' | 'cyrillic' | 'arabic' | 'thai' | 'devanagari' | 'hebrew' | 'greek';
+
+/** Letter pattern per writing-system family. */
+const SCRIPT_FAMILY_PATTERNS: Record<ScriptFamily, RegExp> = {
+  cjk: CJK_LETTER_RE,
+  cyrillic: CYRILLIC_CHAR_RE,
+  arabic: ARABIC_CHAR_RE,
+  thai: THAI_CHAR_RE,
+  devanagari: DEVANAGARI_CHAR_RE,
+  hebrew: HEBREW_CHAR_RE,
+  greek: GREEK_CHAR_RE,
+};
+
+/**
+ * Writing system a language id is written in, for the same-script-target exemption.
+ *
+ * @param lang - Language id such as `ru`, `uk` or `zh-CN`.
+ * @returns The family, or null for Latin-script and unknown languages.
+ */
+function scriptFamilyOfLang(lang?: string): ScriptFamily | null {
+  if (!lang) return null;
+  const t = lang.trim().toLowerCase();
+  if (!t || t === 'auto') return null;
+  if (['zh', 'ja', 'ko'].some((prefix) => t.startsWith(prefix))) return 'cjk';
+  if (isCyrillicSource(t)) return 'cyrillic';
+  if (['ar', 'fa', 'ur'].some((prefix) => t.startsWith(prefix))) return 'arabic';
+  if (isThaiSource(t)) return 'thai';
+  if (['hi', 'mr', 'ne'].some((prefix) => t.startsWith(prefix))) return 'devanagari';
+  if (t.startsWith('he')) return 'hebrew';
+  if (t.startsWith('el')) return 'greek';
+  return null;
+}
+
+/**
+ * Whether an engine answered in the source line's own writing system, for any non-Latin script.
+ *
+ * `isUntranslatedEcho` only measures CJK, so a model that answers an Arabic page in Arabic (or
+ * Cyrillic in Cyrillic, and so on) passes as translated. This is the same comparison for every
+ * script family the pipeline can name: the source's dominant family is found from the source
+ * text itself (no language id needed, which is what makes it work under `auto`), and the answer
+ * fails when half or more of its letters relative to Latin are still in that family. A target
+ * written in the same family (Russian -> Ukrainian, Chinese -> Japanese) is exempt, and a
+ * borrowed name inside an otherwise translated answer cannot reach half.
+ *
+ * @param source - Source line handed to the engine.
+ * @param value - Line the engine returned.
+ * @param targetLangId - Declared target language; a same-family target legitimately answers in it.
+ * @returns True when the answer is still written in the source script.
+ */
+export function isSourceScriptEcho(source: string, value: string, targetLangId?: string): boolean {
+  const from = source.trim();
+  const to = value.trim();
+  if (from === to) return true;
+  if (!from || !to) return false;
+
+  const counts = new Map<ScriptFamily, number>();
+  let latin = 0;
+  for (const char of from) {
+    if (LATIN_LETTER_RE.test(char)) {
+      latin += 1;
+      continue;
+    }
+    for (const [family, pattern] of Object.entries(SCRIPT_FAMILY_PATTERNS) as [ScriptFamily, RegExp][]) {
+      if (pattern.test(char)) {
+        counts.set(family, (counts.get(family) ?? 0) + 1);
+        break;
+      }
+    }
+  }
+  const family = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+  // A Latin-dominant source has no script evidence to judge by; the verbatim check covers it.
+  if (!family || (counts.get(family) ?? 0) < latin) return false;
+  if (scriptFamilyOfLang(targetLangId) === family) return false;
+
+  const pattern = SCRIPT_FAMILY_PATTERNS[family];
+  let familyLetters = 0;
+  let answerLatin = 0;
+  for (const char of to) {
+    if (pattern.test(char)) familyLetters += 1;
+    else if (LATIN_LETTER_RE.test(char)) answerLatin += 1;
+  }
+  const letters = familyLetters + answerLatin;
+  if (letters === 0) return false;
+  return familyLetters / letters >= SOURCE_SCRIPT_SHARE_FOR_UNTRANSLATED;
 }
 
 /** Minimum character count before a line can claim to be dialogue rather than artwork lettering. */

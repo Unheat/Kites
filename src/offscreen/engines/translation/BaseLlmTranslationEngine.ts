@@ -1,7 +1,7 @@
 import type { ITranslationEngine, TranslationOptions } from './BaseEngine';
 import { buildGlossaryPrompt, GLOSSARY_PROMPT_RULES, getEnabledGlossary, filterRelevantGlossary, type GlossaryEntry } from '../../../shared/glossary';
 import { getLanguageName } from '../../../shared/utils/LanguageRegistry';
-import { hasNativeScriptForLang, isUntranslatedEcho } from '../../../shared/utils/textCleaning';
+import { hasNativeScriptForLang, isSourceScriptEcho, isUntranslatedEcho } from '../../../shared/utils/textCleaning';
 import { resolvePageSourceLanguage } from '../../../shared/utils/sourceLanguageHint';
 import { isKanaTransliterationEcho } from '../../../shared/translation/transliterationEcho';
 
@@ -498,7 +498,16 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
         !context.sourceLangId || context.sourceLangId === 'auto'
           ? true
           : hasNativeScriptForLang(chunk[idx].text, context.sourceLangId);
+      // The CJK check above cannot see a non-CJK script: measured with Arabic -> Vietnamese, the
+      // model answered in Arabic and every slot was accepted. The general check covers any
+      // non-Latin family, and - like the JSON-skeleton check - the value is reset to the source
+      // text so a failed recovery cannot bake the reworded source back in.
       if (sourceScriptApplies && isUntranslatedEcho(chunk[idx].text, value, context.targetLangId)) {
+        failed.push(idx);
+        continue;
+      }
+      if (sourceScriptApplies && isSourceScriptEcho(chunk[idx].text, value, context.targetLangId)) {
+        values[idx] = chunk[idx].text;
         failed.push(idx);
         continue;
       }
