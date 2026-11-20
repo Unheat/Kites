@@ -316,7 +316,10 @@ export class PipelineOrchestrator {
         console.log(`[PipelineOrchestrator] No text detected in image.`);
         // If no text, we just save the image as is for translated
         await db.images.update(imageRecord.id!, {
-          translatedImageBlob: imageRecord.rawImageBlob
+          translatedImageBlob: imageRecord.rawImageBlob,
+          // Nothing was erased, so the delivered page is the source page. Persisting it keeps the
+          // recovery path in the background able to hand this job's output to its tab.
+          bakedImageBlob: imageRecord.rawImageBlob
         });
         // Clear stale blocks from a prior run on this image (same dedup rule as the main path).
         await db.textBlocks.where({ imageId: imageRecord.id! }).delete();
@@ -676,7 +679,10 @@ export class PipelineOrchestrator {
       // 7. Save back to DB (Dashboard gets the RAW clean image, NOT the baked one!)
       console.log(`[PipelineOrchestrator] Saving raw clean results to database...`);
       await db.images.update(imageRecord.id!, {
-        translatedImageBlob: cleanedBlob
+        translatedImageBlob: cleanedBlob,
+        // What the content script receives, kept so a job whose response is lost can still be
+        // delivered. The dashboard keeps showing the clean plate, so this is stored separately.
+        bakedImageBlob: bakedBlob
       });
 
       // Map OCR results back to DB text blocks
