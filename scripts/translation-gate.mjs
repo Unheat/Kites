@@ -158,10 +158,17 @@ function changedFiles() {
 /**
  * Fingerprints the pipeline files, so a receipt proves it measured the code being shipped.
  *
+ * Test files are excluded for the same reason {@link isPipelinePath} excludes them: a test cannot
+ * change what a user's page receives, and including them meant committing a test for a measured
+ * change instantly invalidated its own receipt.
+ *
  * @returns Hex SHA-256 over the tracked pipeline files and their contents.
  */
 function pipelineFingerprint() {
-  const files = git(['ls-files', ...PIPELINE_PATHS]).split('\n').filter(Boolean).sort();
+  const files = git(['ls-files', ...PIPELINE_PATHS])
+    .split('\n')
+    .filter((file) => Boolean(file) && !file.endsWith('.test.ts'))
+    .sort();
   const hash = createHash('sha256');
   for (const file of files) {
     hash.update(file);

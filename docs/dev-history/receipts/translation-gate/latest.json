@@ -1,14 +1,14 @@
 {
-  "recordedAt": "2026-11-20T23:38:17.431Z",
-  "commit": "eef7742935a8b4b88aa50afd211e1b6cbe2cc096",
+  "recordedAt": "2026-11-20T23:39:48.544Z",
+  "commit": "d732b4ed56c050f3a21ae2c9b07605a3c0611969",
   "dirty": true,
   "model": "Qwen3.5-0.8B-q4f16_1-MLC",
   "seed": null,
   "repeats": 2,
   "label": "unlabelled",
   "resultFile": "../../../../tmp/kites-matrix-gate-final.json",
-  "pipelineFingerprint": "d867ba66a8ebc8f3a761455f9a875fd063262387a51f8fe3eadc9e9eae855962",
-  "pipelineFiles": 47,
+  "pipelineFingerprint": "9d3f0cb7522b41569d928ef200cec418eb43b96209176a982d13a7025185c688",
+  "pipelineFiles": 31,
   "combos": {
     "auto-en-ja": {
       "slots": 52,
