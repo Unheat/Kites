@@ -1,4 +1,5 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { setOracleDisabledForTests } from './targetLanguageOracle';
 import {
   BaseLlmTranslationEngine,
   isDeterministicPassthrough,
@@ -196,6 +197,10 @@ describe('cleanTranslatedLine tag debris & filler shield', () => {
 });
 
 describe('BaseLlmTranslationEngine Keyed JSON Protocol', () => {
+  // These fixtures are synthetic English (`Item 0`, `First text`) sent as ja -> en, so the
+  // already-target oracle would correctly skip every line and never exercise the protocol.
+  beforeEach(() => setOracleDisabledForTests(true));
+
   it('returns empty array when input is empty without invoking requestLlm', async () => {
     const engine = new MockLlmEngine();
     const result = await engine.translate([]);

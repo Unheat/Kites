@@ -4,6 +4,7 @@ import { getLanguageName } from '../../../shared/utils/LanguageRegistry';
 import { hasNativeScriptForLang, isSourceScriptEcho, isUntranslatedEcho } from '../../../shared/utils/textCleaning';
 import { resolvePageSourceLanguage } from '../../../shared/utils/sourceLanguageHint';
 import { isKanaTransliterationEcho } from '../../../shared/translation/transliterationEcho';
+import { findAlreadyTargetLines } from './targetLanguageOracle';
 
 /** Source-language name shown to the model when the request is in 'auto' mode. */
 export const AUTO_SOURCE_NAME = 'the detected source language';
@@ -203,6 +204,15 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
   protected recoverySegmentLimit = MAX_RETRY_SEGMENTS;
 
   /**
+   * Whether a line that is already the target language may be left untouched.
+   *
+   * On by default: it is what stops a European page spending recovery requests on lines the model
+   * already answered correctly. Tests that assert JSON protocol mechanics on synthetic Latin text
+   * turn it off, because in those fixtures every line genuinely is English.
+   */
+  protected skipAlreadyTargetLines = true;
+
+  /**
    * Maximum recovery requests per `translate()` call.
    *
    * `recoverySegmentLimit * recoveryRequestBudget` is how many failed slots can still be re-asked.
@@ -264,6 +274,42 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
 
     if (toTranslate.length === 0) return results;
 
+    // Snapshot before any await so a caller editing these mid-flight cannot alter later batches.
+    // This must stay the first thing after the passthrough split: the oracle below awaits.
+    const rawGlossary = getEnabledGlossary(options);
+    const customPrompt = this.resolveCustomPrompt(options);
+
+    // A Latin line that is *already* the target language must not be sent: measured on a page with
+    // two French and two English lines, both English lines were re-asked as if they had failed,
+    // costing 4 model requests and 3.1 s. The oracle cannot run later — by the time a slot comes
+    // back echoed, "already the target" and "the model failed on this French line" are the same
+    // observation, and only the first is safe to ignore.
+    const alreadyTarget = this.skipAlreadyTargetLines
+      ? await findAlreadyTargetLines(
+          toTranslate.map((segment) => segment.text),
+          sourceLangId,
+          targetLangId
+        )
+      : new Set<number>();
+    if (alreadyTarget.size > 0) {
+      const kept: LlmTranslationSegment[] = [];
+      toTranslate.forEach((segment, position) => {
+        if (alreadyTarget.has(position)) {
+          // Left exactly as the page has it; it is not a translation and must not be reported as one.
+          results[segment.originalIndex] = segment.text;
+        } else {
+          kept.push(segment);
+        }
+      });
+      toTranslate.length = 0;
+      toTranslate.push(...kept);
+      console.log(
+        `[BaseLlmTranslationEngine] ${alreadyTarget.size} of ${alreadyTarget.size + toTranslate.length} ` +
+        `line(s) are already ${targetLangId}; sent ${toTranslate.length} to the model.`
+      );
+      if (toTranslate.length === 0) return results;
+    }
+
     // One page, one source language. The model must not re-decide per batch: a batch that resolves
     // differently from its neighbours hands the source text back instead of translating it.
     // Measured on scripts/fixtures/matrix, `auto` failed 10/18 Chinese slots while a pinned `zh`
@@ -280,9 +326,6 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
     const sourceLang = this.resolveLanguage(effectiveSourceLangId, 'source');
     const targetLang = this.resolveLanguage(targetLangId, 'target');
     console.log(`[BaseLlmTranslationEngine] Translating ${sourceLang} -> ${targetLang}`);
-    // Snapshot before awaiting inference so edits cannot alter later batches of this request.
-    const rawGlossary = getEnabledGlossary(options);
-    const customPrompt = this.resolveCustomPrompt(options);
 
     // 2. Filter glossary: keep only terms matching any text in this page/batch.
     // If 0 terms match, activeGlossary is empty -> zero glossary prompt overhead.

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { setOracleDisabledForTests } from './targetLanguageOracle';
 import { WebLLMEngine, WEBLLM_IDLE_DEADLINE_MS, WEBLLM_MAX_GENERATION_MS, WEBLLM_PRESENCE_PENALTY, WEBLLM_RECOVERY_TEMPERATURE, WEBLLM_TEMPERATURE, temperatureForAttempt } from './WebLLMEngine';
 
 // 1. Mock the @mlc-ai/web-llm module
@@ -65,6 +66,8 @@ describe('WebLLMEngine Keyed JSON Protocol', () => {
   let engine: WebLLMEngine;
 
   beforeEach(async () => {
+    // Fixtures are synthetic English sent as ja -> en, so the oracle must not skip them here.
+    setOracleDisabledForTests(true);
     vi.clearAllMocks();
     mockProbeAdapter.mockResolvedValue({
       supported: true,

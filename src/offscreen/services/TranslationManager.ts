@@ -4,6 +4,7 @@ import { normalizeSourceCasingForMt, normalizeTargetCasing } from '../../shared/
 import { hasNativeScriptForLang, isSourceScriptEcho, isUntranslatedEcho } from '../../shared/utils/textCleaning';
 import { isDeterministicPassthrough } from '../../shared/translation/tokenEstimation';
 import { WebLLMEngine } from '../engines/translation/WebLLMEngine';
+import { findAlreadyTargetLines } from '../engines/translation/targetLanguageOracle';
 import { GoogleTranslateEngine } from '../engines/translation/GoogleTranslateEngine';
 import { CustomApiEngine } from '../engines/translation/CustomApiEngine';
 import { CloudflareTranslateEngine } from '../engines/translation/CloudflareTranslateEngine';
@@ -179,7 +180,22 @@ export class TranslationManager {
         // With nowhere left to fall, an untranslated page beats an error, so the last engine keeps
         // its result and says so.
         if (returnedPageUntranslated(normalizedTexts, results, sourceLang, targetLang)) {
-          if (isLastEngine) {
+          // Lines the oracle skipped up front come back identical by design, so a page that is
+          // entirely in the target language looks exactly like an engine that translated nothing.
+          // Distinguish the two before spending the rest of the fallback chain: a remote engine in
+          // that chain would be paid for a page that needed no work.
+          const alreadyTarget = await findAlreadyTargetLines(normalizedTexts, sourceLang, targetLang);
+          const everyUnchangedLineWasAlreadyTarget = alreadyTarget.size > 0 &&
+            normalizedTexts.every((text, index) => {
+              if (!text.trim() || isDeterministicPassthrough(text)) return true;
+              return alreadyTarget.has(index) || results[index] !== text;
+            });
+          if (everyUnchangedLineWasAlreadyTarget) {
+            console.log(
+              `[TranslationManager] Engine ${engineId} left the page unchanged because it is already ` +
+              `${targetLang}; not treating that as a translation failure.`
+            );
+          } else if (isLastEngine) {
             console.warn(
               `[TranslationManager] Engine ${engineId} returned the page untranslated and no engine is left to try; keeping it.`
             );
