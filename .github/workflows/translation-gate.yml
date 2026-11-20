@@ -1,0 +1,60 @@
+name: Translation Gate
+
+# Enforces the rule in docs/development/translation-gate.md: a change to the translation pipeline
+# must ship with a measurement of the real pipeline, not just green unit tests.
+#
+# CI cannot run that measurement: the local WebLLM path needs a GPU and WebGPU, and GitHub-hosted
+# runners have neither. So this job verifies the evidence a contributor produced on hardware that
+# can — the receipt committed under docs/dev-history/receipts/translation-gate/ — and fails when it
+# is missing, stale, or shows a regression past tolerance.
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "src/offscreen/**"
+      - "src/shared/**"
+      - "docs/dev-history/receipts/translation-gate/**"
+      - "scripts/translation-gate.mjs"
+      - ".github/workflows/translation-gate.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "src/offscreen/**"
+      - "src/shared/**"
+      - "docs/dev-history/receipts/translation-gate/**"
+      - "scripts/translation-gate.mjs"
+      - ".github/workflows/translation-gate.yml"
+  workflow_dispatch:
+
+jobs:
+  translation-gate:
+    name: Translation Gate (pipeline changes need measurement)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          # The gate diffs against the base branch, so it needs real history and that ref.
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+
+      - name: Resolve base branch
+        # A pull request diffs against its base branch; a push to main diffs against the commit the
+        # push started from, because diffing main against itself would always be empty.
+        run: |
+          if [ -n "${{ github.base_ref }}" ]; then
+            git fetch origin "${{ github.base_ref }}"
+            echo "KITES_GATE_BASE=origin/${{ github.base_ref }}" >> "$GITHUB_ENV"
+          elif [ -n "${{ github.event.before }}" ] && git cat-file -e "${{ github.event.before }}" 2>/dev/null; then
+            echo "KITES_GATE_BASE=${{ github.event.before }}" >> "$GITHUB_ENV"
+          else
+            echo "KITES_GATE_BASE=HEAD~1" >> "$GITHUB_ENV"
+          fi
+
+      - name: Run translation gate
+        run: node scripts/translation-gate.mjs --base "$KITES_GATE_BASE"
