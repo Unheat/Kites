@@ -74,6 +74,7 @@ Rules live in **[`docs/doc_guide.md`](docs/doc_guide.md)** — read it before wr
 *   **Backend Over Frontend**: UI components need visual checks, not unit tests, unless the logic is complex.
 *   **Mandatory Backend Tests**: architecture and orchestrators (`TranslationManager` waterfall, fallback chains, parsing) need comprehensive tests proving graceful failure without manual QA.
 *   **Translation changes need real-browser measurement**: touching the translation pipeline (or the OCR that feeds it) requires a recorded benchmark, not just green tests. Run `npm run gate:translation` before committing; the rule, the commands and the tolerance are in **[`docs/development/translation-gate.md`](docs/development/translation-gate.md)**, enforced by `.github/workflows/translation-gate.yml`.
+*   **Measured edges are recorded, not remembered**: before claiming a limitation is "known", check **[`docs/development/known-limitations.md`](docs/development/known-limitations.md)** — it holds the numbers (short-line failure rates, escalation coverage, detector rejections) and is updated when a measurement changes them.
 
 ## 7. Skill Activation
 
