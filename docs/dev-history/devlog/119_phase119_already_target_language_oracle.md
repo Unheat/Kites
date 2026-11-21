@@ -1,4 +1,4 @@
-# Phase 118 — Leaving lines that are already in the target language alone
+# Devlog 119: Leaving lines that are already in the target language alone
 
 ## The waste, measured
 
@@ -110,3 +110,29 @@ A `fr-en-fr` matrix combo was added because the CJK fixtures cannot see this fea
   judgement the script test could not make either.
 - The gate cannot see a change smaller than its band width (nine slots on 36 for `auto-vi-zh`).
   Targeted measurements remain the evidence for targeted fixes.
+
+## Follow-up in the same window: the prompt stops naming a guessed source
+
+`BaseLlmTranslationEngine` was telling the model "from Japanese" whenever the page counter resolved a
+language, even though the counter can be wrong — a Chinese manhua with katakana SFX measures a 0.375
+kana share and resolves as `ja`. Only a source the *user* pinned now reaches the prompt; the resolved
+id still drives script pruning and diagnostics, where a wrong answer is recoverable.
+
+Measured, and the honest result is that it changes nothing:
+
+- Isolated A/B on one build, `zh-dialogue` → vi, `--src zh` vs `--src auto`, 12 interleaved runs each:
+  17.6 % vs 16.7 % failed lines, Welch t = 0.18.
+- Whole matrix, 56 `auto` runs vs 42 pinned runs, targets en and ja: 5.6 % vs 6.6 % (t = 0.51) and
+  8.9 % vs 10.2 % (t = 1.33).
+- Real browser: `auto` 0/4 unchanged in 4457 ms, pinned `ja` 0/4 unchanged in 3894 ms.
+
+So it ships as a correctness fix with no quality claim attached. The literature agrees it is not a
+lever: Bawden & Yvon (EAMT'23) call their own source-language ablation inconclusive, and Wu et al.
+(2021) locate the gain in *removing* the source tag, not adding it.
+
+## Follow-up: the storage meter was under-reporting by one image per page
+
+Three full-page images are stored per job — source, inpainted plate, and the page delivered to the
+content script. `getProjectStats` summed the first two. The baked page is a lossless PNG of the whole
+scan, so it is usually the largest of the three. RED first: 5 + 7 + 11-byte blobs reported 12 bytes;
+23 after the fix.
