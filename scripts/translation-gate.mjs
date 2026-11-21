@@ -211,7 +211,17 @@ function readResultFile(resultPath) {
  * `failedMin`/`failedMax` over every absorbed run, and the gate only fails when a combo exceeds the
  * worst the reference build has actually produced.
  *
- * @throws When the measurement file is missing or the baseline does not exist.
+ * Absorbs one reference-build measurement into the committed band.
+ *
+ * Remembers every sample (`samples`) rather than just the min and max, because the min/max alone
+ * cannot show how well the band is covered: absorbing an accidentally-broken build looks identical
+ * to absorbing an honest run, and drops like `auto-vi-zh 2-24/36` are only visible if you can see
+ * the individual runs that produced them.
+ *
+ * Only ever absorb a measurement of the **reference** build. Absorbing a candidate change hides the
+ * change.
+ *
+ * @throws If no measurement was passed, or no baseline exists to widen.
  */
 function absorb() {
   const from = flags.get('absorb');
@@ -223,17 +233,25 @@ function absorb() {
   for (const [combo, entry] of measured.combos.entries()) {
     const existing = baseline.combos[combo];
     if (!existing) {
-      baseline.combos[combo] = { slots: entry.slots, failed: entry.failed, failedMin: entry.failed, failedMax: entry.failed };
+      baseline.combos[combo] = {
+        slots: entry.slots,
+        failed: entry.failed,
+        failedMin: entry.failed,
+        failedMax: entry.failed,
+        samples: [entry.failed],
+      };
       console.log(`  ${combo.padEnd(20)} new            ${entry.failed}/${entry.slots}`);
       continue;
     }
-    const low = Math.min(existing.failedMin ?? existing.failed, entry.failed);
-    const high = Math.max(existing.failedMax ?? existing.failed, entry.failed);
+    const samples = Array.isArray(existing.samples) ? [...existing.samples] : [existing.failedMin ?? existing.failed];
+    if (existing.slots === entry.slots) samples.push(entry.failed);
+    samples.sort((a, b) => a - b);
     existing.slots = entry.slots;
-    existing.failed = low;
-    existing.failedMin = low;
-    existing.failedMax = high;
-    console.log(`  ${combo.padEnd(20)} band ${low}-${high}/${entry.slots}`);
+    existing.failed = samples[0];
+    existing.failedMin = samples[0];
+    existing.failedMax = samples[samples.length - 1];
+    existing.samples = samples;
+    console.log(`  ${combo.padEnd(20)} band ${samples[0]}-${samples[samples.length - 1]}/${entry.slots}  n=${samples.length}`);
   }
   baseline.absorbedRuns = (baseline.absorbedRuns ?? 1) + 1;
   baseline.absorbedAt = new Date().toISOString();

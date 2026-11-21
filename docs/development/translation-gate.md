@@ -73,10 +73,15 @@ sample. `baseline.json` stores a band per combo:
 "auto-vi-zh": { "slots": 36, "failed": 2, "failedMin": 2, "failedMax": 11 }
 ```
 
-That band is not caution, it is what nine runs of the *reference* build measured on this combo:
-2, 5, 5, 11, 5, 10, 10 of 36. The reference is a stochastic process at temperature 0.7, so a
-single-sample baseline fails the reference build itself. `--absorb <result.json>` widens the band
-with another reference run; `--record` writes the receipt for a candidate change.
+That band is not caution, it is what twelve runs of the *reference* build measured on this combo:
+2, 5, 5, 5, 6, 6, 7, 9, 9, 10, 10, 11 of 36. The reference is a stochastic process at temperature
+0.7, so a single-sample baseline fails the reference build itself. `--absorb <result.json>` widens
+the band with another reference run and appends to `samples`; `--record` writes the receipt for a
+candidate change.
+
+`samples` is stored because min/max alone cannot show how the band was built: absorbing an
+accidentally-broken build looks exactly like absorbing an honest run. Check the samples list when a
+band is wider than you expect.
 
 `REGRESSION_RATE_TOLERANCE` is 25 % as a secondary guard for when the slot count itself differs
 between baseline and receipt (fixture edit, different `--repeats`); the band is the primary check.
