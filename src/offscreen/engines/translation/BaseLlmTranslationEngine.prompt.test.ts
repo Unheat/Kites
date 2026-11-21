@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest';
-import { BaseLlmTranslationEngine } from './BaseLlmTranslationEngine';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { BaseLlmTranslationEngine, AUTO_SOURCE_NAME } from './BaseLlmTranslationEngine';
+import { setOracleDisabledForTests } from './targetLanguageOracle';
 
 /** Engine that only needs the prompt, so the prompt rules can be asserted in isolation. */
 class PromptOnlyEngine extends BaseLlmTranslationEngine {
@@ -129,5 +130,63 @@ describe('language resolution', () => {
     expect(() => engine.resolveFor('auto', 'target')).toThrow(/concrete language/);
     expect(() => engine.resolveFor('', 'target')).toThrow(/concrete language/);
     expect(() => engine.resolveFor(undefined, 'target')).toThrow(/concrete language/);
+  });
+});
+
+describe('what the prompt is told about the source language', () => {
+  /**
+   * Records the prompt a real `translate()` call builds, so the rule can be asserted on the path
+   * that actually runs rather than on `buildSystemPrompt` in isolation.
+   */
+  class RecordingEngine extends BaseLlmTranslationEngine {
+    public readonly prompts: string[] = [];
+
+    protected async requestLlm(
+      prompt: string,
+      messages?: { role: string; content: string }[]
+    ): Promise<string> {
+      this.prompts.push([prompt, ...(messages ?? []).map((message) => message.content)].join('\n'));
+      // Answer every slot the caller asked for, or the batch is reported as omitted.
+      const keys = [...prompt.matchAll(/"b(\d+)"/g)].map((match) => Number(match[1]));
+      const slots = new Set<number>();
+      for (const line of (messages?.[1]?.content ?? '').split('\n')) {
+        for (const match of line.matchAll(/"b(\d+)"/g)) slots.add(Number(match[1]));
+      }
+      for (const key of keys) slots.add(key);
+      return JSON.stringify(Object.fromEntries([...slots].map((index) => [`b${index}`, 'Hello'])));
+    }
+  }
+
+  // The fixtures are English, so the already-target oracle must not answer for them.
+  beforeEach(() => setOracleDisabledForTests(true));
+
+  it('does not name a guessed source language when the user left it on auto', async () => {
+    const engine = new RecordingEngine();
+
+    // A page the page-level counter resolves confidently. That resolution is for script pruning and
+    // diagnostics only: asserting a guess to the model cannot help, and a wrong one (a Chinese page
+    // with katakana sound effects resolves as `ja`) is worse than saying nothing.
+    await engine.translate(['お前、何してるんだ？', 'やめてくれ'], 'auto', 'en');
+
+    const prompt = engine.prompts.join('\n');
+    expect(prompt).toContain(AUTO_SOURCE_NAME);
+    expect(prompt).not.toContain('Japanese');
+  });
+
+  it('still names a source language the user pinned', async () => {
+    const engine = new RecordingEngine();
+
+    await engine.translate(['お前、何してるんだ？', 'やめてくれ'], 'ja', 'en');
+
+    expect(engine.prompts.join('\n')).toContain('Japanese');
+  });
+
+  it('keeps the page resolution out of the prompt even when it is confident', async () => {
+    const engine = new RecordingEngine();
+
+    // Kana-heavy page: `resolvePageSourceLanguage` returns `ja` here.
+    await engine.translate(['ああ、そうか', 'もう遅い', 'なぜだ'], 'auto', 'en');
+
+    expect(engine.prompts.join('\n')).not.toContain('Japanese');
   });
 });

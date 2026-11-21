@@ -1,22 +1,22 @@
 {
-  "recordedAt": "2026-11-20T23:39:48.544Z",
-  "commit": "d732b4ed56c050f3a21ae2c9b07605a3c0611969",
+  "recordedAt": "2026-11-21T00:16:04.718Z",
+  "commit": "9799df6208dc2542ea302209069ba3337869f52a",
   "dirty": true,
   "model": "Qwen3.5-0.8B-q4f16_1-MLC",
   "seed": null,
   "repeats": 2,
   "label": "unlabelled",
-  "resultFile": "../../../../tmp/kites-matrix-gate-final.json",
-  "pipelineFingerprint": "9d3f0cb7522b41569d928ef200cec418eb43b96209176a982d13a7025185c688",
+  "resultFile": "../../../../tmp/kites-matrix-prompt-untagged-clean.json",
+  "pipelineFingerprint": "518aa4a2a8e52a95cafbdcad82c383086df97e0eb73b6ce04a8586ee87d7719b",
   "pipelineFiles": 31,
   "combos": {
     "auto-en-ja": {
       "slots": 52,
-      "failed": 4
+      "failed": 5
     },
     "auto-en-zh": {
       "slots": 36,
-      "failed": 3
+      "failed": 0
     },
     "auto-en-zh-real": {
       "slots": 40,
@@ -24,19 +24,19 @@
     },
     "auto-vi-ja": {
       "slots": 52,
-      "failed": 4
+      "failed": 2
     },
     "auto-vi-zh": {
       "slots": 36,
-      "failed": 2
+      "failed": 12
     },
     "fr-en-fr": {
       "slots": 36,
-      "failed": 4
+      "failed": 5
     },
     "ja-en-ja": {
       "slots": 52,
-      "failed": 6
+      "failed": 4
     },
     "short-en-zh": {
       "slots": 16,
@@ -44,15 +44,15 @@
     },
     "short-vi-zh": {
       "slots": 16,
-      "failed": 4
+      "failed": 2
     },
     "zh-en-zh": {
       "slots": 36,
-      "failed": 0
+      "failed": 6
     },
     "zh-ru-zh": {
       "slots": 36,
-      "failed": 1
+      "failed": 0
     }
   }
 }

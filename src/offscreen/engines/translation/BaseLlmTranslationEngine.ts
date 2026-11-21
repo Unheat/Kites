@@ -323,9 +323,20 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
       console.log(`[BaseLlmTranslationEngine] Page source resolved: ${pageLanguage.langId} (${pageLanguage.evidence})`);
     }
 
-    const sourceLang = this.resolveLanguage(effectiveSourceLangId, 'source');
+    // The prompt is told the source language only when the *user* pinned it. A language this
+    // pipeline guessed must never be asserted to the model: the page counter can be wrong (a Chinese
+    // manhua with katakana SFX measures 0.375 kana share and resolves as `ja`), and it is not needed
+    // - the model translates the text it is given. Measured: telling the model the guessed language
+    // bought nothing (`zh-en-zh` 0/36 vs 1/36, `ja-en-ja` 5/52 vs 5/52). The resolved id still drives
+    // script pruning and diagnostics below, where being wrong is recoverable.
+    const sourceLang = this.resolveLanguage(sourceLangId, 'source');
     const targetLang = this.resolveLanguage(targetLangId, 'target');
-    console.log(`[BaseLlmTranslationEngine] Translating ${sourceLang} -> ${targetLang}`);
+    console.log(
+      `[BaseLlmTranslationEngine] Translating ${sourceLang} -> ${targetLang}` +
+      (undeclaredSource && pageLanguage?.langId
+        ? ` (page resolved ${pageLanguage.langId} for script pruning only; the prompt keeps an undeclared source)`
+        : '')
+    );
 
     // 2. Filter glossary: keep only terms matching any text in this page/batch.
     // If 0 terms match, activeGlossary is empty -> zero glossary prompt overhead.
