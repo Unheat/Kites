@@ -235,6 +235,12 @@ export async function getProjectStats(projectId: number): Promise<ProjectStats> 
     if (img.translatedImageBlob && typeof img.translatedImageBlob.size === 'number') {
       totalBytes += img.translatedImageBlob.size;
     }
+    // The page delivered to the content script is stored too, and it is usually the largest of the
+    // three because it is a lossless PNG of the whole page. Leaving it out made the meter report a
+    // user's usage as roughly a third lower than it is.
+    if (img.bakedImageBlob && typeof img.bakedImageBlob.size === 'number') {
+      totalBytes += img.bakedImageBlob.size;
+    }
   }
 
   const textBlockCount = imageIds.length > 0 ? await db.textBlocks.where('imageId').anyOf(imageIds).count() : 0;

@@ -181,6 +181,27 @@ describe('projectStore database operations', () => {
     expect(stats.totalBytes).toBe(10);
   });
 
+  it('counts the delivered page in the storage total', async () => {
+    const projectId = await createProject('One Piece');
+    const jobId = (await db.translationJobs.add({ timestamp: NOW, status: 'completed', targetLang: 'VI' }))!;
+    await addJobsToProject(projectId, [jobId]);
+
+    // Three full-page images are stored per job: the source, the inpainted plate, and the page
+    // delivered to the content script. The meter counted only the first two, so it under-reported a
+    // user's real usage by one image per page - on a 40-page chapter that is the largest of the three.
+    const blob = (size: number) => ({ size, type: 'image/png' }) as unknown as Blob;
+    await db.images.add({
+      jobId,
+      rawImageBlob: blob(5),
+      translatedImageBlob: blob(7),
+      bakedImageBlob: blob(11),
+    });
+
+    const stats = await getProjectStats(projectId);
+
+    expect(stats.totalBytes).toBe(23);
+  });
+
   it('handles storage quota query gracefully', async () => {
     const quota = await getStorageQuota();
     expect(quota).toBeDefined();
