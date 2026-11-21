@@ -80,6 +80,7 @@ is superseded by a newer ADR rather than edited to match the outcome.
 | [CI/CD](development/ci-cd.md) | Workflows (lint, unit, docs gate, build, smoke, registry, key health), release, worker ladder |
 | [Coding standards](development/coding-standards.md) | Docstrings, named constants, WebGPU lifecycle, defensive boundaries |
 | [Workarounds](development/workarounds.md) | Vite 8/CRXJS, runtime messaging, SPA replacement, inpainting patches, font syntax |
+| [Known limitations](development/known-limitations.md) | Measured edges: short-line failure, truncation, escalation floor, detector coverage, storage |
 
 Command list lives in `package.json`; the verification gate is documented in [CONTRIBUTING.md](../CONTRIBUTING.md).
 

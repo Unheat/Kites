@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { setOracleDisabledForTests } from './targetLanguageOracle';
 import {
   CustomApiEngine,
   DEFAULT_CUSTOM_API_BATCH_SIZE,
@@ -74,7 +75,12 @@ function jsonResponse(payload: unknown, status = 200): Response {
 }
 
 describe('CustomApiEngine', () => {
-  beforeEach(() => vi.restoreAllMocks());
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    // The fixtures are English sent as en -> fr; nothing here is already French, but pinning the
+    // seam keeps the protocol tests independent of detector contents.
+    setOracleDisabledForTests(true);
+  });
 
   it('translates text using Keyed JSON protocol and maps results', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse(validOpenAiReply));

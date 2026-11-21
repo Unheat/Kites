@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { setOracleDisabledForTests } from './targetLanguageOracle';
 import {
   CloudflareTranslateEngine,
   CloudflarePoolExhaustedError,
@@ -12,6 +13,8 @@ describe('CloudflareTranslateEngine Keyed JSON Protocol', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.clearAllMocks();
+    // The fixtures are English sent as ja -> en; the oracle would skip them and never call the API.
+    setOracleDisabledForTests(true);
     engine = new CloudflareTranslateEngine('https://test-worker.dev/v1/chat/completions');
   });
 

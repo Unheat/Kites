@@ -4,6 +4,7 @@ import { getLanguageName } from '../../../shared/utils/LanguageRegistry';
 import { hasNativeScriptForLang, isSourceScriptEcho, isUntranslatedEcho } from '../../../shared/utils/textCleaning';
 import { resolvePageSourceLanguage } from '../../../shared/utils/sourceLanguageHint';
 import { isKanaTransliterationEcho } from '../../../shared/translation/transliterationEcho';
+import { findAlreadyTargetLines } from './targetLanguageOracle';
 
 /** Source-language name shown to the model when the request is in 'auto' mode. */
 export const AUTO_SOURCE_NAME = 'the detected source language';
@@ -138,7 +139,24 @@ interface ChunkResult {
   keys: string[];
   /** True when the completion was truncated or looped, so its values are not translations. */
   degenerate?: boolean;
+  /** Why each failed slot failed, so the page summary names the real cause. */
+  reasons?: Map<number, SlotFailureReason>;
 }
+
+/**
+ * Why a slot did not come back translated.
+ *
+ * Kept apart because they call for different actions and read differently in a log: an omitted key
+ * is data loss, an echo is a model that copied the source, a transliteration is a model that wrote
+ * the pronunciation, and a source-script answer is a model that stayed in the source language.
+ */
+type SlotFailureReason =
+  | 'omitted'
+  | 'blank'
+  | 'protocol-fragment'
+  | 'echo'
+  | 'transliteration'
+  | 'source-script';
 
 /**
  * Abstract base class for all LLM-based translation engines (WebLLM, CustomApi, Cloudflare).
@@ -184,6 +202,15 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
    * request, a local model pays per token it has to re-read.
    */
   protected recoverySegmentLimit = MAX_RETRY_SEGMENTS;
+
+  /**
+   * Whether a line that is already the target language may be left untouched.
+   *
+   * On by default: it is what stops a European page spending recovery requests on lines the model
+   * already answered correctly. Tests that assert JSON protocol mechanics on synthetic Latin text
+   * turn it off, because in those fixtures every line genuinely is English.
+   */
+  protected skipAlreadyTargetLines = true;
 
   /**
    * Maximum recovery requests per `translate()` call.
@@ -247,6 +274,42 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
 
     if (toTranslate.length === 0) return results;
 
+    // Snapshot before any await so a caller editing these mid-flight cannot alter later batches.
+    // This must stay the first thing after the passthrough split: the oracle below awaits.
+    const rawGlossary = getEnabledGlossary(options);
+    const customPrompt = this.resolveCustomPrompt(options);
+
+    // A Latin line that is *already* the target language must not be sent: measured on a page with
+    // two French and two English lines, both English lines were re-asked as if they had failed,
+    // costing 4 model requests and 3.1 s. The oracle cannot run later — by the time a slot comes
+    // back echoed, "already the target" and "the model failed on this French line" are the same
+    // observation, and only the first is safe to ignore.
+    const alreadyTarget = this.skipAlreadyTargetLines
+      ? await findAlreadyTargetLines(
+          toTranslate.map((segment) => segment.text),
+          sourceLangId,
+          targetLangId
+        )
+      : new Set<number>();
+    if (alreadyTarget.size > 0) {
+      const kept: LlmTranslationSegment[] = [];
+      toTranslate.forEach((segment, position) => {
+        if (alreadyTarget.has(position)) {
+          // Left exactly as the page has it; it is not a translation and must not be reported as one.
+          results[segment.originalIndex] = segment.text;
+        } else {
+          kept.push(segment);
+        }
+      });
+      toTranslate.length = 0;
+      toTranslate.push(...kept);
+      console.log(
+        `[BaseLlmTranslationEngine] ${alreadyTarget.size} of ${alreadyTarget.size + toTranslate.length} ` +
+        `line(s) are already ${targetLangId}; sent ${toTranslate.length} to the model.`
+      );
+      if (toTranslate.length === 0) return results;
+    }
+
     // One page, one source language. The model must not re-decide per batch: a batch that resolves
     // differently from its neighbours hands the source text back instead of translating it.
     // Measured on scripts/fixtures/matrix, `auto` failed 10/18 Chinese slots while a pinned `zh`
@@ -260,12 +323,20 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
       console.log(`[BaseLlmTranslationEngine] Page source resolved: ${pageLanguage.langId} (${pageLanguage.evidence})`);
     }
 
-    const sourceLang = this.resolveLanguage(effectiveSourceLangId, 'source');
+    // The prompt is told the source language only when the *user* pinned it. A language this
+    // pipeline guessed must never be asserted to the model: the page counter can be wrong (a Chinese
+    // manhua with katakana SFX measures 0.375 kana share and resolves as `ja`), and it is not needed
+    // - the model translates the text it is given. Measured: telling the model the guessed language
+    // bought nothing (`zh-en-zh` 0/36 vs 1/36, `ja-en-ja` 5/52 vs 5/52). The resolved id still drives
+    // script pruning and diagnostics below, where being wrong is recoverable.
+    const sourceLang = this.resolveLanguage(sourceLangId, 'source');
     const targetLang = this.resolveLanguage(targetLangId, 'target');
-    console.log(`[BaseLlmTranslationEngine] Translating ${sourceLang} -> ${targetLang}`);
-    // Snapshot before awaiting inference so edits cannot alter later batches of this request.
-    const rawGlossary = getEnabledGlossary(options);
-    const customPrompt = this.resolveCustomPrompt(options);
+    console.log(
+      `[BaseLlmTranslationEngine] Translating ${sourceLang} -> ${targetLang}` +
+      (undeclaredSource && pageLanguage?.langId
+        ? ` (page resolved ${pageLanguage.langId} for script pruning only; the prompt keeps an undeclared source)`
+        : '')
+    );
 
     // 2. Filter glossary: keep only terms matching any text in this page/batch.
     // If 0 terms match, activeGlossary is empty -> zero glossary prompt overhead.
@@ -377,10 +448,20 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
         results[chunk[j].originalIndex] = cleaned;
       }
 
-      const missingKeys = unrecovered.filter((index) => !values[index]).map((index) => `b${index}`);
-      const echoedKeys = unrecovered
-        .filter((index) => values[index] && values[index] === chunk[index].text)
-        .map((index) => `b${index}`);
+      // Report by cause, not by comparing the final value with the source: the transliteration and
+      // source-script checks deliberately reset the value to the source text, and a value comparison
+      // reported those as "the model echoed", which sent the reader looking at the wrong behaviour.
+      const byReason = new Map<SlotFailureReason, number[]>();
+      for (const index of unrecovered) {
+        const reason = first.reasons?.get(index) ?? (values[index] ? 'echo' : 'omitted');
+        byReason.set(reason, [...(byReason.get(reason) ?? []), index]);
+      }
+      const keysFor = (reason: SlotFailureReason) => (byReason.get(reason) ?? []).map((index) => `b${index}`);
+      const missingKeys = keysFor('omitted').concat(keysFor('blank'));
+      const echoedKeys = keysFor('echo');
+      const transliteratedKeys = keysFor('transliteration');
+      const sourceScriptKeys = keysFor('source-script');
+      const protocolKeys = keysFor('protocol-fragment');
 
       const recoveryNote = retryBudget < this.recoveryRequestBudget
         ? ` after ${this.recoveryRequestBudget - retryBudget} recovery request(s)`
@@ -395,6 +476,25 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
         console.warn(
           `[BaseLlmTranslationEngine] Model echoed ${echoedKeys.length}/${chunk.length} slots back ` +
           `unchanged (${echoedKeys.join(', ')})${recoveryNote}; those lines keep their source text.`
+        );
+      }
+      if (transliteratedKeys.length > 0) {
+        console.warn(
+          `[BaseLlmTranslationEngine] Model transliterated ${transliteratedKeys.length}/${chunk.length} slots ` +
+          `into Latin letters instead of translating (${transliteratedKeys.join(', ')})${recoveryNote}; ` +
+          `those lines keep their source text.`
+        );
+      }
+      if (sourceScriptKeys.length > 0) {
+        console.warn(
+          `[BaseLlmTranslationEngine] Model answered ${sourceScriptKeys.length}/${chunk.length} slots in the ` +
+          `source script (${sourceScriptKeys.join(', ')})${recoveryNote}; those lines keep their source text.`
+        );
+      }
+      if (protocolKeys.length > 0) {
+        console.warn(
+          `[BaseLlmTranslationEngine] Model returned JSON punctuation for ${protocolKeys.length}/${chunk.length} ` +
+          `slots (${protocolKeys.join(', ')})${recoveryNote}; those lines keep their source text.`
         );
       }
     }
@@ -471,13 +571,20 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
 
     const values: string[] = [];
     const failed: number[] = [];
+    const reasons = new Map<number, SlotFailureReason>();
     for (let idx = 0; idx < chunk.length; idx += 1) {
       const value = translations[idx] ?? '';
       values[idx] = value;
       // An omitted key or a blank answer is data loss; a verbatim echo carrying source script means
       // the line was never translated, while an echo of punctuation or Latin debris is legitimate.
-      if (!parsedKeys.has(`b${idx}`) || !value.trim()) {
+      if (!parsedKeys.has(`b${idx}`)) {
         failed.push(idx);
+        reasons.set(idx, 'omitted');
+        continue;
+      }
+      if (!value.trim()) {
+        failed.push(idx);
+        reasons.set(idx, 'blank');
         continue;
       }
       // A value that is still JSON punctuation (`{}`, `[]`) is a fragment of the protocol, not a
@@ -487,6 +594,7 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
       if (isJsonSkeleton(value.trim())) {
         values[idx] = chunk[idx].text;
         failed.push(idx);
+        reasons.set(idx, 'protocol-fragment');
         continue;
       }
       // Writing-system comparison, not string equality: a model that normalizes one glyph
@@ -504,11 +612,13 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
       // text so a failed recovery cannot bake the reworded source back in.
       if (sourceScriptApplies && isUntranslatedEcho(chunk[idx].text, value, context.targetLangId)) {
         failed.push(idx);
+        reasons.set(idx, 'echo');
         continue;
       }
       if (sourceScriptApplies && isSourceScriptEcho(chunk[idx].text, value, context.targetLangId)) {
         values[idx] = chunk[idx].text;
         failed.push(idx);
+        reasons.set(idx, 'source-script');
         continue;
       }
       // A transliteration is the same class of failure in the opposite direction: the model read
@@ -520,10 +630,11 @@ export abstract class BaseLlmTranslationEngine implements ITranslationEngine {
       if (isKanaTransliterationEcho(chunk[idx].text, value, context.targetLangId)) {
         values[idx] = chunk[idx].text;
         failed.push(idx);
+        reasons.set(idx, 'transliteration');
       }
     }
 
-    return { values, failed, keys: [...parsedKeys] };
+    return { values, failed, keys: [...parsedKeys], reasons };
   }
 
   /**
