@@ -41,6 +41,7 @@ The developer is a beginner learning full-stack, web extensions and client-side 
     2. **UI**: components derive choices from the catalog; never re-declare literals.
     3. **Validation**: validators, route guards and status checks derive valid sets from the catalog.
     4. **Exhaustive matching**: factories and strategy routers use exhaustive typing so a missing handler fails at compile time.
+    5. **Entry-Point Parity**: when the page pipeline and a Studio route can run the same offscreen operation, every entry point forwards the same explicit settings object; offscreen must not substitute global popup state for a setting the caller already passed. New tiers/fields go into the shared catalog and the parity helper, never into one route only.
 
 ### 3.1 Advanced OOP & Subsystem Boundaries
 

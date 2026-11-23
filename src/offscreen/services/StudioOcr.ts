@@ -79,6 +79,12 @@ export interface StudioOcrResponse {
     color?: string;
     /** Outline color derived from the detected ink; undefined falls back to Studio defaults. */
     strokeColor?: string;
+    /** Outline thickness in pixels. */
+    strokeWidth?: number;
+    /** Horizontal alignment. */
+    align?: 'left' | 'center' | 'right';
+    /** Italic text. */
+    italic?: boolean;
     /** True when the region is artwork Studio keeps as ink: never painted, never translated. */
     isArtwork?: boolean;
     /** True when `text` was reconstructed from pipeline-generated layout lines. */
@@ -218,7 +224,7 @@ export async function runStudioOcr(
   // Studio never paints artwork, so its text is never needed: translating it buys tokens for a
   // string that is discarded. The page pipeline decides the same boundary before dispatch, and both
   // read the one rule so a policy change cannot leave one of them paying for ink.
-  const studioArtworkStrategy = resolveSfxPolicyStrategy(DEFAULT_SFX_POLICY);
+  const studioArtworkStrategy = resolveSfxPolicyStrategy(popupState?.sfxPolicy ?? DEFAULT_SFX_POLICY);
   const artworkIndices = new Set(
     (result.artwork ?? [])
       .filter((item) => isPreservedArtwork(item.kind, studioArtworkStrategy))
@@ -376,7 +382,7 @@ export async function runStudioOcr(
       isArtwork: artworkIndices.has(resolvedIndex),
       rotation,
       color: detectedTextColors[resolvedIndex]?.textColor,
-      strokeColor: detectedTextColors[resolvedIndex]?.strokeColor,
+      strokeColor: popupState.renderFontStrokeDisabled ? 'transparent' : detectedTextColors[resolvedIndex]?.strokeColor,
     };
   });
     const typography = await precomputeStudioOcrLayouts(textObjects.map((object) => ({
@@ -384,7 +390,15 @@ export async function runStudioOcr(
       mode: object.typesetMode, isVertical: object.isVertical, contourPoints: object.contourPoints,
     })), popupState, (width, height) => createSafeCanvas(width, height)?.ctx ?? null);
     return { inpaintedPatchBase64, textObjects: textObjects.map((object, index) => ({
-      ...object, fontFamily: typography.fontFamily, bold: typography.bold, targetLang: typography.targetLang,
+      ...object,
+      fontFamily: typography.fontFamily,
+      bold: typography.bold,
+      italic: popupState.renderFontItalic ?? false,
+      align: popupState.renderFontAlignment && popupState.renderFontAlignment !== 'auto'
+        ? popupState.renderFontAlignment
+        : 'center',
+      strokeWidth: popupState.renderFontStrokeDisabled ? 0 : 2,
+      targetLang: typography.targetLang,
       ...(typography.layouts[index] ? { fontSize: typography.layouts[index]!.fontSize,
         lines: typography.layouts[index]!.lines, positionedLines: typography.layouts[index]!.positionedLines,
         // These lines are renderer output, so a later contour/caption resize may re-flow them.

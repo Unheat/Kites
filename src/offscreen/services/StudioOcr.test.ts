@@ -320,3 +320,56 @@ describe('Studio OCR empty detections and failure propagation', () => {
     expect(mocks.getInpaintManager).not.toHaveBeenCalled();
   });
 });
+
+describe('Studio OCR popup policy and typography parity', () => {
+  it('honours the configured SFX policy instead of the hardcoded preserve default', async () => {
+    mocks.getPopupState.mockResolvedValue({ ...popupState, sfxPolicy: 'translate-plainly' });
+    mocks.processImage.mockResolvedValue({
+      texts: ['ドン'],
+      polygons: [polygon],
+      boxes: [{ x: 0, y: 0, w: 60, h: 60 }],
+      rawPolygons: [],
+      artwork: [{ index: 0, kind: 'sound-effect' }],
+    });
+
+    const response = await runStudioOcr({ ...payload, inpaint: false }, mocks.dependencies);
+
+    // A "translate plainly" page treats sound effects as language, matching the page pipeline.
+    expect(mocks.processTranslation).toHaveBeenCalledWith(['ドン'], 'ja', 'vi', undefined, expect.anything());
+    expect(response.textObjects[0]).toMatchObject({ originalText: 'ドン', isArtwork: false });
+  });
+
+  it('still preserves bare fragments when the policy translates sound effects', async () => {
+    mocks.getPopupState.mockResolvedValue({ ...popupState, sfxPolicy: 'translate-plainly' });
+    mocks.processImage.mockResolvedValue({
+      texts: ['ドン'],
+      polygons: [polygon],
+      boxes: [{ x: 0, y: 0, w: 60, h: 60 }],
+      rawPolygons: [],
+      artwork: [{ index: 0, kind: 'fragment' }],
+    });
+
+    const response = await runStudioOcr({ ...payload, inpaint: false }, mocks.dependencies);
+
+    expect(mocks.processTranslation).not.toHaveBeenCalled();
+    expect(response.textObjects[0]).toMatchObject({ text: 'ドン', isArtwork: true });
+  });
+
+  it('carries popup typography fields into Studio text objects', async () => {
+    mocks.getPopupState.mockResolvedValue({
+      ...popupState,
+      renderFontItalic: true,
+      renderFontAlignment: 'left',
+      renderFontStrokeDisabled: true,
+    });
+
+    const response = await runStudioOcr({ ...payload, translate: false, inpaint: false }, mocks.dependencies);
+
+    expect(response.textObjects[0]).toMatchObject({
+      italic: true,
+      align: 'left',
+      strokeWidth: 0,
+      strokeColor: 'transparent',
+    });
+  });
+});

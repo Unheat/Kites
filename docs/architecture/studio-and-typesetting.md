@@ -11,6 +11,7 @@ Audited cumulative `origin/main..main` through `656d720` against current code. T
 - `src/studio/canvas/TextRenderer.ts` paints **Canvas 2D**, not SVG. Furniture is also Canvas; the inline textarea is a DOM editing surface, not the final renderer.
 - Backend strategy dispatch and Studio edit dispatch are related but not identical. Stored contour visibility is not evidence that the baked solver used that contour.
 - Studio page operations route through shared offscreen services with explicit Studio-owned overrides: `resolveStudioOperationOverrides()` forwards OCR/inpaint/translation tiers for both full-page retranslate and brush OCR, and full-page retranslate records those resolved IDs in `translationJobs`. Colorization resolves explicit request tiers, including `'none'`, before global fallback; the Color tool disables the action when Disabled is selected. Studio engine selections hydrate through background `GET_POPUP_STATE` and refresh on popup-state storage changes.
+- Studio OCR reads popup **policy** from the same `PopupState` as the page pipeline: `sfxPolicy` decides whether sound-effect artwork is preserved or translated, and `renderFontItalic`, `renderFontAlignment` and `renderFontStrokeDisabled` are emitted as `italic`, `align`, `strokeWidth`/`strokeColor` on Studio text objects. Engine and tier options derive from shared catalogs (`src/shared/ocrTiers.ts`); Studio must not keep a second copy of a pipeline-owned list.
 
 ## Architectural Topology
 
