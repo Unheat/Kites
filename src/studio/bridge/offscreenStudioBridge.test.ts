@@ -44,6 +44,18 @@ describe('Studio OCR initial layout boundary', () => {
     }), expect.any(Function));
   });
 
+  it('preserves the generated-layout provenance marker from offscreen responses', async () => {
+    vi.spyOn(chrome.runtime, 'sendMessage').mockImplementation((...args: any[]) => {
+      args[1]({ status: 'success', inpaintedPatchBase64: 'data:image/png;base64,clean', textObjects: [{
+        id: 'generated', x: 0, y: 0, width: 100, height: 80, text: 'Ready', originalText: 'Prêt',
+        lines: ['Rea', 'dy'], textFromGeneratedLines: true,
+      }] });
+    });
+    const result = await requestStudioOcr({ toDataURL: () => 'source' } as HTMLCanvasElement,
+      { x: 0, y: 0, width: 100, height: 80 });
+    expect(result.textObjects[0].textFromGeneratedLines).toBe(true);
+  });
+
   it('retains existing layout, curvature, and per-object editing preference from OCR responses', async () => {
     vi.spyOn(chrome.runtime, 'sendMessage').mockImplementation((...args: any[]) => {
       args[1]({ status: 'success', inpaintedPatchBase64: 'data:image/png;base64,clean', textObjects: [{
