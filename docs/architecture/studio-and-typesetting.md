@@ -10,6 +10,7 @@ Audited cumulative `origin/main..main` through `656d720` against current code. T
 - `src/studio/Studio.tsx` owns the editor; `src/App.tsx` hosts application/history navigation.
 - `src/studio/canvas/TextRenderer.ts` paints **Canvas 2D**, not SVG. Furniture is also Canvas; the inline textarea is a DOM editing surface, not the final renderer.
 - Backend strategy dispatch and Studio edit dispatch are related but not identical. Stored contour visibility is not evidence that the baked solver used that contour.
+- Studio page operations route through shared offscreen services with explicit Studio-owned overrides: `resolveStudioOperationOverrides()` forwards OCR/inpaint/translation tiers for both full-page retranslate and brush OCR, and full-page retranslate records those resolved IDs in `translationJobs`. Colorization resolves explicit request tiers, including `'none'`, before global fallback; the Color tool disables the action when Disabled is selected. Studio engine selections hydrate through background `GET_POPUP_STATE` and refresh on popup-state storage changes.
 
 ## Architectural Topology
 

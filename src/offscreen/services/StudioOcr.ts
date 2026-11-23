@@ -81,6 +81,8 @@ export interface StudioOcrResponse {
     strokeColor?: string;
     /** True when the region is artwork Studio keeps as ink: never painted, never translated. */
     isArtwork?: boolean;
+    /** True when `text` was reconstructed from pipeline-generated layout lines. */
+    textFromGeneratedLines?: boolean;
   }>;
 }
 

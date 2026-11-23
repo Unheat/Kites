@@ -34,6 +34,7 @@ import { BubbleCacheManager } from './services/BubbleCacheManager';
 import { hasModelInCache } from '@mlc-ai/web-llm';
 import { WebLlmCacheManager } from './services/WebLlmCacheManager';
 import { checkWebGPUAvailability } from './utils/hardware';
+import { resolveStudioColorTier } from './services/studioColorizeTier';
 
 /**
  * How often a running job tells the background it is still alive.
@@ -599,11 +600,14 @@ async function handleGetModelStatuses(modelIds: string[]): Promise<{
   const results = await Promise.allSettled(uniqueIds.map(async (modelId) => [modelId, await handleCheckStatus(modelId)] as const));
   const statuses: Record<string, boolean> = {};
 
-  for (const result of results) {
+  for (let i = 0; i < results.length; i++) {
+    const result = results[i];
+    const modelId = uniqueIds[i];
     if (result.status === 'fulfilled') {
       statuses[result.value[0]] = result.value[1];
     } else {
       console.error('[Offscreen] Model status check failed:', result.reason);
+      statuses[modelId] = false;
     }
   }
 
@@ -678,6 +682,9 @@ function blobToBase64(blob: Blob): Promise<string> {
  */
 async function handleStudioInpaint(payload: StudioInpaintPayload): Promise<{ inpaintedPatchBase64: string }> {
   const imageRes = await fetch(payload.imagePatchBase64);
+  if (!imageRes.ok) {
+    throw new Error(`Failed to load Studio inpaint image: ${imageRes.status} ${imageRes.statusText}`);
+  }
   const imageBuf = await imageRes.arrayBuffer();
 
   let inpaintTier: string = payload.engineId || '';
@@ -695,6 +702,9 @@ async function handleStudioInpaint(payload: StudioInpaintPayload): Promise<{ inp
   if (payload.maskPatchBase64) {
     try {
       const maskRes = await fetch(payload.maskPatchBase64);
+      if (!maskRes.ok) {
+        throw new Error(`Failed to load Studio inpaint mask: ${maskRes.status} ${maskRes.statusText}`);
+      }
       const maskBlob = await maskRes.blob();
       const maskBitmap = await createImageBitmap(maskBlob);
       const canvas = new OffscreenCanvas(maskBitmap.width, maskBitmap.height);
@@ -706,7 +716,8 @@ async function handleStudioInpaint(payload: StudioInpaintPayload): Promise<{ inp
       }
       maskBitmap.close();
     } catch (e) {
-      console.warn('[Offscreen] Failed to extract polygons from maskPatchBase64:', e);
+      // A provided mask that cannot be decoded/extracted must not silently widen into a full-patch erase.
+      throw new Error(`Failed to process Studio inpaint mask: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -734,9 +745,11 @@ async function handleStudioInpaint(payload: StudioInpaintPayload): Promise<{ inp
  */
 async function handleStudioColorize(payload: StudioColorizePayload): Promise<{ colorizedBase64: string }> {
   const imageRes = await fetch(payload.imageBase64);
+  if (!imageRes.ok) {
+    throw new Error(`Failed to load Studio colorize image: ${imageRes.status} ${imageRes.statusText}`);
+  }
   const imageBuf = await imageRes.arrayBuffer();
 
-  let colorTier: string = payload.colorTier || '';
   const popupState = await new Promise<any>((resolve) => {
     chrome.runtime.sendMessage(
       { type: 'GET_POPUP_STATE', target: 'background', source: 'offscreen', request: true },
@@ -744,9 +757,11 @@ async function handleStudioColorize(payload: StudioColorizePayload): Promise<{ c
     );
   });
 
-  if (!colorTier || colorTier === 'none') {
-    colorTier = popupState.activeColorId || 'manga-colorization-v2';
-  }
+  const colorTier = resolveStudioColorTier(
+    payload.colorTier,
+    popupState.activeColorId,
+    'manga-colorization-v2',
+  );
 
   const entry = colorRegistry[colorTier];
   if (entry && !BUILTIN_COLOR_IDS.has(colorTier)) {

@@ -32,7 +32,12 @@ describe('Studio OCR initial layout boundary', () => {
       args[1](response);
     });
     const canvas = { toDataURL: () => 'data:image/png;base64,source' } as HTMLCanvasElement;
-    const result = await requestStudioOcr(canvas, { x: 3, y: 4, width: 150, height: 90 }, { translate });
+    const result = await requestStudioOcr(canvas, { x: 3, y: 4, width: 150, height: 90 }, {
+      translate,
+      ocrEngineId: 'v6-medium',
+      inpaintEngineId: 'telea',
+      translationEngineId: 'cloudflare-translate',
+    });
     expect(prepareInitialTextObject).toHaveBeenCalledOnce();
     expect(result.textObjects[0].lines).toEqual(['canonical', 'layout']);
     expect(result.textObjects[0].fontSize).toBe(15);
@@ -40,7 +45,12 @@ describe('Studio OCR initial layout boundary', () => {
     expect(result.textObjects[0].rotation).toBe(12);
     expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
       target: 'background', source: 'studio', request: true, type: 'STUDIO_OCR',
-      payload: expect.objectContaining({ translate }),
+      payload: expect.objectContaining({
+        translate,
+        ocrEngineId: 'v6-medium',
+        inpaintEngineId: 'telea',
+        translationEngineId: 'cloudflare-translate',
+      }),
     }), expect.any(Function));
   });
 

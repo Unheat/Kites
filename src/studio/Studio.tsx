@@ -31,6 +31,7 @@ import {
 import { db } from '../db';
 import { ensureFontsRegistered } from '../shared/fontLibrary';
 import { studioStore, useStudioStore } from './state/studioStore';
+import { resolveStudioOperationOverrides } from './state/studioRouteSettings';
 import { studioUndoStack } from './state/undoStack';
 import { requestStudioOcr, requestStudioColorize } from './bridge/offscreenStudioBridge';
 import {
@@ -187,6 +188,9 @@ export const Studio: React.FC<StudioProps> = ({
       console.warn('[Studio] Font library registration failed:', err);
     });
   }, []);
+
+  // Follow popup edits and background normalization while the editor stays open.
+  useEffect(() => studioStore.subscribeToGlobalState(), []);
 
   // Reset undo history when switching manga pages or unmounting
   useEffect(() => {
@@ -353,7 +357,7 @@ export const Studio: React.FC<StudioProps> = ({
 
   const getCleanBaseFilename = (): string => {
     let name = jobTitle || 'manga-page';
-    name = name.replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9_\-]/g, '_');
+    name = name.replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9_-]/g, '_');
     return name.slice(0, 40) || 'manga-page';
   };
 
@@ -583,10 +587,11 @@ export const Studio: React.FC<StudioProps> = ({
         pCtx.drawImage(originalImage, 0, 0, imageWidth, imageHeight);
       }
 
+      const operationOverrides = resolveStudioOperationOverrides(studioStore.getState());
       const result = await requestStudioOcr(
         patchCanvas,
         { x: 0, y: 0, width: imageWidth, height: imageHeight },
-        { translate: true, inpaint: true }
+        { ...operationOverrides, translate: true, inpaint: true }
       );
 
       // Staleness guard: never apply another page's retranslation to this page's
@@ -639,17 +644,14 @@ export const Studio: React.FC<StudioProps> = ({
       if (jobId) {
         try {
           const retranslateDuration = Math.round(performance.now() - retranslateStart);
-          const currentOcrId = studioStore.getState().selectedOcrEngineId || 'v6-small';
-          const currentInpaintId = studioStore.getState().selectedInpaintEngineId || 'lama-manga';
-          const currentTranslationId = studioStore.getState().selectedTranslationEngineId || 'gg-translate';
 
           await db.translationJobs.update(jobId, {
             status: 'completed',
             completedAt: Date.now(),
             durationMs: retranslateDuration,
-            ocrEngineId: currentOcrId,
-            inpaintTier: currentInpaintId,
-            translationEngineId: currentTranslationId,
+            ocrEngineId: operationOverrides.ocrEngineId,
+            inpaintTier: operationOverrides.inpaintEngineId,
+            translationEngineId: operationOverrides.translationEngineId,
           });
 
           const imageRecord = await db.images.where({ jobId }).first();
@@ -1110,7 +1112,7 @@ export const Studio: React.FC<StudioProps> = ({
 
         {/* Canvas Body Container */}
         <div className="relative flex flex-1 min-h-0 w-full h-full overflow-hidden">
-          <StudioCanvas originalImage={originalImage} cleanedImage={cleanedImage} />
+          <StudioCanvas originalImage={originalImage} cleanedImage={cleanedImage} jobId={jobId} />
         </div>
       </main>
 

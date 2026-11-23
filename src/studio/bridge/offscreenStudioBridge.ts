@@ -104,12 +104,14 @@ export async function requestStudioOcr(
       contourPoints?: Array<{ x: number; y: number }>;
       /** Noise-guard absorbed fragment; Studio renders it as a dashed box without text. */
       isSkipped?: boolean;
-      /** Preserved artwork: never erased and never painted. */
-      isArtwork?: boolean;
-      /** Detected per-bubble ink color from the original artwork; undefined uses the default. */
-      color?: string;
-      /** Outline color derived from the detected ink; undefined uses the default. */
-      strokeColor?: string;
+	      /** Preserved artwork: never erased and never painted. */
+	      isArtwork?: boolean;
+	      /** Detected per-bubble ink color from the original artwork; undefined uses the default. */
+	      color?: string;
+	      /** Outline color derived from the detected ink; undefined uses the default. */
+	      strokeColor?: string;
+	      /** True when `text` was reconstructed from pipeline-generated layout lines. */
+	      textFromGeneratedLines?: boolean;
     }>;
     error?: string;
   }>((resolve) => {
@@ -177,16 +179,17 @@ export async function requestStudioOcr(
     originalContourPoints: t.contourPoints,
     detectedWidth: t.width,
     detectedHeight: t.height,
-    // Absorbed noise fragments stay editable in Studio but do not double-paint.
-    isSkipped: t.isSkipped ?? false,
-    // Preserved artwork keeps its original ink; painting a translation over it would break the
-    // erase/draw pair the pipeline guarantees.
-    isArtwork: t.isArtwork ?? false,
-    // Detected per-bubble colors ride in from Studio OCR; the hardcoded pair
-    // stays as the fallback for older offscreen responses and failed detection.
-    color: t.color ?? '#000000',
-    strokeColor: t.strokeColor ?? '#ffffff',
-    strokeWidth: 2,
+	    // Absorbed noise fragments stay editable in Studio but do not double-paint.
+	    isSkipped: t.isSkipped ?? false,
+	    // Preserved artwork keeps its original ink; painting a translation over it would break the
+	    // erase/draw pair the pipeline guarantees.
+	    isArtwork: t.isArtwork ?? false,
+	    // Detected per-bubble colors ride in from Studio OCR; the hardcoded pair
+	    // stays as the fallback for older offscreen responses and failed detection.
+	    color: t.color ?? '#000000',
+	    strokeColor: t.strokeColor ?? '#ffffff',
+	    strokeWidth: 2,
+	    textFromGeneratedLines: t.textFromGeneratedLines,
     align: 'center',
     isVertical: t.isVertical ?? false,
     rotation: t.rotation ?? 0,
