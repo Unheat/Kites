@@ -1,6 +1,7 @@
 /**
  * Shared message types between Content, Background, and Offscreen contexts.
  */
+import { DEFAULT_OCR_TIER_ID } from './ocrTiers';
 import { DEFAULT_SFX_POLICY, type SfxPolicyId } from './sfx/sfxPolicy';
 export type MessageType = 
   | 'TRANSLATE_IMAGE'    // Content -> Background
@@ -300,7 +301,7 @@ export const DEFAULT_POPUP_STATE: PopupState = {
   activeEngineId: 'gg-translate',
   activeInpaintId: 'telea',
   activeColorId: 'none',
-  activeOcrId: 'v6-small',
+  activeOcrId: DEFAULT_OCR_TIER_ID,
   renderFontPresetId: 'comic',
   renderFontBold: false,
   renderFontItalic: false,

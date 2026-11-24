@@ -110,6 +110,9 @@ export async function requestStudioOcr(
 	      color?: string;
 	      /** Outline color derived from the detected ink; undefined uses the default. */
 	      strokeColor?: string;
+	      strokeWidth?: number;
+	      align?: 'left' | 'center' | 'right';
+	      italic?: boolean;
 	      /** True when `text` was reconstructed from pipeline-generated layout lines. */
 	      textFromGeneratedLines?: boolean;
     }>;
@@ -188,9 +191,10 @@ export async function requestStudioOcr(
 	    // stays as the fallback for older offscreen responses and failed detection.
 	    color: t.color ?? '#000000',
 	    strokeColor: t.strokeColor ?? '#ffffff',
-	    strokeWidth: 2,
+	    strokeWidth: t.strokeWidth ?? 2,
 	    textFromGeneratedLines: t.textFromGeneratedLines,
-    align: 'center',
+    align: t.align ?? 'center',
+    italic: t.italic ?? false,
     isVertical: t.isVertical ?? false,
     rotation: t.rotation ?? 0,
   }));

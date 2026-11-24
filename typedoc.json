@@ -23,7 +23,8 @@
   },
   "intentionallyNotExported": [
     "FontPickerDropdownProps",
-    "LamaProvider"
+    "LamaProvider",
+    "OCR_TIER_DEFINITIONS"
   ],
   "validation": {
     "notExported": true,

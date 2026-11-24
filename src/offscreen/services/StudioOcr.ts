@@ -14,6 +14,7 @@ import { precomputeStudioOcrLayouts } from './studioOcrTypeset';
 import { createPageBubbleOwnership, type PageBubbleOwnership } from './PageBubbleOwnership';
 import { analyzePageText } from './PageTextAnalysis';
 import { DEFAULT_SFX_POLICY, isPreservedArtwork, resolveSfxPolicyStrategy } from '../../shared/sfx/sfxPolicy';
+import { DEFAULT_OCR_TIER_ID } from '../../shared/ocrTiers';
 import type { BoxRect } from '../utils/bubbleExpansion';
 
 // Preserve Studio's minimum editable text-handle dimensions.
@@ -79,6 +80,12 @@ export interface StudioOcrResponse {
     color?: string;
     /** Outline color derived from the detected ink; undefined falls back to Studio defaults. */
     strokeColor?: string;
+    /** Outline thickness in pixels. */
+    strokeWidth?: number;
+    /** Horizontal alignment. */
+    align?: 'left' | 'center' | 'right';
+    /** Italic text. */
+    italic?: boolean;
     /** True when the region is artwork Studio keeps as ink: never painted, never translated. */
     isArtwork?: boolean;
     /** True when `text` was reconstructed from pipeline-generated layout lines. */
@@ -183,11 +190,12 @@ export async function runStudioOcr(
   const analysis = await analyzePageText({
     ocrManager: dependencies.getOcrManager(),
     imageBuffer,
-    ocrTier: payload.ocrEngineId || popupState.activeOcrId || 'v6-small',
+    ocrTier: payload.ocrEngineId || popupState.activeOcrId || DEFAULT_OCR_TIER_ID,
     ocrContext: {
       sourceLang: popupState.sourceLang !== 'auto' ? popupState.sourceLang : undefined,
       pageWidth: payload.width,
       pageHeight: payload.height,
+      sfxPolicy: popupState?.sfxPolicy ?? DEFAULT_SFX_POLICY,
     },
     ownership,
   });
@@ -218,7 +226,8 @@ export async function runStudioOcr(
   // Studio never paints artwork, so its text is never needed: translating it buys tokens for a
   // string that is discarded. The page pipeline decides the same boundary before dispatch, and both
   // read the one rule so a policy change cannot leave one of them paying for ink.
-  const studioArtworkStrategy = resolveSfxPolicyStrategy(DEFAULT_SFX_POLICY);
+  const studioSfxPolicy = popupState?.sfxPolicy ?? DEFAULT_SFX_POLICY;
+  const studioArtworkStrategy = resolveSfxPolicyStrategy(studioSfxPolicy);
   const artworkIndices = new Set(
     (result.artwork ?? [])
       .filter((item) => isPreservedArtwork(item.kind, studioArtworkStrategy))
@@ -251,9 +260,17 @@ export async function runStudioOcr(
   if (payload.inpaint !== false) {
     // OcrManager supplies surviving unmerged lines for precise masks. Never forward DBNet maskRawCanvas.
     // If blank regions were removed here, only mask retained renderable polygons.
-    const maskPolygons = regions.length === result.texts.length && result.rawPolygons?.length
-      ? result.rawPolygons
+    // Preserved artwork keeps its original ink, so exclude it from the erase mask the same way the
+    // page pipeline does. The artwork gate above already decided which indices are preserved.
+    const useRawPolygons = regions.length === result.texts.length && Boolean(result.rawPolygons?.length);
+    const maskCandidates = useRawPolygons
+      ? result.rawPolygons!
       : regions.map(region => region.polygon);
+    const maskPolygons = maskCandidates.filter((_, i) => {
+      if (useRawPolygons) return !artworkIndices.has(i);
+      const region = regions[i];
+      return region ? !artworkIndices.has(region.index) : true;
+    });
     if (!maskPolygons.every(isValidPolygon)) throw new Error('Studio OCR returned invalid inpaint polygons.');
     const backgroundBuffer = payload.backgroundPatchBase64 && payload.backgroundPatchBase64 !== payload.imagePatchBase64
       ? await readPatch(payload.backgroundPatchBase64)
@@ -371,12 +388,13 @@ export async function runStudioOcr(
       // Noise-guard absorbed fragments stay as editable dashed boxes in Studio
       // (StudioCanvas renders skipped objects without painting their text).
       isSkipped: bubbleSkipped[resolvedIndex] ?? false,
-      // Studio OCR runs the default preserve policy, so every artwork region keeps its ink and
-      // must not be painted by Studio either.
+      // Preserved artwork keeps its original ink. The resolved SFX policy is forwarded into OCR and
+      // applied to the artwork gate above, so translate-plainly sound effects are inpainted/translated
+      // while preserve keeps them as artwork.
       isArtwork: artworkIndices.has(resolvedIndex),
       rotation,
       color: detectedTextColors[resolvedIndex]?.textColor,
-      strokeColor: detectedTextColors[resolvedIndex]?.strokeColor,
+      strokeColor: popupState.renderFontStrokeDisabled ? 'transparent' : detectedTextColors[resolvedIndex]?.strokeColor,
     };
   });
     const typography = await precomputeStudioOcrLayouts(textObjects.map((object) => ({
@@ -384,7 +402,15 @@ export async function runStudioOcr(
       mode: object.typesetMode, isVertical: object.isVertical, contourPoints: object.contourPoints,
     })), popupState, (width, height) => createSafeCanvas(width, height)?.ctx ?? null);
     return { inpaintedPatchBase64, textObjects: textObjects.map((object, index) => ({
-      ...object, fontFamily: typography.fontFamily, bold: typography.bold, targetLang: typography.targetLang,
+      ...object,
+      fontFamily: typography.fontFamily,
+      bold: typography.bold,
+      italic: popupState.renderFontItalic ?? false,
+      align: popupState.renderFontAlignment && popupState.renderFontAlignment !== 'auto'
+        ? popupState.renderFontAlignment
+        : 'center',
+      strokeWidth: popupState.renderFontStrokeDisabled ? 0 : 2,
+      targetLang: typography.targetLang,
       ...(typography.layouts[index] ? { fontSize: typography.layouts[index]!.fontSize,
         lines: typography.layouts[index]!.lines, positionedLines: typography.layouts[index]!.positionedLines,
         // These lines are renderer output, so a later contour/caption resize may re-flow them.

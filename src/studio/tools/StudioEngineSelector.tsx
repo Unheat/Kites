@@ -3,6 +3,7 @@ import { ChevronDown, Check, Download, Globe, Lock } from 'lucide-react';
 import { studioStore, useStudioStore } from '../state/studioStore';
 import { INPAINT_TIER_CATALOG } from '../../shared/inpaintTiers';
 import { COLOR_TIER_CATALOG } from '../../shared/colorTiers';
+import { DEFAULT_OCR_TIER_ID, OCR_TIER_CATALOG } from '../../shared/ocrTiers';
 import { defaultGroupFor, orderEngines } from '../../shared/engineOrdering';
 
 export interface EngineOption {
@@ -17,18 +18,13 @@ export const INPAINT_ENGINE_OPTIONS: EngineOption[] = INPAINT_TIER_CATALOG as En
 
 export const COLOR_ENGINE_OPTIONS: EngineOption[] = COLOR_TIER_CATALOG as unknown as EngineOption[];
 
-export const OCR_ENGINE_OPTIONS: EngineOption[] = [
-  { id: 'v6-small', name: 'PaddleOCR v6 Small (Default)', tag: 'Recommended', isModel: true, sizeEstimate: '~4 MB' },
-  { id: 'v6-medium', name: 'PaddleOCR v6 Medium', tag: 'Higher Accuracy', isModel: true, sizeEstimate: '~8 MB' },
-  { id: 'v6-tiny', name: 'PaddleOCR v6 Tiny', tag: 'Ultra Fast', isModel: true, sizeEstimate: '~2 MB' },
-  { id: 'v5-mobile', name: 'PaddleOCR v5 Mobile', tag: 'Legacy v5', isModel: true, sizeEstimate: '~4 MB' },
-  { id: 'v5-server', name: 'PaddleOCR v5 Server', tag: 'Server Grade', isModel: true, sizeEstimate: '~20 MB' },
-  { id: 'v5-en-mobile', name: 'PaddleOCR v5 English Mobile', tag: 'English Tuned', isModel: true, sizeEstimate: '~4 MB' },
-  { id: 'v4-mobile', name: 'PaddleOCR v4 Mobile', tag: 'Legacy v4', isModel: true, sizeEstimate: '~4 MB' },
-  { id: 'v4-server', name: 'PaddleOCR v4 Server', tag: 'v4 Server', isModel: true, sizeEstimate: '~20 MB' },
-  { id: 'v3-mobile', name: 'PaddleOCR v3 Mobile', tag: 'Legacy v3', isModel: true, sizeEstimate: '~4 MB' },
-  { id: 'v3-japanese-mobile', name: 'PaddleOCR v3 Japanese Mobile', tag: 'Japanese Tuned', isModel: true, sizeEstimate: '~4 MB' },
-];
+export const OCR_ENGINE_OPTIONS: EngineOption[] = OCR_TIER_CATALOG.map((tier) => ({
+  id: tier.id,
+  name: tier.name,
+  tag: tier.tag,
+  isModel: tier.isModel,
+  sizeEstimate: tier.sizeEstimate,
+}));
 
 interface StudioEngineSelectorProps {
   category: 'inpaint' | 'ocr' | 'color';
@@ -60,7 +56,7 @@ export const StudioEngineSelector: React.FC<StudioEngineSelectorProps> = ({ cate
   const activeOption = options.find((o) => o.id === currentEngineId) || options[0];
 
   const defaultId =
-    category === 'inpaint' ? 'simple' : category === 'color' ? 'none' : 'v6-small';
+    category === 'inpaint' ? 'simple' : category === 'color' ? 'none' : DEFAULT_OCR_TIER_ID;
 
   // Same three-layer order as the popup dropdowns: default -> installed -> not installed.
   const orderedOptions = useMemo(

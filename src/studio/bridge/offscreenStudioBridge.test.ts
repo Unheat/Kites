@@ -81,4 +81,38 @@ describe('Studio OCR initial layout boundary', () => {
       borderRadius: 24, isRounded: true, bold: true, targetLang: 'de',
     });
   });
+
+  it('forwards typography fields and keeps legacy fallbacks for older responses', async () => {
+    vi.spyOn(chrome.runtime, 'sendMessage').mockImplementation((...args: any[]) => {
+      args[1]({
+        status: 'success',
+        inpaintedPatchBase64: 'data:image/png;base64,clean',
+        textObjects: [
+          {
+            id: 'styled', x: 0, y: 0, width: 100, height: 80, text: 'Styled', originalText: 'src',
+            italic: true, align: 'left', strokeWidth: 0, strokeColor: 'transparent',
+          },
+          {
+            id: 'legacy', x: 10, y: 10, width: 100, height: 80, text: 'Legacy', originalText: 'src',
+          },
+        ],
+      });
+    });
+
+    const result = await requestStudioOcr({ toDataURL: () => 'source' } as HTMLCanvasElement,
+      { x: 0, y: 0, width: 100, height: 80 });
+
+    expect(result.textObjects[0]).toMatchObject({
+      italic: true,
+      align: 'left',
+      strokeWidth: 0,
+      strokeColor: 'transparent',
+    });
+    expect(result.textObjects[1]).toMatchObject({
+      italic: false,
+      align: 'center',
+      strokeWidth: 2,
+      strokeColor: '#ffffff',
+    });
+  });
 });

@@ -25,7 +25,7 @@ Studio page tools share offscreen services with the main pipeline, but their req
 - Targeted repro suite: `npx vitest run src/studio/state/studioRouteSettings.test.ts src/offscreen/services/studioColorizeTier.test.ts src/studio/state/studioStore.hydration.test.ts src/studio/bridge/offscreenStudioBridge.test.ts src/studio/tools/ColorSettings.test.tsx` — 15 passed.
 - `npm run lint` — 58 pre-existing warnings, 0 errors.
 - `npm run docs:api` / `npm run docs:check` — pass (undocumented baseline unchanged).
-- `npm run build` — pending in this session.
+- `npm run build` — pass.
 
 ## Out of scope (stacked PR2)
 
