@@ -19,7 +19,7 @@ export interface OcrTierDefinition {
   readonly isModel: boolean;
   /** Approximate download size shown next to the name. */
   readonly sizeEstimate: string;
-  /** Whether the popup hides the tier behind its advanced list. */
+  /** Whether the offscreen registry marks the tier as advanced; mirrors `ocrRegistry` metadata. */
   readonly isAdvanced: boolean;
 }
 
