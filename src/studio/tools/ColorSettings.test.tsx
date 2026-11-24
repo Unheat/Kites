@@ -72,6 +72,23 @@ describe('ColorSettings Component', () => {
     expect(button).not.toBeNull();
   });
 
+  it('disables colorization when the disabled tier is selected', () => {
+    studioStore.setState({ selectedColorEngineId: 'none' });
+    act(() => {
+      root.render(
+        <ColorSettings
+          onColorize={vi.fn()}
+          isColorizing={false}
+          isPageColorized={false}
+        />
+      );
+    });
+
+    const colorizeBtn = Array.from(container.querySelectorAll('button'))
+      .find((button) => button.textContent?.includes('Colorize Manga Page'));
+    expect(colorizeBtn?.hasAttribute('disabled')).toBe(true);
+  });
+
   it('triggers onColorize when clicked', () => {
     const handleColorize = vi.fn();
     act(() => {

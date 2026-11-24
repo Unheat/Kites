@@ -2,6 +2,7 @@ import React from 'react';
 import { Palette, CheckCircle2, CircleDashed, Loader2 } from 'lucide-react';
 import { useStudioStore } from '../state/studioStore';
 import { StudioEngineSelector } from './StudioEngineSelector';
+import { resolveStudioColorTier } from '../../offscreen/services/studioColorizeTier';
 
 export interface ColorSettingsProps {
   onColorize?: () => void;
@@ -16,7 +17,8 @@ export const ColorSettings: React.FC<ColorSettingsProps> = ({
 }) => {
   const selectedColorId = useStudioStore((s) => s.selectedColorEngineId);
   const downloadedIds = useStudioStore((s) => s.downloadedModelIds);
-  const isModelReady = selectedColorId === 'none' || downloadedIds.includes(selectedColorId);
+  const resolvedColorTier = resolveStudioColorTier(selectedColorId, selectedColorId, selectedColorId);
+  const isModelReady = resolvedColorTier !== 'none' && downloadedIds.includes(resolvedColorTier);
 
   return (
     <div className="space-y-4 text-xs text-slate-200">

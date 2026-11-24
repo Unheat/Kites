@@ -35,6 +35,7 @@ import { createStudioOcrCrops } from './studioOcrCrop';
 import { StudioSourceSampler } from './StudioSourceSampler';
 import { ToolViewModePolicy } from './tools/ToolViewModePolicy';
 import { requestStudioInpaint, requestStudioOcr } from '../bridge/offscreenStudioBridge';
+import { resolveStudioOperationOverrides } from '../state/studioRouteSettings';
 import { computeRotatedBounds, getHandleCursor } from './transformMath';
 import { applyTextObjectUpdates, prepareInitialTextObject, CJK_CHARACTER_REGEX, FONT_SIZE_SLIDER_MAX, getTypesetMeasureContext, resetContourFitMemo } from './studioTypeset';
 import { unwrapWrappedText } from '../../offscreen/utils/typography';
@@ -81,12 +82,18 @@ interface ActiveTextGesture {
 export interface StudioCanvasProps {
   originalImage: HTMLImageElement | null;
   cleanedImage: HTMLImageElement | null;
+  jobId?: number;
 }
 
 export const StudioCanvas: React.FC<StudioCanvasProps> = ({
   originalImage,
   cleanedImage,
+  jobId,
 }) => {
+  const jobIdRef = useRef<number | undefined>(jobId);
+  useEffect(() => {
+    jobIdRef.current = jobId;
+  }, [jobId]);
   const containerRef = useRef<HTMLDivElement>(null);
   const spacerRef = useRef<HTMLDivElement>(null);
   const originalCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -106,7 +113,6 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
   const inpaintSettings = useStudioStore((s) => s.inpaintSettings);
   const ocrSettings = useStudioStore((s) => s.ocrSettings);
   const selectedInpaintEngineId = useStudioStore((s) => s.selectedInpaintEngineId);
-  const selectedOcrEngineId = useStudioStore((s) => s.selectedOcrEngineId);
   const imageLayers = useStudioStore((s) => s.imageLayers);
   const selectedImageLayerId = useStudioStore((s) => s.selectedImageLayerId);
   const appearance = useStudioStore((s) => s.appearance);
@@ -270,7 +276,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
         CanvasFurniture.drawSelectionFurniture(ctx, selectedObj, appearance.selectedBoxBorderColor);
       }
     }
-  }, [imageWidth, imageHeight, textObjects, imageLayers, selectedTextId, editingTextId, selectedImageLayerId, appearance, hideBoxes, viewMode]);
+  }, [imageWidth, imageHeight, textObjects, imageLayers, selectedTextId, selectedImageLayerId, appearance, hideBoxes, viewMode]);
 
   useEffect(() => {
     redrawOverlay();
@@ -1188,6 +1194,10 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
           paddedBbox,
           selectedInpaintEngineId
         );
+        if (jobIdRef.current !== jobId) {
+          console.log('[StudioCanvas] Page switched during inpaint; discarding stale result.');
+          return;
+        }
 
         // Option B (Torii-parity): Composite inpainted result through the user's stroke mask.
         // Only pixels directly underneath the circle or square brush strokes are updated on bgCtx,
@@ -1248,12 +1258,15 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
         const preOcrPatch = ocrSettings.inpaint
           ? BrushEngine.captureBoundingPatch(bgCtx, paddedBbox) : undefined;
         const result = await requestStudioOcr(crops.recognition, paddedBbox, {
-          ocrEngineId: selectedOcrEngineId,
-          inpaintEngineId: selectedInpaintEngineId,
+          ...resolveStudioOperationOverrides(studioStore.getState()),
           translate: ocrSettings.translate,
           inpaint: ocrSettings.inpaint,
           backgroundPatchBase64: ocrSettings.inpaint ? crops.background.toDataURL('image/png') : undefined,
         });
+        if (jobIdRef.current !== jobId) {
+          console.log('[StudioCanvas] Page switched during OCR; discarding stale result.');
+          return;
+        }
         if (result.textObjects.length === 0) {
           setOcrFeedback('No text found in the selected area. Try selecting the whole text line.');
           return;

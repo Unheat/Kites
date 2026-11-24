@@ -32,7 +32,12 @@ describe('Studio OCR initial layout boundary', () => {
       args[1](response);
     });
     const canvas = { toDataURL: () => 'data:image/png;base64,source' } as HTMLCanvasElement;
-    const result = await requestStudioOcr(canvas, { x: 3, y: 4, width: 150, height: 90 }, { translate });
+    const result = await requestStudioOcr(canvas, { x: 3, y: 4, width: 150, height: 90 }, {
+      translate,
+      ocrEngineId: 'v6-medium',
+      inpaintEngineId: 'telea',
+      translationEngineId: 'cloudflare-translate',
+    });
     expect(prepareInitialTextObject).toHaveBeenCalledOnce();
     expect(result.textObjects[0].lines).toEqual(['canonical', 'layout']);
     expect(result.textObjects[0].fontSize).toBe(15);
@@ -40,8 +45,25 @@ describe('Studio OCR initial layout boundary', () => {
     expect(result.textObjects[0].rotation).toBe(12);
     expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
       target: 'background', source: 'studio', request: true, type: 'STUDIO_OCR',
-      payload: expect.objectContaining({ translate }),
+      payload: expect.objectContaining({
+        translate,
+        ocrEngineId: 'v6-medium',
+        inpaintEngineId: 'telea',
+        translationEngineId: 'cloudflare-translate',
+      }),
     }), expect.any(Function));
+  });
+
+  it('preserves the generated-layout provenance marker from offscreen responses', async () => {
+    vi.spyOn(chrome.runtime, 'sendMessage').mockImplementation((...args: any[]) => {
+      args[1]({ status: 'success', inpaintedPatchBase64: 'data:image/png;base64,clean', textObjects: [{
+        id: 'generated', x: 0, y: 0, width: 100, height: 80, text: 'Ready', originalText: 'Prêt',
+        lines: ['Rea', 'dy'], textFromGeneratedLines: true,
+      }] });
+    });
+    const result = await requestStudioOcr({ toDataURL: () => 'source' } as HTMLCanvasElement,
+      { x: 0, y: 0, width: 100, height: 80 });
+    expect(result.textObjects[0].textFromGeneratedLines).toBe(true);
   });
 
   it('retains existing layout, curvature, and per-object editing preference from OCR responses', async () => {

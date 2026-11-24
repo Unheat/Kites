@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import { STORAGE_KEYS, type TypesetMode, DEFAULT_TYPESET_MODE } from '../../shared/constants';
+import type { PopupState } from '../../shared/types';
 import type {
   BrushShape,
   EditorAppearanceSettings,
@@ -369,21 +370,53 @@ class StudioStore {
   };
 
   /**
-   * Hydrates engine selections from popupState in chrome.storage.local.
+   * Copies the normalized popup engine tiers into Studio state.
+   *
+   * @param state - State returned by the background boundary, if available.
+   */
+  private applyPopupState = (state: Partial<PopupState> | undefined): void => {
+    if (!state) return;
+    if (!this.state.syncWithGlobal) return;
+    this.setState({
+      selectedInpaintEngineId: state.activeInpaintId ?? this.state.selectedInpaintEngineId,
+      selectedOcrEngineId: state.activeOcrId ?? this.state.selectedOcrEngineId,
+      selectedTranslationEngineId: state.activeEngineId ?? this.state.selectedTranslationEngineId,
+      selectedColorEngineId: state.activeColorId ?? this.state.selectedColorEngineId,
+    });
+  };
+
+  /**
+   * Hydrates engine selections from the background-normalized popup state.
+   *
+   * The background owns defaults and legacy migrations (`GET_POPUP_STATE`); reading
+   * `chrome.storage.local` directly would reintroduce raw legacy ids here.
    */
   public hydrateFromStorage = (): void => {
-    if (typeof chrome === 'undefined' || !chrome.storage?.local) return;
-    chrome.storage.local.get(STORAGE_KEYS.POPUP_STATE, (data) => {
-      const state = data[STORAGE_KEYS.POPUP_STATE] as any;
-      if (state) {
-        this.setState({
-          selectedInpaintEngineId: state.activeInpaintId || this.state.selectedInpaintEngineId,
-          selectedOcrEngineId: state.activeOcrId || this.state.selectedOcrEngineId,
-          selectedTranslationEngineId: state.activeEngineId || this.state.selectedTranslationEngineId,
-          selectedColorEngineId: state.activeColorId || this.state.selectedColorEngineId,
-        });
-      }
+    if (typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) return;
+    chrome.runtime.sendMessage({ type: 'GET_POPUP_STATE' }, (state?: Partial<PopupState>) => {
+      if (chrome.runtime.lastError || !state) return;
+      this.applyPopupState(state);
     });
+  };
+
+  /**
+   * Keeps Studio selections synchronized with popup edits while the editor stays open.
+   *
+   * @returns Unsubscribe function that removes the storage listener.
+   */
+  public subscribeToGlobalState = (): (() => void) => {
+    if (typeof chrome === 'undefined' || !chrome.storage?.onChanged) {
+      this.hydrateFromStorage();
+      return () => undefined;
+    }
+    const handleChange = (changes: { [key: string]: chrome.storage.StorageChange }, areaName: string): void => {
+      if (areaName === 'local' && changes[STORAGE_KEYS.POPUP_STATE]) {
+        this.hydrateFromStorage();
+      }
+    };
+    chrome.storage.onChanged.addListener(handleChange);
+    this.hydrateFromStorage();
+    return () => chrome.storage.onChanged.removeListener(handleChange);
   };
 }
 
