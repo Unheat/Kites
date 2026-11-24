@@ -13,6 +13,7 @@ import { db, type TranslationJob, type ImageRecord, type TextBlock } from '../..
 import { useStudioStore } from '../state/studioStore';
 import { RENDER_FONT_PRESETS } from '../../shared/renderFontPresets';
 import { COLOR_TIER_CATALOG } from '../../shared/colorTiers';
+import { OCR_TIER_CATALOG } from '../../shared/ocrTiers';
 
 export interface PageInfoSettingsProps {
   jobId?: number;
@@ -31,16 +32,9 @@ interface PageData {
  * @returns Formatted label.
  */
 function resolveOcrLabel(id?: string): string {
-  switch (id) {
-    case 'v6-small':
-      return 'Paddle OCR v6 Small';
-    case 'v6-large':
-      return 'Paddle OCR v6 Large';
-    case 'manga-ocr':
-      return 'Manga-OCR (ViT)';
-    default:
-      return id || 'Paddle OCR v6';
-  }
+  const tier = OCR_TIER_CATALOG.find((entry) => entry.id === id);
+  if (tier) return tier.name.replace(/ \(Default\)$/i, '');
+  return id || 'Paddle OCR';
 }
 
 /**

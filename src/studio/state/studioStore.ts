@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import { STORAGE_KEYS, type TypesetMode, DEFAULT_TYPESET_MODE } from '../../shared/constants';
 import type { PopupState } from '../../shared/types';
+import { DEFAULT_OCR_TIER_ID } from '../../shared/ocrTiers';
 import type {
   BrushShape,
   EditorAppearanceSettings,
@@ -177,7 +178,7 @@ const initialState: StudioState = {
 
   syncWithGlobal: true,
   selectedInpaintEngineId: 'lama-manga',
-  selectedOcrEngineId: 'v6-small',
+  selectedOcrEngineId: DEFAULT_OCR_TIER_ID,
   selectedTranslationEngineId: 'gg-translate',
   selectedColorEngineId: 'manga-colorization-v2',
   modelDownloads: {},

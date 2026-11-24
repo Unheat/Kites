@@ -927,10 +927,10 @@ export default function EngineSelectionPanel({ state, updateState }: EngineSelec
       <div className="flex flex-col gap-1.5">
         <div className="flex items-center gap-1.5 mb-1">
           <h2 className="text-sm font-medium">OCR Engine</h2>
-          <HelpTooltip
-            size="md"
-            content="Select PaddleOCR text detection and recognition model tier. v6-small is fast and lightweight. Higher tiers provide enhanced precision for specialized scripts."
-          />
+              <HelpTooltip
+                size="md"
+                content={`Select PaddleOCR text detection and recognition model tier. ${DEFAULT_OCR_TIER_ID} is the default balanced tier. Higher tiers provide enhanced precision for specialized scripts.`}
+              />
         </div>
 
         <div className="relative flex flex-col">

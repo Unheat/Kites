@@ -83,7 +83,7 @@ describe('Studio OCR independent optional steps', () => {
     // Balloon ownership is resolved inside the OCR stage, so the client options travel as a fifth
     // argument (undefined here: this fixture has no bubble tier enabled).
     expect(mocks.processImage.mock.calls[0].slice(0, 3)).toEqual([originalBuffer, 'v6-medium', {
-      sourceLang: 'ja', pageWidth: 100, pageHeight: 80,
+      sourceLang: 'ja', pageWidth: 100, pageHeight: 80, sfxPolicy: 'preserve',
     }]);
     expect(mocks.processTranslation).toHaveBeenCalledWith(['こんにちは'], 'ja', 'vi', undefined, popupState);
     expect(mocks.eraseText).toHaveBeenCalledWith(originalBuffer, rawPolygons, 'telea');
@@ -322,21 +322,45 @@ describe('Studio OCR empty detections and failure propagation', () => {
 });
 
 describe('Studio OCR popup policy and typography parity', () => {
-  it('honours the configured SFX policy instead of the hardcoded preserve default', async () => {
+  it('forwards sfxPolicy and inpaints sound effects under translate-plainly', async () => {
     mocks.getPopupState.mockResolvedValue({ ...popupState, sfxPolicy: 'translate-plainly' });
+    const speechPolygon = polygon;
+    const sfxPolygon = [{ x: 70, y: 5 }, { x: 95, y: 5 }, { x: 95, y: 30 }, { x: 70, y: 30 }];
     mocks.processImage.mockResolvedValue({
-      texts: ['ドン'],
-      polygons: [polygon],
-      boxes: [{ x: 0, y: 0, w: 60, h: 60 }],
-      rawPolygons: [],
-      artwork: [{ index: 0, kind: 'sound-effect' }],
+      texts: ['こんにちは', 'ドン'],
+      polygons: [speechPolygon, sfxPolygon],
+      boxes: [{ x: 10, y: 10, w: 55, h: 40 }, { x: 70, y: 5, w: 25, h: 25 }],
+      rawPolygons: [speechPolygon, sfxPolygon],
+      artwork: [{ index: 1, kind: 'sound-effect' }],
+    });
+    mocks.processTranslation.mockResolvedValue(['Xin chào', 'ĐÙNG']);
+
+    const response = await runStudioOcr(payload, mocks.dependencies);
+
+    expect(mocks.processImage.mock.calls[0][2]).toMatchObject({ sfxPolicy: 'translate-plainly' });
+    expect(mocks.processTranslation).toHaveBeenCalledWith(['こんにちは', 'ドン'], 'ja', 'vi', undefined, expect.anything());
+    expect(mocks.eraseText).toHaveBeenCalledWith(originalBuffer, [speechPolygon, sfxPolygon], 'telea');
+    expect(response.textObjects[1]).toMatchObject({ originalText: 'ドン', text: 'ĐÙNG', isArtwork: false });
+  });
+
+  it('forwards sfxPolicy and keeps preserved sound effects out of eraseText under preserve', async () => {
+    mocks.getPopupState.mockResolvedValue({ ...popupState, sfxPolicy: 'preserve' });
+    const speechPolygon = polygon;
+    const sfxPolygon = [{ x: 70, y: 5 }, { x: 95, y: 5 }, { x: 95, y: 30 }, { x: 70, y: 30 }];
+    mocks.processImage.mockResolvedValue({
+      texts: ['こんにちは', 'ドン'],
+      polygons: [speechPolygon, sfxPolygon],
+      boxes: [{ x: 10, y: 10, w: 55, h: 40 }, { x: 70, y: 5, w: 25, h: 25 }],
+      rawPolygons: [speechPolygon, sfxPolygon],
+      artwork: [{ index: 1, kind: 'sound-effect' }],
     });
 
-    const response = await runStudioOcr({ ...payload, inpaint: false }, mocks.dependencies);
+    const response = await runStudioOcr(payload, mocks.dependencies);
 
-    // A "translate plainly" page treats sound effects as language, matching the page pipeline.
-    expect(mocks.processTranslation).toHaveBeenCalledWith(['ドン'], 'ja', 'vi', undefined, expect.anything());
-    expect(response.textObjects[0]).toMatchObject({ originalText: 'ドン', isArtwork: false });
+    expect(mocks.processImage.mock.calls[0][2]).toMatchObject({ sfxPolicy: 'preserve' });
+    expect(mocks.processTranslation).toHaveBeenCalledWith(['こんにちは'], 'ja', 'vi', undefined, expect.anything());
+    expect(mocks.eraseText).toHaveBeenCalledWith(originalBuffer, [speechPolygon], 'telea');
+    expect(response.textObjects[1]).toMatchObject({ text: 'ドン', originalText: 'ドン', isArtwork: true });
   });
 
   it('still preserves bare fragments when the policy translates sound effects', async () => {
@@ -345,13 +369,15 @@ describe('Studio OCR popup policy and typography parity', () => {
       texts: ['ドン'],
       polygons: [polygon],
       boxes: [{ x: 0, y: 0, w: 60, h: 60 }],
-      rawPolygons: [],
+      rawPolygons: [polygon],
       artwork: [{ index: 0, kind: 'fragment' }],
     });
 
-    const response = await runStudioOcr({ ...payload, inpaint: false }, mocks.dependencies);
+    const response = await runStudioOcr(payload, mocks.dependencies);
 
+    expect(mocks.processImage.mock.calls[0][2]).toMatchObject({ sfxPolicy: 'translate-plainly' });
     expect(mocks.processTranslation).not.toHaveBeenCalled();
+    expect(mocks.eraseText).toHaveBeenCalledWith(originalBuffer, [], 'telea');
     expect(response.textObjects[0]).toMatchObject({ text: 'ドン', isArtwork: true });
   });
 
