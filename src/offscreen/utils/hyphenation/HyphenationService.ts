@@ -5,6 +5,8 @@
 
 import {
   HYPHENATION_DICTIONARY_MAP,
+  HYPHEN_MAX_WORD_LENGTH,
+  HYPHEN_MIN_LETTERS,
   HYPHEN_MIN_SIDE,
   INDIC_SYLLABLE_LANGS,
   VOWEL_SYLLABLE_LANGS,
@@ -15,7 +17,7 @@ import {
   syllablesFromPoints,
 } from './LiangEngine';
 import { indicAksharaPoints, vowelPatternPoints } from './syllableRules';
-import { hyphenation_lang_from_tag } from './hypherCompat';
+import { getHypherBounds, hyphenation_lang_from_tag } from './hypherCompat';
 import { HyphenationDataStore } from './HyphenationDataStore';
 import { HYPHER_TRIE_LOADERS } from './hypherData';
 import { hasUsablePatterns, isPlausibleHypherTrie } from './hyphenationValidation';
@@ -67,8 +69,10 @@ export class HyphenationService {
   }
 
   /**
-   * Maps a source or target language code to its canonical legacy Liang dictionary filename.
-   * Signature preserved for existing XianScan/auto-balloon callers.
+   * Maps a source or target language code to its legacy Liang dictionary filename.
+   * After the hypher unification only the languages with no vendored trie
+   * (id, ms, ro) remain dictionary-backed; all other languages resolve through
+   * `resolveHypherKey` instead. Signature preserved for existing callers.
    *
    * @param lang - ISO 639-1 or composite language code (e.g. 'en', 'es-419', 'pt-BR').
    * @returns Dictionary filename without extension, or undefined if not dictionary-backed.
@@ -93,27 +97,27 @@ export class HyphenationService {
 
   /**
    * Checks whether the hyphenation data for a language is ready for synchronous
-   * queries. Rule-class languages resolve through the hypher trie when one is
-   * vendored for them; languages without trie data (ne, az, uz) fall back to the
-   * syllable rules and are always ready. Keep this precedence identical to
-   * {@link findHyphenationPoints}.
+   * queries. Any language with a vendored hypher trie waits for that trie;
+   * rule-fallback languages without trie data (ne, az, uz) are always ready;
+   * remaining languages wait for their legacy dictionary. Keep this precedence
+   * identical to {@link findHyphenationPoints}.
    *
    * @param lang - Target language code.
-   * @returns True if the backing dictionary/trie is cached or not required.
+   * @returns True if the backing trie/dictionary is cached or not required.
    */
   public isLoaded(lang: string): boolean {
     const baseLang = (lang || 'en').split('-')[0].toLowerCase();
 
+    const trieKey = this.resolveHypherKey(baseLang);
+    if (trieKey && HYPHER_TRIE_LOADERS[trieKey]) {
+      return this.data.hypherTrieCache.has(trieKey);
+    }
     if (INDIC_SYLLABLE_LANGS.has(baseLang) || VOWEL_SYLLABLE_LANGS.has(baseLang)) {
-      const trieKey = this.resolveHypherKey(baseLang);
-      if (trieKey && HYPHER_TRIE_LOADERS[trieKey]) {
-        return this.data.hypherTrieCache.has(trieKey);
-      }
       return true;
     }
 
     const dictName = this.resolveDictionaryName(lang);
-    if (!dictName) return true; // Rule fallback or CJK needs no dictionary
+    if (!dictName) return true; // No-data languages (CJK, unknown) need no dictionary
     return this.data.patternsCache.has(dictName);
   }
 
@@ -134,7 +138,7 @@ export class HyphenationService {
   /**
    * Manually registers raw pattern text into the in-memory cache (legacy Liang format).
    *
-   * @param dictName - Target dictionary key (e.g. 'en_US', 'es').
+   * @param dictName - Target dictionary key (e.g. 'id_ID', 'ro_RO').
    * @param text - Raw Liang pattern text content.
    */
   public registerPatterns(dictName: string, text: string): void {
@@ -173,14 +177,20 @@ export class HyphenationService {
 
   /**
    * Computes legal hyphenation slice points for a word in the specified language.
-   * Dispatch policy: rule-class languages with vendored hypher tries resolve
-   * through the curated TeX patterns (both wrap routes share one engine);
-   * rule-class languages without trie data use the syllable rules fallback;
-   * remaining languages use the legacy Liang dictionary.
+   * Dispatch policy: any language with a vendored hypher trie resolves through
+   * the curated TeX patterns with the same per-language bounds the contour route
+   * uses, so a word splits identically no matter which wrap route renders it.
+   * Rule-class languages without trie data (ne, az, uz) use the syllable rules
+   * fallback; the remaining languages (id, ms, ro) use the legacy Liang
+   * dictionary. The comic-lettering length gates (min letters / max word) apply
+   * on the trie path exactly as on the dict path, so words under 6 letters stay
+   * whole even though the contour route gates at its own caller instead.
    *
    * @param word - Raw alphabetic token.
    * @param targetLang - Language of the word (default: 'en').
-   * @param minSide - Minimum characters required on either side of the hyphen.
+   * @param minSide - Minimum characters required on either side of the hyphen
+   *                  (governs the syllable-rules and dictionary paths; the trie
+   *                  path uses the language's hypher bounds for route parity).
    * @returns Array of character slice offsets where a hyphen may be inserted.
    */
   public findHyphenationPoints(
@@ -196,9 +206,9 @@ export class HyphenationService {
     // Data-backed languages must not memoize "no points" before the data is ready.
     // Prior defect: an early lookup cached [] forever, so a later successful load
     // never took effect for that word. Rule-fallback languages are always ready.
-    const ruleClass = INDIC_SYLLABLE_LANGS.has(baseLang) || VOWEL_SYLLABLE_LANGS.has(baseLang);
-    const trieKey = ruleClass ? this.resolveHypherKey(baseLang) : undefined;
+    const trieKey = this.resolveHypherKey(baseLang);
     const trieCapable = trieKey !== undefined && HYPHER_TRIE_LOADERS[trieKey] !== undefined;
+    const ruleClass = INDIC_SYLLABLE_LANGS.has(baseLang) || VOWEL_SYLLABLE_LANGS.has(baseLang);
     const cacheable = trieCapable
       ? this.data.hypherTrieCache.has(trieKey)
       : ruleClass
@@ -207,9 +217,15 @@ export class HyphenationService {
 
     let points: number[] = [];
 
-    // 1. Rule-class languages with vendored hypher tries: curated TeX patterns.
+    // 1. Languages with vendored hypher tries: curated TeX patterns, per-language
+    //    bounds, identical to the contour route.
     if (trieCapable) {
-      points = findContourHyphenationPoints(this.data.hypherTrieCache, word, baseLang, minSide, minSide);
+      if (!word || word.length < HYPHEN_MIN_LETTERS || word.length > HYPHEN_MAX_WORD_LENGTH) {
+        points = [];
+      } else {
+        const bounds = getHypherBounds(baseLang);
+        points = findContourHyphenationPoints(this.data.hypherTrieCache, word, baseLang, bounds.left, bounds.right);
+      }
     } else if (INDIC_SYLLABLE_LANGS.has(baseLang)) {
       // 2a. Indic languages without trie data (Nepali) - akshara rules
       points = indicAksharaPoints(word, minSide);
@@ -217,7 +233,7 @@ export class HyphenationService {
       // 2b. Vowel-harmonic languages without trie data (az, uz) - vowel rules
       points = vowelPatternPoints(word, baseLang, minSide);
     } else {
-      // 3. Dictionary-backed Liang engine (legacy policy, unchanged)
+      // 3. Dict-only languages (id, ms, ro) - legacy Liang engine
       const dictName = this.resolveDictionaryName(targetLang);
       if (dictName) {
         const patterns = this.data.patternsCache.get(dictName);
