@@ -7,7 +7,7 @@
  */
 
 import { syllables } from './hyphenation';
-import { INSERTED_HYPHEN } from './typography/textUnwrap';
+import { WRAP_HYPHEN_MARKER } from './typography/lineJoin';
 
 /**
  * Rectangular word wrapper for flat caption/narration boxes or zero-strength shapes.
@@ -39,11 +39,11 @@ export function wrapRectangular(
         for (let s = 0; s < syls.length; s++) {
           const isLast = s === syls.length - 1;
           const piece = syls[s] + (isLast ? trailingPunct : '');
-          const candidate = accum + piece + (isLast ? '' : INSERTED_HYPHEN);
+          const candidate = accum + piece + (isLast ? '' : WRAP_HYPHEN_MARKER);
           if (measure(candidate) <= targetWidth || !accum) {
             accum += syls[s] + (isLast ? trailingPunct : '');
           } else {
-            lines.push(accum + INSERTED_HYPHEN);
+            lines.push(accum + WRAP_HYPHEN_MARKER);
             accum = piece;
           }
         }

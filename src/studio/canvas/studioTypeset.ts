@@ -1,7 +1,7 @@
 import { measureDefaultLayout } from '../../offscreen/utils/cotransDefaultRenderer';
 import { generateBubbleContour, wrapTextContour, MINIMUM_READABLE_FONT_SIZE } from '../../offscreen/utils/contourTypeset';
 import { wrapRectangular } from '../../offscreen/utils/ellipseTypeset';
-import { unwrapWrappedText } from '../../offscreen/utils/typography';
+import { unwrapSoftLines } from '../../offscreen/utils/typography';
 import type { TypesetMode } from '../../shared/constants';
 import type { TextObject } from '../types';
 import { recordGeneratedLayout } from '../state/layoutGenerations';
@@ -22,7 +22,7 @@ type TypesetStyle = Pick<TextObject, 'bold' | 'italic' | 'letterSpacing' | 'line
  * @returns Source text safe for the chosen engine.
  */
 function resolveTypesetSource(text: string, style: Pick<TextObject, 'textFromGeneratedLines'>): string {
-  return style.textFromGeneratedLines ? unwrapWrappedText(text) : text;
+  return style.textFromGeneratedLines ? unwrapSoftLines(text) : text;
 }
 
 /** Small boxes cannot reliably run the fitting engine. */
@@ -561,8 +561,8 @@ export function recalculateBlockTypeset(
         ? style.lines.map((line) => getTypesetDisplayText(line, style))
         : null;
       const linesMatchText = suppliedLines !== null
-        && unwrapWrappedText(suppliedLines.join('\n')).toLocaleLowerCase()
-          === unwrapWrappedText(text).toLocaleLowerCase();
+        && unwrapSoftLines(suppliedLines.join('\n')).toLocaleLowerCase()
+          === unwrapSoftLines(text).toLocaleLowerCase();
       const structuredLines = linesMatchText
         ? suppliedLines
         : (!style.textFromGeneratedLines && sourceText.includes('\n')
@@ -589,7 +589,7 @@ export function recalculateBlockTypeset(
       // older Studio OCR path forgot the provenance marker. Bubble Contour must re-break those
       // words on resize instead of treating the previous line breaks as authored.
       const sourceText = style.lines?.length
-        ? unwrapWrappedText(text)
+        ? unwrapSoftLines(text)
         : resolveTypesetSource(text, style);
       const contour = (style.contourPoints && style.contourPoints.length >= 3)
         ? style.contourPoints
@@ -641,7 +641,7 @@ export function recalculateBlockTypeset(
     const isList = /^\s*[-*•\d+.]/m.test(text);
   // Marker-aware unwrapper rejoins soft line-break hyphens for the existing Auto
   // Balloon route. Authored mandatory-break handling is scoped to contour/simple.
-  const unhyphenated = unwrapWrappedText(text);
+  const unhyphenated = unwrapSoftLines(text);
   const normalizedText = isList || unhyphenated.includes('\n\n')
     ? unhyphenated
     : unhyphenated.replace(/\r?\n/g, ' ').replace(/\s+/g, ' ').trim();

@@ -1,4 +1,4 @@
-import { HyphenationService, INSERTED_HYPHEN } from './hyphenation';
+import { HyphenationService, WRAP_HYPHEN_MARKER } from './hyphenation';
 
 /**
  * typesetLayout.ts
@@ -229,7 +229,7 @@ export function wrapText(
       let chosenSplit = -1;
       for (let i = points.length - 1; i >= 0; i--) {
         const p = points[i];
-        const candHead = curStem[p - 1] === '-' ? curStem.slice(0, p) : `${curStem.slice(0, p)}${INSERTED_HYPHEN}`;
+        const candHead = curStem[p - 1] === '-' ? curStem.slice(0, p) : `${curStem.slice(0, p)}${WRAP_HYPHEN_MARKER}`;
         if (ctx.measureText(candHead).width <= maxWidth) {
           chosenSplit = p;
           break;
@@ -237,7 +237,7 @@ export function wrapText(
       }
 
       if (chosenSplit > 0) {
-        const candHead = curStem[chosenSplit - 1] === '-' ? curStem.slice(0, chosenSplit) : `${curStem.slice(0, chosenSplit)}${INSERTED_HYPHEN}`;
+        const candHead = curStem[chosenSplit - 1] === '-' ? curStem.slice(0, chosenSplit) : `${curStem.slice(0, chosenSplit)}${WRAP_HYPHEN_MARKER}`;
         heads.push(candHead);
         current = curStem.slice(chosenSplit) + curPunct;
         continue;
@@ -252,7 +252,7 @@ export function wrapText(
         break;
       }
       const prefix = curStem.slice(0, k);
-      heads.push(prefix.endsWith('-') || prefix.endsWith(INSERTED_HYPHEN) ? prefix : `${prefix}${INSERTED_HYPHEN}`);
+      heads.push(prefix.endsWith('-') || prefix.endsWith(WRAP_HYPHEN_MARKER) ? prefix : `${prefix}${WRAP_HYPHEN_MARKER}`);
       current = curStem.slice(k) + curPunct;
     }
     return { head: heads, tail: current };
@@ -320,7 +320,7 @@ export function wrapText(
         }
       } else {
         const isPurePunct = LONE_PUNCT.test(word);
-        const isHyphenEnd = current.endsWith('-') || current.endsWith(INSERTED_HYPHEN);
+        const isHyphenEnd = current.endsWith('-') || current.endsWith(WRAP_HYPHEN_MARKER);
         const candidate = isHyphenEnd || isPurePunct ? `${current}${word}` : `${current} ${word}`;
         if (ctx.measureText(candidate).width <= (isPurePunct ? maxWidth * 1.15 : maxWidth)) {
           current = candidate;
@@ -670,7 +670,7 @@ export function fitFontSizeWithLines(
           let segMax = 0;
           let prev = 0;
           for (const p of points) {
-            const seg = stem[p - 1] === '-' ? stem.slice(prev, p) : `${stem.slice(prev, p)}${INSERTED_HYPHEN}`;
+            const seg = stem[p - 1] === '-' ? stem.slice(prev, p) : `${stem.slice(prev, p)}${WRAP_HYPHEN_MARKER}`;
             segMax = Math.max(segMax, mCtx.measureText(seg).width);
             prev = p;
           }
@@ -685,7 +685,7 @@ export function fitFontSizeWithLines(
       const lines = reflowText(mCtx, text, maxW, targetLang);
       const lineH = mid * LINE_HEIGHT;
       const allLinesFitW = lines.every((l) => mCtx.measureText(l).width <= maxW + 0.5);
-      const hasNoHyphenBreaks = lines.every((l) => (!l.endsWith('-') && !l.endsWith(INSERTED_HYPHEN)) || text.includes(l));
+      const hasNoHyphenBreaks = lines.every((l) => (!l.endsWith('-') && !l.endsWith(WRAP_HYPHEN_MARKER)) || text.includes(l));
       if (allLinesFitW && lines.length * lineH <= maxH && hasNoHyphenBreaks) {
         cleanBest = mid;
         foundClean = true;
@@ -760,7 +760,7 @@ export function fitFontSizeWithLines(
     const lines = reflowText(mCtx, text, maxW, targetLang);
     const lineH = mid * LINE_HEIGHT;
     const allLinesFitW = lines.every((l) => mCtx.measureText(l).width <= maxW + 0.5);
-    const hasNoHyphenBreaks = lines.every((l) => (!l.endsWith('-') && !l.endsWith(INSERTED_HYPHEN)) || text.includes(l));
+    const hasNoHyphenBreaks = lines.every((l) => (!l.endsWith('-') && !l.endsWith(WRAP_HYPHEN_MARKER)) || text.includes(l));
     if (allLinesFitW && lines.length * lineH <= maxH && hasNoHyphenBreaks) {
       consider(mid, lines);
       lo = mid + 1;

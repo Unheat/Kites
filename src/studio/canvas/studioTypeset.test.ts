@@ -200,7 +200,7 @@ describe('Studio Algorithmic Typeset & Line Reflow', () => {
     expect(contourJoined).toContain('community');
   });
 
-  it('un-hyphenates INSERTED_HYPHEN marker splits when box is widened in Auto Balloon mode', () => {
+  it('un-hyphenates WRAP_HYPHEN_MARKER marker splits when box is widened in Auto Balloon mode', () => {
     // Regression: the Balanced Fit route used to run a lowercase-only regex that missed
     // the Word Joiner marker, letting wrapText glue "Every-\u2060" + "one" into a
     // permanently hyphenated "Every-one" on a single line after widening.

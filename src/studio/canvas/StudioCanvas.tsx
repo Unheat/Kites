@@ -38,7 +38,7 @@ import { requestStudioInpaint, requestStudioOcr } from '../bridge/offscreenStudi
 import { resolveStudioOperationOverrides } from '../state/studioRouteSettings';
 import { computeRotatedBounds, getHandleCursor } from './transformMath';
 import { applyTextObjectUpdates, prepareInitialTextObject, CJK_CHARACTER_REGEX, FONT_SIZE_SLIDER_MAX, getTypesetMeasureContext, resetContourFitMemo } from './studioTypeset';
-import { unwrapWrappedText } from '../../offscreen/utils/typography';
+import { unwrapSoftLines } from '../../offscreen/utils/typography';
 import {
   canUseContourEditorGeometry, charIndexFromPoint, computeContourEditorGeometry,
   type ContourEditorGeometry,
@@ -1608,7 +1608,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
           // editor value's lines no longer match the placements (e.g. healed hyphens).
           const rawEditorValue =
             (!isVerticalMode && !editingObj.text.includes('\n') && editingObj.lines && editingObj.lines.length > 1)
-              ? unwrapWrappedText(editingObj.lines.join('\n'))
+              ? unwrapSoftLines(editingObj.lines.join('\n'))
               : editingObj.text;
           const measureCtx = getTypesetMeasureContext();
           let contourGeometry: ContourEditorGeometry | null = null;
@@ -1677,7 +1677,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
                   (!isVerticalMode && !editingObj.text.includes('\n') && editingObj.lines && editingObj.lines.length > 1)
                     // Heal typesetter hyphen markers so finishing the edit never bakes
                     // line-wrap syllable breaks into the canonical text.
-                    ? unwrapWrappedText(editingObj.lines.join('\n'))
+                    ? unwrapSoftLines(editingObj.lines.join('\n'))
                     : editingObj.text
                 }
                 onChange={(e) => handleInlineTextChange(e.target.value)}

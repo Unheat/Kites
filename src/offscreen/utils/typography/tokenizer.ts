@@ -3,7 +3,7 @@
  * Tokenizes translated dialogue into typographic units with script-aware clustering and linguistic penalties.
  */
 
-import { isNoSpaceScriptChar, NO_LINE_START_RE, OPENING_MARK_RE } from './kinsokuShori';
+import { isContinuousScriptChar, isLineStartForbidden, isOpeningMark } from './lineBreakRules';
 
 /** Penalty added when breaking mid-sentence across comma, colon, semicolon, or dash. */
 const COMMA_BREAK_PENALTY = 20.0;
@@ -24,7 +24,7 @@ const DEFAULT_WORD_BREAK_PENALTY = 100.0;
  * @returns Array of cohesive word tokens.
  */
 export function tokenizeDialogue(text: string): string[] {
-  const hasNoSpaceScript = Array.from(text).some(isNoSpaceScriptChar);
+  const hasNoSpaceScript = Array.from(text).some(isContinuousScriptChar);
 
   if (hasNoSpaceScript) {
     let rawSegments: string[] = [];
@@ -42,7 +42,7 @@ export function tokenizeDialogue(text: string): string[] {
     if (rawSegments.length === 0) {
       let currentWord = '';
       for (const char of text) {
-        if (isNoSpaceScriptChar(char)) {
+        if (isContinuousScriptChar(char)) {
           if (currentWord) rawSegments.push(currentWord);
           rawSegments.push(char);
           currentWord = '';
@@ -58,7 +58,7 @@ export function tokenizeDialogue(text: string): string[] {
 
     const bound: string[] = [];
     for (const seg of rawSegments) {
-      if (bound.length > 0 && (NO_LINE_START_RE.test(seg) || OPENING_MARK_RE.test(bound[bound.length - 1]))) {
+      if (bound.length > 0 && (isLineStartForbidden(seg) || isOpeningMark(bound[bound.length - 1]))) {
         bound[bound.length - 1] += seg;
       } else {
         bound.push(seg);
@@ -72,7 +72,7 @@ export function tokenizeDialogue(text: string): string[] {
 
   for (let i = 0; i < words.length; i++) {
     const w = words[i];
-    if (NO_LINE_START_RE.test(w) && tokens.length > 0 && w.length <= 2) {
+    if (isLineStartForbidden(w) && tokens.length > 0 && w.length <= 2) {
       tokens[tokens.length - 1] += ` ${w}`;
     } else {
       tokens.push(w);
