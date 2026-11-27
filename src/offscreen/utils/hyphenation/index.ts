@@ -4,7 +4,7 @@
 
 export * from './types';
 export * from './LiangEngine';
-export * from './RuleBasedEngine';
+export * from './syllableRules';
 export * from './HyphenationService';
 export * from './hypherCompat';
 
