@@ -175,7 +175,7 @@ Koharu distinguishes the original automatic analysis region from authored geomet
 
 - `engines/typeset/`: strategy interface/factory and three concrete strategies.
 - `utils/contourTypeset.ts`: compatibility exports; `utils/contour/`: portable profiles, segments, DP, font policy, geometry, measurement adaptation, and placement.
-- `utils/typography/`: shared tokenization, kinsoku rules, and marker-aware unwrapping.
+- `utils/typography/`: shared tokenization, line-break legality rules (`lineBreakRules.ts`, kinsoku tables cited to UAX #14 / W3C jlreq), and marker-aware unwrapping (`lineJoin.ts`).
 - `utils/geometry/`: polygon math, neck decomposition, partitioning, sibling clearance.
 - `services/BubbleLayoutService.ts`: association, geometry resolution, noise suppression, acceptance/rollback.
 - `utils/cotransDefaultRenderer.ts` and `utils/renderer/`: strategy dispatch, Canvas painting, line-break/region helpers.

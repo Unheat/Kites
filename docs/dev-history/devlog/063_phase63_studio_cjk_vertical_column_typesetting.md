@@ -37,7 +37,7 @@ Fix Studio visual layout breakage when "CJK Vertical Layout" is enabled. Previou
 ---
 
 ### 4. Roadblocks & Decisions
-* **Horizontal Wrapper Mismatch**: Early implementations relied on horizontal line breaks to populate vertical columns. Following donor patterns (Torii & Koharu), wrapping must be driven by the inline progression axis (height in vertical layout).
+* **Horizontal Wrapper Mismatch**: Early implementations relied on horizontal line breaks to populate vertical columns. Following the Koharu donor pattern, wrapping must be driven by the inline progression axis (height in vertical layout).
 * **Script Gating Rule**: Retained Koharu's script-gating principle: when a user enables vertical layout but the text contains only Latin alphabet, force horizontal layout. Stacking Latin letters vertically down narrow columns produces unreadable scanlation dialogue.
 
 ---

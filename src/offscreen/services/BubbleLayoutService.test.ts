@@ -269,7 +269,7 @@ describe('conservative bubble layouts', () => {
     });
 
     it('handles a realistic dense page with 12 bubbles across multiple panels without cascading collapse', () => {
-      // 12 bubbles distributed in a 3x2 grid of comic panels (similar to the Torii test image)
+      // 12 bubbles distributed in a 3x2 grid of comic panels (similar to the reference test image)
       const boxes: BoxRect[] = [];
       const carriers: BoxRect[] = [];
       const proposals: BoxRect[] = [];

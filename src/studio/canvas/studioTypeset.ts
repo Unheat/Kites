@@ -330,7 +330,7 @@ export const FONT_SIZE_SLIDER_MAX = 120;
 export const MAX_FONT_SIZE_CEILING = FONT_SIZE_SLIDER_MAX;
 
 /**
- * Fast, greedy word-wrapping without diamond balancing (Torii ported mode).
+ * Fast, greedy word-wrapping without diamond balancing (ported fast-wrap mode).
  */
 export function wrapSimpleGreedy(
   ctx: CanvasRenderingContext2D,

@@ -1199,7 +1199,7 @@ export const StudioCanvas: React.FC<StudioCanvasProps> = ({
           return;
         }
 
-        // Option B (Torii-parity): Composite inpainted result through the user's stroke mask.
+        // Option B (donor-parity): Composite inpainted result through the user's stroke mask.
         // Only pixels directly underneath the circle or square brush strokes are updated on bgCtx,
         // leaving the surrounding context pixels untouched.
         const blendCanvas = document.createElement('canvas');
