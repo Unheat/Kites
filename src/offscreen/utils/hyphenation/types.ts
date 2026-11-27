@@ -42,34 +42,14 @@ export interface ParsedPatterns {
 }
 
 /**
- * Canonical dictionary filename mapping for supported languages.
+ * Legacy Liang dictionary filename mapping for the languages that have no
+ * vendored hypher trie (Indonesian, Malay — both served by id_ID — and
+ * Romanian). Every other language resolves through HYPHER_TRIE_LOADERS instead.
  */
 export const HYPHENATION_DICTIONARY_MAP: Record<string, string> = {
-  en: 'en_US',
-  es: 'es',
-  'es-419': 'es',
-  de: 'de_DE',
-  fr: 'fr',
-  pt: 'pt_BR',
-  'pt-BR': 'pt_BR',
-  'pt-PT': 'pt_PT',
-  it: 'it_IT',
-  ru: 'ru_RU',
-  pl: 'pl_PL',
   id: 'id_ID',
   ms: 'id_ID',
-  uk: 'uk_UA',
-  cs: 'cs_CZ',
-  nl: 'nl_NL',
-  da: 'da_DK',
-  no: 'nb_NO',
-  nb: 'nb_NO',
-  sv: 'sv',
   ro: 'ro_RO',
-  hr: 'hr_HR',
-  bg: 'bg_BG',
-  sk: 'sk_SK',
-  hu: 'hu_HU',
 };
 
 /**

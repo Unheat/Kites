@@ -10,7 +10,7 @@ import {
   hasHypherSupport,
 } from './index';
 import { HYPHER_TRIE_LOADERS } from './hypherData';
-import { getHypherHyphenationCharacter } from './hypherCompat';
+import { getHypherBounds, getHypherHyphenationCharacter } from './hypherCompat';
 
 describe('LiangEngine pattern parsing', () => {
   it('parses basic patterns with weights', () => {
@@ -114,19 +114,15 @@ describe('HyphenationService multi-language integration', () => {
     expect(s1.join('')).toBe('international');
   });
 
-  it('keeps legacy Liang output unchanged when the independent hypher trie becomes ready', async () => {
+  it('keeps the legacy Liang path authoritative for languages without vendored tries', () => {
     const service = HyphenationService.getInstance();
-    // Deliberately different from donor hypher ex-ten-sive. This verifies actual
-    // source isolation instead of comparing two dictionaries that happen to agree.
-    service.registerPatterns('en_US', 'ext1ensive');
-    expect(service.isContourReady('en')).toBe(false);
-    expect(service.findHyphenationPoints('extensive', 'en', 2)).toEqual([3]);
-
-    await service.loadLanguage('en');
-    expect(service.isContourReady('en')).toBe(true);
-    expect(service.findContourHyphenationPoints('extensive', 'en', 2, 3)).toEqual([2, 5]);
-    expect(service.findHyphenationPoints('extensive', 'en', 2)).toEqual([3]);
-    expect(service.findHyphenationPoints('extensive', 'en', 2)).toEqual([3]);
+    // Deliberately different from any TeX pattern: proves the legacy dictionary
+    // path still owns id/ms/ro, the languages with no hypher trie chunk, while
+    // the trie-backed languages resolve through the shared patterns instead.
+    service.registerPatterns('id_ID', 'ext1ensive');
+    expect(service.isLoaded('id')).toBe(true);
+    expect(service.findHyphenationPoints('extensive', 'id', 2)).toEqual([3]);
+    expect(service.findContourHyphenationPoints('extensive', 'id', 2, 2)).toEqual([]);
   });
 
   it('routes trie-capable Indic languages through the shared hypher patterns', async () => {
@@ -148,6 +144,33 @@ describe('HyphenationService multi-language integration', () => {
     expect(syls.join('')).toBe('सहयोगी');
     expect(syls.length).toBeGreaterThan(1);
     expect(service.isLoaded('ne')).toBe(true);
+  });
+
+  it('routes all trie-backed languages through the same patterns as the contour route', async () => {
+    const service = HyphenationService.getInstance();
+    // en 'international'/'community', de 'Verkehrsinfrastruktur' and pt
+    // 'extraordinariamente' diverge between the legacy dict path (symmetric
+    // minSide, older patterns) and the hypher trie path (per-language bounds,
+    // current TeX patterns); the parity contract pins them together.
+    const cases: Array<[string, string]> = [
+      ['en', 'extensive'],
+      ['en', 'extraordinary'],
+      ['en', 'international'],
+      ['en', 'community'],
+      ['de', 'Verkehrsinfrastruktur'],
+      ['pt', 'extraordinariamente'],
+      ['nb', 'hyphenation'],
+    ];
+    for (const [lang, word] of cases) {
+      await loadHyphenationLanguage(lang);
+      const { left, right } = getHypherBounds(lang);
+      const mainPoints = service.findHyphenationPoints(word, lang);
+      const contourPoints = service.findContourHyphenationPoints(word, lang, left, right);
+      expect(mainPoints, `${lang}:${word}`).toEqual(contourPoints);
+    }
+    // Words proven to split by the invariant tests must still split on the unified path.
+    expect(service.findHyphenationPoints('extraordinary', 'en').length).toBeGreaterThan(0);
+    expect(service.findHyphenationPoints('Geschwindigkeit', 'de').length).toBeGreaterThan(0);
   });
 
   it('loads every explicit trie chunk and resolves Norwegian aliases to the same data', async () => {
@@ -231,7 +254,7 @@ describe('HyphenationService multi-language integration', () => {
   it('REGRESSION: isLoaded reflects actual state accurately', async () => {
     const service = HyphenationService.getInstance();
     
-    // Unloaded dictionary-backed language
+    // Unloaded trie-backed languages wait for their vendored patterns
     expect(service.isLoaded('en')).toBe(false);
     expect(service.isLoaded('de')).toBe(false);
 
@@ -242,11 +265,15 @@ describe('HyphenationService multi-language integration', () => {
     expect(service.isLoaded('hi')).toBe(true);
     expect(service.isLoaded('tr')).toBe(false);
 
+    // Dict-only languages (no trie) wait for their Liang dictionary
+    expect(service.isLoaded('id')).toBe(false);
+    expect(service.isLoaded('ro')).toBe(false);
+
     // Rule-fallback languages ship no trie data -> always ready
     expect(service.isLoaded('ne')).toBe(true); // Indic fallback
     expect(service.isLoaded('az')).toBe(true); // Vowel fallback
     expect(service.isLoaded('ja')).toBe(true); // CJK
-    
+
     // Load English
     await service.loadLanguage('en');
     expect(service.isLoaded('en')).toBe(true);

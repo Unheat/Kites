@@ -79,8 +79,10 @@ const HYPHEN_SUFFIXES = [
 ];
 
 /**
- * Hyphenation point finder supporting on-demand multi-language dictionaries
- * with a 6-stage morphological fallback for English.
+ * Hyphenation point finder backed by the shared HyphenationService (vendored
+ * hypher patterns for trie-backed languages, legacy dictionaries for
+ * id/ms/ro, syllable rules for ne/az/uz) with a 6-stage morphological
+ * fallback for English.
  * Strict comic rule: Never hyphenate words shorter than 7 letters.
  */
 export function findHyphenationPoints(rawWord: string, targetLang: string = 'en'): number[] {
@@ -91,7 +93,7 @@ export function findHyphenationPoints(rawWord: string, targetLang: string = 'en'
   const len = word.length;
   if (len < 7) return [];
 
-  // Query on-demand multi-language Liang / rule-based HyphenationService
+  // Query the shared HyphenationService (hypher patterns / legacy dicts / rules)
   const service = HyphenationService.getInstance();
   const servicePoints = service.findHyphenationPoints(rawWord, targetLang);
   if (servicePoints.length > 0) {
