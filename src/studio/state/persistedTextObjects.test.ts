@@ -61,7 +61,7 @@ describe('persisted renderer layout restoration', () => {
     expect(restored.text).not.toContain('com-');
   });
 
-  it('heals INSERTED_HYPHEN Word Joiner marker splits and uppercase lettering without touching lines', () => {
+  it('heals WRAP_HYPHEN_MARKER Word Joiner marker splits and uppercase lettering without touching lines', () => {
     const markerBlock: TextBlock = {
       imageId: 1, originalText: '皆',
       translatedText: 'Everyone else is also in a state of being unable to fight.',

@@ -49,7 +49,7 @@ The goal is to unify Ellipse DP typesetting across all active bubble tiers (`heu
 * **Why Did It Work in v1.2.3?**
   In v1.2.3, the shout bubble was unexpanded at 81px width. In an 81px box, `"reinforcements!"` was far wider than 1.15x, so hyphenation triggered naturally. When PR #31 expanded the box to 99px, `"reinforcements!"` (91.6px) fell into the 1.15x dead-zone, breaking the binary search and collapsing to 11px.
 * **Why Did Heuristic Use Rectangles?**
-  A historical invariant assumed only YOLO masks had trustworthy contours. However, `HeuristicBubbleExtractor` extracts accurate carrier masks via flood-fill. Removing the gate allows all 3 tiers to produce 98% Torii-parity curved lettering.
+  A historical invariant assumed only YOLO masks had trustworthy contours. However, `HeuristicBubbleExtractor` extracts accurate carrier masks via flood-fill. Removing the gate allows all 3 tiers to produce 98% donor-parity curved lettering.
 
 ---
 

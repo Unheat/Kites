@@ -4,7 +4,7 @@
 * **Date:** 2026-10-26
 * **Feature/Task:** Per-bubble text (ink) color detection from the original pre-inpaint image, with luminance snapping to pure black/white and colored-text preservation
 * **Status:** Completed (code + tests); visual verification on real colored pages still pending
-* **Branch:** `feat/per-bubble-text-color-detection` (stacked on `feat/3tier-typeset-decoupling-and-torii-parity`)
+* **Branch:** `feat/per-bubble-text-color-detection` (stacked on the 3-tier typesetting decoupling branch)
 
 ---
 

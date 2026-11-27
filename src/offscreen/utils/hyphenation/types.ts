@@ -2,11 +2,9 @@
  * Types, interfaces, and language registry mappings for the on-demand hyphenation subsystem.
  */
 
-/**
- * Invisible word joiner Unicode character (\u2060) appended after an inserted hyphen.
- * Distinguishes auto-wrapped line-break hyphens from authored text hyphens.
- */
-export const INSERTED_HYPHEN = '-\u2060';
+// Wrap-hyphen marker is owned by the typography layer (single source of truth);
+// re-exported here for the hyphenation-facing import surface.
+export { WRAP_HYPHEN_MARKER } from '../typography/lineJoin';
 
 /**
  * Minimum total letters required in a word for it to be eligible for hyphenation.

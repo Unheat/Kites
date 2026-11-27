@@ -3,7 +3,7 @@
  * Barrel export for shared typography, punctuation, tokenization, and soft-hyphen normalization.
  */
 
-export * from './kinsokuShori';
-export * from './textUnwrap';
+export * from './lineBreakRules';
+export * from './lineJoin';
 export * from './tokenizer';
 export * from './contourSegments';

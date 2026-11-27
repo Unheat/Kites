@@ -81,7 +81,7 @@ export function computeMaskCurvature(
   // 2. Spiky Burst / Shout Balloon:
   // Outward spikes and wide collar spread the top or bottom wide (endRatio >= 0.65),
   // so the interior chamber is a wide cylindrical body rather than a pinched oval.
-  // Sets strength ~0.25 - 0.30 (gently rounded corners with 88% chord width at ends matching Torii).
+  // Sets strength ~0.25 - 0.30 (gently rounded corners with 88% chord width at ends).
   if (endRatio >= 0.65) {
     const burstRadius = Math.max(8, Math.round(rMax * 0.30));
     return { isRounded: true, borderRadius: burstRadius };

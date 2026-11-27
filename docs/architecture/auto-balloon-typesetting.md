@@ -34,7 +34,7 @@ Balanced wrapping can form a diamond-like stanza, but the current strategy does 
 
 ## 4. Hyphenation & Script Routing
 
-`findHyphenationPoints()` consults the shared on-demand Liang dictionary service and retains its local fallback rules. Pattern assets live under `public/assets/hyphenation/`. Long-word logic uses the seven-character stem gate and measured discretionary-hyphen suffixes. Shared typography helpers heal typesetter-inserted hyphens before Studio reflow so resizing does not turn temporary syllable breaks into canonical dialogue.
+`findHyphenationPoints()` routes rule-class languages with vendored hypher tries (the Indic scripts, Turkish, Finnish) through the curated TeX patterns — the same engine the contour route uses — and falls back to the `syllableRules.ts` akshara/vowel rules only for languages without trie data (Nepali, Azerbaijani, Uzbek); everything else consults the shared on-demand Liang dictionary service. Pattern assets live under `public/assets/hyphenation/`, vendored trie chunks under `src/offscreen/utils/hyphenation/hypherData/`. Long-word logic uses the seven-character stem gate and measured discretionary-hyphen suffixes. Shared typography helpers heal typesetter-inserted hyphens before Studio reflow so resizing does not turn temporary syllable breaks into canonical dialogue.
 
 Non-Western output routing belongs to `renderTextBlocksBatch()` in `canvasTypesetting.ts`, not to a failed Auto Balloon strategy. The batch dispatcher selects the legacy orientation-aware path by target language; it does not wait for this strategy to fail.
 

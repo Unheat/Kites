@@ -129,6 +129,27 @@ describe('HyphenationService multi-language integration', () => {
     expect(service.findHyphenationPoints('extensive', 'en', 2)).toEqual([3]);
   });
 
+  it('routes trie-capable Indic languages through the shared hypher patterns', async () => {
+    const service = HyphenationService.getInstance();
+    await service.loadLanguage('ta');
+    expect(service.isLoaded('ta')).toBe(true);
+
+    // Same engine as the contour route: identical points for identical inputs.
+    const mainPoints = service.findHyphenationPoints('பரிசோதனை', 'ta');
+    const contourPoints = service.findContourHyphenationPoints('பரிசோதனை', 'ta', 2, 2);
+    expect(mainPoints).toEqual(contourPoints);
+    expect(service.syllables('பரிசோதனை', 'ta').join('')).toBe('பரிசோதனை');
+  });
+
+  it('falls back to syllable rules for languages without vendored tries', () => {
+    const service = HyphenationService.getInstance();
+    // Nepali (Devanagari) has no hypher trie: akshara rules stay synchronous.
+    const syls = service.syllables('सहयोगी', 'ne');
+    expect(syls.join('')).toBe('सहयोगी');
+    expect(syls.length).toBeGreaterThan(1);
+    expect(service.isLoaded('ne')).toBe(true);
+  });
+
   it('loads every explicit trie chunk and resolves Norwegian aliases to the same data', async () => {
     const service = HyphenationService.getInstance();
     const entries = Object.entries(HYPHER_TRIE_LOADERS);
@@ -213,10 +234,17 @@ describe('HyphenationService multi-language integration', () => {
     // Unloaded dictionary-backed language
     expect(service.isLoaded('en')).toBe(false);
     expect(service.isLoaded('de')).toBe(false);
-    
-    // Rule-based language needs no dictionary -> always loaded
-    expect(service.isLoaded('hi')).toBe(true); // Indic
-    expect(service.isLoaded('tr')).toBe(true); // Vowel-syllable
+
+    // Trie-backed rule-class languages wait for their hypher data
+    expect(service.isLoaded('hi')).toBe(false); // Indic, trie-capable
+    expect(service.isLoaded('tr')).toBe(false); // Vowel-syllable, trie-capable
+    await service.loadLanguage('hi');
+    expect(service.isLoaded('hi')).toBe(true);
+    expect(service.isLoaded('tr')).toBe(false);
+
+    // Rule-fallback languages ship no trie data -> always ready
+    expect(service.isLoaded('ne')).toBe(true); // Indic fallback
+    expect(service.isLoaded('az')).toBe(true); // Vowel fallback
     expect(service.isLoaded('ja')).toBe(true); // CJK
     
     // Load English

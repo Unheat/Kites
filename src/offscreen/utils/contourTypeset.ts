@@ -31,6 +31,6 @@ export {
 export { extractStemAndPunct, generateBubbleContour } from './contour/geometry';
 
 // Legacy re-exports for direct imports that tests or utilities may reference
-export { INSERTED_HYPHEN } from './typography/textUnwrap';
+export { WRAP_HYPHEN_MARKER } from './typography/lineJoin';
 export { comicBreakPenalty, tokenizeDialogue } from './typography/tokenizer';
 export { findHyphenationPoints, type MeasureCache } from './typesetLayout';

@@ -14,9 +14,10 @@ import {
   parseHyphenationPatterns,
   syllablesFromPoints,
 } from './LiangEngine';
-import { getIndicSyllablePoints, getVowelSyllablePoints } from './RuleBasedEngine';
+import { indicAksharaPoints, vowelPatternPoints } from './syllableRules';
 import { hyphenation_lang_from_tag } from './hypherCompat';
 import { HyphenationDataStore } from './HyphenationDataStore';
+import { HYPHER_TRIE_LOADERS } from './hypherData';
 import { hasUsablePatterns, isPlausibleHypherTrie } from './hyphenationValidation';
 import { contourSyllables, findContourHyphenationPoints } from './contourHyphenation';
 
@@ -91,24 +92,28 @@ export class HyphenationService {
   }
 
   /**
-   * Checks whether the legacy hyphenation dictionary for a language is ready for
-   * synchronous queries. Preserves original XianScan/auto-balloon semantics:
-   * rule-based and CJK languages are always ready.
+   * Checks whether the hyphenation data for a language is ready for synchronous
+   * queries. Rule-class languages resolve through the hypher trie when one is
+   * vendored for them; languages without trie data (ne, az, uz) fall back to the
+   * syllable rules and are always ready. Keep this precedence identical to
+   * {@link findHyphenationPoints}.
    *
    * @param lang - Target language code.
-   * @returns True if the legacy dictionary is cached or not required.
+   * @returns True if the backing dictionary/trie is cached or not required.
    */
   public isLoaded(lang: string): boolean {
     const baseLang = (lang || 'en').split('-')[0].toLowerCase();
 
-    // Rule-based engines (Indic syllables, vowel syllables) need no dictionary.
-    // Keep this precedence identical to findHyphenationPoints.
     if (INDIC_SYLLABLE_LANGS.has(baseLang) || VOWEL_SYLLABLE_LANGS.has(baseLang)) {
+      const trieKey = this.resolveHypherKey(baseLang);
+      if (trieKey && HYPHER_TRIE_LOADERS[trieKey]) {
+        return this.data.hypherTrieCache.has(trieKey);
+      }
       return true;
     }
 
     const dictName = this.resolveDictionaryName(lang);
-    if (!dictName) return true; // Rule-based or CJK needs no dictionary
+    if (!dictName) return true; // Rule fallback or CJK needs no dictionary
     return this.data.patternsCache.has(dictName);
   }
 
@@ -168,10 +173,10 @@ export class HyphenationService {
 
   /**
    * Computes legal hyphenation slice points for a word in the specified language.
-   * Legacy XianScan policy: Indic/vowel rule engines first, then the legacy Liang
-   * dictionary. This method intentionally does NOT use hypher tries, so existing
-   * typesetLayout behavior is unchanged. Contour typesetting uses
-   * `findContourHyphenationPoints` instead.
+   * Dispatch policy: rule-class languages with vendored hypher tries resolve
+   * through the curated TeX patterns (both wrap routes share one engine);
+   * rule-class languages without trie data use the syllable rules fallback;
+   * remaining languages use the legacy Liang dictionary.
    *
    * @param word - Raw alphabetic token.
    * @param targetLang - Language of the word (default: 'en').
@@ -188,23 +193,31 @@ export class HyphenationService {
     const cached = this.wordPointsCache.get(cacheKey);
     if (cached) return cached;
 
-    // Dictionary-backed languages must not memoize "no points" before the data is ready.
+    // Data-backed languages must not memoize "no points" before the data is ready.
     // Prior defect: an early lookup cached [] forever, so a later successful load
-    // never took effect for that word. Rule-based languages are always ready.
-    const dictionaryBacked =
-      !INDIC_SYLLABLE_LANGS.has(baseLang) && !VOWEL_SYLLABLE_LANGS.has(baseLang);
-    const cacheable = !dictionaryBacked || this.isLoaded(targetLang);
+    // never took effect for that word. Rule-fallback languages are always ready.
+    const ruleClass = INDIC_SYLLABLE_LANGS.has(baseLang) || VOWEL_SYLLABLE_LANGS.has(baseLang);
+    const trieKey = ruleClass ? this.resolveHypherKey(baseLang) : undefined;
+    const trieCapable = trieKey !== undefined && HYPHER_TRIE_LOADERS[trieKey] !== undefined;
+    const cacheable = trieCapable
+      ? this.data.hypherTrieCache.has(trieKey)
+      : ruleClass
+        ? true
+        : this.isLoaded(targetLang);
 
     let points: number[] = [];
 
-    // 1. Indic scripts (Devanagari, Bengali, Tamil, etc.) - rule-based
-    if (INDIC_SYLLABLE_LANGS.has(baseLang)) {
-      points = getIndicSyllablePoints(word, minSide);
+    // 1. Rule-class languages with vendored hypher tries: curated TeX patterns.
+    if (trieCapable) {
+      points = findContourHyphenationPoints(this.data.hypherTrieCache, word, baseLang, minSide, minSide);
+    } else if (INDIC_SYLLABLE_LANGS.has(baseLang)) {
+      // 2a. Indic languages without trie data (Nepali) - akshara rules
+      points = indicAksharaPoints(word, minSide);
     } else if (VOWEL_SYLLABLE_LANGS.has(baseLang)) {
-      // 2. Vowel-syllabic languages (Turkish, Finnish, Azerbaijani) - rule-based
-      points = getVowelSyllablePoints(word, baseLang, minSide);
+      // 2b. Vowel-harmonic languages without trie data (az, uz) - vowel rules
+      points = vowelPatternPoints(word, baseLang, minSide);
     } else {
-      // 3. Dictionary-backed Liang engine (legacy XianScan policy, unchanged)
+      // 3. Dictionary-backed Liang engine (legacy policy, unchanged)
       const dictName = this.resolveDictionaryName(targetLang);
       if (dictName) {
         const patterns = this.data.patternsCache.get(dictName);

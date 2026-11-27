@@ -1,6 +1,6 @@
 import { comicBreakPenalty } from '../typography/tokenizer';
 import { buildContourSegments } from '../typography/contourSegments';
-import { INSERTED_HYPHEN } from '../typography/textUnwrap';
+import { WRAP_HYPHEN_MARKER } from '../typography/lineJoin';
 import type { SegmentTemplate, SegmentMeasure } from './types';
 import { add, sub, f32, sum } from './numeric';
 
@@ -72,7 +72,7 @@ export function materializeLines(segments: SegmentMeasure[], breaks: number[]): 
         : segment.text + (!final && segment.trailingAdvance > 0 ? ' ' : '');
     }
     const last = segments[end - 1];
-    if (end < segments.length && !last.isMandatory && last.breakSuffixAdvance > 0) text += INSERTED_HYPHEN;
+    if (end < segments.length && !last.isMandatory && last.breakSuffixAdvance > 0) text += WRAP_HYPHEN_MARKER;
     start = end;
     return text;
   });

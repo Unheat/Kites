@@ -79,7 +79,7 @@ Resolve core interaction defects in Studio text manipulation (drag freezing on p
   * *Resolution*: Made the action row permanent, adopted concise un-truncated labels (`Reader (N)`, `Open Reader (M)`, `Export ZIP (N)`), and decoupled general chapter reading/export from batch translation selection.
 * **Feature: Dual Studio Typesetting Engine (Auto Balloon vs Simple Wrap)**:
   * *Auto Balloon*: Directly routes to Kites's core pipeline typesystem (`measureDefaultLayout`), generating comic diamond line envelopes, syllable hyphenation, and automatic font-size fitting as boxes resize.
-  * *Simple Wrap*: Torii-ported greedy word-wrapping at fixed font size for rectangular captions and narration.
+  * *Simple Wrap*: greedy word-wrapping ported from a closed-source extension donor at fixed font size for rectangular captions and narration.
   * *UI Control*: Added a toggle in `TypographySettings.tsx` allowing instant switching between Auto Balloon and Simple Wrap per dialogue bubble.
 
 ---
